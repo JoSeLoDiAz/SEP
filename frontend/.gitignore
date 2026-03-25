@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vue-tsc build artifacts
+*.vue.js
+*.vue.d.ts
+src/**/*.js
+src/**/*.d.ts
+!src/env.d.ts

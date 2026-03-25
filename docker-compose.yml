@@ -1,8 +1,8 @@
 services:
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: sep_frontend
     restart: unless-stopped
     networks:
@@ -10,13 +10,12 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: sep_backend
     restart: unless-stopped
     env_file:
       - .env
-    depends_on: []
     networks:
       - sep-internal
       - sep-shared-network

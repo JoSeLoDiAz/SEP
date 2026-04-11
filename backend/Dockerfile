@@ -17,6 +17,7 @@ COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
 RUN pnpm install --frozen-lockfile --filter backend --prod
 COPY --from=build /app/backend/dist ./backend/dist
+COPY backend/src/certificados/assets ./backend/dist/certificados/assets
 WORKDIR /app/backend
 EXPOSE 4000
 CMD ["node", "dist/main.js"]

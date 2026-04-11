@@ -2,7 +2,7 @@
 
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
-import { ArrowLeft, Loader2, LogIn } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Loader2, LogIn } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
@@ -126,6 +126,13 @@ export default function LoginPage() {
                   Acceso usuarios registrados
                 </p>
               </div>
+
+              {error && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+                  <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                  {error}
+                </div>
+              )}
 
               <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">

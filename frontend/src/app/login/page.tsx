@@ -3,6 +3,7 @@
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
 import { AlertCircle, ArrowLeft, Loader2, LogIn } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
@@ -82,26 +83,42 @@ export default function LoginPage() {
       />
 
       <div className="min-h-screen flex flex-col bg-neutral-50">
-        {/* GOV.CO */}
-        <div className="w-full py-1.5 flex items-center justify-center gap-2" style={{ backgroundColor: '#3465CC' }}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="8" fill="white" fillOpacity="0.25" />
-            <path d="M8 3L10 7H6L8 3Z" fill="white" />
-            <rect x="5" y="7" width="6" height="5" rx="1" fill="white" />
-          </svg>
-          <span className="text-white text-xs font-semibold tracking-wide">GOV.CO</span>
+        {/* GOV.CO bar */}
+        <div className="w-full bg-[#3465CC] py-1.5 px-4 flex items-center">
+          <div className="max-w-7xl w-full mx-auto flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://betowa.sena.edu.co/assets/logos/gov-logo-new.svg"
+              alt="GOV.CO"
+              className="h-5 w-auto object-contain"
+            />
+          </div>
         </div>
 
-        {/* Cabecera */}
-        <div className="bg-white border-b border-neutral-200 py-3 px-6">
-          <div className="max-w-7xl mx-auto flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-lime-500 flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-black text-[10px]">SENA</span>
+        {/* Cabecera institucional */}
+        <div className="bg-white border-b border-neutral-200 py-3 px-4">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+            {/* Logo SENA */}
+            <div className="flex-shrink-0">
+              <Image src="/images/sena-logo.svg" alt="SENA" width={70} height={70} priority
+                className="w-12 h-12 sm:w-16 sm:h-16 md:w-[70px] md:h-[70px] object-contain" />
             </div>
-            <div className="w-px h-8 bg-neutral-200" />
-            <span className="font-bold text-sm uppercase tracking-wide" style={{ color: '#00304D' }}>
-              Sistema Especializado de Proyectos — SEP
-            </span>
+            <div className="w-px h-10 sm:h-14 bg-neutral-200 flex-shrink-0" />
+            {/* Título */}
+            <div className="flex-1 text-center px-1">
+              <p className="text-cerulean-500 text-sm sm:text-base md:text-xl font-extrabold leading-tight tracking-wide uppercase">
+                Sistema Especializado de
+              </p>
+              <p className="text-cerulean-500 text-sm sm:text-base md:text-xl font-extrabold leading-tight tracking-wide uppercase">
+                Proyectos — SEP
+              </p>
+            </div>
+            {/* Logo Trabajo */}
+            <div className="flex-shrink-0">
+              <Image src="/images/layout_set_logo_mintrabajo.png" alt="Ministerio del Trabajo"
+                width={120} height={70} priority
+                className="w-16 sm:w-24 md:w-[120px] object-contain h-auto" />
+            </div>
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { Facebook, Twitter, Instagram, Youtube, Radio } from 'lucide-react'
+import { Facebook, Instagram, XIcon, Youtube } from 'lucide-react'
 
 // Redes del programa GPC-SENA (FCE / GPC)
 const socialLinks = [
@@ -10,9 +10,9 @@ const socialLinks = [
     href: 'https://www.facebook.com/people/Rusby-Vargas-fce/100063727045079/',
   },
   {
-    icon: Twitter,
-    label: 'X (Twitter)',
-    href: 'https://twitter.com/RusbyVargas',
+    icon: XIcon,
+    label: 'X',
+    href: 'https://x.com/RusbyVargas',
   },
   {
     // Google/Gmail icon — lucide no tiene, usamos Mail like envelope

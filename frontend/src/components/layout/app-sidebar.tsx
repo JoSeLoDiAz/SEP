@@ -7,7 +7,8 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
   ClipboardList, Cog, FileCheck2, FileText, FolderKanban,
-  Home, LayoutDashboard, List, LogOut, ScrollText, Users, Wallet, X,
+  Home, LayoutDashboard, LogOut, ScrollText, Users, Wallet, X,
+  BookUser, BarChart2,
 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -24,6 +25,8 @@ const URL_MAP: Record<string, string> = {
   'Proyectos.aspx':            '/panel/proyectos',
   'WPConvenios.aspx':          '/panel/convenios',
   'wptratamientodatos.aspx':   '/panel/beneficiarios',
+  'ContactosEmpresa.aspx':     '/panel/contactos',
+  'AnalisisEmpresarial.aspx':  '/panel/analisis',
   'Empresas.aspx':             '/panel/empresas',
   'Convenios.aspx':            '/panel/convenios',
   'Cronograma.aspx':           '/panel/cronograma',
@@ -60,7 +63,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'fa-building':          Building2,
   'fa-cog':               Cog,
   'fa-tachometer-alt':    LayoutDashboard,
-  'fa-chart-bar':         List,
+  'fa-chart-bar':         BarChart2,
+  'fa-address-book':      BookUser,
 }
 
 function faToLucide(iconClass: string): LucideIcon {
@@ -90,10 +94,32 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   const [collapsed, setCollapsed] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
 
+  const LABEL_OVERRIDE: Record<string, string> = {
+    'Mis Proyectos': 'Proyectos',
+    'Mis Necesidades': 'Necesidades',
+  }
+
+  const EXTRA_ITEMS: MenuItem[] = [
+    { desc: 'Convenios', url: 'WPConvenios.aspx', icono: 'ScrollText' },
+  ]
+
   useEffect(() => {
     api.get<MenuItem[]>('/empresa/menu')
-      .then(r => setMenuItems(r.data))
+      .then(r => {
+        const items = r.data.map(item => ({
+          ...item,
+          desc: LABEL_OVERRIDE[item.desc] ?? item.desc,
+        }))
+        // Añadir items extra que no vengan del API
+        for (const extra of EXTRA_ITEMS) {
+          if (!items.some(it => it.url === extra.url)) {
+            items.push(extra)
+          }
+        }
+        setMenuItems(items)
+      })
       .catch(() => setMenuItems([]))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleLogout() {

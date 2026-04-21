@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { JwtStrategy } from './strategies/jwt.strategy'
+import { MailService } from './mail.service'
 import { Usuario } from './entities/usuario.entity'
 import { Empresa } from './entities/empresa.entity'
 import { Persona } from './entities/persona.entity'
@@ -21,13 +22,13 @@ import { TipoDocumentoIdentidad } from './entities/tipo-documento.entity'
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET', 'sep_jwt_secret_2024'),
         signOptions: {
-          expiresIn: config.get('JWT_EXPIRES_IN', '8h') as '8h',
+          expiresIn: config.get('JWT_EXPIRES_IN', '1h') as '1h',
         },
       }),
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, MailService],
   exports: [JwtModule, PassportModule, JwtStrategy],
 })
 export class AuthModule {}

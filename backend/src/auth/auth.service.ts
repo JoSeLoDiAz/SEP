@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { JwtService } from '@nestjs/jwt'
@@ -17,6 +18,10 @@ import { TipoDocumentoIdentidad } from './entities/tipo-documento.entity'
 import { LoginDto } from './dto/login.dto'
 import { RegistrarEmpresaDto } from './dto/registrar-empresa.dto'
 import { RegistrarPersonaDto } from './dto/registrar-persona.dto'
+import { MailService } from './mail.service'
+
+// Token en memoria: { email, expira }
+interface ResetToken { email: string; expira: Date }
 
 /**
  * Replica exacta de GeneXus GetEncryptionKey():
@@ -75,6 +80,9 @@ const PERFIL_ROLES: Record<number, string> = {
 
 @Injectable()
 export class AuthService {
+  // Tokens de restablecimiento en memoria (TTL 30 min)
+  private readonly resetTokens = new Map<string, ResetToken>()
+
   constructor(
     @InjectRepository(Usuario)
     private readonly usuarioRepo: Repository<Usuario>,
@@ -86,6 +94,7 @@ export class AuthService {
     private readonly tipoDocRepo: Repository<TipoDocumentoIdentidad>,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
+    private readonly mailService: MailService,
   ) {}
 
   async tiposDocumento(para: 'persona' | 'empresa') {
@@ -372,5 +381,53 @@ export class AuthService {
       ...usuario,
       rol: PERFIL_ROLES[usuario.perfilId] ?? 'usuario',
     }
+  }
+
+  // ── Restablecimiento de contraseña ────────────────────────────────────────
+
+  async solicitarRestablecimiento(email: string) {
+    if (!email?.trim()) throw new BadRequestException('El correo es requerido')
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioEmail: email.trim() } })
+    // Respuesta genérica para no revelar si el email existe o no
+    if (!usuario) return { message: 'Si el correo está registrado, recibirás un enlace en breve.' }
+
+    // Generar token único de 32 bytes → 64 chars hex
+    const token = crypto.randomBytes(32).toString('hex')
+    const expira = new Date(Date.now() + 30 * 60 * 1000) // 30 minutos
+
+    // Limpiar tokens anteriores del mismo email
+    for (const [k, v] of this.resetTokens.entries()) {
+      if (v.email === email.trim()) this.resetTokens.delete(k)
+    }
+
+    this.resetTokens.set(token, { email: email.trim(), expira })
+
+    await this.mailService.enviarRestablecimiento(email.trim(), token)
+
+    return { message: 'Si el correo está registrado, recibirás un enlace en breve.' }
+  }
+
+  async restablecerContrasena(token: string, nuevaClave: string) {
+    if (!token?.trim()) throw new BadRequestException('Token requerido')
+    if (!nuevaClave || nuevaClave.trim().length < 6)
+      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres')
+
+    const entry = this.resetTokens.get(token)
+    if (!entry) throw new NotFoundException('El enlace no es válido o ya fue utilizado')
+    if (entry.expira < new Date()) {
+      this.resetTokens.delete(token)
+      throw new BadRequestException('El enlace ha expirado. Solicita uno nuevo.')
+    }
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioEmail: entry.email } })
+    if (!usuario) throw new NotFoundException('Usuario no encontrado')
+
+    const claveEncriptada = encrypt64(nuevaClave.trim(), usuario.usuarioLlaveEncriptacion)
+    await this.usuarioRepo.update(usuario.usuarioId, { usuarioClave: claveEncriptada })
+
+    this.resetTokens.delete(token)
+
+    return { message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' }
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
@@ -54,8 +54,8 @@ export class EmpresaService {
          e.CIIUID                   AS "ciiuId",
          e.TIPOEMPRESAID            AS "tipoEmpresaId",
          e.TAMANOEMPRESAID          AS "tamanoEmpresaId",
-         TRIM(e.EMPRESACERTIFCOMP)  AS "empresaCertifComp",
-         TRIM(e.EMPRESAEXPERTTECN)  AS "empresaExpertTecn",
+         CASE WHEN e.EMPRESACERTIFCOMP = 1 THEN 'S' ELSE 'N' END AS "empresaCertifComp",
+         CASE WHEN e.EMPRESAEXPERTTECN = 1 THEN 'S' ELSE 'N' END AS "empresaExpertTecn",
          e.TIPOIDENTIFICACIONREP    AS "tipoIdentificacionRep",
          TRIM(e.EMPRESAREPDOCUMENTO) AS "empresaRepDocumento",
          TRIM(e.EMPRESAREP)         AS "empresaRep",
@@ -227,23 +227,25 @@ export class EmpresaService {
   }) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
-    await this.dataSource.query(
-      `UPDATE EMPRESA SET
-         CIIUID            = :1,
-         TIPOEMPRESAID     = :2,
-         TAMANOEMPRESAID   = :3,
-         EMPRESACERTIFCOMP = :4,
-         EMPRESAEXPERTTECN = :5
-       WHERE EMPRESAID = :6`,
-      [
-        dto.ciiuId,
-        dto.tipoEmpresaId,
-        dto.tamanoEmpresaId,
-        dto.empresaCertifComp ?? 'N',
-        dto.empresaExpertTecn ?? 'N',
-        empresa.empresaId,
-      ],
-    )
+    const ciiuId    = Number(dto.ciiuId)          || null
+    const tipoId    = Number(dto.tipoEmpresaId)   || null
+    const tamanoId  = Number(dto.tamanoEmpresaId) || null
+    const certif    = String(dto.empresaCertifComp || 'N').trim() === 'S' ? 1 : 0
+    const expert    = String(dto.empresaExpertTecn || 'N').trim() === 'S' ? 1 : 0
+    try {
+      await this.dataSource.query(
+        `UPDATE EMPRESA SET
+           CIIUID            = :1,
+           TIPOEMPRESAID     = :2,
+           TAMANOEMPRESAID   = :3,
+           EMPRESACERTIFCOMP = :4,
+           EMPRESAEXPERTTECN = :5
+         WHERE EMPRESAID = :6`,
+        [ciiuId, tipoId, tamanoId, certif, expert, empresa.empresaId],
+      )
+    } catch (e) {
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
     return { message: 'Datos generales actualizados' }
   }
 
@@ -275,6 +277,65 @@ export class EmpresaService {
     return { message: 'Datos del representante legal actualizados' }
   }
 
+  async getAnalisis(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const [row] = await this.dataSource.query(
+        `SELECT EMPRESAOBJETO       AS "objeto",
+                EMPRESAPRODUCTOS    AS "productos",
+                EMPRESASITUACION    AS "situacion",
+                EMPRESAPAPEL        AS "papel",
+                EMPRESARETOS        AS "retos",
+                EMPRESAEXPERIENCIA  AS "experiencia",
+                EMPRESAESLABONES    AS "eslabones",
+                EMPRESAINTERACCIONES AS "interacciones"
+           FROM EMPRESA WHERE EMPRESAID = :1`,
+        [empresa.empresaId],
+      )
+      return row ?? {}
+    } catch (e) {
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async updateAnalisis(email: string, dto: {
+    objeto?: string; productos?: string; situacion?: string
+    papel?: string; retos?: string; experiencia?: string
+    eslabones?: string; interacciones?: string
+  }) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      await this.dataSource.query(
+        `UPDATE EMPRESA SET
+           EMPRESAOBJETO        = :1,
+           EMPRESAPRODUCTOS     = :2,
+           EMPRESASITUACION     = :3,
+           EMPRESAPAPEL         = :4,
+           EMPRESARETOS         = :5,
+           EMPRESAEXPERIENCIA   = :6,
+           EMPRESAESLABONES     = :7,
+           EMPRESAINTERACCIONES = :8
+         WHERE EMPRESAID = :9`,
+        [
+          dto.objeto        ?? null,
+          dto.productos     ?? null,
+          dto.situacion     ?? null,
+          dto.papel         ?? null,
+          dto.retos         ?? null,
+          dto.experiencia   ?? null,
+          dto.eslabones     ?? null,
+          dto.interacciones ?? null,
+          empresa.empresaId,
+        ],
+      )
+      return { message: 'Análisis empresarial actualizado' }
+    } catch (e) {
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
   async getMenu(perfilId: number) {
     const rows: Array<{ desc: string; url: string; icono: string }> = await this.dataSource.query(
       `SELECT TRIM(MENUXDESC)  AS "desc",
@@ -299,5 +360,258 @@ export class EmpresaService {
     const claveEncriptada = encrypt64(nuevaClave, usuario.usuarioLlaveEncriptacion)
     await this.usuarioRepo.update(usuario.usuarioId, { usuarioClave: claveEncriptada })
     return { message: 'Contraseña actualizada correctamente' }
+  }
+
+  // ── Mesas Sectoriales ─────────────────────────────────────────────────────
+
+  async getMesasSectoriales() {
+    try {
+      return await this.dataSource.query(
+        `SELECT MESASECTORIALID AS "id",
+                TRIM(MESASECTORIALNOMBRE) AS "nombre"
+           FROM MESASECTORIAL
+          ORDER BY TRIM(MESASECTORIALNOMBRE) ASC`,
+      )
+    } catch { return [] }
+  }
+
+  async getMesasEmpresa(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      return await this.dataSource.query(
+        `SELECT ems.EMPRESAMESASECTORIALID AS "id",
+                TRIM(ms.MESASECTORIALNOMBRE) AS "nombre"
+           FROM EMPRESAMESASECTORIAL ems
+           JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = ems.MESASECTORIALIDEMPRESA
+          WHERE ems.EMPRESAIDMESASECTORIAL = :1
+          ORDER BY TRIM(ms.MESASECTORIALNOMBRE) ASC`,
+        [empresa.empresaId],
+      )
+    } catch { return [] }
+  }
+
+  async registrarMesaEmpresa(email: string, mesaSectorialId: number) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const existing = await this.dataSource.query(
+        `SELECT EMPRESAMESASECTORIALID FROM EMPRESAMESASECTORIAL
+          WHERE EMPRESAIDMESASECTORIAL = :1 AND MESASECTORIALIDEMPRESA = :2 AND ROWNUM = 1`,
+        [empresa.empresaId, mesaSectorialId],
+      )
+      if (existing.length > 0) throw new ConflictException('La mesa ya está registrada para esta empresa')
+      await this.dataSource.query(
+        `INSERT INTO EMPRESAMESASECTORIAL (EMPRESAIDMESASECTORIAL, MESASECTORIALIDEMPRESA)
+         VALUES (:1, :2)`,
+        [empresa.empresaId, mesaSectorialId],
+      )
+      return { message: 'Mesa sectorial registrada' }
+    } catch (e) {
+      if (e instanceof ConflictException) throw e
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async eliminarMesaEmpresa(empresaMesaSectorialId: number) {
+    try {
+      await this.dataSource.query(
+        `DELETE FROM EMPRESAMESASECTORIAL WHERE EMPRESAMESASECTORIALID = :1`,
+        [empresaMesaSectorialId],
+      )
+      return { message: 'Mesa sectorial eliminada' }
+    } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
+  }
+
+  // ── Sectores / Subsectores ────────────────────────────────────────────────
+
+  async getSectores() {
+    try {
+      return await this.dataSource.query(
+        `SELECT SECTORID AS "id", TRIM(SECTORDESCRIPCION) AS "nombre"
+           FROM SECTOR ORDER BY TRIM(SECTORDESCRIPCION) ASC`,
+      )
+    } catch { return [] }
+  }
+
+  async getSubsectores() {
+    try {
+      return await this.dataSource.query(
+        `SELECT SUBSECTORID AS "id", TRIM(SUBSECTORNOMBRE) AS "nombre"
+           FROM SUBSECTOR ORDER BY TRIM(SUBSECTORNOMBRE) ASC`,
+      )
+    } catch { return [] }
+  }
+
+  // ── Sectores que PERTENECE ────────────────────────────────────────────────
+
+  async getSectoresPertenece(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      return await this.dataSource.query(
+        `SELECT sp.SECTORPEMPRESAID AS "id", TRIM(s.SECTORDESCRIPCION) AS "nombre"
+           FROM SECTORPEMPRESA sp
+           JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
+          WHERE sp.EMPRESAIDPSECTOR = :1 ORDER BY TRIM(s.SECTORDESCRIPCION) ASC`,
+        [empresa.empresaId],
+      )
+    } catch { return [] }
+  }
+
+  async registrarSectorPertenece(email: string, sectorId: number) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const ex = await this.dataSource.query(
+        `SELECT SECTORPEMPRESAID FROM SECTORPEMPRESA WHERE EMPRESAIDPSECTOR=:1 AND SECTORIDPEMPRESA=:2 AND ROWNUM=1`,
+        [empresa.empresaId, sectorId],
+      )
+      if (ex.length > 0) throw new ConflictException('Sector ya registrado')
+      await this.dataSource.query(
+        `INSERT INTO SECTORPEMPRESA (EMPRESAIDPSECTOR, SECTORIDPEMPRESA) VALUES (:1,:2)`,
+        [empresa.empresaId, sectorId],
+      )
+      return { message: 'Sector registrado' }
+    } catch (e) {
+      if (e instanceof ConflictException) throw e
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async eliminarSectorPertenece(id: number) {
+    try {
+      await this.dataSource.query(`DELETE FROM SECTORPEMPRESA WHERE SECTORPEMPRESAID=:1`, [id])
+      return { message: 'Sector eliminado' }
+    } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
+  }
+
+  // ── Subsectores que PERTENECE ─────────────────────────────────────────────
+
+  async getSubsectoresPertenece(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      return await this.dataSource.query(
+        `SELECT sp.SUBSECTORPEMPRESAID AS "id", TRIM(s.SUBSECTORNOMBRE) AS "nombre"
+           FROM SUBSECTORPEMPRESA sp
+           JOIN SUBSECTOR s ON s.SUBSECTORID = sp.SUBSECTORIDPEMPRESA
+          WHERE sp.EMPRESAIDPSUBSECTOR = :1 ORDER BY TRIM(s.SUBSECTORNOMBRE) ASC`,
+        [empresa.empresaId],
+      )
+    } catch { return [] }
+  }
+
+  async registrarSubsectorPertenece(email: string, subsectorId: number) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const ex = await this.dataSource.query(
+        `SELECT SUBSECTORPEMPRESAID FROM SUBSECTORPEMPRESA WHERE EMPRESAIDPSUBSECTOR=:1 AND SUBSECTORIDPEMPRESA=:2 AND ROWNUM=1`,
+        [empresa.empresaId, subsectorId],
+      )
+      if (ex.length > 0) throw new ConflictException('Subsector ya registrado')
+      await this.dataSource.query(
+        `INSERT INTO SUBSECTORPEMPRESA (EMPRESAIDPSUBSECTOR, SUBSECTORIDPEMPRESA) VALUES (:1,:2)`,
+        [empresa.empresaId, subsectorId],
+      )
+      return { message: 'Subsector registrado' }
+    } catch (e) {
+      if (e instanceof ConflictException) throw e
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async eliminarSubsectorPertenece(id: number) {
+    try {
+      await this.dataSource.query(`DELETE FROM SUBSECTORPEMPRESA WHERE SUBSECTORPEMPRESAID=:1`, [id])
+      return { message: 'Subsector eliminado' }
+    } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
+  }
+
+  // ── Sectores que REPRESENTA ───────────────────────────────────────────────
+
+  async getSectoresRepresenta(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      return await this.dataSource.query(
+        `SELECT se.SECTOREMPRESAID AS "id", TRIM(s.SECTORDESCRIPCION) AS "nombre"
+           FROM SECTOREMPRESA se
+           JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
+          WHERE se.EMPRESAID = :1 ORDER BY TRIM(s.SECTORDESCRIPCION) ASC`,
+        [empresa.empresaId],
+      )
+    } catch { return [] }
+  }
+
+  async registrarSectorRepresenta(email: string, sectorId: number) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const ex = await this.dataSource.query(
+        `SELECT SECTOREMPRESAID FROM SECTOREMPRESA WHERE EMPRESAID=:1 AND SECTORIDEMPRESA=:2 AND ROWNUM=1`,
+        [empresa.empresaId, sectorId],
+      )
+      if (ex.length > 0) throw new ConflictException('Sector ya registrado')
+      await this.dataSource.query(
+        `INSERT INTO SECTOREMPRESA (EMPRESAID, SECTORIDEMPRESA) VALUES (:1,:2)`,
+        [empresa.empresaId, sectorId],
+      )
+      return { message: 'Sector registrado' }
+    } catch (e) {
+      if (e instanceof ConflictException) throw e
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async eliminarSectorRepresenta(id: number) {
+    try {
+      await this.dataSource.query(`DELETE FROM SECTOREMPRESA WHERE SECTOREMPRESAID=:1`, [id])
+      return { message: 'Sector eliminado' }
+    } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
+  }
+
+  // ── Subsectores que REPRESENTA ────────────────────────────────────────────
+
+  async getSubsectoresRepresenta(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      return await this.dataSource.query(
+        `SELECT se.SUBSECTOREMPRESAID AS "id", TRIM(s.SUBSECTORNOMBRE) AS "nombre"
+           FROM SUBSECTOREMPRESA se
+           JOIN SUBSECTOR s ON s.SUBSECTORID = se.SUBSECTORIDEMPRESA
+          WHERE se.EMPRESAID = :1 ORDER BY TRIM(s.SUBSECTORNOMBRE) ASC`,
+        [empresa.empresaId],
+      )
+    } catch { return [] }
+  }
+
+  async registrarSubsectorRepresenta(email: string, subsectorId: number) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    try {
+      const ex = await this.dataSource.query(
+        `SELECT SUBSECTOREMPRESAID FROM SUBSECTOREMPRESA WHERE EMPRESAID=:1 AND SUBSECTORIDEMPRESA=:2 AND ROWNUM=1`,
+        [empresa.empresaId, subsectorId],
+      )
+      if (ex.length > 0) throw new ConflictException('Subsector ya registrado')
+      await this.dataSource.query(
+        `INSERT INTO SUBSECTOREMPRESA (EMPRESAID, SUBSECTORIDEMPRESA) VALUES (:1,:2)`,
+        [empresa.empresaId, subsectorId],
+      )
+      return { message: 'Subsector registrado' }
+    } catch (e) {
+      if (e instanceof ConflictException) throw e
+      throw new BadRequestException(`Error Oracle: ${(e as Error).message}`)
+    }
+  }
+
+  async eliminarSubsectorRepresenta(id: number) {
+    try {
+      await this.dataSource.query(`DELETE FROM SUBSECTOREMPRESA WHERE SUBSECTOREMPRESAID=:1`, [id])
+      return { message: 'Subsector eliminado' }
+    } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 }

@@ -44,4 +44,16 @@ export class AuthController {
   perfil(@CurrentUser() user: { usuarioId: number }) {
     return this.authService.perfil(user.usuarioId)
   }
+
+  @Post('recuperar-contrasena')
+  @ApiOperation({ summary: 'Solicitar enlace de restablecimiento de contraseña por correo' })
+  recuperarContrasena(@Body() dto: { email: string }) {
+    return this.authService.solicitarRestablecimiento(dto.email)
+  }
+
+  @Post('restablecer-contrasena')
+  @ApiOperation({ summary: 'Restablecer contraseña con el token recibido por correo' })
+  restablecerContrasena(@Body() dto: { token: string; nuevaClave: string }) {
+    return this.authService.restablecerContrasena(dto.token, dto.nuevaClave)
+  }
 }

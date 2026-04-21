@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Put, Query, UseGuards,
+  Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -100,5 +100,111 @@ export class EmpresaController {
   @ApiOperation({ summary: 'Cambiar contraseña del usuario' })
   cambiarClave(@CurrentUser() user: JwtUser, @Body() dto: { nuevaClave: string }) {
     return this.empresaService.cambiarClave(user.email, dto.nuevaClave)
+  }
+
+  // ── Mesas Sectoriales ─────────────────────────────────────────────────────
+
+  @Get('mesas-sectoriales')
+  getMesasSectoriales() {
+    return this.empresaService.getMesasSectoriales()
+  }
+
+  @Get('mesas-sectoriales/empresa')
+  getMesasEmpresa(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getMesasEmpresa(user.email)
+  }
+
+  @Post('mesas-sectoriales/empresa')
+  registrarMesaEmpresa(@CurrentUser() user: JwtUser, @Body() dto: { mesaSectorialId: number }) {
+    return this.empresaService.registrarMesaEmpresa(user.email, dto.mesaSectorialId)
+  }
+
+  @Delete('mesas-sectoriales/empresa/:id')
+  eliminarMesaEmpresa(@Param('id') id: string) {
+    return this.empresaService.eliminarMesaEmpresa(Number(id))
+  }
+
+  // ── Sectores / Subsectores lookups ────────────────────────────────────────
+
+  @Get('sectores')
+  getSectores() { return this.empresaService.getSectores() }
+
+  @Get('subsectores')
+  getSubsectores() { return this.empresaService.getSubsectores() }
+
+  // ── Sectores/Subsectores PERTENECE ────────────────────────────────────────
+
+  @Get('sectores-pertenece')
+  getSectoresPertenece(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getSectoresPertenece(user.email)
+  }
+
+  @Post('sectores-pertenece')
+  registrarSectorPertenece(@CurrentUser() user: JwtUser, @Body() dto: { sectorId: number }) {
+    return this.empresaService.registrarSectorPertenece(user.email, dto.sectorId)
+  }
+
+  @Delete('sectores-pertenece/:id')
+  eliminarSectorPertenece(@Param('id') id: string) {
+    return this.empresaService.eliminarSectorPertenece(Number(id))
+  }
+
+  @Get('subsectores-pertenece')
+  getSubsectoresPertenece(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getSubsectoresPertenece(user.email)
+  }
+
+  @Post('subsectores-pertenece')
+  registrarSubsectorPertenece(@CurrentUser() user: JwtUser, @Body() dto: { subsectorId: number }) {
+    return this.empresaService.registrarSubsectorPertenece(user.email, dto.subsectorId)
+  }
+
+  @Delete('subsectores-pertenece/:id')
+  eliminarSubsectorPertenece(@Param('id') id: string) {
+    return this.empresaService.eliminarSubsectorPertenece(Number(id))
+  }
+
+  // ── Sectores/Subsectores REPRESENTA ──────────────────────────────────────
+
+  @Get('sectores-representa')
+  getSectoresRepresenta(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getSectoresRepresenta(user.email)
+  }
+
+  @Post('sectores-representa')
+  registrarSectorRepresenta(@CurrentUser() user: JwtUser, @Body() dto: { sectorId: number }) {
+    return this.empresaService.registrarSectorRepresenta(user.email, dto.sectorId)
+  }
+
+  @Delete('sectores-representa/:id')
+  eliminarSectorRepresenta(@Param('id') id: string) {
+    return this.empresaService.eliminarSectorRepresenta(Number(id))
+  }
+
+  @Get('subsectores-representa')
+  getSubsectoresRepresenta(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getSubsectoresRepresenta(user.email)
+  }
+
+  @Post('subsectores-representa')
+  registrarSubsectorRepresenta(@CurrentUser() user: JwtUser, @Body() dto: { subsectorId: number }) {
+    return this.empresaService.registrarSubsectorRepresenta(user.email, dto.subsectorId)
+  }
+
+  @Delete('subsectores-representa/:id')
+  eliminarSubsectorRepresenta(@Param('id') id: string) {
+    return this.empresaService.eliminarSubsectorRepresenta(Number(id))
+  }
+
+  // ── Análisis empresarial ──────────────────────────────────────────────────
+
+  @Get('analisis')
+  getAnalisis(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getAnalisis(user.email)
+  }
+
+  @Put('analisis')
+  updateAnalisis(@CurrentUser() user: JwtUser, @Body() dto: Record<string, unknown>) {
+    return this.empresaService.updateAnalisis(user.email, dto as Parameters<EmpresaService['updateAnalisis']>[1])
   }
 }

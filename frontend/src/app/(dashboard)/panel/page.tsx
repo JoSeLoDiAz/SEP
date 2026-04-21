@@ -2,6 +2,8 @@
 
 import { getSepUsuario, isEmpresa } from '@/lib/auth'
 import {
+  BookUser,
+  BarChart2,
   Building2,
   CalendarDays,
   ClipboardList,
@@ -19,14 +21,36 @@ import { useEffect, useState } from 'react'
 const EMPRESA_CARDS = [
   {
     id: 'datos',
-    title: 'Mis Datos',
+    title: 'Datos Básicos',
     icon: Building2,
     color: '#00304D',
     href: '/panel/datos',
     objetivo: 'Diligenciar la información básica de la empresa o gremio.',
-    descripcion: 'Permite gestionar la información empresarial o gremial y los datos de contacto.',
-    accion: '¿Cómo hacerlo? Seleccionar "Mis Datos" en el menú y completar la información solicitada.',
-    btnLabel: 'Ir a Mis Datos',
+    descripcion: 'Permite gestionar la información empresarial o gremial, ubicación, datos económicos y representante legal.',
+    accion: '¿Cómo hacerlo? Seleccionar "Datos Básicos" en el menú y completar la información solicitada.',
+    btnLabel: 'Ir a Datos Básicos',
+  },
+  {
+    id: 'contactos',
+    title: 'Contactos',
+    icon: BookUser,
+    color: '#0070C0',
+    href: '/panel/contactos',
+    objetivo: 'Registrar las personas de contacto de la empresa o gremio.',
+    descripcion: 'Permite gestionar los contactos asociados a la organización y vincularlos a un proyecto específico.',
+    accion: '¿Cómo hacerlo? Seleccionar "Contactos" en el menú y agregar o editar los contactos.',
+    btnLabel: 'Ir a Contactos',
+  },
+  {
+    id: 'analisis',
+    title: 'Análisis Empresarial',
+    icon: BarChart2,
+    color: '#00304D',
+    href: '/panel/analisis',
+    objetivo: 'Describir el análisis empresarial o gremial del proponente.',
+    descripcion: 'Permite registrar el objeto social, productos, situación actual, retos estratégicos, cadena productiva e interacciones.',
+    accion: '¿Cómo hacerlo? Seleccionar "Análisis" en el menú y completar cada sección del formulario.',
+    btnLabel: 'Ir a Análisis',
   },
   {
     id: 'necesidades',
@@ -43,7 +67,7 @@ const EMPRESA_CARDS = [
     id: 'proyectos',
     title: 'Mis Proyectos',
     icon: FolderKanban,
-    color: '#6C29B3',
+    color: '#C47900',
     href: '/panel/proyectos',
     objetivo: 'Registrar el proyecto de formación diseñado a la medida de sus necesidades.',
     descripcion: 'Permite gestionar la información del proyecto y las acciones de formación que lo conforman.',
@@ -54,7 +78,7 @@ const EMPRESA_CARDS = [
     id: 'convenios',
     title: 'Mis Convenios',
     icon: ScrollText,
-    color: '#0070C0',
+    color: '#C4003D',
     href: '/panel/convenios',
     objetivo: 'Registrar la información relacionada al Convenio una vez gestionada la suscripción.',
     descripcion: 'Permite gestionar la ejecución del convenio (proyecto de formación y acciones de formación).',
@@ -86,6 +110,8 @@ const ADMIN_MODULES = [
 export default function PanelHome() {
   const [usuario, setUsuario] = useState<ReturnType<typeof getSepUsuario>>(null)
 
+  useEffect(() => { document.title = 'Inicio | SEP' }, [])
+
   useEffect(() => {
     setUsuario(getSepUsuario())
   }, [])
@@ -103,10 +129,10 @@ export default function PanelHome() {
 
 function EmpresaHome({ nombre }: { nombre: string }) {
   return (
-    <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6 h-full">
+    <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
       {/* Welcome banner */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
-        <div className="h-2 bg-gradient-to-r from-[#00304D] via-[#39A900] to-[#6C29B3]" />
+        <div className="h-2 bg-gradient-to-r from-[#00304D] via-[#39A900] to-[#00304D]" />
         <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1 min-w-0">
             <p className="text-lg font-bold text-[#00304D] truncate">
@@ -120,16 +146,15 @@ function EmpresaHome({ nombre }: { nombre: string }) {
               A continuación le brindamos una breve explicación de las opciones disponibles para gestionar la información.
             </p>
           </div>
-          {/* Indicador derecho opcional */}
           <div className="hidden xl:flex flex-col items-end gap-0.5 flex-shrink-0 text-right">
             <span className="text-[11px] text-neutral-400">Módulos disponibles</span>
-            <span className="text-2xl font-bold text-[#39A900]">4</span>
+            <span className="text-2xl font-bold text-[#39A900]">6</span>
           </div>
         </div>
       </div>
 
-      {/* Cards grid — usa todo el ancho disponible */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 flex-1">
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {EMPRESA_CARDS.map((card) => (
           <div
             key={card.id}

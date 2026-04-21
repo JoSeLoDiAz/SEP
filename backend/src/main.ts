@@ -3,9 +3,14 @@ import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule)
+  const app = await NestFactory.create<NestExpressApplication>(AppModule)
+
+  // Aumentar límite para campos NCLOB grandes (análisis, eslabones, etc.)
+  app.useBodyParser('json', { limit: '20mb' })
+  app.useBodyParser('urlencoded', { extended: true, limit: '20mb' })
 
   app.useGlobalPipes(
     new ValidationPipe({

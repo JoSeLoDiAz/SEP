@@ -108,29 +108,45 @@ Si dice `TcpTestSucceeded : True` → el túnel funciona. Cierra la primera term
 
 ### 2.3 Auto-arranque al encender Windows (recomendado)
 
-PowerShell **como administrador**:
+> **Por qué un servicio y no una tarea programada:** las tareas con trigger "ONLOGON" NO se disparan cuando Windows hace **Fast Startup** (modo de hibernación que reanuda la sesión sin emitir el evento de logon). El resultado es que reinicias el PC y el túnel no arranca, y tienes que lanzarlo a mano. Un **servicio Windows nativo** se levanta antes del logon y sobrevive Fast Startup, hibernate, y cualquier modo de inicio.
+
+El repo incluye un script que lo deja todo configurado en 1 minuto. **PowerShell como administrador**:
 
 ```powershell
-mkdir C:\cloudflared -Force
-
-# Script que abre el túnel
-@"
-@echo off
-cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
-"@ | Out-File C:\cloudflared\sep-tunnel.bat -Encoding ascii
-
-# Tarea programada al iniciar sesión Windows
-schtasks /Create /TN "SEP DB Tunnel" /TR "C:\cloudflared\sep-tunnel.bat" /SC ONLOGON /RU "$env:USERNAME" /RL HIGHEST /F
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Documents\SEP\scripts\install-sep-tunnel.ps1"
 ```
 
-Pruébalo (sin reiniciar):
+(Ajusta la ruta si clonaste el repo en otro lugar.)
+
+El script:
+- Descarga **WinSW** (wrapper liviano para servicios Windows) desde GitHub
+- Crea el servicio `SEPDBTunnel` con auto-arranque al boot
+- Lo configura para reiniciarse solo si crashea (delay 5s)
+- Lo arranca y verifica que el puerto 1521 abra
+
+Verás `[1/7]` ... `[7/7]` y al final un cuadro **verde** si todo OK:
+
+```
+===========================================
+  OK Tunel funcionando, puerto 1521 abierto
+===========================================
+```
+
+Comprobación posterior (sin admin):
 ```powershell
-schtasks /Run /TN "SEP DB Tunnel"
-Start-Sleep 3
-Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
+Get-Service SEPDBTunnel
+Test-NetConnection 127.0.0.1 -Port 1521
 ```
 
-`TcpTestSucceeded : True` → ya quedó automatizado para siempre. Cuando enciendas el PC, el túnel arrancará solo en background.
+`Status: Running` y `TcpTestSucceeded: True` → automatizado para siempre. Si en el futuro quieres desinstalarlo:
+
+```powershell
+# PowerShell admin
+Stop-Service SEPDBTunnel
+& C:\cloudflared\sep-tunnel.exe uninstall C:\cloudflared\sep-tunnel.xml
+```
+
+Logs del servicio: `C:\cloudflared\sep-tunnel.out.log`
 
 ### 2.2 Configurar la conexión en SQL Developer
 

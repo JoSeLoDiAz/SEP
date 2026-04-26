@@ -69,41 +69,68 @@ Si alguno falla, reinstala antes de seguir.
 
 ## 2. Configurar acceso a la base de datos del servidor
 
-> **Por qué cloudflared:** la DB del servidor no está expuesta directamente a internet por seguridad. `cloudflared` es un cliente que abre un túnel cifrado a través de Cloudflare y mapea `sepdb.ggpcsena.com` al puerto local de tu PC. Lo dejas como servicio Windows y se mantiene siempre activo (no tienes que hacer nada al iniciar el día).
+> **Por qué cloudflared:** la DB del servidor no está expuesta directamente a internet por seguridad. `cloudflared` abre un túnel cifrado al servidor y mapea `sepdb.ggpcsena.com` a un puerto local de tu PC. Una vez configurado como tarea programada, arranca solo cuando enciendes Windows y queda corriendo en background — no haces nada al iniciar el día.
 
-### 2.1 Configurar cloudflared como servicio
+### 2.1 Verifica el puerto local 1521
 
-Abre **PowerShell como administrador** y ejecuta:
+Antes de nada, comprueba que el puerto 1521 esté libre en tu PC:
 
 ```powershell
-# Crea la carpeta de configuración
+netstat -ano | findstr :1521
+```
+
+- Si **no devuelve nada** → puerto libre, perfecto.
+- Si **devuelve una línea** con un PID al final → algo ya usa ese puerto. Mátalo:
+  ```powershell
+  Stop-Process -Id <PID> -Force
+  ```
+  O usa el puerto alterno **`11521`** en los siguientes pasos (reemplaza `1521` por `11521` en TODO lo que sigue, incluido el `.env`).
+
+### 2.2 Probar el túnel manualmente
+
+Abre PowerShell (no necesita admin):
+
+```powershell
+cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
+```
+
+Te debe mostrar:
+```
+INF Start Websocket listener host=localhost:1521
+```
+
+Deja esa terminal abierta y abre OTRA PowerShell:
+```powershell
+Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
+```
+
+Si dice `TcpTestSucceeded : True` → el túnel funciona. Cierra la primera terminal con `Ctrl+C`.
+
+### 2.3 Auto-arranque al encender Windows (recomendado)
+
+PowerShell **como administrador**:
+
+```powershell
 mkdir C:\cloudflared -Force
 
-# Crea el archivo de configuración del túnel TCP
+# Script que abre el túnel
 @"
-url: localhost:1521
-hostname: sepdb.ggpcsena.com
-loglevel: info
-"@ | Out-File C:\cloudflared\config.yml -Encoding utf8
+@echo off
+cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
+"@ | Out-File C:\cloudflared\sep-tunnel.bat -Encoding ascii
 
-# Pídele al líder técnico el archivo `cert.pem` y guárdalo en C:\cloudflared\
-# (El líder genera uno con `cloudflared login` desde su cuenta del SEP)
+# Tarea programada al iniciar sesión Windows
+schtasks /Create /TN "SEP DB Tunnel" /TR "C:\cloudflared\sep-tunnel.bat" /SC ONLOGON /RU "$env:USERNAME" /RL HIGHEST /F
 ```
 
-Cuando tengas `cert.pem` en `C:\cloudflared\`, instala el túnel como servicio:
-
+Pruébalo (sin reiniciar):
 ```powershell
-cloudflared service install --config C:\cloudflared\config.yml
-Start-Service cloudflared
-Get-Service cloudflared
-# Estado debe ser: Running
+schtasks /Run /TN "SEP DB Tunnel"
+Start-Sleep 3
+Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
 ```
 
-> **Si esto se complica**, alternativa simple en una sola terminal (no como servicio):
-> ```powershell
-> cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
-> ```
-> Deja esa terminal abierta mientras programes.
+`TcpTestSucceeded : True` → ya quedó automatizado para siempre. Cuando enciendas el PC, el túnel arrancará solo en background.
 
 ### 2.2 Configurar la conexión en SQL Developer
 
@@ -233,13 +260,15 @@ Espera unos 5 segundos hasta ver:
 
 ✅ Frontend en `http://localhost:3000`. Cualquier cambio en archivos `.tsx`, `.ts`, `.css` → se actualiza el navegador en ~200 ms (Hot Module Replacement).
 
-### Terminal 3 (opcional) — Túnel a la DB si NO instalaste como servicio
+### Terminal 3 (opcional) — Túnel a la DB si NO automatizaste
+
+Solo aplica si no creaste la tarea programada de la sección 2.3:
 
 ```powershell
 cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
 ```
 
-Si configuraste cloudflared como servicio en la sección 2.1, este paso no aplica.
+Deja esa terminal abierta mientras programes.
 
 ---
 
@@ -334,11 +363,12 @@ En GitHub:
 
 → El túnel `cloudflared` no está corriendo. Verifica:
 ```powershell
-Get-Service cloudflared
+schtasks /Query /TN "SEP DB Tunnel"
+Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
 ```
-Si dice "Stopped":
+Si el `Test-NetConnection` dice `False`, lanza la tarea manualmente:
 ```powershell
-Start-Service cloudflared
+schtasks /Run /TN "SEP DB Tunnel"
 ```
 
 ### 8.2 `ORA-01017: invalid username/password`

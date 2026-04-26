@@ -99,9 +99,9 @@ export class ProyectosController {
     return this.proyectosService.getActividadesUT()
   }
 
-  @Get('rubrosperfilut')
-  getRubrosPerfilUT() {
-    return this.proyectosService.getRubrosPerfilUT()
+  @Get(':id/rubrosperfilut')
+  getRubrosPerfilUT(@Param('id', ParseIntPipe) proyectoId: number) {
+    return this.proyectosService.getRubrosPerfilUT(proyectoId)
   }
 
   @Get('articulacionesterr')
@@ -512,5 +512,72 @@ export class ProyectosController {
   @Delete(':id/acciones/:afId/recursos/:rdafId')
   eliminarRecursoAF(@Param('rdafId', ParseIntPipe) rdafId: number) {
     return this.proyectosService.eliminarRecursoAF(rdafId)
+  }
+
+  // ── Rubros ────────────────────────────────────────────────────────────────
+
+  @Get(':id/acciones/:afId/rubros/prereqs')
+  getPrerequisitosRubros(@Param('afId', ParseIntPipe) afId: number) {
+    return this.proyectosService.getPrerequisitosRubros(afId)
+  }
+
+  @Get(':id/acciones/:afId/rubros/catalogo')
+  getRubrosCatalogo(@Param('afId', ParseIntPipe) afId: number) {
+    return this.proyectosService.getRubrosCatalogo(afId)
+  }
+
+  @Get(':id/acciones/:afId/rubros')
+  getRubrosAF(@Param('afId', ParseIntPipe) afId: number) {
+    return this.proyectosService.getRubrosAF(afId)
+  }
+
+  @Post(':id/acciones/:afId/rubros')
+  guardarRubroAF(
+    @Param('id', ParseIntPipe) proyectoId: number,
+    @Param('afId', ParseIntPipe) afId: number,
+    @Body() dto: {
+      rubroId: number; justificacion: string
+      numHoras: number; cantidad: number; beneficiarios: number; dias: number; numGrupos: number
+      totalRubro: number; cofSena: number; contraEspecie: number; contraDinero: number
+      valorMaximo: number; valorBenef: number; paquete: string
+    },
+  ) {
+    return this.proyectosService.guardarRubroAF(proyectoId, afId, dto)
+  }
+
+  @Get(':id/acciones/:afId/rubros/go')
+  getGastosOperacion(@Param('afId', ParseIntPipe) afId: number) {
+    return this.proyectosService.getGastosOperacion(afId)
+  }
+
+  @Post(':id/acciones/:afId/rubros/go')
+  guardarGastosOperacion(
+    @Param('id', ParseIntPipe) proyectoId: number,
+    @Param('afId', ParseIntPipe) afId: number,
+    @Body() dto: { cofSena: number; especie: number; dinero: number },
+  ) {
+    return this.proyectosService.guardarGastosOperacion(proyectoId, afId, dto)
+  }
+
+  @Get(':id/acciones/:afId/rubros/transferencia')
+  getTransferencia(@Param('afId', ParseIntPipe) afId: number) {
+    return this.proyectosService.getTransferencia(afId)
+  }
+
+  @Post(':id/acciones/:afId/rubros/transferencia')
+  guardarTransferencia(
+    @Param('id', ParseIntPipe) proyectoId: number,
+    @Param('afId', ParseIntPipe) afId: number,
+    @Body() dto: { beneficiarios: number; valor: number },
+  ) {
+    return this.proyectosService.guardarTransferencia(proyectoId, afId, dto)
+  }
+
+  @Delete(':id/acciones/:afId/rubros/:afrubroid')
+  eliminarRubroAF(
+    @Param('afId', ParseIntPipe) afId: number,
+    @Param('afrubroid', ParseIntPipe) afrubroid: number,
+  ) {
+    return this.proyectosService.eliminarRubroAF(afId, afrubroid)
   }
 }

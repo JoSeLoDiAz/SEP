@@ -389,18 +389,13 @@ export class ProyectosService {
     const gruposChanged = Number(actual.numGrupos) !== (dto.numGrupos ?? 0)
 
     if (eventoChanged || modalidadChanged || gruposChanged) {
-      const [{ total }] = await this.dataSource.query(
-        `SELECT (
-           (SELECT COUNT(1) FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = :1) +
-           (SELECT COUNT(1) FROM AFSECTOR          WHERE ACCIONFORMACIONID = :2) +
-           (SELECT COUNT(1) FROM AFGRUPO           WHERE ACCIONFORMACIONID = :3) +
-           (SELECT COUNT(1) FROM UNIDADTEMATICA    WHERE ACCIONFORMACIONID = :4)
-         ) AS "total" FROM DUAL`,
-        [afId, afId, afId, afId],
+      const [{ totalRubros }] = await this.dataSource.query(
+        `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
+        [afId],
       )
-      if (Number(total) > 0)
+      if (Number(totalRubros) > 0)
         throw new BadRequestException(
-          'No se puede cambiar el evento, modalidad o grupos porque la AF ya tiene información registrada (rubros, cobertura o unidades temáticas). Elimine esos registros primero.',
+          'No se puede cambiar el evento, modalidad o número de grupos porque la AF ya tiene rubros registrados. Elimine los rubros primero.',
         )
     }
 
@@ -944,24 +939,48 @@ export class ProyectosService {
   }
 
   async eliminarAF(afId: number) {
-    const [{ total }] = await this.dataSource.query(
-      `SELECT (
-         (SELECT COUNT(1) FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = :1) +
-         (SELECT COUNT(1) FROM AFSECTOR          WHERE ACCIONFORMACIONID = :2) +
-         (SELECT COUNT(1) FROM AFGRUPO           WHERE ACCIONFORMACIONID = :3) +
-         (SELECT COUNT(1) FROM UNIDADTEMATICA    WHERE ACCIONFORMACIONID = :4)
-       ) AS "total" FROM DUAL`,
-      [afId, afId, afId, afId],
-    )
-    if (Number(total) > 0)
-      throw new BadRequestException(
-        'No se puede eliminar la AF porque tiene información asociada en Niveles, Sectores, Grupos o Unidades Temáticas.',
-      )
-
-    await this.dataSource.query(
-      `DELETE FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+    // Solo bloquear si tiene rubros registrados
+    const [{ totalRubros }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
       [afId],
     )
+    if (Number(totalRubros) > 0)
+      throw new BadRequestException(
+        'No se puede eliminar la AF porque tiene rubros registrados. Elimine los rubros primero.',
+      )
+
+    // Cascada: hijos de UNIDADTEMATICA
+    await this.dataSource.query(
+      `DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1)`,
+      [afId],
+    )
+    await this.dataSource.query(
+      `DELETE FROM PERFILUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1)`,
+      [afId],
+    )
+    await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`, [afId])
+
+    // Cascada: hijos de AFGRUPO
+    await this.dataSource.query(
+      `DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID IN (SELECT AFGRUPOID FROM AFGRUPO WHERE ACCIONFORMACIONID = :1)`,
+      [afId],
+    )
+    await this.dataSource.query(`DELETE FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`, [afId])
+
+    // Resto de tablas relacionadas
+    await this.dataSource.query(`DELETE FROM AFNIVELOCUPACIONAL   WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFAREAFUNCIONAL      WHERE ACCIONFORMACIONIDAF  = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM OCUPACIONCOUCAF      WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFPSECTOR            WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFPSUBSECTOR         WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFSECTOR             WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFSUBSECTOR          WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID   = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF  WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFHABILIDAD          WHERE ACCIONFORMACIONID    = :1`, [afId])
+
+    await this.dataSource.query(`DELETE FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`, [afId])
     return { message: 'Acción de formación eliminada correctamente' }
   }
 
@@ -976,12 +995,15 @@ export class ProyectosService {
     )
   }
 
-  async getRubrosPerfilUT() {
+  async getRubrosPerfilUT(proyectoId: number) {
     return this.dataSource.query(
-      `SELECT RUBROID AS "id", TRIM(RUBRONOMBRE) AS "nombre"
-         FROM RUBRO
-        WHERE RUBROPERFILUT = 1 AND RUBROACTIVO = 1
-        ORDER BY RUBROID ASC`,
+      `SELECT r.RUBROID AS "id", TRIM(r.RUBRONOMBRE) AS "nombre"
+         FROM RUBRO r
+         JOIN PROYECTO p ON p.CONVOCATORIAID = r.CONVOCATORIAIDRUBRO
+        WHERE r.RUBROPERFILUT = 1 AND r.RUBROACTIVO = 1
+          AND p.PROYECTOID = :1
+        ORDER BY r.RUBROID ASC`,
+      [proyectoId]
     )
   }
 
@@ -1563,5 +1585,386 @@ export class ProyectosService {
   async eliminarRecursoAF(rdafId: number) {
     await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE RECURSOSDIDACTICOSAFID = :1`, [rdafId])
     return { message: 'Recurso eliminado' }
+  }
+
+  // ── Rubros ────────────────────────────────────────────────────────────────
+
+  async getRubrosCatalogo(afId: number) {
+    // Get convocatoria + modalidad of the AF
+    const [af] = await this.dataSource.query(
+      `SELECT af.MODALIDADFORMACIONID AS "modalidadId",
+              mf.MODALIDADFORMACIONNOMBRE AS "modalidad",
+              p.CONVOCATORIAID AS "convocatoriaId"
+         FROM ACCIONFORMACION af
+         JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
+         JOIN PROYECTO p ON p.PROYECTOID = af.PROYECTOID
+        WHERE af.ACCIONFORMACIONID = :1`, [afId]
+    )
+    if (!af) throw new BadRequestException('AF no encontrada')
+
+    const modalidad = (af.modalidad as string).toUpperCase().trim()
+    const convId: number = af.convocatoriaId
+
+    const rubros = await this.dataSource.query(
+      `SELECT r.RUBROID       AS "rubroId",
+              r.RUBROCODIGO   AS "codigo",
+              r.RUBRONOMBRE   AS "nombre",
+              DBMS_LOB.SUBSTR(r.RUBRODESCRIPCION, 2000, 1) AS "descripcion",
+              r.RUBROTOPE     AS "tope",
+              r.RUBROPAQUETE  AS "paquete",
+              r.RUBROCASO     AS "caso",
+              r.RUBROAF       AS "rubroAf",
+              r.RUBROPROYECTO AS "rubroProyecto",
+              r.RUBROPERFILUT AS "perfilUt",
+              r.RUBROMODALIDAD AS "modalidades"
+         FROM RUBRO r
+        WHERE r.CONVOCATORIAIDRUBRO = :1
+          AND r.RUBROACTIVO = 1
+          AND r.RUBROAF = 1
+          AND (r.RUBROMODALIDAD IS NULL OR r.RUBROMODALIDAD = ''
+               OR INSTR(UPPER(r.RUBROMODALIDAD), :2) > 0)
+          AND (
+            r.RUBROPERFILUT = 0
+            OR r.RUBROID IN (
+              SELECT DISTINCT p.RUBROIDUT
+                FROM PERFILUT p
+                JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = p.UNIDADTEMATICAID
+               WHERE ut.ACCIONFORMACIONID = :3
+            )
+          )
+        ORDER BY r.RUBROID`, [convId, modalidad, afId]
+    )
+    return rubros
+  }
+
+  async getRubrosAF(afId: number) {
+    const rows = await this.dataSource.query(
+      `SELECT ar.AFRUBROID            AS "afrubroid",
+              ar.RUBROID              AS "rubroId",
+              r.RUBROCODIGO           AS "codigo",
+              r.RUBRONOMBRE           AS "nombre",
+              r.RUBROPAQUETE          AS "paquete",
+              r.RUBROCASO             AS "caso",
+              ar.AFRUBROJUSTIFICACION AS "justificacion",
+              ar.AFRUBRONUMHORAS      AS "numHoras",
+              ar.AFRUBROCANTIDAD      AS "cantidad",
+              ar.AFRUBROBENEFICIARIOS AS "beneficiarios",
+              ar.AFRUBRODIAS          AS "dias",
+              ar.AFRUBRONUMEROGRUPOS  AS "numGrupos",
+              ar.AFRUBROVALOR         AS "totalRubro",
+              ar.AFRUBROCOFINANCIACION AS "cofSena",
+              ar.AFRUBROESPECIE       AS "contraEspecie",
+              ar.AFRUBRODINERO        AS "contraDinero",
+              ar.AFRUBROVALORMAXIMO   AS "valorMaximo",
+              ar.AFRUBROVALORPORBENEFICIARIO AS "valorBenef",
+              ar.AFRUBROPORCENTAJECOFINANCIACION AS "porcSena",
+              ar.AFRUBROPORCENTAJEESPECIE        AS "porcEspecie",
+              ar.AFRUBROPORCENTAJEDINERO         AS "porcDinero"
+         FROM AFRUBRO ar
+         JOIN RUBRO r ON r.RUBROID = ar.RUBROID
+        WHERE ar.ACCIONFORMACIONID = :1
+          AND TRIM(r.RUBROCODIGO) NOT IN ('R09', 'R015')
+        ORDER BY ar.AFRUBROID`, [afId]
+    )
+    return rows
+  }
+
+  async getPrerequisitosRubros(afId: number): Promise<{ ok: boolean; issues: string[] }> {
+    const issues: string[] = []
+    const [af] = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONNUMGRUPOS       AS "numGrupos",
+              af.ACCIONFORMACIONNUMTOTHORASGRUP AS "numTotHoras",
+              af.TIPOEVENTOID                  AS "tipoEventoId",
+              af.MODALIDADFORMACIONID          AS "modalidadId"
+         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!af) return { ok: false, issues: ['AF no encontrada'] }
+
+    const numGruposAF = Number(af.numGrupos) || 0
+    const numTotHoras = Number(af.numTotHoras) || 0
+
+    if (!af.tipoEventoId || !af.modalidadId)
+      issues.push('Falta guardar el tipo de evento y/o modalidad de formación.')
+    if (numTotHoras <= 0)
+      issues.push('Falta definir el número de horas y grupos (guardar la sección "Grupos y Beneficiarios").')
+
+    const [{ gruposCreados }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`, [afId])
+    if (Number(gruposCreados) < numGruposAF)
+      issues.push(`Faltan grupos de cobertura: la AF tiene ${numGruposAF} grupos definidos pero solo ${Number(gruposCreados)} están creados.`)
+
+    const [{ gruposSinCob }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "gruposSinCob" FROM AFGRUPO g
+        WHERE g.ACCIONFORMACIONID = :1
+          AND NOT EXISTS (SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID)`,
+      [afId])
+    if (Number(gruposSinCob) > 0)
+      issues.push(`${Number(gruposSinCob)} grupo(s) no tienen cobertura registrada. Complete la cobertura de cada grupo.`)
+
+    const [{ totalUTs }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`, [afId])
+    if (Number(totalUTs) === 0)
+      issues.push('Debe registrar al menos una Unidad Temática.')
+
+    if (numTotHoras > 0) {
+      const [{ horasUTs }] = await this.dataSource.query(
+        `SELECT NVL(SUM(
+           NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
+           NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
+           NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
+           NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+         ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+        [afId])
+      if (Number(horasUTs) < numTotHoras)
+        issues.push(`Las horas de las UTs (${Number(horasUTs)}h) no cubren el total de la AF (${numTotHoras}h). Agregue más horas en las UTs.`)
+    }
+
+    return { ok: issues.length === 0, issues }
+  }
+
+  private async validarPrerequisitosRubros(afId: number) {
+    const [af] = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONNUMGRUPOS       AS "numGrupos",
+              af.ACCIONFORMACIONNUMTOTHORASGRUP AS "numTotHoras",
+              af.TIPOEVENTOID                  AS "tipoEventoId",
+              af.MODALIDADFORMACIONID          AS "modalidadId"
+         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!af) throw new BadRequestException('AF no encontrada')
+
+    const numGruposAF = Number(af.numGrupos) || 0
+    const numTotHoras = Number(af.numTotHoras) || 0
+
+    // 1. Debe tener tipo de evento, modalidad y horas definidas
+    if (!af.tipoEventoId || !af.modalidadId)
+      throw new BadRequestException('Debe guardar primero el tipo de evento y modalidad de formación antes de registrar rubros.')
+    if (numTotHoras <= 0)
+      throw new BadRequestException('Debe definir el número de horas y grupos antes de registrar rubros.')
+
+    // 2. Cada grupo debe tener al menos una cobertura registrada
+    const [{ gruposSinCob }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "gruposSinCob"
+         FROM AFGRUPO g
+        WHERE g.ACCIONFORMACIONID = :1
+          AND NOT EXISTS (
+            SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID
+          )`,
+      [afId],
+    )
+    if (Number(gruposSinCob) > 0)
+      throw new BadRequestException(`${Number(gruposSinCob)} grupo(s) no tienen cobertura registrada. Complete la cobertura de todos los grupos antes de registrar rubros.`)
+
+    // 3. El número de grupos con cobertura debe coincidir con numGrupos de la AF
+    const [{ gruposConCob }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "gruposConCob" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (Number(gruposConCob) < numGruposAF)
+      throw new BadRequestException(`La AF tiene ${numGruposAF} grupos definidos pero solo ${Number(gruposConCob)} están creados en cobertura. Registre todos los grupos.`)
+
+    // 4. Debe haber al menos una unidad temática
+    const [{ totalUTs }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (Number(totalUTs) === 0)
+      throw new BadRequestException('Debe registrar al menos una Unidad Temática antes de registrar rubros.')
+
+    // 5. Las horas de las UTs deben sumar el total de horas de la AF
+    const [{ horasUTs }] = await this.dataSource.query(
+      `SELECT NVL(SUM(
+         NVL(ut.UNIDADTEMATICAHORASPP,0) + NVL(ut.UNIDADTEMATICAHORASPV,0) +
+         NVL(ut.UNIDADTEMATICAHORASPPAT,0) + NVL(ut.UNIDADTEMATICAHORASPHIB,0) +
+         NVL(ut.UNIDADTEMATICAHORASTP,0) + NVL(ut.UNIDADTEMATICAHORASTV,0) +
+         NVL(ut.UNIDADTEMATICAHORASTPAT,0) + NVL(ut.UNIDADTEMATICAHORASTHIB,0)
+       ), 0) AS "horasUTs"
+         FROM UNIDADTEMATICA ut WHERE ut.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (Number(horasUTs) < numTotHoras)
+      throw new BadRequestException(`Las horas de las Unidades Temáticas (${Number(horasUTs)}h) no completan las horas totales de la AF (${numTotHoras}h). Complete las UTs antes de registrar rubros.`)
+  }
+
+  async guardarRubroAF(proyectoId: number, afId: number, dto: {
+    rubroId: number; justificacion: string
+    numHoras: number; cantidad: number; beneficiarios: number; dias: number; numGrupos: number
+    totalRubro: number; cofSena: number; contraEspecie: number; contraDinero: number
+    valorMaximo: number; valorBenef: number; paquete: string
+  }) {
+    await this.validarPrerequisitosRubros(afId)
+
+    const { rubroId, justificacion, numHoras, cantidad, beneficiarios, dias,
+            numGrupos, totalRubro, cofSena, contraEspecie, contraDinero,
+            valorMaximo, valorBenef, paquete } = dto
+
+    const porcSena    = totalRubro > 0 ? (cofSena    / totalRubro) * 100 : 0
+    const porcEspecie = totalRubro > 0 ? (contraEspecie / totalRubro) * 100 : 0
+    const porcDinero  = totalRubro > 0 ? (contraDinero  / totalRubro) * 100 : 0
+
+    const [existing] = await this.dataSource.query(
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      [afId, rubroId]
+    )
+
+    if (existing) {
+      await this.dataSource.query(
+        `UPDATE AFRUBRO SET
+           AFRUBROJUSTIFICACION          = :1,
+           AFRUBRONUMHORAS               = :2,
+           AFRUBROCANTIDAD               = :3,
+           AFRUBROBENEFICIARIOS          = :4,
+           AFRUBRODIAS                   = :5,
+           AFRUBRONUMEROGRUPOS           = :6,
+           AFRUBROVALOR                  = :7,
+           AFRUBROCOFINANCIACION         = :8,
+           AFRUBROESPECIE                = :9,
+           AFRUBRODINERO                 = :10,
+           AFRUBROVALORMAXIMO            = :11,
+           AFRUBROVALORPORBENEFICIARIO   = :12,
+           AFRUBROPAQUETE                = :13,
+           AFRUBROPORCENTAJECOFINANCIACION = :14,
+           AFRUBROPORCENTAJEESPECIE      = :15,
+           AFRUBROPORCENTAJEDINERO       = :16,
+           AFRUBROFECHAREGISTRO          = SYSDATE
+         WHERE AFRUBROID = :17`,
+        [justificacion, numHoras, cantidad, beneficiarios, dias, numGrupos,
+         totalRubro, cofSena, contraEspecie, contraDinero, valorMaximo, valorBenef,
+         paquete, porcSena, porcEspecie, porcDinero, existing.id]
+      )
+      return { message: 'Rubro actualizado', afrubroid: existing.id }
+    }
+
+    const [{ nid }] = await this.dataSource.query(
+      `SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`
+    )
+    await this.dataSource.query(
+      `INSERT INTO AFRUBRO (
+         AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+         AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
+         AFRUBROBENEFICIARIOS, AFRUBRODIAS, AFRUBRONUMEROGRUPOS,
+         AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
+         AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
+         AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
+         AFRUBROFECHAREGISTRO
+       ) VALUES (
+         :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,SYSDATE
+       )`,
+      [nid, proyectoId, afId, rubroId,
+       justificacion, numHoras, cantidad, beneficiarios, dias, numGrupos,
+       totalRubro, cofSena, contraEspecie, contraDinero, valorMaximo, valorBenef,
+       paquete, porcSena, porcEspecie, porcDinero]
+    )
+    return { message: 'Rubro guardado', afrubroid: nid }
+  }
+
+  async eliminarRubroAF(afId: number, afrubroid: number) {
+    await this.dataSource.query(`DELETE FROM AFRUBRO WHERE AFRUBROID = :1`, [afrubroid])
+    // Limpiar GO y Transferencia al modificar rubros
+    await this.dataSource.query(
+      `DELETE FROM AFRUBRO ar WHERE ar.ACCIONFORMACIONID = :1
+         AND EXISTS (SELECT 1 FROM RUBRO r WHERE r.RUBROID = ar.RUBROID AND TRIM(r.RUBROCODIGO) IN ('R09','R015'))`,
+      [afId]
+    )
+    return { message: 'Rubro eliminado' }
+  }
+
+  // ── Gastos de Operación ────────────────────────────────────────────────────
+
+  private async getRubroConvByCode(afId: number, codigo: string) {
+    const [row] = await this.dataSource.query(
+      `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
+         FROM RUBRO r
+         JOIN PROYECTO p ON p.CONVOCATORIAID = r.CONVOCATORIAIDRUBRO
+         JOIN ACCIONFORMACION af ON af.PROYECTOID = p.PROYECTOID
+        WHERE af.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = :2`, [afId, codigo]
+    )
+    return row
+  }
+
+  async getGastosOperacion(afId: number) {
+    const [row] = await this.dataSource.query(
+      `SELECT ar.AFRUBROID AS "afrubroid", ar.AFRUBROCOFINANCIACION AS "cofSena",
+              ar.AFRUBROESPECIE AS "especie", ar.AFRUBRODINERO AS "dinero",
+              ar.AFRUBROVALOR AS "total"
+         FROM AFRUBRO ar
+         JOIN RUBRO r ON r.RUBROID = ar.RUBROID
+        WHERE ar.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = 'R09'`, [afId]
+    )
+    return row ?? null
+  }
+
+  async guardarGastosOperacion(proyectoId: number, afId: number, dto: { cofSena: number; especie: number; dinero: number }) {
+    await this.validarPrerequisitosRubros(afId)
+    const rubro = await this.getRubroConvByCode(afId, 'R09')
+    if (!rubro) throw new BadRequestException('Rubro GO no encontrado para esta convocatoria')
+    const total = (dto.cofSena ?? 0) + (dto.especie ?? 0) + (dto.dinero ?? 0)
+    const porcSena    = total > 0 ? (dto.cofSena  / total) * 100 : 0
+    const porcEspecie = total > 0 ? (dto.especie  / total) * 100 : 0
+    const porcDinero  = total > 0 ? (dto.dinero   / total) * 100 : 0
+    const [existing] = await this.dataSource.query(
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      [afId, rubro.rubroId]
+    )
+    if (existing) {
+      await this.dataSource.query(
+        `UPDATE AFRUBRO SET AFRUBROVALOR=:1, AFRUBROCOFINANCIACION=:2, AFRUBROESPECIE=:3, AFRUBRODINERO=:4,
+           AFRUBROPORCENTAJECOFINANCIACION=:5, AFRUBROPORCENTAJEESPECIE=:6, AFRUBROPORCENTAJEDINERO=:7,
+           AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:8`,
+        [total, dto.cofSena, dto.especie, dto.dinero, porcSena, porcEspecie, porcDinero, existing.id]
+      )
+      return { afrubroid: existing.id }
+    }
+    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`)
+    await this.dataSource.query(
+      `INSERT INTO AFRUBRO (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+         AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
+         AFRUBROPAQUETE, AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
+       VALUES (:1,:2,:3,:4,'GASTOS DE OPERACIÓN',1,:5,:6,:7,:8,:9,:10,:11,:12,SYSDATE)`,
+      [nid, proyectoId, afId, rubro.rubroId, total, dto.cofSena, dto.especie, dto.dinero,
+       rubro.paquete, porcSena, porcEspecie, porcDinero]
+    )
+    return { afrubroid: nid }
+  }
+
+  // ── Transferencia ──────────────────────────────────────────────────────────
+
+  async getTransferencia(afId: number) {
+    const [row] = await this.dataSource.query(
+      `SELECT ar.AFRUBROID AS "afrubroid", ar.AFRUBROBENEFICIARIOS AS "beneficiarios",
+              ar.AFRUBROVALOR AS "valor"
+         FROM AFRUBRO ar
+         JOIN RUBRO r ON r.RUBROID = ar.RUBROID
+        WHERE ar.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = 'R015'`, [afId]
+    )
+    return row ?? null
+  }
+
+  async guardarTransferencia(proyectoId: number, afId: number, dto: { beneficiarios: number; valor: number }) {
+    await this.validarPrerequisitosRubros(afId)
+    const rubro = await this.getRubroConvByCode(afId, 'R015')
+    if (!rubro) throw new BadRequestException('Rubro Transferencia no encontrado para esta convocatoria')
+    const [existing] = await this.dataSource.query(
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      [afId, rubro.rubroId]
+    )
+    if (existing) {
+      await this.dataSource.query(
+        `UPDATE AFRUBRO SET AFRUBROBENEFICIARIOS=:1, AFRUBROVALOR=:2, AFRUBRODINERO=:3,
+           AFRUBROPORCENTAJEDINERO=100, AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:4`,
+        [dto.beneficiarios, dto.valor, dto.valor, existing.id]
+      )
+      return { afrubroid: existing.id }
+    }
+    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`)
+    await this.dataSource.query(
+      `INSERT INTO AFRUBRO (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+         AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROBENEFICIARIOS, AFRUBROVALOR, AFRUBRODINERO,
+         AFRUBROPAQUETE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
+       VALUES (:1,:2,:3,:4,'TRANSFERENCIA CONOCIMIENTO',1,:5,:6,:7,:8,100,SYSDATE)`,
+      [nid, proyectoId, afId, rubro.rubroId, dto.beneficiarios, dto.valor, dto.valor, rubro.paquete]
+    )
+    return { afrubroid: nid }
   }
 }

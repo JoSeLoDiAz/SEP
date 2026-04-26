@@ -167,7 +167,7 @@ export default function UnidadesPage() {
         api.get<Proyecto>(`/proyectos/${proyectoId}`),
         api.get<UTResumen[]>(`/proyectos/${proyectoId}/acciones/${afId}/unidades`),
         api.get<Opcion[]>('/proyectos/actividadesut'),
-        api.get<Opcion[]>('/proyectos/rubrosperfilut'),
+        api.get<Opcion[]>(`/proyectos/${proyectoId}/rubrosperfilut`),
         api.get<Opcion[]>(`/proyectos/${proyectoId}/acciones/${afId}/habilidades`),
       ])
       setAf(rAf.data)
@@ -790,7 +790,7 @@ function PerfilSection({ det, rubrosCat, perfilAdd, perfilAdding,
           <table className="w-full text-xs">
             <thead>
               <tr className="text-neutral-400 border-b border-neutral-100">
-                <th className="text-left py-1.5 pr-3 font-medium">Rubro</th>
+                <th className="text-left py-1.5 pr-3 font-medium">Perfil del Capacitador</th>
                 <th className="text-center py-1.5 px-2 font-medium">Horas Cap.</th>
                 <th className="text-center py-1.5 px-2 font-medium">Días</th>
                 <th className="py-1.5 w-8" />
@@ -822,7 +822,7 @@ function PerfilSection({ det, rubrosCat, perfilAdd, perfilAdding,
       {canAdd && (
         <div className="flex gap-2 flex-wrap items-end">
           <div className="flex-1 min-w-[180px]">
-            <label className={lbl}>Rubro</label>
+            <label className={lbl}>Perfil del Capacitador</label>
             <select value={perfilAdd.rubroId}
               onChange={e => onPerfilAddChange({ rubroId: e.target.value })} className={inp}>
               <option value="">— Seleccione —</option>

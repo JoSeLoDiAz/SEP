@@ -398,6 +398,93 @@ function mensajeNoEditable(p: Proyecto | null): string {
   return ''
 }
 
+function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
+  const e = Number(form.tipoEventoId) || 0
+  const m = Number(form.modalidadFormacionId) || 0
+  if (!e || !m) return {} as Record<string, string>
+
+  const horas    = Number(form.numHorasGrupo)
+  const grupos   = Number(form.numGrupos)
+  const benef    = Number(form.benefGrupo)
+  const benefVi  = Number(form.benefViGrupo)
+  const esIndGremio   = proyectoModalidadId === 1 || proyectoModalidadId === 3
+  const esSoloVirtual = MOD_SOLO_VIRTUAL.has(m)
+  const esHibrida     = m === 3 || m === 5 || m === 6
+
+  const err: Record<string, string> = {}
+
+  // ── Horas ─────────────────────────────────────────────────────────────────
+  if (form.numHorasGrupo !== '') {
+    if (horas <= 0) {
+      err.horas = 'Ingrese un número de horas válido (mayor que 0)'
+    } else if (e === 1 || e === 2) {
+      if (horas < 1 || horas > 4) err.horas = `${e === 1 ? 'CONFERENCIA' : 'FORO'}: debe ser entre 1 y 4 horas`
+    } else if (esIndGremio) {
+      if (e === 3 && (horas < 8 || horas > 16))       err.horas = 'SEMINARIO: debe ser entre 8 y 16 horas'
+      if (e === 4 && (horas < 4 || horas > 24))       err.horas = 'TALLER: debe ser entre 4 y 24 horas'
+      if (e === 8 && horas !== 28)                    err.horas = 'TALLER-PUESTO: debe ser exactamente 28 horas'
+      if (e === 9 && horas !== 16 && horas !== 24)    err.horas = 'TALLER-BOOTCAMP: debe ser 16 o 24 horas'
+      if (e === 5) {
+        if (esSoloVirtual && horas !== 20 && horas !== 40)  err.horas = 'CURSO Virtual: debe ser 20 o 40 horas'
+        if (!esSoloVirtual && (horas < 20 || horas > 80))  err.horas = 'CURSO: debe ser entre 20 y 80 horas'
+      }
+      if (e === 6) {
+        if (esSoloVirtual && horas !== 80 && horas !== 120)  err.horas = 'DIPLOMADO Virtual: debe ser 80 o 120 horas'
+        if (!esSoloVirtual && (horas < 80 || horas > 120))  err.horas = 'DIPLOMADO: debe ser entre 80 y 120 horas'
+      }
+    }
+  }
+
+  // ── Grupos ────────────────────────────────────────────────────────────────
+  if (form.numGrupos !== '') {
+    if (grupos <= 0) {
+      err.grupos = 'Ingrese un número de grupos válido (mayor que 0)'
+    } else {
+      if ((e === 1 || e === 2) && grupos > 2)  err.grupos = 'Máximo 2 grupos para este evento'
+      if ((e === 8 || e === 9) && grupos > 2)  err.grupos = 'Máximo 2 grupos para este evento'
+      if ((e === 5 || e === 6) && grupos > 20) err.grupos = 'Máximo 20 grupos'
+    }
+  }
+
+  // ── Beneficiarios presenciales ────────────────────────────────────────────
+  if (form.benefGrupo !== '' && !esSoloVirtual) {
+    if (benef <= 0) {
+      err.benef = 'Ingrese un número de beneficiarios válido (mayor que 0)'
+    } else if (!esHibrida) {
+      if ((e === 1 || e === 2) && (benef < 60 || benef > 250))  err.benef = 'Entre 60 y 250 beneficiarios presenciales por grupo'
+      if (esIndGremio) {
+        if (e === 3 && (benef < 20 || benef > 50))  err.benef = 'SEMINARIO: entre 20 y 50 beneficiarios'
+        if (e === 4 && (benef < 20 || benef > 30))  err.benef = 'TALLER: entre 20 y 30 beneficiarios'
+        if (e === 8 && benef !== 5)                  err.benef = 'TALLER-PUESTO: exactamente 5 beneficiarios'
+        if (e === 9 && (benef < 10 || benef > 30))  err.benef = 'TALLER-BOOTCAMP: entre 10 y 30 beneficiarios'
+        if ((e === 5 || e === 6) && (benef < 20 || benef > 30)) err.benef = 'Entre 20 y 30 beneficiarios'
+      }
+    } else {
+      // Modalidad híbrida: validar total presencial + sincrónico
+      const total = benef + benefVi
+      if ((e === 1 || e === 2)) {
+        if (total > 250)              err.benef = 'Total presencial + sincrónico no puede superar 250'
+        else if (total <= 60 && benef < 50) err.benef = 'Con total ≤60: mínimo 50 beneficiarios presenciales'
+        else if (total > 60 && benef < 60)  err.benef = 'Con total >60: mínimo 60 beneficiarios presenciales'
+      }
+    }
+  }
+
+  // ── Beneficiarios virtuales / sincrónicos ─────────────────────────────────
+  if (form.benefViGrupo !== '' && MOD_CON_VIRTUAL.has(m)) {
+    if (benefVi <= 0) {
+      err.benefVi = 'Ingrese un número de beneficiarios válido (mayor que 0)'
+    } else if (esSoloVirtual && esIndGremio && (e === 5 || e === 6)) {
+      if (benefVi < 20 || benefVi > 50) err.benefVi = 'Entre 20 y 50 beneficiarios virtuales'
+    } else if (esHibrida && (e === 1 || e === 2)) {
+      const total = benef + benefVi
+      if (total > 250) err.benefVi = 'Total presencial + sincrónico no puede superar 250'
+    }
+  }
+
+  return err
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AFDetallePage() {
@@ -566,7 +653,7 @@ export default function AFDetallePage() {
         api.get<Opcion[]>('/proyectos/subsectoresaf'),
         api.get<UTResumen[]>(`/proyectos/${proyectoId}/acciones/${afIdNum}/unidades`),
         api.get<Opcion[]>('/proyectos/actividadesut'),
-        api.get<Opcion[]>('/proyectos/rubrosperfilut'),
+        api.get<Opcion[]>(`/proyectos/${proyectoId}/rubrosperfilut`),
         api.get<Opcion[]>('/proyectos/articulacionesterr'),
         api.get<Opcion[]>('/proyectos/retonacionales'),
         api.get<AlineacionData>(`/proyectos/${proyectoId}/acciones/${afIdNum}/alineacion`),
@@ -634,6 +721,21 @@ export default function AFDetallePage() {
     }
   }, [proyectoId, afIdNum])
 
+  // Recarga parcial — no toca el form ni el resto del estado
+  async function recargarPerfil() {
+    try {
+      const r = await api.get<Perfil>(`/proyectos/${proyectoId}/acciones/${afIdNum}/beneficiarios`)
+      setPerfil(r.data)
+    } catch { /* silencioso */ }
+  }
+
+  async function recargarSectores() {
+    try {
+      const r = await api.get<SectoresData>(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores`)
+      setSectoresData(r.data)
+    } catch { /* silencioso */ }
+  }
+
   useEffect(() => {
     document.title = 'Detalle AF | SEP'
     cargar()
@@ -670,6 +772,7 @@ export default function AFDetallePage() {
   const showPresencial = modalidadId !== null && !MOD_SOLO_VIRTUAL.has(modalidadId)
   const showVirtual    = modalidadId !== null && MOD_CON_VIRTUAL.has(modalidadId)
   const mensajeAlerta  = getMensajeAlerta(eventoId, modalidadId)
+  const fieldErrors    = form ? getFieldErrors(form, proyecto?.modalidadId ?? null) : {}
 
   const totalHoras = useMemo(() => {
     if (!form) return null
@@ -734,20 +837,21 @@ export default function AFDetallePage() {
 
   async function handleAgregarArea() {
     if (!areaSelId) { showToast('error', 'Seleccione un área funcional'); return }
+    if ((perfil?.areas.length ?? 0) >= 5) { showToast('error', 'Máximo 5 áreas funcionales por acción de formación'); return }
     const areaId = Number(areaSelId)
     const otro = areaId === AREA_OTRA_ID ? (areaOtroText.trim() || null) : null
     if (areaId === AREA_OTRA_ID && !otro) { showToast('error', 'Especifique el área en el campo "Otra"'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/areas`, { areaId, otro })
       setAreaSelId(''); setAreaOtroText('')
-      await cargar()
+      await recargarPerfil()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarArea(aafId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/areas/${aafId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/areas/${aafId}`); await recargarPerfil() }
     catch { showToast('error', 'Error al eliminar área') }
   }
 
@@ -755,28 +859,28 @@ export default function AFDetallePage() {
     if (!nivelSelId) { showToast('error', 'Seleccione un nivel ocupacional'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/niveles`, { nivelId: Number(nivelSelId) })
-      setNivelSelId(''); await cargar()
+      setNivelSelId(''); await recargarPerfil()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarNivel(anId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/niveles/${anId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/niveles/${anId}`); await recargarPerfil() }
     catch { showToast('error', 'Error al eliminar nivel') }
   }
 
   async function handleAgregarCuoc(cuocId: number) {
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/cuoc`, { cuocId })
-      setCuocQuery(''); setCuocOpen(false); await cargar()
+      setCuocQuery(''); setCuocOpen(false); await recargarPerfil()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarCuoc(ocAfId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/cuoc/${ocAfId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/cuoc/${ocAfId}`); await recargarPerfil() }
     catch { showToast('error', 'Error al eliminar CUOC') }
   }
 
@@ -786,14 +890,14 @@ export default function AFDetallePage() {
     if (!sectorBenefSelId) { showToast('error', 'Seleccione un sector'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-benef`, { sectorId: Number(sectorBenefSelId) })
-      setSectorBenefSelId(''); await cargar()
+      setSectorBenefSelId(''); await recargarSectores()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarSectorBenef(psId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-benef/${psId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-benef/${psId}`); await recargarSectores() }
     catch { showToast('error', 'Error al eliminar sector') }
   }
 
@@ -801,14 +905,14 @@ export default function AFDetallePage() {
     if (!subsectorBenefSelId) { showToast('error', 'Seleccione un sub-sector'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-benef`, { subsectorId: Number(subsectorBenefSelId) })
-      setSubsectorBenefSelId(''); await cargar()
+      setSubsectorBenefSelId(''); await recargarSectores()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarSubSectorBenef(pssId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-benef/${pssId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-benef/${pssId}`); await recargarSectores() }
     catch { showToast('error', 'Error al eliminar sub-sector') }
   }
 
@@ -816,14 +920,14 @@ export default function AFDetallePage() {
     if (!sectorAfSelId) { showToast('error', 'Seleccione un sector AF'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-af`, { sectorId: Number(sectorAfSelId) })
-      setSectorAfSelId(''); await cargar()
+      setSectorAfSelId(''); await recargarSectores()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarSectorAf(saId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-af/${saId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/sectores-af/${saId}`); await recargarSectores() }
     catch { showToast('error', 'Error al eliminar sector AF') }
   }
 
@@ -831,14 +935,14 @@ export default function AFDetallePage() {
     if (!subsectorAfSelId) { showToast('error', 'Seleccione un sub-sector AF'); return }
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-af`, { subsectorId: Number(subsectorAfSelId) })
-      setSubsectorAfSelId(''); await cargar()
+      setSubsectorAfSelId(''); await recargarSectores()
     } catch (e: unknown) {
       showToast('error', (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error')
     }
   }
 
   async function handleEliminarSubSectorAf(ssaId: number) {
-    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-af/${ssaId}`); await cargar() }
+    try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/subsectores-af/${ssaId}`); await recargarSectores() }
     catch { showToast('error', 'Error al eliminar sub-sector AF') }
   }
 
@@ -1135,6 +1239,10 @@ export default function AFDetallePage() {
       await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/grupos/${grupoId}`)
       setDeletingGrupo(null)
       if (expandedGrupo === grupoId) setExpandedGrupo(null)
+      setCoberturas(prev => { const n = { ...prev }; delete n[grupoId]; return n })
+      setCobPres(prev => { const n = { ...prev }; delete n[grupoId]; return n })
+      setCobVirt(prev => { const n = { ...prev }; delete n[grupoId]; return n })
+      setGrupoJust(prev => { const n = { ...prev }; delete n[grupoId]; return n })
       await cargarGrupos()
     } catch { showToast('error', 'Error al eliminar grupo') }
   }
@@ -1435,6 +1543,10 @@ export default function AFDetallePage() {
         <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
           <ClipboardList size={13} /> Detalle AF {af.numero}
         </span>
+        <Link href={`/panel/proyectos/${proyectoId}/acciones/${afId}/rubros`}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
+          <BookOpen size={13} /> Rubros
+        </Link>
         {!esAprobado && (
           <span className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl border ${
             esRadicado ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white border-neutral-200 text-neutral-400'
@@ -1582,17 +1694,20 @@ export default function AFDetallePage() {
             <label className={label}>N° Horas por Grupo <span className="text-red-500">*</span></label>
             <input type="number" min={1} disabled={!editable || !form.modalidadFormacionId}
               value={form.numHorasGrupo} onChange={e => set('numHorasGrupo', e.target.value)} className={input} placeholder="Horas" />
+            {fieldErrors.horas && <p className="text-xs text-red-500 mt-0.5">{fieldErrors.horas}</p>}
           </div>
           <div>
             <label className={label}>N° de Grupos <span className="text-red-500">*</span></label>
             <input type="number" min={1} disabled={!editable || !form.modalidadFormacionId}
               value={form.numGrupos} onChange={e => set('numGrupos', e.target.value)} className={input} placeholder="Grupos" />
+            {fieldErrors.grupos && <p className="text-xs text-red-500 mt-0.5">{fieldErrors.grupos}</p>}
           </div>
           {showPresencial && (
             <div>
               <label className={label}>Beneficiarios Presenciales por Grupo <span className="text-red-500">*</span></label>
               <input type="number" min={0} disabled={!editable || !form.modalidadFormacionId}
                 value={form.benefGrupo} onChange={e => set('benefGrupo', e.target.value)} className={input} placeholder="0" />
+              {fieldErrors.benef && <p className="text-xs text-red-500 mt-0.5">{fieldErrors.benef}</p>}
             </div>
           )}
           {showVirtual && (
@@ -1603,6 +1718,7 @@ export default function AFDetallePage() {
               </label>
               <input type="number" min={0} disabled={!editable || !form.modalidadFormacionId}
                 value={form.benefViGrupo} onChange={e => set('benefViGrupo', e.target.value)} className={input} placeholder="0" />
+              {fieldErrors.benefVi && <p className="text-xs text-red-500 mt-0.5">{fieldErrors.benefVi}</p>}
             </div>
           )}
         </div>
@@ -1632,7 +1748,7 @@ export default function AFDetallePage() {
         {/* Áreas funcionales */}
         <div className="flex flex-col gap-3">
           <p className={secTitle}>Área(s) Funcional(es) <span className="font-normal text-neutral-400">(máx. 5)</span></p>
-          {editable && (
+          {editable && perfil.areas.length < 5 && (
             <div className="flex flex-col sm:flex-row gap-2">
               <select value={areaSelId} onChange={e => { setAreaSelId(e.target.value); if (Number(e.target.value) !== AREA_OTRA_ID) setAreaOtroText('') }} className={select}>
                 <option value="">Seleccionar área funcional…</option>
@@ -1644,7 +1760,7 @@ export default function AFDetallePage() {
               </button>
             </div>
           )}
-          {Number(areaSelId) === AREA_OTRA_ID && editable && (
+          {Number(areaSelId) === AREA_OTRA_ID && editable && perfil.areas.length < 5 && (
             <div>
               <label className={label}>Especifique el área funcional <span className="text-red-500">*</span></label>
               <textarea value={areaOtroText} onChange={e => setAreaOtroText(e.target.value)}
@@ -2290,7 +2406,7 @@ export default function AFDetallePage() {
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-xs mb-2">
                                     <thead><tr className="text-neutral-400 border-b border-neutral-100">
-                                      <th className="text-left py-1.5 pr-3 font-medium">Rubro</th>
+                                      <th className="text-left py-1.5 pr-3 font-medium">Perfil del Capacitador</th>
                                       <th className="text-center py-1.5 px-2 font-medium">Horas Capacitador</th>
                                       {editable && <th className="py-1.5 w-8" />}
                                     </tr></thead>
@@ -2313,7 +2429,7 @@ export default function AFDetallePage() {
                                 <div className="flex gap-2 flex-wrap items-end">
                                   <div className="flex-1 min-w-[200px]">
                                     <select value={perfilAddUT.rubroId} onChange={e => setPerfilAddUT(p => ({ ...p, rubroId: e.target.value }))} className={select}>
-                                      <option value="">— Rubro —</option>
+                                      <option value="">— Perfil del Capacitador —</option>
                                       {rubrosCat.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                                     </select>
                                   </div>
@@ -2507,7 +2623,7 @@ export default function AFDetallePage() {
           <div className="bg-white rounded-2xl shadow-sm border border-neutral-200">
             <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
               <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center">
-                <BookOpen size={16} className="text-white" />
+                <Users size={16} className="text-white" />
               </div>
               <h2 className="text-base font-bold text-neutral-800">Cobertura de la Acción de Formación</h2>
             </div>
@@ -2877,7 +2993,7 @@ export default function AFDetallePage() {
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200">
         <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center">
-            <BookOpen size={16} className="text-white" />
+            <Layers size={16} className="text-white" />
           </div>
           <h2 className="text-base font-bold text-neutral-800">Material de Formación</h2>
         </div>
@@ -2992,6 +3108,18 @@ export default function AFDetallePage() {
           )}
 
         </div>
+      </div>
+
+      {/* Navegación a Rubros */}
+      <div className="flex justify-between items-center pt-2 pb-6">
+        <button onClick={() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-neutral-50 transition">
+          <ChevronUp size={14} /> Volver arriba
+        </button>
+        <Link href={`/panel/proyectos/${proyectoId}/acciones/${afIdNum}/rubros`}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#00304D] hover:bg-[#004a76] text-white text-xs font-semibold rounded-xl transition">
+          <BookOpen size={14} /> Ir a Rubros
+        </Link>
       </div>
 
     </div>

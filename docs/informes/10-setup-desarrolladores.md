@@ -202,8 +202,8 @@ Abre `backend/.env` en VS Code y reemplaza los `⚠️` con los valores que te d
 BACKEND_PORT=4000
 NODE_ENV=development
 
-ORACLE_USER=SEPLOCAL
-ORACLE_PASSWORD=<la_que_te_pase_jose>
+ORACLE_USER=SEP_APP
+ORACLE_PASSWORD=<la_que_te_pase_josse>
 ORACLE_CONNECT_STRING=localhost:1521/XEPDB1
 
 JWT_SECRET=DEV_LOCAL_NO_USAR_EN_PROD_ed25519_minimo_64_caracteres_super_random
@@ -221,10 +221,10 @@ APP_URL=http://localhost:3000
 
 | Quien las usa | Usuario | Contraseña | Permisos |
 |---|---|---|---|
-| **Tu backend (`pnpm dev`)** | `SEPLOCAL` | (la del líder) | TODO (INSERT/UPDATE/DELETE/SELECT) — para que tu app funcione |
+| **Tu backend (`pnpm dev`)** | `SEP_APP` | (la del líder) | INSERT/UPDATE/DELETE/SELECT — sin DDL |
 | **Tú en SQL Developer** | `SEP_LECTOR` | (la del líder) | Solo `SELECT` — para consultar datos |
 
-**No uses SEPLOCAL en SQL Developer.** Si lo haces, podrías borrar datos de producción sin querer. Usa `SEP_LECTOR`.
+**Aunque tengas la contraseña de `SEP_APP`, no la uses en SQL Developer.** Un logon trigger en la BD bloquea cualquier conexión de `SEP_APP` que no venga de Node — verás `ORA-20001: SEP_APP solo se conecta desde el backend Node`. Para consultar datos a mano usa `SEP_LECTOR`.
 
 ---
 

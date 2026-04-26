@@ -1,6 +1,6 @@
 # Informe de Desarrollo — Módulo Rubros por Acción de Formación
 **Sistema Especializado de Proyectos — GGPC SENA**
-**Fecha:** Abril 2026 | **Estado:** Implementado en su mayoría — refinamientos finales en curso
+**Fecha:** Mayo 2026 | **Estado:** Implementado en su mayoría — refinamientos finales en curso
 
 ---
 

@@ -1,6 +1,6 @@
 # Informe de Desarrollo — Módulo Listado de Proyectos
 **Sistema Especializado de Proyectos — GGPC SENA**
-**Fecha:** Abril 2026 | **Estado:** Implementado y en pruebas
+**Fecha:** Mayo 2026 | **Estado:** Implementado y en pruebas
 
 ---
 

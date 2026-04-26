@@ -142,21 +142,20 @@ Test-NetConnection -ComputerName localhost -Port 1521
 
 ---
 
-## 3. Generar `cert.pem` para los devs
+## 3. Sobre certificados (no aplica con `cloudflared access tcp`)
 
-Cada dev necesita un certificado para autenticar el túnel. Hay dos formas:
+Como expusiste el TCP de Oracle como **public hostname** en el ingress del túnel, los devs **no necesitan `cert.pem`**. Solo necesitan:
 
-### Opción A — un solo cert.pem para todos (más simple, menos seguro)
+1. Tener `cloudflared` instalado en su PC.
+2. Ejecutar `cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521`.
 
-```bash
-sudo cat /etc/cloudflared/cert.pem
-```
+Internamente `cloudflared access` usa la conexión pública del tunnel sin requerir credenciales por dev. La seguridad la da:
 
-Copia ese contenido y pásalo a cada dev por canal seguro (Bitwarden, pendrive, USB). Lo guardan en `C:\cloudflared\cert.pem` en su PC.
+- La contraseña de SEP_LECTOR (solo lectura)
+- La contraseña de SEPLOCAL (escritura) que solo los devs autorizados conocen
+- TLS end-to-end de Cloudflare
 
-### Opción B — un cert.pem por dev (más seguro)
-
-Esto requiere Cloudflare Zero Trust con Access policies. Es overkill para empezar — usa **Opción A** y lo iteras después si crece el equipo.
+Si en el futuro quieres añadir una capa extra (ej. requerir login con email del dev antes de abrir el túnel), creas una política de **Cloudflare Access** apuntando a `sepdb.ggpcsena.com`. Eso es opcional y puede esperar.
 
 ---
 
@@ -211,10 +210,11 @@ Rol recomendado: **Write** (pueden hacer push a sus ramas y abrir PRs, pero no m
 Pásale a cada uno (Bitwarden / pendrive — NO Slack ni email):
 
 1. ✅ La guía: link a `docs/informes/10-setup-desarrolladores.md`
-2. ✅ El archivo `cert.pem`
-3. ✅ La contraseña de `SEPLOCAL` (para su `.env` del backend)
-4. ✅ La contraseña de `SEP_LECTOR` (`S3p2026__` — o la que cambiaste)
-5. ✅ Credenciales SMTP si las van a necesitar
+2. ✅ La contraseña de `SEPLOCAL` (para su `.env` del backend) → `SenaSep2026`
+3. ✅ La contraseña de `SEP_LECTOR` (para SQL Developer) → `S3p2026__`
+4. ✅ Credenciales SMTP si las van a necesitar (las que tengas en `backend/.env`)
+
+**No requieres entregar `cert.pem` ni configuración especial** — con cloudflared instalado en la PC del dev y los pasos de la guía, queda funcional.
 
 ---
 

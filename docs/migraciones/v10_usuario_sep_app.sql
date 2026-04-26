@@ -34,18 +34,27 @@ CREATE USER SEP_APP IDENTIFIED BY "<CLAVE_APP>"
 GRANT CREATE SESSION TO SEP_APP;
 
 -- ─── 2. DML en TODAS las tablas de SEPLOCAL ───────────────────────
+--      Wrap por-objeto: una tabla en estado raro no debe romper el loop.
 BEGIN
   FOR t IN (SELECT table_name FROM dba_tables WHERE owner = 'SEPLOCAL') LOOP
-    EXECUTE IMMEDIATE 'GRANT SELECT, INSERT, UPDATE, DELETE ON SEPLOCAL.'
-                      || t.table_name || ' TO SEP_APP';
+    BEGIN
+      EXECUTE IMMEDIATE 'GRANT SELECT, INSERT, UPDATE, DELETE ON SEPLOCAL.'
+                        || t.table_name || ' TO SEP_APP';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
   END LOOP;
 END;
 /
 
 -- ─── 3. SELECT en vistas ──────────────────────────────────────────
+--      Wrap por-objeto: una vista INVALID (ORA-04063) NO debe romper
+--      el loop y dejar el resto sin permisos.
 BEGIN
   FOR v IN (SELECT view_name FROM dba_views WHERE owner = 'SEPLOCAL') LOOP
-    EXECUTE IMMEDIATE 'GRANT SELECT ON SEPLOCAL.' || v.view_name || ' TO SEP_APP';
+    BEGIN
+      EXECUTE IMMEDIATE 'GRANT SELECT ON SEPLOCAL.' || v.view_name || ' TO SEP_APP';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
   END LOOP;
 END;
 /
@@ -53,7 +62,10 @@ END;
 -- ─── 4. SELECT en secuencias (necesario para INSERT con NEXTVAL) ──
 BEGIN
   FOR s IN (SELECT sequence_name FROM dba_sequences WHERE sequence_owner = 'SEPLOCAL') LOOP
-    EXECUTE IMMEDIATE 'GRANT SELECT ON SEPLOCAL.' || s.sequence_name || ' TO SEP_APP';
+    BEGIN
+      EXECUTE IMMEDIATE 'GRANT SELECT ON SEPLOCAL.' || s.sequence_name || ' TO SEP_APP';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
   END LOOP;
 END;
 /
@@ -88,21 +100,42 @@ END;
 -- ─── 7. Logon trigger — bloquear uso interactivo de SEP_APP ───────
 --   Solo permite conexión si el programa cliente es "node" o "nest".
 --   No afecta a SYS/SYSTEM ni a otros usuarios.
+--
+--   Notas de implementación:
+--   • Usa V$SESSION.PROGRAM en vez de SYS_CONTEXT('USERENV','PROGRAM')
+--     porque ese parámetro NO está disponible en Oracle XE (ORA-02003).
+--   • Sale temprano si el usuario no es SEP_APP (overhead mínimo para
+--     el resto de logins).
+--   • EXCEPTION fail-open: cualquier error en el trigger distinto a
+--     nuestro ORA-20001 se traga, para no bloquear logins legítimos
+--     si algo del SYS_CONTEXT/V$SESSION cambia entre versiones de Oracle.
 CREATE OR REPLACE TRIGGER restringir_sep_app
 AFTER LOGON ON DATABASE
 DECLARE
-  v_user    VARCHAR2(30)  := SYS_CONTEXT('USERENV', 'SESSION_USER');
-  v_program VARCHAR2(128) := LOWER(NVL(SYS_CONTEXT('USERENV', 'PROGRAM'), ''));
+  v_user    VARCHAR2(30);
+  v_program VARCHAR2(128) := '';
 BEGIN
-  IF v_user = 'SEP_APP'
-     AND v_program NOT LIKE '%node%'
+  v_user := SYS_CONTEXT('USERENV', 'SESSION_USER');
+  IF v_user <> 'SEP_APP' THEN RETURN; END IF;
+
+  BEGIN
+    SELECT LOWER(NVL(program, ''))
+      INTO v_program
+      FROM v$session
+     WHERE sid = SYS_CONTEXT('USERENV', 'SID')
+       AND ROWNUM = 1;
+  EXCEPTION WHEN OTHERS THEN v_program := '';
+  END;
+
+  IF v_program NOT LIKE '%node%'
      AND v_program NOT LIKE '%nest%'
   THEN
-    RAISE_APPLICATION_ERROR(
-      -20001,
-      'SEP_APP solo se conecta desde el backend Node. Para consultas usa SEP_LECTOR.'
-    );
+    RAISE_APPLICATION_ERROR(-20001,
+      'SEP_APP solo se conecta desde el backend Node. Para consultas usa SEP_LECTOR.');
   END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    IF SQLCODE = -20001 THEN RAISE; END IF;
 END;
 /
 

@@ -60,7 +60,7 @@ sep.ggpcsena.com   ssh.ggpcsena.com    sepdb.ggpcsena.com
 (usuarios finales) (admin)             (devs vía cloudflared
                                         access tcp en local)
        │                │                       │
-       │                │                       ├─ José (admin)
+       │                │                       ├─ Josse (admin)
        │                │                       ├─ Rosa
        │                │                       ├─ Jhonatan
        │                │                       ├─ Javier
@@ -172,7 +172,7 @@ Cualquier cambio en código se ve en el navegador en ~200 ms. **No requiere Dock
 ## Estrategia de ramas
 
 ```
-produccion ◀── (merge solo por José, despliega a sep.ggpcsena.com)
+produccion ◀── (merge solo por Josse, despliega a sep.ggpcsena.com)
     ↑
    dev      ◀── (rama integradora del equipo, recibe los PRs de features)
     ↑
@@ -181,9 +181,9 @@ feature/<nombre-dev>-<descripción>  ◀── (cada dev en su rama personal)
 
 **Reglas:**
 - ❌ Nadie hace push directo a `produccion` ni `dev` (branch protection).
-- ✅ Cada dev abre PR de su rama → `dev`. José revisa y mergea.
-- ✅ Cuando `dev` está estable, José mergea `dev` → `produccion`.
-- ✅ Solo José tiene rol `Admin` en GitHub; los demás son `Write`.
+- ✅ Cada dev abre PR de su rama → `dev`. Josse revisa y mergea.
+- ✅ Cuando `dev` está estable, Josse mergea `dev` → `produccion`.
+- ✅ Solo Josse tiene rol `Admin` en GitHub; los demás son `Write`.
 
 **Convenciones de mensaje:**
 - `feat:` nueva funcionalidad
@@ -197,21 +197,26 @@ feature/<nombre-dev>-<descripción>  ◀── (cada dev en su rama personal)
 
 ## Roles de base de datos
 
-| Usuario | Contraseña | Permisos | Quién lo usa |
-|---|---|---|---|
-| `SEPLOCAL` | `SenaSep2026` | Owner del schema — INSERT/UPDATE/DELETE/SELECT/DDL | Backend de cada dev en `.env` (la app necesita escribir) |
-| `SEP_LECTOR` | `S3p2026__` | Solo `SELECT` (180 tablas + sinónimos) | SQL Developer de cada dev (consulta segura) |
-| `SYSTEM` | `SepBD2026` | DBA del PDB | Solo José para tareas de mantenimiento |
+| Usuario | Permisos | Quién lo usa |
+|---|---|---|
+| `SEPLOCAL` | Owner del schema — todo (DDL incluido) | Solo Josse, para migraciones |
+| `SEP_APP` | INSERT/UPDATE/DELETE/SELECT (sin DDL) — bloqueado fuera de Node por logon trigger | Backend de cada dev en `.env` |
+| `SEP_LECTOR` | Solo `SELECT` (180 tablas + sinónimos) | SQL Developer de cada dev (consulta segura) |
+| `SYSTEM` | DBA del PDB | Solo Josse para mantenimiento |
 
-> **Importante:** los devs nunca usan `SEPLOCAL` en SQL Developer — solo en su `.env` del backend. Para consultar datos a mano usan `SEP_LECTOR`. Si intentan `DELETE` con `SEP_LECTOR` reciben `ORA-01031: insufficient privileges`.
+> **Contraseñas:** no se comparten en el repo. Pídeselas a Josse por canal seguro (Bitwarden / pendrive — nunca por Slack ni email).
+>
+> **Por qué dos usuarios para los devs:** `SEP_APP` es el que va en `.env` del backend. Aunque un dev tenga la contraseña, un logon trigger lo bloquea si intenta abrirla en SQL Developer (solo acepta clientes Node/Nest). Para consultar datos a mano se usa `SEP_LECTOR` (solo SELECT). Así, ni la contraseña de `SEP_APP` filtrada permite `DROP TABLE`.
 
-Script de creación: [`docs/migraciones/v9_usuario_lector_devs.sql`](docs/migraciones/v9_usuario_lector_devs.sql)
+Scripts de creación:
+- [`docs/migraciones/v9_usuario_lector_devs.sql`](docs/migraciones/v9_usuario_lector_devs.sql) — `SEP_LECTOR`
+- [`docs/migraciones/v10_usuario_sep_app.sql`](docs/migraciones/v10_usuario_sep_app.sql) — `SEP_APP` + logon trigger + auditoría
 
 ---
 
 ## Despliegue a producción
 
-> **Solo José.** Lectura completa: [`docs/informes/11-setup-server-multi-dev.md`](docs/informes/11-setup-server-multi-dev.md)
+> **Solo Josse.** Lectura completa: [`docs/informes/11-setup-server-multi-dev.md`](docs/informes/11-setup-server-multi-dev.md)
 
 ```bash
 # 1. Mergea dev → produccion en local
@@ -239,7 +244,7 @@ docker compose up -d --build && bash reload-nginx.sh
 BACKEND_PORT=4000
 NODE_ENV=development
 
-ORACLE_USER=SEPLOCAL
+ORACLE_USER=SEP_APP
 ORACLE_PASSWORD=<pedir al líder>
 ORACLE_CONNECT_STRING=localhost:1521/XEPDB1   # vía cloudflared en local
 
@@ -284,7 +289,7 @@ Toda la documentación funcional está en [`docs/informes/`](docs/informes/):
 
 | Rol | Nombre | Responsabilidad |
 |---|---|---|
-| **Líder técnico / Admin** | José Díaz (`josediazd40z@gmail.com`) | Arquitectura, infra, deploys, code review, BD |
+| **Líder técnico / Admin** | Josse Díaz (`josediazd40z@gmail.com`) | Arquitectura, infra, deploys, code review, BD |
 | Desarrolladora | Rosa | Features asignadas |
 | Desarrollador | Jhonatan | Features asignadas |
 | Desarrollador | Javier | Features asignadas |

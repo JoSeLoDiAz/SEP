@@ -35,6 +35,9 @@ docker/nginx/logs/
 *.swp
 *.swo
 
+# ── Herramientas locales (Claude Code, etc.) ──
+.claude/
+
 # ── OS ──
 .DS_Store
 Thumbs.db

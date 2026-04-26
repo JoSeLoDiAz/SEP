@@ -1,7 +1,7 @@
 # Setup para Desarrolladores — SEP
 
 > **Para:** Rosa, Jhonatan, Javier, Julio, Juliana
-> **Líder técnico:** José (`josediazd40z@gmail.com`)
+> **Líder técnico:** Josse (`josediazd40z@gmail.com`)
 > **Última actualización:** 26 abril 2026
 
 Esta guía te lleva desde **cero hasta tener el proyecto SEP corriendo en tu PC con hot-reload** en menos de 1 hora. Síguela en orden.
@@ -108,29 +108,45 @@ Si dice `TcpTestSucceeded : True` → el túnel funciona. Cierra la primera term
 
 ### 2.3 Auto-arranque al encender Windows (recomendado)
 
-PowerShell **como administrador**:
+> **Por qué un servicio y no una tarea programada:** las tareas con trigger "ONLOGON" NO se disparan cuando Windows hace **Fast Startup** (modo de hibernación que reanuda la sesión sin emitir el evento de logon). El resultado es que reinicias el PC y el túnel no arranca, y tienes que lanzarlo a mano. Un **servicio Windows nativo** se levanta antes del logon y sobrevive Fast Startup, hibernate, y cualquier modo de inicio.
+
+El repo incluye un script que lo deja todo configurado en 1 minuto. **PowerShell como administrador**:
 
 ```powershell
-mkdir C:\cloudflared -Force
-
-# Script que abre el túnel
-@"
-@echo off
-cloudflared access tcp --hostname sepdb.ggpcsena.com --url localhost:1521
-"@ | Out-File C:\cloudflared\sep-tunnel.bat -Encoding ascii
-
-# Tarea programada al iniciar sesión Windows
-schtasks /Create /TN "SEP DB Tunnel" /TR "C:\cloudflared\sep-tunnel.bat" /SC ONLOGON /RU "$env:USERNAME" /RL HIGHEST /F
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Documents\SEP\scripts\install-sep-tunnel.ps1"
 ```
 
-Pruébalo (sin reiniciar):
+(Ajusta la ruta si clonaste el repo en otro lugar.)
+
+El script:
+- Descarga **WinSW** (wrapper liviano para servicios Windows) desde GitHub
+- Crea el servicio `SEPDBTunnel` con auto-arranque al boot
+- Lo configura para reiniciarse solo si crashea (delay 5s)
+- Lo arranca y verifica que el puerto 1521 abra
+
+Verás `[1/7]` ... `[7/7]` y al final un cuadro **verde** si todo OK:
+
+```
+===========================================
+  OK Tunel funcionando, puerto 1521 abierto
+===========================================
+```
+
+Comprobación posterior (sin admin):
 ```powershell
-schtasks /Run /TN "SEP DB Tunnel"
-Start-Sleep 3
-Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
+Get-Service SEPDBTunnel
+Test-NetConnection 127.0.0.1 -Port 1521
 ```
 
-`TcpTestSucceeded : True` → ya quedó automatizado para siempre. Cuando enciendas el PC, el túnel arrancará solo en background.
+`Status: Running` y `TcpTestSucceeded: True` → automatizado para siempre. Si en el futuro quieres desinstalarlo:
+
+```powershell
+# PowerShell admin
+Stop-Service SEPDBTunnel
+& C:\cloudflared\sep-tunnel.exe uninstall C:\cloudflared\sep-tunnel.xml
+```
+
+Logs del servicio: `C:\cloudflared\sep-tunnel.out.log`
 
 ### 2.2 Configurar la conexión en SQL Developer
 
@@ -139,7 +155,7 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
 3. Llena:
    - **Name:** `SEP Producción (lectura)`
    - **Username:** `SEP_LECTOR`
-   - **Password:** `S3p2026__` (te la pasa el líder, después se cambia)
+   - **Password:** *(te la pasa el líder por canal seguro)*
    - **Hostname:** `localhost`
    - **Port:** `1521`
    - **Service name:** `XEPDB1`
@@ -202,8 +218,8 @@ Abre `backend/.env` en VS Code y reemplaza los `⚠️` con los valores que te d
 BACKEND_PORT=4000
 NODE_ENV=development
 
-ORACLE_USER=SEPLOCAL
-ORACLE_PASSWORD=<la_que_te_pase_jose>
+ORACLE_USER=SEP_APP
+ORACLE_PASSWORD=<la_que_te_pase_josse>
 ORACLE_CONNECT_STRING=localhost:1521/XEPDB1
 
 JWT_SECRET=DEV_LOCAL_NO_USAR_EN_PROD_ed25519_minimo_64_caracteres_super_random
@@ -221,10 +237,10 @@ APP_URL=http://localhost:3000
 
 | Quien las usa | Usuario | Contraseña | Permisos |
 |---|---|---|---|
-| **Tu backend (`pnpm dev`)** | `SEPLOCAL` | (la del líder) | TODO (INSERT/UPDATE/DELETE/SELECT) — para que tu app funcione |
-| **Tú en SQL Developer** | `SEP_LECTOR` | `S3p2026__` | Solo `SELECT` — para consultar datos |
+| **Tu backend (`pnpm dev`)** | `SEP_APP` | (la del líder) | INSERT/UPDATE/DELETE/SELECT — sin DDL |
+| **Tú en SQL Developer** | `SEP_LECTOR` | (la del líder) | Solo `SELECT` — para consultar datos |
 
-**No uses SEPLOCAL en SQL Developer.** Si lo haces, podrías borrar datos de producción sin querer. Usa `SEP_LECTOR`.
+**Aunque tengas la contraseña de `SEP_APP`, no la uses en SQL Developer.** Un logon trigger en la BD bloquea cualquier conexión de `SEP_APP` que no venga de Node — verás `ORA-20001: SEP_APP solo se conecta desde el backend Node`. Para consultar datos a mano usa `SEP_LECTOR`.
 
 ---
 
@@ -291,7 +307,7 @@ Para verificar que todo funciona:
 ### 7.1 Estructura de ramas
 
 ```
-produccion ◀── (solo José hace merge a aquí)
+produccion ◀── (solo Josse hace merge a aquí)
     ↑
    dev ◀── (rama integradora del equipo)
     ↑
@@ -340,12 +356,12 @@ En GitHub:
 2. **Base:** `dev` ← **Compare:** `feature/rosa-validacion-rubros`
 3. Describe qué hiciste y por qué.
 4. Asigna a **JoSeLoDiAz** como reviewer.
-5. **Espera review.** José revisa y hace merge a `dev`.
+5. **Espera review.** Josse revisa y hace merge a `dev`.
 
 ### 7.5 Reglas de oro
 
 - ❌ **NO** hagas push directo a `dev` ni a `produccion`.
-- ❌ **NO** hagas merge tú a `dev` — solo José aprueba.
+- ❌ **NO** hagas merge tú a `dev` — solo Josse aprueba.
 - ✅ **SÍ** abre PR para todo cambio.
 - ✅ **SÍ** mantén tu rama actualizada con `dev`:
   ```powershell
@@ -407,7 +423,7 @@ Stop-Process -Id <PID>
 | **Grupo WhatsApp/Slack** | Dudas rápidas, avisos del día |
 | **Issues de GitHub** | Reporte de bugs y features |
 | **Pull Requests** | Revisión de código |
-| **José directo** | Permisos, contraseñas, despliegues |
+| **Josse directo** | Permisos, contraseñas, despliegues |
 
 ---
 
@@ -444,4 +460,4 @@ git merge dev
 
 ---
 
-**¿Algo no te quedó claro?** Pregúntale a José antes de improvisar. Mejor 5 minutos preguntando que 5 horas debugging.
+**¿Algo no te quedó claro?** Pregúntale a Josse antes de improvisar. Mejor 5 minutos preguntando que 5 horas debugging.

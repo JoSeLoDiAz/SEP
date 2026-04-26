@@ -1,6 +1,6 @@
 # Setup del Servidor para Equipo Multi-Dev — SEP
 
-> **Para:** José (líder técnico — solo tú haces estos pasos)
+> **Para:** Josse (líder técnico — solo tú haces estos pasos)
 > **Última actualización:** 26 abril 2026
 
 Esta guía complementa `10-setup-desarrolladores.md`. Aquí están los pasos **del lado del servidor** que TÚ tienes que hacer una vez para que tus 5 devs puedan trabajar en paralelo desde sus PCs.
@@ -9,16 +9,19 @@ Esta guía complementa `10-setup-desarrolladores.md`. Aquí están los pasos **d
 
 ## Resumen de lo que vas a configurar
 
-1. ✅ Crear usuario `SEP_LECTOR` en Oracle (script SQL ya creado)
-2. ✅ Exponer Oracle al equipo vía Cloudflare Tunnel TCP (`sepdb.ggpcsena.com`)
-3. ✅ Generar `cert.pem` para repartir a cada dev
-4. ✅ Setear protección de ramas en GitHub
-5. ✅ Cambiar la rama default a `produccion`
-6. ✅ Pasarle a cada dev: usuario SSH (no aplica ya), contraseñas, cert.pem
+1. ✅ Crear usuario `SEP_LECTOR` en Oracle (v9 — solo SELECT para SQL Developer)
+2. ✅ Crear usuario `SEP_APP` en Oracle (v10 — backend, sin DDL, logon trigger, auditoría)
+3. ✅ Exponer Oracle al equipo vía Cloudflare Tunnel TCP (`sepdb.ggpcsena.com`)
+4. ✅ Generar `cert.pem` para repartir a cada dev
+5. ✅ Setear protección de ramas en GitHub
+6. ✅ Cambiar la rama default a `produccion`
+7. ✅ Pasarle a cada dev: contraseñas de `SEP_APP` y `SEP_LECTOR`
 
 ---
 
-## 1. Crear el usuario lector en Oracle
+## 1. Crear los usuarios de aplicación en Oracle
+
+### 1.1 SEP_LECTOR (v9) — solo lectura
 
 En la VM del server (Hyper-V, Ubuntu):
 
@@ -26,30 +29,69 @@ En la VM del server (Hyper-V, Ubuntu):
 # Copia el script al container de Oracle
 docker cp /opt/sep/SEPLocal/docs/migraciones/v9_usuario_lector_devs.sql oracle-xe:/tmp/
 
-# Ejecuta el script como SEPLOCAL
-docker exec -it oracle-xe sqlplus SEPLOCAL/SenaSep2026@localhost:1521/XEPDB1 @/tmp/v9_usuario_lector_devs.sql
+# Ejecuta el script como SEPLOCAL (reemplaza <CLAVE_SEPLOCAL> por la real)
+docker exec -it oracle-xe sqlplus SEPLOCAL/<CLAVE_SEPLOCAL>@localhost:1521/XEPDB1 @/tmp/v9_usuario_lector_devs.sql
 ```
 
-Al terminar te muestra los privilegios concedidos y el resultado esperado. Si todo OK, **la contraseña inicial es `S3p2026__`** (ya viene en el script). Cuando estés en producción real, cámbiala con:
+> **Antes de ejecutar:** edita el script y reemplaza el placeholder `<CLAVE_INICIAL>` por la contraseña que usarás para `SEP_LECTOR`. **No commitees el script con la contraseña real.**
+
+### 1.2 SEP_APP (v10) — backend con least privilege + logon trigger + auditoría
+
+Este es el usuario que va en el `.env` de los devs. Tiene INSERT/UPDATE/DELETE/SELECT en todas las tablas pero **no puede DROP/ALTER/CREATE**, y un logon trigger lo bloquea fuera de Node — así si un dev intenta usarlo en SQL Developer, recibe `ORA-20001`.
+
+```bash
+docker cp /opt/sep/SEPLocal/docs/migraciones/v10_usuario_sep_app.sql oracle-xe:/tmp/
+
+# Ejecuta el script como SYSTEM (necesita CREATE USER + ADMINISTER DATABASE TRIGGER + AUDIT SYSTEM)
+docker exec -it oracle-xe sqlplus SYSTEM/<CLAVE_SYSTEM>@localhost:1521/XEPDB1 @/tmp/v10_usuario_sep_app.sql
+```
+
+> **Antes de ejecutar:** edita el script y reemplaza `<CLAVE_APP>` por una contraseña fuerte. **No commitees el script con la contraseña real.**
+
+Al terminar te muestra:
+- Resumen de privilegios concedidos a `SEP_APP`
+- Total de sinónimos creados
+- Estado del trigger `RESTRINGIR_SEP_APP`
+
+Para rotar contraseñas en producción:
 
 ```sql
 ALTER USER SEP_LECTOR IDENTIFIED BY "<NuevaClaveMasFuerte>";
+ALTER USER SEP_APP    IDENTIFIED BY "<NuevaClaveMasFuerte>";
 ```
 
-### Verificación rápida
+### 1.3 Verificación rápida
 
 ```bash
-docker exec -it oracle-xe sqlplus SEP_LECTOR/S3p2026__@localhost:1521/XEPDB1
+# SEP_LECTOR debe funcionar para SELECT y fallar en DELETE
+docker exec -it oracle-xe sqlplus SEP_LECTOR/<CLAVE_LECTOR>@localhost:1521/XEPDB1
 ```
 ```sql
--- Esto debe funcionar
-SELECT COUNT(*) FROM USUARIO;
-
--- Esto debe FALLAR con ORA-01031
-DELETE FROM USUARIO WHERE USUARIOID = 1;
-
+SELECT COUNT(*) FROM USUARIO;                  -- OK
+DELETE FROM USUARIO WHERE USUARIOID = 1;       -- ORA-01031 insufficient privileges
 EXIT;
 ```
+
+```bash
+# SEP_APP debe FALLAR desde sqlplus por el logon trigger
+docker exec -it oracle-xe sqlplus SEP_APP/<CLAVE_APP>@localhost:1521/XEPDB1
+# → ORA-20001: SEP_APP solo se conecta desde el backend Node
+```
+
+Si el último paso muestra `ORA-20001`, el trigger funciona. Significa que aunque un dev tenga la contraseña, no podrá usarla en SQL Developer ni en sqlplus.
+
+### 1.4 Revisar auditoría de SEP_APP (cualquier momento)
+
+```sql
+-- conectado como SYSTEM
+SELECT username, userhost, terminal, os_username, timestamp, returncode
+  FROM dba_audit_session
+ WHERE username = 'SEP_APP'
+ ORDER BY timestamp DESC
+ FETCH FIRST 50 ROWS ONLY;
+```
+
+Te muestra cada conexión: desde qué máquina, qué usuario del SO, a qué hora y si fue exitosa (`returncode = 0`) o rechazada por el trigger (`returncode = 20001`).
 
 ---
 
@@ -151,8 +193,9 @@ Como expusiste el TCP de Oracle como **public hostname** en el ingress del túne
 
 Internamente `cloudflared access` usa la conexión pública del tunnel sin requerir credenciales por dev. La seguridad la da:
 
-- La contraseña de SEP_LECTOR (solo lectura)
-- La contraseña de SEPLOCAL (escritura) que solo los devs autorizados conocen
+- La contraseña de `SEP_LECTOR` (solo SELECT, para SQL Developer)
+- La contraseña de `SEP_APP` (DML sin DDL, bloqueada fuera de Node por logon trigger)
+- `SEPLOCAL` y `SYSTEM` nunca salen de la máquina del líder
 - TLS end-to-end de Cloudflare
 
 Si en el futuro quieres añadir una capa extra (ej. requerir login con email del dev antes de abrir el túnel), creas una política de **Cloudflare Access** apuntando a `sepdb.ggpcsena.com`. Eso es opcional y puede esperar.
@@ -210,9 +253,13 @@ Rol recomendado: **Write** (pueden hacer push a sus ramas y abrir PRs, pero no m
 Pásale a cada uno (Bitwarden / pendrive — NO Slack ni email):
 
 1. ✅ La guía: link a `docs/informes/10-setup-desarrolladores.md`
-2. ✅ La contraseña de `SEPLOCAL` (para su `.env` del backend) → `SenaSep2026`
-3. ✅ La contraseña de `SEP_LECTOR` (para SQL Developer) → `S3p2026__`
+2. ✅ La contraseña de `SEP_APP` (para su `.env` del backend)
+3. ✅ La contraseña de `SEP_LECTOR` (para SQL Developer)
 4. ✅ Credenciales SMTP si las van a necesitar (las que tengas en `backend/.env`)
+
+> **Nunca compartas `SEPLOCAL` ni `SYSTEM`** — esas se quedan contigo. Si un dev tiene `SEP_APP` y trata de usarlo en SQL Developer, el logon trigger lo rechaza con `ORA-20001`.
+
+> Las contraseñas se entregan **solo por canal seguro** (Bitwarden, pendrive, llamada). Nunca por Slack, email ni en commits del repo.
 
 **No requieres entregar `cert.pem` ni configuración especial** — con cloudflared instalado en la PC del dev y los pasos de la guía, queda funcional.
 
@@ -249,24 +296,25 @@ sudo crontab -e
 ```
 Agrega:
 ```
-0 2 * * * docker exec oracle-xe sh -c 'expdp SEPLOCAL/SenaSep2026@XEPDB1 schemas=SEPLOCAL directory=DATA_PUMP_DIR dumpfile=sep_$(date +\%Y\%m\%d).dmp logfile=sep_backup.log' 2>> /var/log/oracle-backup.log
+0 2 * * * docker exec oracle-xe sh -c 'expdp SEPLOCAL/$SEPLOCAL_PASS@XEPDB1 schemas=SEPLOCAL directory=DATA_PUMP_DIR dumpfile=sep_$(date +\%Y\%m\%d).dmp logfile=sep_backup.log' 2>> /var/log/oracle-backup.log
 ```
 
 ### 7.2 Cambiar contraseñas cada 90 días
 
 ```sql
-ALTER USER SEPLOCAL IDENTIFIED BY "<nueva>";
-ALTER USER SEP_LECTOR IDENTIFIED BY "<nueva>";
+ALTER USER SEPLOCAL   IDENTIFIED BY "<nueva>";   -- solo Josse
+ALTER USER SEP_APP    IDENTIFIED BY "<nueva>";   -- avisar a devs
+ALTER USER SEP_LECTOR IDENTIFIED BY "<nueva>";   -- avisar a devs
 ```
 
-Avisa a los devs por canal seguro y que actualicen su `.env`.
+Avisa a los devs por canal seguro y que actualicen su `.env` (`SEP_APP`) y la conexión de SQL Developer (`SEP_LECTOR`).
 
 ### 7.3 Revocar acceso a un dev que sale
 
 1. GitHub → Settings → Collaborators → Remove
-2. SI usabas SSH (no aplica ahora), eliminar su cuenta `userdel devN -r`
+2. Si usabas SSH (no aplica ahora), eliminar su cuenta `userdel devN -r`
 3. Si compartían `cert.pem`, regenera uno nuevo y pásalo a los demás
-4. Cambia la contraseña de `SEPLOCAL`
+4. Cambia las contraseñas de `SEP_APP` y `SEP_LECTOR` y avisa a los demás devs
 
 ---
 
@@ -296,7 +344,7 @@ Avisa a los devs por canal seguro y que actualicen su `.env`.
        ▲                    ▲                       ▲
        │                    │                       │
 sep.ggpcsena.com    ssh.ggpcsena.com      sepdb.ggpcsena.com
-(usuarios finales)  (José solo)           (5 devs + José para
+(usuarios finales)  (Josse solo)          (5 devs + Josse para
                                            desarrollo local)
        │                    │                       │
        │                    │                       ├─ Rosa PC
@@ -304,9 +352,9 @@ sep.ggpcsena.com    ssh.ggpcsena.com      sepdb.ggpcsena.com
        │                    │                       ├─ Javier PC
        │                    │                       ├─ Julio PC
        │                    │                       ├─ Juliana PC
-       │                    │                       └─ José PC
+       │                    │                       └─ Josse PC
        │                    │
-   Cualquiera         Solo José
+   Cualquiera         Solo Josse
 ```
 
 ---

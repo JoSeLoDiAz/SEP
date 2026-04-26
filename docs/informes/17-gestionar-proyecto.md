@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Gestionar Proyecto es la **vista central** del aplicativo: la pantalla donde la empresa construye un proyecto desde su estado inicial (borrador) hasta su radicación al SENA. Reemplaza funcionalmente la pantalla `EditarProyecto.aspx` del SEP GeneXus y la familia de pantallas relacionadas.
+Implementación en el nuevo SEP de la **vista central** del aplicativo: la pantalla donde la empresa construye un proyecto desde su estado inicial (borrador) hasta su radicación al SENA. En el SEP GeneXus esta funcionalidad estaba dispersa entre varias pantallas con postbacks completos en cada acción; en el nuevo SEP se unifica en una sola vista SPA con pestañas internas y persistencia REST instantánea por sección, lo que reduce dramáticamente el tiempo perdido en recargas y permite un flujo de trabajo continuo. Conserva todas las reglas de negocio (estados borrador/radicado/reversado, "1 radicado por convocatoria", bloqueo de edición cuando está radicado) y las refuerza en backend para que no se puedan saltar manipulando el frontend.
 
 Cada proyecto se gestiona en `/panel/proyectos/[id]` y desde aquí se accede a:
 
@@ -196,7 +196,7 @@ Si encuentra alguno, rechaza con `BadRequestException("Ya existe un proyecto rad
 
 Cordial saludo,
 
-Se informa que el **módulo de Gestionar Proyecto** del nuevo SEP, equivalente a la pantalla `EditarProyecto.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Gestionar Proyecto** del nuevo SEP, que unifica en una sola vista SPA lo que en el SEP GeneXus estaba disperso entre varias pantallas con postbacks completos, ha sido finalizado y se encuentra en pruebas. Las reglas de negocio (estados, unicidad de radicación, bloqueo cuando está radicado) están reforzadas en backend.
 
 **Funcionalidades entregadas:**
 - Vista central del proyecto con sus cuatro secciones: Generalidades, Contactos del proyecto, Acciones de formación y Rubros

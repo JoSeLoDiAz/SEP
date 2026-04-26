@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Diagnóstico y Necesidades de Formación replica funcionalmente la pantalla `Necesidades.aspx` del SEP GeneXus. Es la sección donde la empresa documenta el **diagnóstico organizacional** que sustenta la pertinencia de los proyectos de formación que va a presentar. Cada diagnóstico es la base técnica que justifica las acciones de formación posteriores: sin un diagnóstico válido y vigente, no se pueden crear proyectos.
+Implementación en el nuevo SEP del módulo donde la empresa documenta el **diagnóstico organizacional** que sustenta la pertinencia de los proyectos de formación. Cada diagnóstico es la base técnica que justifica las acciones de formación posteriores: sin un diagnóstico válido y vigente, no se pueden crear proyectos. Conserva la lógica del SEP GeneXus (cabecera del diagnóstico + herramientas aplicadas + necesidades detectadas) e incorpora mejoras del nuevo stack: numeración correlativa automática de necesidades calculada en la misma transacción, persistencia REST instantánea por cada herramienta y necesidad agregada (sin postbacks completos), validación de integridad referencial reforzada (no se permite borrar un diagnóstico ya asociado a acciones de formación con mensaje específico que indica cuántas lo bloquean) y trazabilidad de quién registra cada item con fecha autoritativa del servidor Oracle.
 
 Una empresa puede tener **varios diagnósticos** a lo largo del tiempo (uno por convocatoria, periodo o iniciativa). Cada diagnóstico se compone de:
 
@@ -235,7 +235,7 @@ Tabla maestra de tipos de herramienta de diagnóstico (encuesta, entrevista, obs
 
 Cordial saludo,
 
-Se informa que el **módulo de Diagnóstico y Necesidades de Formación** del nuevo SEP, equivalente a la pantalla `Necesidades.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Diagnóstico y Necesidades de Formación** del nuevo SEP, conforme a la lógica del SEP GeneXus pero implementado sobre el nuevo stack con mejoras en experiencia, integridad referencial y trazabilidad, ha sido finalizado y se encuentra en pruebas.
 
 **Funcionalidades entregadas:**
 - Listado de diagnósticos por empresa con conteo de necesidades de formación detectadas

@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Crear Nuevo Proyecto replica funcionalmente el modal de creación que aparece en `Proyectos.aspx` del SEP GeneXus. Permite a la empresa o gremio (perfilId=7) iniciar un nuevo proyecto seleccionando la convocatoria activa, la modalidad de presentación y un nombre descriptivo. Al crearse, el proyecto queda en estado borrador y el sistema redirige inmediatamente a la vista de gestión completa para empezar a poblar las secciones (objetivo, acciones de formación, contactos, rubros, etc.).
+Implementación en el nuevo SEP del flujo de inicio de un nuevo proyecto. La empresa o gremio (perfilId=7) selecciona la convocatoria activa, la modalidad de presentación y un nombre descriptivo, y al crearse el proyecto queda en estado borrador con redirección inmediata a la vista de gestión completa para empezar a poblar las secciones (objetivo, acciones de formación, contactos, rubros, etc.). Conserva la lógica de negocio del SEP GeneXus, incluida la regla "una empresa, un proyecto por convocatoria", e incorpora mejoras: validación de unicidad reforzada en backend (no solo en cliente), generación criptográficamente segura del código de seguridad (`crypto.randomBytes` en vez del random débil del runtime ASP.NET legacy), y dropdowns con catálogos cargados en paralelo al abrir el modal.
 
 La regla de negocio crítica que aplica este módulo es: **una empresa solo puede tener un proyecto por convocatoria**. Esta validación se aplica en el backend antes del INSERT — no es solo una restricción visual del frontend.
 
@@ -178,7 +178,7 @@ Ambos catálogos los administra el SENA, no son editables desde el aplicativo.
 
 Cordial saludo,
 
-Se informa que el **módulo de Crear Nuevo Proyecto** del nuevo SEP, equivalente al modal de creación de la pantalla `Proyectos.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Crear Nuevo Proyecto** del nuevo SEP, conforme al SEP GeneXus pero con la regla de unicidad reforzada en backend y generación criptográficamente segura del código de seguridad, ha sido finalizado y se encuentra en pruebas.
 
 **Funcionalidades entregadas:**
 - Modal de creación con tres campos: convocatoria, modalidad y nombre del proyecto

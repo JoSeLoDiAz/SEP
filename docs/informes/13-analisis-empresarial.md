@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Análisis Empresarial / Gremial replica funcionalmente la pantalla `AnalisisEmpresa.aspx` del SEP GeneXus. Es la sección donde la empresa o gremio describe su contexto cualitativo: a qué se dedica, qué hace, en qué situación está, qué retos enfrenta, en qué cadena productiva participa y de qué sectores forma parte o representa. Esta información es el insumo principal para que los evaluadores del SENA entiendan la pertinencia de los proyectos que después la entidad presenta.
+Implementación en el nuevo SEP del módulo donde la empresa o gremio describe su contexto cualitativo: a qué se dedica, qué hace, en qué situación está, qué retos enfrenta, en qué cadena productiva participa y de qué sectores forma parte o representa. Esta información es el insumo principal para que los evaluadores del SENA entiendan la pertinencia de los proyectos. Conserva la estructura de campos del SEP GeneXus pero con mejoras en la nueva implementación: contadores en vivo de caracteres por textarea, validaciones inmediatas en cliente, carga paralela de los 7 conjuntos de datos en una sola pasada (vs. los postbacks de WebForms) y persistencia REST instantánea de cada item sectorial sin recargar la pantalla.
 
 La pantalla combina dos tipos de información en una sola vista:
 
@@ -195,7 +195,7 @@ Las 4 listas sectoriales viven en tablas pivote (`EMPRESASECTORPERTENECE`, `EMPR
 
 Cordial saludo,
 
-Se informa que el **módulo de Análisis Empresarial / Gremial** del nuevo SEP, equivalente a la pantalla `AnalisisEmpresa.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Análisis Empresarial / Gremial** del nuevo SEP, conforme a la estructura de campos del SEP GeneXus pero implementado sobre el nuevo stack con mejoras de experiencia (contadores en vivo, validaciones inmediatas, carga paralela), ha sido finalizado y se encuentra en pruebas.
 
 **Funcionalidades entregadas:**
 - Captura de los 8 textos cualitativos del análisis: objeto social, productos y servicios, situación actual y proyección, papel en el sector, retos estratégicos, experiencia en actividades formativas, eslabones de la cadena productiva e interacciones con otros actores

@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Listado de Proyectos replica funcionalmente la pantalla `Proyectos.aspx` del SEP GeneXus. Es el punto de entrada al núcleo del aplicativo: desde aquí la empresa o gremio (perfilId=7) ve todos los proyectos que ha creado en el SEP, en qué convocatoria y modalidad se inscribió cada uno, y en qué estado están (borrador, radicado, reversado).
+Implementación en el nuevo SEP del punto de entrada al núcleo del aplicativo: desde aquí la empresa o gremio (perfilId=7) ve todos los proyectos que ha creado, en qué convocatoria y modalidad se inscribió cada uno, y en qué estado están (borrador, radicado, reversado). Conserva la información del SEP GeneXus y agrega varias mejoras: una sola query con JOIN al backend (sin peticiones adicionales para resolver nombres de catálogos), vista responsive con tabla en escritorio y tarjetas en móvil, badges visuales para distinguir estados a primera vista y navegación SPA al detalle del proyecto sin recargas completas de página.
 
 La pantalla muestra una tabla con los proyectos de la empresa autenticada, ordenados por fecha de registro. Cada fila tiene acciones contextuales para abrir el proyecto (gestión completa) o, si la convocatoria sigue abierta, crear uno nuevo. La validación de "una empresa solo puede tener un proyecto por convocatoria" se aplica del lado del backend al momento de crear (ver informe 16 — Crear Nuevo Proyecto).
 
@@ -155,7 +155,7 @@ El filtro `WHERE p.EMPRESAID = :1` con el `empresaId` derivado del JWT garantiza
 
 Cordial saludo,
 
-Se informa que el **módulo de Listado de Proyectos** del nuevo SEP, equivalente a la pantalla `Proyectos.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Listado de Proyectos** del nuevo SEP, conforme al SEP GeneXus pero implementado sobre el nuevo stack con mejoras de experiencia y rendimiento, ha sido finalizado y se encuentra en pruebas.
 
 **Funcionalidades entregadas:**
 - Listado completo de los proyectos de la empresa autenticada, con nombre, convocatoria, modalidad, estado y fechas

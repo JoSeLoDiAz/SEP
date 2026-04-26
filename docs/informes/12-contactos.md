@@ -6,7 +6,7 @@
 
 ## 1. Descripción General
 
-El módulo Contactos replica funcionalmente la pantalla `ContactosEmpresa.aspx` del SEP GeneXus. Permite a usuarios con perfil Empresa/Gremio/Asociación (perfilId=7) gestionar la **libreta de contactos institucional** de su organización: representante legal, responsable del proyecto y contacto administrativo. Cada contacto puede estar **sin asignar** o **asociado a un proyecto específico** del catálogo de la empresa.
+Implementación en el nuevo SEP del módulo de gestión de la **libreta de contactos institucional** de la empresa. Conserva la lógica de negocio que existía en el SEP GeneXus (representante legal, responsable del proyecto y contacto administrativo, con asignación opcional a un proyecto específico), pero con varias mejoras del nuevo stack: vista responsive con tabla en escritorio y tarjetas en móvil, validación inmediata en cliente, modal de confirmación previo al borrado, carga paralela de los 3 catálogos al ingresar (un solo viaje al backend en lugar de los postbacks de WebForms) y persistencia REST instantánea en cada acción. Aplica al perfil Empresa/Gremio/Asociación (perfilId=7).
 
 El módulo se expone en dos lugares de la aplicación:
 
@@ -186,7 +186,7 @@ Se filtra a `TIPODOCUMENTOIDENTIDADPERSONA = 1` para excluir tipos de empresa. R
 
 Cordial saludo,
 
-Se informa que el **módulo de Contactos** del nuevo SEP, equivalente a la pantalla `ContactosEmpresa.aspx` del SEP GeneXus, ha sido implementado y se encuentra en pruebas.
+Se informa que el **módulo de Contactos** del nuevo SEP, conforme a la lógica que existía en el SEP GeneXus pero implementado sobre el nuevo stack con mejoras de experiencia y de rendimiento, ha sido finalizado y se encuentra en pruebas.
 
 **Funcionalidades entregadas:**
 - Listado, creación, edición y eliminación de contactos institucionales (representante legal, responsable de proyecto, contacto administrativo)

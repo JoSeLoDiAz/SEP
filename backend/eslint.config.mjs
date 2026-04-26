@@ -26,10 +26,24 @@ export default tseslint.config(
   },
   {
     rules: {
+      // Permitimos `any` y operaciones sobre any — el código actual lo
+      // usa ampliamente al integrar con oracledb (filas dinámicas).
+      // Si un módulo nuevo se quiere tipar estricto, override local.
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
+      '@typescript-eslint/no-base-to-string': 'warn',
       '@typescript-eslint/no-floating-promises': 'warn',
-      '@typescript-eslint/no-unsafe-argument': 'warn',
-      "prettier/prettier": ["error", { endOfLine: "auto" }],
+      // Prettier desactivado: el estilo actual del código (sin punto y
+      // coma, mezcla de single/multi-line) no encaja con ningún preset
+      // de Prettier sin un reformat masivo. Si en el futuro el equipo
+      // quiere uniformar, correr `pnpm exec prettier --write src/` y
+      // re-activar la regla.
+      'prettier/prettier': 'off',
     },
   },
 );

@@ -11,7 +11,9 @@ END;
 /
 
 -- 2. Crear usuario con la contraseña inicial
-CREATE USER SEP_LECTOR IDENTIFIED BY "S3p2026__"
+--    Reemplaza <CLAVE_INICIAL> antes de ejecutar. NO commitees el script
+--    con la contraseña real; pásala por canal seguro a los devs.
+CREATE USER SEP_LECTOR IDENTIFIED BY "<CLAVE_INICIAL>"
   DEFAULT TABLESPACE USERS
   TEMPORARY TABLESPACE TEMP
   QUOTA 0 ON USERS;

@@ -1,7 +1,7 @@
 # Setup para Desarrolladores — SEP
 
 > **Para:** Rosa, Jhonatan, Javier, Julio, Juliana
-> **Líder técnico:** José (`josediazd40z@gmail.com`)
+> **Líder técnico:** Josse (`josediazd40z@gmail.com`)
 > **Última actualización:** 26 abril 2026
 
 Esta guía te lleva desde **cero hasta tener el proyecto SEP corriendo en tu PC con hot-reload** en menos de 1 hora. Síguela en orden.
@@ -139,7 +139,7 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
 3. Llena:
    - **Name:** `SEP Producción (lectura)`
    - **Username:** `SEP_LECTOR`
-   - **Password:** `S3p2026__` (te la pasa el líder, después se cambia)
+   - **Password:** *(te la pasa el líder por canal seguro)*
    - **Hostname:** `localhost`
    - **Port:** `1521`
    - **Service name:** `XEPDB1`
@@ -222,7 +222,7 @@ APP_URL=http://localhost:3000
 | Quien las usa | Usuario | Contraseña | Permisos |
 |---|---|---|---|
 | **Tu backend (`pnpm dev`)** | `SEPLOCAL` | (la del líder) | TODO (INSERT/UPDATE/DELETE/SELECT) — para que tu app funcione |
-| **Tú en SQL Developer** | `SEP_LECTOR` | `S3p2026__` | Solo `SELECT` — para consultar datos |
+| **Tú en SQL Developer** | `SEP_LECTOR` | (la del líder) | Solo `SELECT` — para consultar datos |
 
 **No uses SEPLOCAL en SQL Developer.** Si lo haces, podrías borrar datos de producción sin querer. Usa `SEP_LECTOR`.
 
@@ -291,7 +291,7 @@ Para verificar que todo funciona:
 ### 7.1 Estructura de ramas
 
 ```
-produccion ◀── (solo José hace merge a aquí)
+produccion ◀── (solo Josse hace merge a aquí)
     ↑
    dev ◀── (rama integradora del equipo)
     ↑
@@ -340,12 +340,12 @@ En GitHub:
 2. **Base:** `dev` ← **Compare:** `feature/rosa-validacion-rubros`
 3. Describe qué hiciste y por qué.
 4. Asigna a **JoSeLoDiAz** como reviewer.
-5. **Espera review.** José revisa y hace merge a `dev`.
+5. **Espera review.** Josse revisa y hace merge a `dev`.
 
 ### 7.5 Reglas de oro
 
 - ❌ **NO** hagas push directo a `dev` ni a `produccion`.
-- ❌ **NO** hagas merge tú a `dev` — solo José aprueba.
+- ❌ **NO** hagas merge tú a `dev` — solo Josse aprueba.
 - ✅ **SÍ** abre PR para todo cambio.
 - ✅ **SÍ** mantén tu rama actualizada con `dev`:
   ```powershell
@@ -407,7 +407,7 @@ Stop-Process -Id <PID>
 | **Grupo WhatsApp/Slack** | Dudas rápidas, avisos del día |
 | **Issues de GitHub** | Reporte de bugs y features |
 | **Pull Requests** | Revisión de código |
-| **José directo** | Permisos, contraseñas, despliegues |
+| **Josse directo** | Permisos, contraseñas, despliegues |
 
 ---
 
@@ -444,4 +444,4 @@ git merge dev
 
 ---
 
-**¿Algo no te quedó claro?** Pregúntale a José antes de improvisar. Mejor 5 minutos preguntando que 5 horas debugging.
+**¿Algo no te quedó claro?** Pregúntale a Josse antes de improvisar. Mejor 5 minutos preguntando que 5 horas debugging.

@@ -1,6 +1,6 @@
 # Setup del Servidor para Equipo Multi-Dev — SEP
 
-> **Para:** José (líder técnico — solo tú haces estos pasos)
+> **Para:** Josse (líder técnico — solo tú haces estos pasos)
 > **Última actualización:** 26 abril 2026
 
 Esta guía complementa `10-setup-desarrolladores.md`. Aquí están los pasos **del lado del servidor** que TÚ tienes que hacer una vez para que tus 5 devs puedan trabajar en paralelo desde sus PCs.
@@ -26,11 +26,13 @@ En la VM del server (Hyper-V, Ubuntu):
 # Copia el script al container de Oracle
 docker cp /opt/sep/SEPLocal/docs/migraciones/v9_usuario_lector_devs.sql oracle-xe:/tmp/
 
-# Ejecuta el script como SEPLOCAL
-docker exec -it oracle-xe sqlplus SEPLOCAL/SenaSep2026@localhost:1521/XEPDB1 @/tmp/v9_usuario_lector_devs.sql
+# Ejecuta el script como SEPLOCAL (reemplaza <CLAVE_SEPLOCAL> por la real)
+docker exec -it oracle-xe sqlplus SEPLOCAL/<CLAVE_SEPLOCAL>@localhost:1521/XEPDB1 @/tmp/v9_usuario_lector_devs.sql
 ```
 
-Al terminar te muestra los privilegios concedidos y el resultado esperado. Si todo OK, **la contraseña inicial es `S3p2026__`** (ya viene en el script). Cuando estés en producción real, cámbiala con:
+> **Antes de ejecutar:** edita el script y reemplaza el placeholder `<CLAVE_INICIAL>` por la contraseña que usarás para `SEP_LECTOR`. **No commitees el script con la contraseña real.**
+
+Al terminar te muestra los privilegios concedidos y el resultado esperado. Cuando estés en producción real, rota la contraseña con:
 
 ```sql
 ALTER USER SEP_LECTOR IDENTIFIED BY "<NuevaClaveMasFuerte>";
@@ -39,7 +41,7 @@ ALTER USER SEP_LECTOR IDENTIFIED BY "<NuevaClaveMasFuerte>";
 ### Verificación rápida
 
 ```bash
-docker exec -it oracle-xe sqlplus SEP_LECTOR/S3p2026__@localhost:1521/XEPDB1
+docker exec -it oracle-xe sqlplus SEP_LECTOR/<CLAVE_LECTOR>@localhost:1521/XEPDB1
 ```
 ```sql
 -- Esto debe funcionar
@@ -210,9 +212,11 @@ Rol recomendado: **Write** (pueden hacer push a sus ramas y abrir PRs, pero no m
 Pásale a cada uno (Bitwarden / pendrive — NO Slack ni email):
 
 1. ✅ La guía: link a `docs/informes/10-setup-desarrolladores.md`
-2. ✅ La contraseña de `SEPLOCAL` (para su `.env` del backend) → `SenaSep2026`
-3. ✅ La contraseña de `SEP_LECTOR` (para SQL Developer) → `S3p2026__`
+2. ✅ La contraseña de `SEPLOCAL` (para su `.env` del backend)
+3. ✅ La contraseña de `SEP_LECTOR` (para SQL Developer)
 4. ✅ Credenciales SMTP si las van a necesitar (las que tengas en `backend/.env`)
+
+> Las contraseñas se entregan **solo por canal seguro** (Bitwarden, pendrive, llamada). Nunca por Slack, email ni en commits del repo.
 
 **No requieres entregar `cert.pem` ni configuración especial** — con cloudflared instalado en la PC del dev y los pasos de la guía, queda funcional.
 
@@ -249,7 +253,7 @@ sudo crontab -e
 ```
 Agrega:
 ```
-0 2 * * * docker exec oracle-xe sh -c 'expdp SEPLOCAL/SenaSep2026@XEPDB1 schemas=SEPLOCAL directory=DATA_PUMP_DIR dumpfile=sep_$(date +\%Y\%m\%d).dmp logfile=sep_backup.log' 2>> /var/log/oracle-backup.log
+0 2 * * * docker exec oracle-xe sh -c 'expdp SEPLOCAL/$SEPLOCAL_PASS@XEPDB1 schemas=SEPLOCAL directory=DATA_PUMP_DIR dumpfile=sep_$(date +\%Y\%m\%d).dmp logfile=sep_backup.log' 2>> /var/log/oracle-backup.log
 ```
 
 ### 7.2 Cambiar contraseñas cada 90 días
@@ -296,7 +300,7 @@ Avisa a los devs por canal seguro y que actualicen su `.env`.
        ▲                    ▲                       ▲
        │                    │                       │
 sep.ggpcsena.com    ssh.ggpcsena.com      sepdb.ggpcsena.com
-(usuarios finales)  (José solo)           (5 devs + José para
+(usuarios finales)  (Josse solo)          (5 devs + Josse para
                                            desarrollo local)
        │                    │                       │
        │                    │                       ├─ Rosa PC
@@ -304,9 +308,9 @@ sep.ggpcsena.com    ssh.ggpcsena.com      sepdb.ggpcsena.com
        │                    │                       ├─ Javier PC
        │                    │                       ├─ Julio PC
        │                    │                       ├─ Juliana PC
-       │                    │                       └─ José PC
+       │                    │                       └─ Josse PC
        │                    │
-   Cualquiera         Solo José
+   Cualquiera         Solo Josse
 ```
 
 ---

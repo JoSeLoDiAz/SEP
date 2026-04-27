@@ -74,7 +74,7 @@ export default function LoginPage() {
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? 'Credenciales incorrectas. Verifique e intente nuevamente.'
+        ?? 'Credenciales inválidas. Verifique e intente nuevamente.'
       setCaptchaToken('')
       turnstileRef.current?.reset()
       showErr(msg)

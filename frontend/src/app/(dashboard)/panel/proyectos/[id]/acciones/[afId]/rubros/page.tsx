@@ -122,6 +122,7 @@ export default function RubrosAFPage() {
   const [saving, setSaving]       = useState(false)
   const [form, setForm]           = useState(emptyForm)
   const [editId, setEditId]       = useState<number | null>(null)
+  const [deletingRubroId, setDeletingRubroId] = useState<number | null>(null)
   const [toast, setToast]         = useState<{tipo:'success'|'error'; msg:string}|null>(null)
   const [toastK, setToastK]       = useState(0)
 
@@ -266,15 +267,18 @@ export default function RubrosAFPage() {
   }
 
   async function handleEliminar(afrubroid: number) {
-    if (!confirm('¿Eliminar este rubro?')) return
     try {
       await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/${afrubroid}`)
       showToast('success', 'Rubro eliminado.')
       if (form.rubroId === rubrosAF.find(r => r.afrubroid === afrubroid)?.rubroId) {
         setForm(emptyForm); setEditId(null)
       }
+      setDeletingRubroId(null)
       await refrescarRubros()
-    } catch { showToast('error', 'Error al eliminar.') }
+    } catch {
+      showToast('error', 'Error al eliminar.')
+      setDeletingRubroId(null)
+    }
   }
 
   // ── Guardar GO ────────────────────────────────────────────────────────────
@@ -671,11 +675,21 @@ export default function RubrosAFPage() {
                         <td className="px-3 py-3 text-right text-neutral-400">{pct(r.porcDinero ?? 0)}</td>
                         <td className="px-4 py-3 text-right font-bold text-[#00304D] whitespace-nowrap">{fmt(r.totalRubro ?? 0)}</td>
                         {editable && (
-                          <td className="px-3 py-3">
-                            <button onClick={e => { e.stopPropagation(); handleEliminar(r.afrubroid) }}
-                              className="text-neutral-300 hover:text-red-500 transition">
-                              <Trash2 size={14} />
-                            </button>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            {deletingRubroId === r.afrubroid ? (
+                              <div className="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                                <span className="text-[11px] text-red-700 font-medium">¿Eliminar?</span>
+                                <button onClick={e => { e.stopPropagation(); handleEliminar(r.afrubroid) }}
+                                  className="px-2 py-0.5 bg-red-600 text-white text-[11px] font-bold rounded hover:bg-red-700 transition">Sí</button>
+                                <button onClick={e => { e.stopPropagation(); setDeletingRubroId(null) }}
+                                  className="px-2 py-0.5 border border-neutral-200 bg-white text-[11px] text-neutral-600 rounded hover:bg-neutral-100 transition">No</button>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); setDeletingRubroId(r.afrubroid) }}
+                                className="text-neutral-300 hover:text-red-500 transition">
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </td>
                         )}
                       </tr>

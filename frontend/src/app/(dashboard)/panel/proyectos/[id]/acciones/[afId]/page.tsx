@@ -144,7 +144,7 @@ function getHorasTeor(ut: UTDetalle) {
   return (ut.horasTP ?? 0) + (ut.horasTV ?? 0) + (ut.horasTPAT ?? 0) + (ut.horasTHib ?? 0)
 }
 function labelHorasUT(m: number | null) {
-  if (m === 2) return { prac: 'Horas Prácticas (PP-AT)', teor: 'Horas Teóricas (TP-AT)' }
+  if (m === 2) return { prac: 'Horas Prácticas (PP-PAT)', teor: 'Horas Teóricas (TP-PAT)' }
   if (m === 4) return { prac: 'Horas Prácticas (Virtual)', teor: 'Horas Teóricas (Virtual)' }
   if (m === 3 || m === 5 || m === 6) return { prac: 'Horas Prácticas (Híbrida)', teor: 'Horas Teóricas (Híbrida)' }
   return { prac: 'Horas Prácticas (Presencial)', teor: 'Horas Teóricas (Presencial)' }
@@ -553,6 +553,7 @@ export default function AFDetallePage() {
   const [actSelUT,          setActSelUT]          = useState('')
   const [actOtroUT,         setActOtroUT]         = useState('')
   const [actAddingUT,       setActAddingUT]       = useState(false)
+  const [actBusqueda,       setActBusqueda]       = useState('')
   // Perfil capacitador
   const [perfilAddUT,       setPerfilAddUT]       = useState({ rubroId: '', horasCap: '' })
   const [perfilAddingUT,    setPerfilAddingUT]    = useState(false)
@@ -1105,6 +1106,7 @@ export default function AFDetallePage() {
       })
       setActSelUT('')
       setActOtroUT('')
+      setActBusqueda('')
       await cargarDetalleUT(expandedUtId)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error'
@@ -2383,11 +2385,19 @@ export default function AFDetallePage() {
                               </div>
                               {editable && (
                                 <div className="flex gap-2 flex-wrap items-end">
-                                  <div className="flex-1 min-w-[200px]">
+                                  <div className="flex-1 min-w-[200px] flex flex-col gap-1.5">
+                                    <div className="relative">
+                                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                                      <input value={actBusqueda} onChange={e => setActBusqueda(e.target.value)}
+                                        placeholder="Buscar actividad…"
+                                        className={`${input} pl-8`} />
+                                    </div>
                                     <select value={actSelUT} onChange={e => setActSelUT(e.target.value)} className={select}>
                                       <option value="">— Seleccione actividad —</option>
-                                      {actividadesCat.filter(a => !detalleUT.actividades.some(d => d.actividadId === a.id)).map(a =>
-                                        <option key={a.id} value={a.id}>{a.nombre}</option>)}
+                                      {actividadesCat
+                                        .filter(a => !detalleUT.actividades.some(d => d.actividadId === a.id))
+                                        .filter(a => !actBusqueda.trim() || a.nombre.toLowerCase().includes(actBusqueda.trim().toLowerCase()))
+                                        .map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
                                     </select>
                                   </div>
                                   {actNeedsOtro && (

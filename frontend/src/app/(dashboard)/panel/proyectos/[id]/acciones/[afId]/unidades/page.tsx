@@ -101,7 +101,7 @@ function getHorasTeor(ut: UTDetalle) {
 }
 
 function labelHoras(m: number | null): { prac: string; teor: string } {
-  if (m === 2)                    return { prac: 'Horas Prácticas (PP-AT)',  teor: 'Horas Teóricas (TP-AT)' }
+  if (m === 2)                    return { prac: 'Horas Prácticas (PP-PAT)',  teor: 'Horas Teóricas (TP-PAT)' }
   if (m === 4)                    return { prac: 'Horas Prácticas (Virtual)', teor: 'Horas Teóricas (Virtual)' }
   if (m === 3 || m === 5 || m === 6) return { prac: 'Horas Prácticas (Híbrida)', teor: 'Horas Teóricas (Híbrida)' }
   return { prac: 'Horas Prácticas (Presencial)', teor: 'Horas Teóricas (Presencial)' }

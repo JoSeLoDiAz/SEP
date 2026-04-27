@@ -77,7 +77,7 @@ Write-Host "[3/7] OK WinSW en: $serviceExe"
 $xmlContent = @"
 <service>
   <id>SEPDBTunnel</id>
-  <name>SEP DB Tunnel (cloudflared)</name>
+  <n>SEP DB Tunnel (cloudflared)</n>
   <description>Tunnel cloudflared TCP a sepdb.ggpcsena.com:1521 (Oracle)</description>
   <executable>$cloudflared</executable>
   <arguments>access tcp --hostname sepdb.ggpcsena.com --url localhost:1521</arguments>
@@ -93,13 +93,18 @@ $xmlContent = @"
 Write-Host "[4/7] OK Configuracion XML escrita en: $serviceXml"
 
 # 5. Limpiar lo viejo (tarea programada, procesos, servicio anterior)
-schtasks /Delete /TN 'SEP DB Tunnel' /F 2>&1 | Out-Null
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-$svc = Get-Service SEPDBTunnel -ErrorAction SilentlyContinue
-if ($svc) {
-  if ($svc.Status -eq 'Running') { & $serviceExe stop $serviceXml 2>&1 | Out-Null }
-  & $serviceExe uninstall $serviceXml 2>&1 | Out-Null
-  Start-Sleep 2
+# Envuelto en try/catch porque schtasks falla con codigo de error si la tarea no existe
+try {
+  cmd /c "schtasks /Delete /TN ""SEP DB Tunnel"" /F >nul 2>&1"
+  Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  $svc = Get-Service SEPDBTunnel -ErrorAction SilentlyContinue
+  if ($svc) {
+    if ($svc.Status -eq 'Running') { & $serviceExe stop $serviceXml 2>&1 | Out-Null }
+    & $serviceExe uninstall $serviceXml 2>&1 | Out-Null
+    Start-Sleep 2
+  }
+} catch {
+  # ignorar errores de limpieza - es normal en primera instalacion
 }
 Write-Host "[5/7] OK Limpieza previa terminada"
 

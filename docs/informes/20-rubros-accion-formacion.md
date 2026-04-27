@@ -64,12 +64,32 @@ GET /proyectos/:id/acciones/:afId/rubros/prereqs  → ¿AF está lista para rubr
 
 - Al entrar a la pestaña **muestra primero el chequeo de prerrequisitos**: si la AF aún no cumple las condiciones para registrar rubros (faltan horas, faltan UTs, falta cobertura de grupos, etc.), aparece una lista de issues con CTA para volver a las pestañas correspondientes. El formulario de rubros queda oculto hasta que todos los issues se resuelvan.
 - Una vez OK, se renderizan **tres bloques**:
-  1. **Tabla de rubros** ya registrados, con código, nombre, valor total, distribución cofinanciación/especie/dinero y porcentajes.
-  2. **Formulario inline** para agregar o editar un rubro: dropdown con catálogo de rubros disponibles (excluye `R09` y `R015` que tienen su propio bloque), campos numéricos de cantidad, horas, beneficiarios, días, grupos, valor total, cofinanciación, especie, dinero, valor máximo y valor por beneficiario, más justificación. El campo "paquete" se autocompleta del catálogo.
+  1. **Tabla de rubros** ya registrados, con código, nombre, valor total, distribución cofinanciación/especie/dinero y porcentajes. La columna "Cant." muestra unidades inteligentes según el `RUBROCASO`: `2h`, `3 d`, `5 ud.`, `12 tiq.`, `150 benef.` o `2h × 150 benef.` para rubros que multiplican horas por beneficiarios.
+  2. **Formulario inline** para agregar o editar un rubro: dropdown con catálogo de rubros disponibles (excluye `R09` y `R015` que tienen su propio bloque), campos numéricos de cantidad, horas, beneficiarios, días, grupos, valor total, cofinanciación, especie, dinero, valor máximo y valor por beneficiario, más justificación. El campo "paquete" se autocompleta del catálogo. Los campos visibles dependen del `RUBROCASO` del rubro seleccionado (ver tabla más abajo).
   3. **Bloque Gastos de Operación** y **bloque Transferencia** con sus propios formularios simplificados.
+- **Cálculo en vivo del valor máximo permitido** según el caso del rubro: tarjeta azul con `Valor máximo permitido` y, cuando aplica, tarjeta verde con `Valor por beneficiario` (`total / beneficiarios`).
 - **Cálculo en vivo de porcentajes** mientras el usuario llena cofinanciación / especie / dinero — se muestran porcentajes sobre el total para que el usuario vea inmediatamente la distribución.
 - **Validaciones cliente** específicas: el total del rubro debe igualar la suma de cofinanciación + especie + dinero (con tolerancia de 1 peso); el valor por beneficiario no puede exceder el valor máximo del catálogo.
+- **Cantidad mínima = 1.** Aunque el rubro sea "intangible" (formación virtual, transporte por beneficiario, etc.) la columna `AFRUBROCANTIDAD` se fuerza a ≥ 1 en frontend y backend. Sin esto, los rubros R010 entraban con cantidad 0 y rompían reportes posteriores.
 - **Bloqueo cuando el proyecto está radicado**.
+
+### Casos de cálculo según `RUBRO.RUBROCASO`
+
+El catálogo `RUBRO` trae una columna `RUBROCASO` que define qué inputs se piden y cómo se calcula el valor máximo permitido. La pantalla deriva todo del caso, sin reglas duplicadas en frontend:
+
+| Caso | Significado | Inputs visibles | Cálculo `valorMaximo` |
+|---|---|---|---|
+| 1  | Tarifa por hora | `# Horas` | `tope × horas` |
+| 2  | Tarifa por unidad / página | `Cantidad` | `tope × cantidad` |
+| 3  | Tarifa por beneficiario (R010 — formación virtual) | `# Beneficiarios` | `tope × beneficiarios` |
+| 4  | Tarifa por día | `# Días` | `tope × días` |
+| 5  | Valor fijo (no se calcula) | (ninguno) | (lo digita el usuario) |
+| 8  | Tarifa por hora × beneficiario (R07.2.2 / R07.2.3) | `# Horas` + `# Beneficiarios` | `tope × horas × beneficiarios` |
+| 20 | Valor fijo | (ninguno) | (lo digita el usuario) |
+
+> **Nota sobre R07.2.2 / R07.2.3:** son rubros de transporte / refrigerios que dependen tanto de la duración (horas) como de cuánta gente los recibe. En GeneXus esto era un cálculo manual; en el nuevo SEP se hace en vivo: por ejemplo, tarifa $647 × 2 horas × 150 beneficiarios = $194.100 aparece en la tarjeta azul antes de guardar. La tabla resumen muestra `2h × 150 benef.` para que la métrica física sea legible de un vistazo.
+
+> **Nota sobre R010 (caso 3):** la formación virtual no tiene "horas" en el sentido tradicional (no hay un instructor por hora) sino "beneficiarios atendidos" como unidad económica. El formulario oculta el campo de horas y solo pide beneficiarios; el valor por beneficiario se muestra como verificación (debe igualar la tarifa del catálogo).
 
 ---
 
@@ -107,6 +127,16 @@ Antes de cualquier guardado de rubro, el servicio ejecuta el método privado `va
 5. **UTs presentes y horas suficientes.** Debe haber al menos una UT, y la suma de las 8 columnas de horas de las UTs (presencial + virtual + presencial-asistido + híbrido, en variantes pp/pv/ppat/phib + tp/tv/tpat/thib) debe igualar o superar las horas totales de la AF. Si no, mensajes específicos.
 
 Estos mismos chequeos se exponen como endpoint `GET .../rubros/prereqs` para que el frontend los muestre proactivamente sin tener que intentar guardar para enterarse.
+
+### Normalización de cantidad en `guardarRubroAF`
+
+Antes del INSERT/UPDATE el servicio fuerza `cantidad ≥ 1`:
+
+```typescript
+const cantidad = Math.max(1, Number(dto.cantidad) || 1)
+```
+
+Sin esta línea, los rubros donde la unidad económica es el beneficiario (caso 3, R010) o la hora (caso 1, 8) entraban con `AFRUBROCANTIDAD = 0` y rompían reportes posteriores que asumen cantidad ≥ 1 para mostrar la métrica física en la tabla resumen. Es defensa en profundidad: el frontend ya envía 1 por defecto, pero un cliente comprometido podía mandar 0.
 
 ### Cálculo de porcentajes en `guardarRubroAF`
 
@@ -216,8 +246,10 @@ Se informa que el **módulo de Rubros por Acción de Formación** del nuevo SEP,
 
 **Funcionalidades entregadas:**
 - Vista de prerrequisitos: chequeo proactivo de las condiciones para registrar rubros (tipo de evento y modalidad definidos, horas y grupos completos, todos los grupos con cobertura registrada, al menos una Unidad Temática y horas de UTs cubriendo el total de la AF), con lista de issues específicos cuando algo falta
-- Tabla de rubros registrados con código, nombre, métricas físicas (cantidad, horas, beneficiarios, días, grupos), valor total y distribución entre cofinanciación SENA, contraparte en especie y contraparte en dinero, con porcentajes calculados y guardados en backend
-- Formulario unificado de agregar/editar rubro con upsert en backend (no se distingue entre crear y editar — siempre el mismo endpoint)
+- Tabla de rubros registrados con código, nombre, métricas físicas inteligentes según el caso del rubro (`2h`, `5 ud.`, `150 benef.`, `2h × 150 benef.`), valor total y distribución entre cofinanciación SENA, contraparte en especie y contraparte en dinero, con porcentajes calculados y guardados en backend
+- Formulario unificado de agregar/editar rubro con upsert en backend (no se distingue entre crear y editar — siempre el mismo endpoint), con campos visibles condicionados por el `RUBROCASO` del catálogo
+- Cálculo en vivo del valor máximo permitido y del valor por beneficiario, con soporte completo para los 7 casos del catálogo SENA (incluidos casos especiales R010 = caso 3, y R07.2.2/R07.2.3 = caso 8 que multiplica horas × beneficiarios)
+- Cantidad mínima 1 forzada en backend para rubros intangibles (R010 y similares), evitando inconsistencias en reportes posteriores
 - Bloques especiales separados para Gastos de Operación (R09) y Transferencia (R015), con sus propios formularios y modelo de datos
 - Validación reforzada en backend antes de cualquier guardado: las cinco condiciones de prerrequisito se vuelven a evaluar al momento del INSERT/UPDATE para evitar que un cliente comprometido se las salte
 - Cálculo de porcentajes siempre en servidor para eliminar errores de redondeo cliente-side

@@ -45,7 +45,17 @@ const fmt = (n: number) =>
 const pct = (n: number) => `${Number(n ?? 0).toFixed(2)}%`
 
 function unidadesLabel(r: RubroAF): string {
-  if (r.numHoras > 0)     return `${r.numHoras} h`
+  // caso 8 (R07.2.2/R07.2.3): tarifa × horas × benef → mostrar ambos
+  if (r.caso === 8) {
+    if (r.numHoras > 0 && r.beneficiarios > 0) return `${r.numHoras}h × ${r.beneficiarios} benef.`
+    if (r.beneficiarios > 0) return `${r.beneficiarios} benef.`
+    return '—'
+  }
+  // caso 3 (R010): solo beneficiarios
+  if (r.caso === 3) {
+    return r.beneficiarios > 0 ? `${r.beneficiarios} benef.` : '—'
+  }
+  if (r.numHoras > 0)      return `${r.numHoras} h`
   if (r.dias > 0)          return `${r.dias} d`
   if (r.cantidad > 0)      return `${r.cantidad} ${r.codigo?.trim().startsWith('R04') ? 'tiq.' : 'ud.'}`
   if (r.beneficiarios > 0) return `${r.beneficiarios} benef.`
@@ -54,25 +64,28 @@ function unidadesLabel(r: RubroAF): string {
 
 function camposVisibles(caso: number) {
   return {
-    horas:    [1].includes(caso),
+    // caso 8 (R07.2.2 / R07.2.3) pide horas Y beneficiarios → tope × horas × benef
+    horas:    [1, 8].includes(caso),
     dias:     [4].includes(caso),
     unidades: [2].includes(caso),
-    benef:    [8].includes(caso),
-    autoCalc: [1, 2, 4, 8].includes(caso),
-    fijo:     [5, 3, 20].includes(caso),
+    // caso 3 (R010 — formación virtual) y caso 8 piden beneficiarios
+    benef:    [3, 8].includes(caso),
+    autoCalc: [1, 2, 3, 4, 8].includes(caso),
+    fijo:     [5, 20].includes(caso),
   }
 }
 
 function calcValorMaximo(caso: number, tope: number, horas: number, dias: number, cantidad: number, benef: number) {
   if (caso === 1) return tope * horas
   if (caso === 2) return tope * cantidad
+  if (caso === 3) return tope * benef       // R010: tope × # beneficiarios
   if (caso === 4) return tope * dias
   if (caso === 8) return tope * horas * benef
   return 0
 }
 
 const emptyForm = {
-  rubroId: 0, justificacion: '', numHoras: 0, cantidad: 0,
+  rubroId: 0, justificacion: '', numHoras: 0, cantidad: 1,
   beneficiarios: 0, dias: 0, numGrupos: 1, totalRubro: 0,
   cofSena: 0, contraEspecie: 0, contraDinero: 0,
   valorMaximo: 0, valorBenef: 0, paquete: '', caso: 0, tope: 0,
@@ -149,7 +162,7 @@ export default function RubrosAFPage() {
       setEditId(existing.afrubroid)
       setForm({
         rubroId, justificacion: existing.justificacion ?? '',
-        numHoras: existing.numHoras ?? 0, cantidad: existing.cantidad ?? 0,
+        numHoras: existing.numHoras ?? 0, cantidad: existing.cantidad ?? 1,
         beneficiarios: existing.beneficiarios ?? 0, dias: existing.dias ?? 0,
         numGrupos: existing.numGrupos ?? 1, totalRubro: existing.totalRubro ?? 0,
         cofSena: existing.cofSena ?? 0, contraEspecie: existing.contraEspecie ?? 0,
@@ -191,6 +204,13 @@ export default function RubrosAFPage() {
     if (r && campos.autoCalc && form.valorMaximo > 0 && totalCalc > form.valorMaximo) {
       return showToast('error', `El valor total supera el tope máximo (${fmt(form.valorMaximo)}).`)
     }
+    // Si el rubro pide beneficiarios, el valor por beneficiario se calcula
+    // dinámicamente en vivo (total / beneficiarios). Si no, mantiene el del
+    // form (ej. tiquetes que viene precargado).
+    const valorBenefCalc = campos.benef && form.beneficiarios > 0
+      ? totalCalc / form.beneficiarios
+      : form.valorBenef
+
     setSaving(true)
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros`, {
@@ -198,7 +218,7 @@ export default function RubrosAFPage() {
         numHoras: form.numHoras, cantidad: form.cantidad, beneficiarios: form.beneficiarios,
         dias: form.dias, numGrupos: form.numGrupos, totalRubro: totalCalc,
         cofSena: form.cofSena, contraEspecie: form.contraEspecie, contraDinero: form.contraDinero,
-        valorMaximo: form.valorMaximo, valorBenef: form.valorBenef, paquete: form.paquete,
+        valorMaximo: form.valorMaximo, valorBenef: valorBenefCalc, paquete: form.paquete,
       })
       showToast('success', editId ? 'Rubro actualizado.' : 'Rubro guardado.')
       setForm(emptyForm); setEditId(null)
@@ -459,7 +479,7 @@ export default function RubrosAFPage() {
                 {campos.unidades && (
                   <div>
                     <label className={lbl}>Cantidad (unidades / páginas) *</label>
-                    <NumberInput min={0} className={inp} value={form.cantidad}
+                    <NumberInput min={1} className={inp} value={form.cantidad}
                       onChange={v => setField('cantidad', v)} />
                   </div>
                 )}
@@ -473,7 +493,7 @@ export default function RubrosAFPage() {
                 {esTiquetes && (
                   <div>
                     <label className={lbl}>N° de Tiquetes</label>
-                    <NumberInput min={0} className={inp} value={form.cantidad}
+                    <NumberInput min={1} className={inp} value={form.cantidad}
                       onChange={v => setField('cantidad', v)} />
                     <p className="text-xs text-neutral-400 mt-1">Rubro abierto — la cantidad no define el valor máximo.</p>
                   </div>
@@ -524,6 +544,12 @@ export default function RubrosAFPage() {
                         <span className="text-[#00304D] font-medium">Total rubro</span>
                         <span className="font-bold text-[#00304D] text-sm">{fmt(totalCalc)}</span>
                       </div>
+                      {campos.benef && form.beneficiarios > 0 && (
+                        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2 text-xs flex justify-between items-center">
+                          <span className="text-emerald-700 font-medium">Valor por beneficiario</span>
+                          <span className="font-bold text-emerald-900 text-sm">{fmt(totalCalc / form.beneficiarios)}</span>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>

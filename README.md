@@ -249,7 +249,7 @@ ORACLE_PASSWORD=<pedir al líder>
 ORACLE_CONNECT_STRING=localhost:1521/XEPDB1   # vía cloudflared en local
 
 JWT_SECRET=<64 caracteres random>
-JWT_EXPIRES_IN=8h
+JWT_EXPIRES_IN=30m   # sliding-session: backend regenera token en cada request
 
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -257,6 +257,15 @@ SMTP_USER=<correo>
 SMTP_PASS=<app password>
 
 APP_URL=http://localhost:3000   # en producción: https://sep.ggpcsena.com
+
+# Captcha del login. Vacío en dev = sin verificación. En prod siempre va.
+TURNSTILE_SECRET=<pedir al líder>
+```
+
+Y en `frontend/.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:4000/api
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAADD6VVCyoP6eM5Ao   # site key pública
 ```
 
 Plantilla completa: [`.env.example`](.env.example)

@@ -2,6 +2,7 @@
 
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { PanelTopbar } from '@/components/layout/panel-topbar'
+import { IdleLogout } from '@/components/auth/idle-logout'
 import { getSepToken, getSepUsuario, type SepUsuario } from '@/lib/auth'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -123,6 +124,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
+      <IdleLogout />
     </div>
   )
 }

@@ -28,6 +28,7 @@ async function bootstrap() {
       'http://127.0.0.1:8081',
     ],
     credentials: true,
+    exposedHeaders: ['X-New-Token'],
   })
 
   const config = new DocumentBuilder()

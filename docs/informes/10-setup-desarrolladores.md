@@ -2,7 +2,7 @@
 
 > **Para:** Rosa, Jhonatan, Javier, Julio, Juliana
 > **Líder técnico:** Josse (`josediazd40z@gmail.com`)
-> **Última actualización:** 26 abril 2026
+> **Última actualización:** 26 abril 2026 — Cloudflare Turnstile + sliding-session JWT 30m + idle logout
 
 Esta guía te lleva desde **cero hasta tener el proyecto SEP corriendo en tu PC con hot-reload** en menos de 1 hora. Síguela en orden.
 
@@ -222,8 +222,8 @@ ORACLE_USER=SEP_APP
 ORACLE_PASSWORD=<la_que_te_pase_josse>
 ORACLE_CONNECT_STRING=localhost:1521/XEPDB1
 
-JWT_SECRET=DEV_LOCAL_NO_USAR_EN_PROD_ed25519_minimo_64_caracteres_super_random
-JWT_EXPIRES_IN=8h
+JWT_SECRET=DEV_LOCAL_NO_USAR_EN_PROD_minimo_64_caracteres_super_random
+JWT_EXPIRES_IN=30m
 
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -231,7 +231,22 @@ SMTP_USER=<correo_que_te_pase>
 SMTP_PASS=<password_app>
 
 APP_URL=http://localhost:3000
+
+# Captcha del login. Si lo dejas vacío en dev, el backend OMITE
+# la verificación (no rompe pruebas locales). En prod siempre va.
+TURNSTILE_SECRET=<la_que_te_pase_josse>
 ```
+
+Y en `frontend/.env.local` (créalo si no existe):
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:4000/api
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAADD6VVCyoP6eM5Ao
+```
+
+(La site key de Turnstile es pública, no es secreto.)
+
+> **Sobre `JWT_EXPIRES_IN=30m`:** el backend regenera el token en cada request autenticado y lo devuelve por el header `X-New-Token`, que el axios del frontend captura y guarda en `localStorage`. Mientras estés interactuando con el panel, la sesión se mantiene viva indefinidamente. A los 20 minutos sin actividad real (mouse, teclado, scroll), el `IdleLogout` te saca y te manda al `/login?reason=idle`. No subas el TTL — es defensa en profundidad.
 
 ### 4.2 ⚠️ Diferencia clave de credenciales
 

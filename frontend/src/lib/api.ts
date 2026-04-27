@@ -25,13 +25,22 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// ── Interceptor de response: manejo centralizado de errores ──
+// ── Interceptor de response: sliding session + manejo de 401 ──
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Sliding session: el backend devuelve un JWT renovado en cada request
+    // autenticada exitosa. Lo persistimos para que la próxima request lo use.
+    const newToken = response.headers?.['x-new-token']
+    if (newToken && typeof window !== 'undefined' && typeof newToken === 'string') {
+      localStorage.setItem('sep_token', newToken)
+    }
+    return response
+  },
   (error) => {
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('sep_token')
+        localStorage.removeItem('sep_usuario')
         window.location.href = '/login'
       }
     }

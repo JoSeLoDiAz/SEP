@@ -1795,9 +1795,13 @@ export class ProyectosService {
   }) {
     await this.validarPrerequisitosRubros(afId)
 
-    const { rubroId, justificacion, numHoras, cantidad, beneficiarios, dias,
+    const { rubroId, justificacion, numHoras, beneficiarios, dias,
             numGrupos, totalRubro, cofSena, contraEspecie, contraDinero,
             valorMaximo, valorBenef, paquete } = dto
+
+    // Cantidad mínima 1: aunque el rubro sea intangible (ej. rubroid 365),
+    // siempre debe representar "al menos una unidad" en la BD.
+    const cantidad = Math.max(1, Number(dto.cantidad) || 1)
 
     const porcSena    = totalRubro > 0 ? (cofSena    / totalRubro) * 100 : 0
     const porcEspecie = totalRubro > 0 ? (contraEspecie / totalRubro) * 100 : 0

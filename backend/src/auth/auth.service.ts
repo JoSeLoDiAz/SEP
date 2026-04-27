@@ -155,8 +155,10 @@ export class AuthService {
       where: { usuarioEmail: dto.email },
     })
 
+    // Mensaje unificado: no revelamos si el correo existe o si la contraseña
+    // falló — mejor por seguridad y evita confundir al usuario.
     if (!usuario) {
-      throw new UnauthorizedException('Usuario incorrecto')
+      throw new UnauthorizedException('Credenciales inválidas')
     }
 
     if (usuario.usuarioEstado === 0) {
@@ -171,11 +173,11 @@ export class AuthService {
         usuario.usuarioLlaveEncriptacion,
       )
     } catch {
-      throw new UnauthorizedException('Error al verificar credenciales')
+      throw new UnauthorizedException('Credenciales inválidas')
     }
 
     if (claveDesencriptada !== dto.clave) {
-      throw new UnauthorizedException('Contraseña incorrecta')
+      throw new UnauthorizedException('Credenciales inválidas')
     }
 
     const rol = PERFIL_ROLES[usuario.perfilId] ?? 'usuario'

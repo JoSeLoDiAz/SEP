@@ -1017,15 +1017,16 @@ export default function AFDetallePage() {
     const totalUtHoras = horasPracNum + horasTeorNum
     if (totalUtHoras <= 0) return showToast('error', 'Debe ingresar las horas de la unidad temática.')
 
-    // Verificar que horas UT no superen total AF (restando horas de otras UTs)
-    if (af?.numTotHorasGrup) {
+    // Verificar que horas UT no superen las horas por grupo de la AF
+    // (las UTs se formulan por grupo y se replican en cada uno)
+    if (af?.numHorasGrupo) {
       const horasOtrasUts = uts
         .filter(u => u.utId !== expandedUtId)
         .reduce((sum, u) => sum + (u.totalPrac ?? 0) + (u.totalTeor ?? 0), 0)
-      const disponibles = af.numTotHorasGrup - horasOtrasUts
+      const disponibles = af.numHorasGrupo - horasOtrasUts
       if (totalUtHoras > disponibles) {
         return showToast('error',
-          `Las horas de esta UT (${totalUtHoras}h) superan las disponibles en la AF (${disponibles}h de ${af.numTotHorasGrup}h totales).`)
+          `Las horas de esta UT (${totalUtHoras}h) superan las disponibles por grupo en la AF (${disponibles}h de ${af.numHorasGrupo}h por grupo).`)
       }
     }
 
@@ -1765,6 +1766,7 @@ export default function AFDetallePage() {
               <label className={label}>Especifique el área funcional <span className="text-red-500">*</span></label>
               <textarea value={areaOtroText} onChange={e => setAreaOtroText(e.target.value)}
                 maxLength={500} rows={2} className={textarea} placeholder="Describa el área funcional…" />
+              <p className="text-xs text-neutral-400 text-right mt-0.5">{(areaOtroText ?? '').length}/500</p>
             </div>
           )}
           {perfil.areas.length > 0 && (
@@ -2156,19 +2158,40 @@ export default function AFDetallePage() {
         const mostrarDescVirtual = detalleUT ? tieneActividadVirtualOAumentada(detalleUT.actividades) : false
         const canCrear = editable && !creandoUT && expandedUtId === null
 
+        const horasUts    = uts.reduce((a, u) => a + Number(u.totalPrac) + Number(u.totalTeor), 0)
+        const horasGrupo  = Number(af.numHorasGrupo) || 0
+        const horasFaltan = Math.max(0, horasGrupo - horasUts)
+        const horasExcede = Math.max(0, horasUts - horasGrupo)
+        const utsCompleto = horasGrupo > 0 && horasUts === horasGrupo
+
         return (
           <div className={card}>
             {/* Header */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
                   <BookOpen size={16} className="text-white" />
                 </div>
                 <h2 className="text-sm font-bold text-neutral-800">Unidades Temáticas</h2>
                 {uts.length > 0 && (
                   <span className="text-xs text-neutral-400 ml-1">
-                    {uts.length} UT{uts.length !== 1 ? 's' : ''} · {uts.reduce((a, u) => a + Number(u.totalPrac) + Number(u.totalTeor), 0)} h totales
+                    {uts.length} UT{uts.length !== 1 ? 's' : ''} · {horasUts} h por grupo
                   </span>
+                )}
+                {horasGrupo > 0 && (
+                  utsCompleto ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-50 border border-green-200 text-green-700 text-[11px] font-semibold">
+                      ✓ Completo · {horasUts}/{horasGrupo}h por grupo
+                    </span>
+                  ) : horasExcede > 0 ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 text-[11px] font-semibold">
+                      ⚠ Excede {horasExcede}h · {horasUts}/{horasGrupo}h por grupo
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-semibold">
+                      Faltan {horasFaltan}h · {horasUts}/{horasGrupo}h por grupo
+                    </span>
+                  )
                 )}
               </div>
               {canCrear && (
@@ -2340,6 +2363,7 @@ export default function AFDetallePage() {
                               <textarea disabled={!editable} value={utDetForm.contenido}
                                 onChange={e => setUtDetForm(f => f ? { ...f, contenido: e.target.value } : f)}
                                 rows={3} maxLength={3000} className={textarea} placeholder="Describa el contenido temático…" />
+                              <p className="text-xs text-neutral-400 text-right mt-0.5">{(utDetForm.contenido ?? '').length}/3000</p>
                             </div>
 
                             {/* Actividades de aprendizaje */}
@@ -2388,6 +2412,7 @@ export default function AFDetallePage() {
                                   onChange={e => setUtDetForm(f => f ? { ...f, justActividad: e.target.value } : f)}
                                   rows={3} maxLength={3000} className={textarea}
                                   placeholder="Describa cómo se desarrollarán las actividades virtuales o aumentadas…" />
+                                <p className="text-xs text-neutral-400 text-right mt-0.5">{(utDetForm.justActividad ?? '').length}/3000</p>
                               </div>
                             )}
 
@@ -2397,6 +2422,7 @@ export default function AFDetallePage() {
                               <textarea disabled={!editable} value={utDetForm.competencias}
                                 onChange={e => setUtDetForm(f => f ? { ...f, competencias: e.target.value } : f)}
                                 rows={3} maxLength={3000} className={textarea} placeholder="Describa las competencias que adquirirán los beneficiarios…" />
+                              <p className="text-xs text-neutral-400 text-right mt-0.5">{(utDetForm.competencias ?? '').length}/3000</p>
                             </div>
 
                             {/* Perfil de capacitador */}
@@ -2559,6 +2585,7 @@ export default function AFDetallePage() {
                   onChange={e => setAlinForm(f => ({ ...f, compod: e.target.value }))}
                   rows={4} maxLength={3000} className={textarea}
                   placeholder="Describa cómo esta acción de formación se alinea con los componentes seleccionados…" />
+                <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.compod ?? '').length}/3000</p>
               </div>
 
               {/* ── ¿Por qué es especializada? ── */}
@@ -2569,6 +2596,7 @@ export default function AFDetallePage() {
                   onChange={e => setAlinForm(f => ({ ...f, justificacion: e.target.value }))}
                   rows={4} maxLength={3000} className={textarea}
                   placeholder="Justifique por qué esta acción de formación es especializada…" />
+                <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.justificacion ?? '').length}/3000</p>
               </div>
 
               {/* ── Resultados Desempeño ── */}
@@ -2579,6 +2607,7 @@ export default function AFDetallePage() {
                   onChange={e => setAlinForm(f => ({ ...f, resDesem: e.target.value }))}
                   rows={5} maxLength={5000} className={textarea}
                   placeholder="Describa los resultados esperados en el desempeño del trabajador…" />
+                <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.resDesem ?? '').length}/5000</p>
               </div>
 
               {/* ── Resultados Productividad ── */}
@@ -2589,6 +2618,7 @@ export default function AFDetallePage() {
                   onChange={e => setAlinForm(f => ({ ...f, resForm: e.target.value }))}
                   rows={5} maxLength={5000} className={textarea}
                   placeholder="Describa los resultados esperados en productividad y competitividad…" />
+                <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.resForm ?? '').length}/5000</p>
               </div>
 
               {/* ── Guardar ── */}
@@ -2727,6 +2757,7 @@ export default function AFDetallePage() {
                             onChange={e => setGrupoJust(prev => ({ ...prev, [grupo.grupoId]: e.target.value }))}
                             placeholder="Describa la justificación de la cobertura para este grupo…"
                           />
+                          <p className="text-xs text-neutral-400 text-right mt-0.5">{(grupoJust[grupo.grupoId] ?? '').length}/3000</p>
                           {editable && (
                             <div className="flex mt-2">
                               <button onClick={() => handleSaveJustificacion(grupo.grupoId)} disabled={isSavingJ}
@@ -3074,6 +3105,7 @@ export default function AFDetallePage() {
               value={matForm.justMat}
               onChange={e => setMatForm(f => ({ ...f, justMat: e.target.value }))}
               placeholder="Justifique el material seleccionado…" />
+            <p className="text-xs text-neutral-400 text-right mt-0.5">{(matForm.justMat ?? '').length}/3000</p>
           </div>
 
           {/* Insumos */}
@@ -3085,6 +3117,7 @@ export default function AFDetallePage() {
                 value={matForm.insumo}
                 onChange={e => setMatForm(f => ({ ...f, insumo: e.target.value }))}
                 placeholder="Describa los insumos o equipos requeridos…" />
+              <p className="text-xs text-neutral-400 text-right mt-0.5">{(matForm.insumo ?? '').length}/3000</p>
             </div>
             <div>
               <label className={label}>Justificación del insumo y/o equipos especializados (solo si aplica)</label>
@@ -3093,6 +3126,7 @@ export default function AFDetallePage() {
                 value={matForm.justInsumo}
                 onChange={e => setMatForm(f => ({ ...f, justInsumo: e.target.value }))}
                 placeholder="Justifique los insumos o equipos descritos…" />
+              <p className="text-xs text-neutral-400 text-right mt-0.5">{(matForm.justInsumo ?? '').length}/3000</p>
             </div>
           </div>
 

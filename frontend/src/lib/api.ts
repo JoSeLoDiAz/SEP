@@ -38,7 +38,12 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      if (typeof window !== 'undefined') {
+      // Endpoints públicos de /auth/* (login, registro, recuperar/restablecer
+      // contraseña): no redirigir — la página de origen muestra el error
+      // localmente. Redirigir aquí recargaba el login y mataba el banner.
+      const url: string = error.config?.url ?? ''
+      const esEndpointAuth = /\/auth\//.test(url)
+      if (!esEndpointAuth && typeof window !== 'undefined') {
         localStorage.removeItem('sep_token')
         localStorage.removeItem('sep_usuario')
         window.location.href = '/login'

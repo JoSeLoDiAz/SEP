@@ -12,6 +12,7 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-size: 16px;
   }
 
   body {
@@ -49,4 +50,118 @@ input[type=number]::-webkit-inner-spin-button {
 }
 input[type=number] {
   -moz-appearance: textfield;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Accesibilidad — reglas activadas por data-attributes del <html>
+   El store en lib/accessibility/store.ts persiste las preferencias y
+   accessibility-fab.tsx las pinta en el documento como data-*.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Tamaño de texto — cambia el font-size base del html ──────────── */
+html[data-text-size="xs"]   { font-size: 14.4px; }   /* 90%  */
+html[data-text-size="sm"]   { font-size: 15.2px; }   /* 95%  */
+html[data-text-size="md"]   { font-size: 16px;   }   /* 100% */
+html[data-text-size="lg"]   { font-size: 20px;   }   /* 125% */
+html[data-text-size="xl"]   { font-size: 24px;   }   /* 150% */
+
+/* ── Espaciado de texto — útil para dislexia ──────────────────────── */
+html[data-spacing="comodo"] body * {
+  line-height: 1.7 !important;
+  letter-spacing: 0.04em !important;
+  word-spacing: 0.1em !important;
+}
+html[data-spacing="amplio"] body * {
+  line-height: 2 !important;
+  letter-spacing: 0.08em !important;
+  word-spacing: 0.2em !important;
+}
+
+/* ── Filtros de daltonismo (los <filter> SVG están en colorblind-filters.tsx) ── */
+html[data-colorblind="deuteranopia"] body { filter: url(#cb-deuteranopia); }
+html[data-colorblind="protanopia"]   body { filter: url(#cb-protanopia);   }
+html[data-colorblind="tritanopia"]   body { filter: url(#cb-tritanopia);   }
+
+/* ── Modo oscuro ──────────────────────────────────────────────────── */
+html[data-dark-mode="true"] body {
+  background-color: #0e0f12;
+  color: #e8e8ee;
+}
+html[data-dark-mode="true"] body .bg-white,
+html[data-dark-mode="true"] body [class*="bg-white"] {
+  background-color: #1c1d22 !important;
+  color: #e8e8ee !important;
+}
+html[data-dark-mode="true"] body .bg-neutral-50,
+html[data-dark-mode="true"] body .bg-neutral-100 {
+  background-color: #16171b !important;
+}
+html[data-dark-mode="true"] body .text-neutral-900,
+html[data-dark-mode="true"] body .text-neutral-800,
+html[data-dark-mode="true"] body .text-neutral-700 {
+  color: #e8e8ee !important;
+}
+html[data-dark-mode="true"] body .text-neutral-600,
+html[data-dark-mode="true"] body .text-neutral-500 {
+  color: #b6b8c0 !important;
+}
+html[data-dark-mode="true"] body .border-neutral-200,
+html[data-dark-mode="true"] body .border-neutral-300 {
+  border-color: #2a2c33 !important;
+}
+html[data-dark-mode="true"] body input:not([type="checkbox"]):not([type="radio"]),
+html[data-dark-mode="true"] body select,
+html[data-dark-mode="true"] body textarea {
+  background-color: #1c1d22 !important;
+  color: #e8e8ee !important;
+  border-color: #3a3c44 !important;
+}
+
+/* ── Alto contraste — gana sobre dark mode si ambos están activos ─── */
+html[data-high-contrast="true"] body,
+html[data-high-contrast="true"] body * {
+  background-color: #000 !important;
+  color: #fff !important;
+  border-color: #fff !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+html[data-high-contrast="true"] body a,
+html[data-high-contrast="true"] body button,
+html[data-high-contrast="true"] body [role="button"] {
+  color: #ffe600 !important;
+  text-decoration: underline !important;
+  outline: 2px solid #ffe600 !important;
+}
+html[data-high-contrast="true"] body input,
+html[data-high-contrast="true"] body select,
+html[data-high-contrast="true"] body textarea {
+  background-color: #000 !important;
+  color: #fff !important;
+  border: 2px solid #fff !important;
+}
+/* El panel de accesibilidad sigue siendo visible y diferenciado */
+html[data-high-contrast="true"] [aria-label="Cerrar accesibilidad"],
+html[data-high-contrast="true"] [aria-label="Abrir opciones de accesibilidad"] {
+  background: #ffe600 !important;
+  color: #000 !important;
+  border: 3px solid #fff !important;
+}
+
+/* ── Reducir animaciones ──────────────────────────────────────────── */
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── Subrayar enlaces ─────────────────────────────────────────────── */
+html[data-underline-links="true"] body a:not([class*="no-underline"]) {
+  text-decoration: underline !important;
+  text-underline-offset: 3px !important;
+  text-decoration-thickness: 2px !important;
 }

@@ -97,6 +97,36 @@ export class AuthService {
     private readonly mailService: MailService,
   ) {}
 
+  /**
+   * Verifica un token de Cloudflare Turnstile contra la API de Cloudflare.
+   * Si TURNSTILE_SECRET no está configurado en .env, se permite el login
+   * (modo desarrollo / testing). En produccion siempre debe estar.
+   */
+  private async verifyCaptcha(token?: string): Promise<void> {
+    const secret = process.env.TURNSTILE_SECRET
+    if (!secret) {
+      // Sin secret configurado → omitir verificación (dev mode)
+      return
+    }
+    if (!token) {
+      throw new UnauthorizedException('Falta validación de captcha')
+    }
+    try {
+      const body = new URLSearchParams({ secret, response: token })
+      const res = await fetch(
+        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        { method: 'POST', body },
+      )
+      const data = (await res.json()) as { success: boolean; 'error-codes'?: string[] }
+      if (!data.success) {
+        throw new UnauthorizedException('Captcha inválido o expirado')
+      }
+    } catch (e) {
+      if (e instanceof UnauthorizedException) throw e
+      throw new UnauthorizedException('Error al verificar el captcha')
+    }
+  }
+
   async tiposDocumento(para: 'persona' | 'empresa') {
     const col =
       para === 'persona'
@@ -118,6 +148,8 @@ export class AuthService {
     if (!dto.email || !dto.clave) {
       throw new BadRequestException('Correo y contraseña son requeridos')
     }
+
+    await this.verifyCaptcha(dto.captchaToken)
 
     const usuario = await this.usuarioRepo.findOne({
       where: { usuarioEmail: dto.email },

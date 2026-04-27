@@ -8,18 +8,18 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import ReCAPTCHA from 'react-google-recaptcha'
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 
-// Para producción, reemplaza con tu site key de https://www.google.com/recaptcha/admin
-const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY ?? '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'
+// Site key pública de Cloudflare Turnstile. Configurable por env.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '0x4AAAAAADD6VVCyoP6eM5Ao'
 
 export default function LoginPage() {
   const router = useRouter()
-  const recaptchaRef = useRef<ReCAPTCHA>(null)
+  const turnstileRef = useRef<TurnstileInstance | null>(null)
 
   const [email, setEmail] = useState('')
   const [clave, setClave] = useState('')
-  const [captchaOk, setCaptchaOk] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(false)
   const [toastNombre, setToastNombre] = useState('')
@@ -50,8 +50,8 @@ export default function LoginPage() {
       showErr('Correo y contraseña son requeridos')
       return
     }
-    if (!captchaOk) {
-      showErr('Por favor completa el reCAPTCHA')
+    if (!captchaToken) {
+      showErr('Por favor espera a que se complete la validación de seguridad')
       return
     }
 
@@ -60,7 +60,7 @@ export default function LoginPage() {
       const res = await api.post<{
         accessToken: string
         usuario: { perfilId: number; email: string; nombre: string }
-      }>('/auth/login', { email, clave })
+      }>('/auth/login', { email, clave, captchaToken })
 
       localStorage.setItem('sep_token', res.data.accessToken)
       localStorage.setItem('sep_usuario', JSON.stringify({
@@ -75,8 +75,8 @@ export default function LoginPage() {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message
         ?? 'Credenciales incorrectas. Verifique e intente nuevamente.'
-      setCaptchaOk(false)
-      recaptchaRef.current?.reset()
+      setCaptchaToken('')
+      turnstileRef.current?.reset()
       showErr(msg)
     } finally {
       setLoading(false)
@@ -271,20 +271,21 @@ export default function LoginPage() {
                   />
                 </div>
 
-                {/* reCAPTCHA */}
+                {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
                 <div className="flex justify-center">
-                  <ReCAPTCHA
-                    ref={recaptchaRef}
-                    sitekey={RECAPTCHA_SITE_KEY}
-                    onChange={(token) => setCaptchaOk(!!token)}
-                    onExpired={() => setCaptchaOk(false)}
-                    hl="es"
+                  <Turnstile
+                    ref={turnstileRef}
+                    siteKey={TURNSTILE_SITE_KEY}
+                    options={{ language: 'es', theme: 'light' }}
+                    onSuccess={(token) => setCaptchaToken(token)}
+                    onExpire={() => setCaptchaToken('')}
+                    onError={() => setCaptchaToken('')}
                   />
                 </div>
 
                 <button
                   type="submit"
-                  disabled={loading || !captchaOk}
+                  disabled={loading || !captchaToken}
                   className="w-full bg-green-500 hover:bg-green-600 active:bg-green-700 disabled:opacity-60 text-white font-semibold text-sm py-2.5 rounded-lg transition-colors mt-1 flex items-center justify-center gap-2"
                 >
                   {loading && <Loader2 size={15} className="animate-spin" />}

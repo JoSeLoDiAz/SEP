@@ -44,6 +44,19 @@ const fmt = (n: number) =>
 
 const pct = (n: number) => `${Number(n ?? 0).toFixed(2)}%`
 
+// Valor unitario — totalRubro / cantidad de unidades.
+// Detecta la unidad por el campo poblado (no por el caso) para que también
+// funcione con rubros abiertos como R04 (tiquetes) que no tienen caso 1-4/8.
+function valorUnidad(r: RubroAF): number | null {
+  if (!r.totalRubro || r.totalRubro <= 0) return null
+  if (r.numHoras > 0 && r.beneficiarios > 0) return r.totalRubro / (r.numHoras * r.beneficiarios)
+  if (r.numHoras > 0)      return r.totalRubro / r.numHoras
+  if (r.dias > 0)          return r.totalRubro / r.dias
+  if (r.cantidad > 0)      return r.totalRubro / r.cantidad
+  if (r.beneficiarios > 0) return r.totalRubro / r.beneficiarios
+  return null
+}
+
 function unidadesLabel(r: RubroAF): string {
   // caso 8 (R07.2.2/R07.2.3): tarifa × horas × benef → mostrar ambos
   if (r.caso === 8) {
@@ -152,11 +165,34 @@ export default function RubrosAFPage() {
 
   useEffect(() => { cargar() }, [cargar])
 
+  // Refrescos parciales — evitan que `cargar()` sobrescriba inputs no guardados
+  // de otras secciones (p. ej. guardar GO no debe borrar Transferencia en edición).
+  const refrescarRubros = useCallback(async () => {
+    const [rRubros, rPre] = await Promise.all([
+      api.get(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros`),
+      api.get(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/prereqs`),
+    ])
+    setRubrosAF(rRubros.data)
+    setPrereqs(rPre.data)
+  }, [proyectoId, afIdNum])
+
+  const refrescarGO = useCallback(async () => {
+    const r = await api.get(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/go`)
+    setGoForm(r.data ?? emptyGO)
+  }, [proyectoId, afIdNum])
+
+  const refrescarTrans = useCallback(async () => {
+    const r = await api.get(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/transferencia`)
+    setTransForm(r.data ?? emptyTrans)
+  }, [proyectoId, afIdNum])
+
   // ── Rubro select → fill form ──────────────────────────────────────────────
 
   function seleccionarRubro(rubroId: number) {
     const r = catalogo.find(c => c.rubroId === rubroId)
     if (!r) return
+    // R013 (pólizas/garantías): solo Contrapartida en Dinero
+    const soloDinero = r.codigo?.trim().startsWith('R013') ?? false
     const existing = rubrosAF.find(a => a.rubroId === rubroId)
     if (existing) {
       setEditId(existing.afrubroid)
@@ -165,7 +201,8 @@ export default function RubrosAFPage() {
         numHoras: existing.numHoras ?? 0, cantidad: existing.cantidad ?? 1,
         beneficiarios: existing.beneficiarios ?? 0, dias: existing.dias ?? 0,
         numGrupos: existing.numGrupos ?? 1, totalRubro: existing.totalRubro ?? 0,
-        cofSena: existing.cofSena ?? 0, contraEspecie: existing.contraEspecie ?? 0,
+        cofSena: soloDinero ? 0 : (existing.cofSena ?? 0),
+        contraEspecie: soloDinero ? 0 : (existing.contraEspecie ?? 0),
         contraDinero: existing.contraDinero ?? 0, valorMaximo: existing.valorMaximo ?? 0,
         valorBenef: existing.valorBenef ?? 0, paquete: r.paquete, caso: r.caso, tope: r.tope,
       })
@@ -222,7 +259,7 @@ export default function RubrosAFPage() {
       })
       showToast('success', editId ? 'Rubro actualizado.' : 'Rubro guardado.')
       setForm(emptyForm); setEditId(null)
-      await cargar()
+      await refrescarRubros()
     } catch (e: any) {
       showToast('error', e?.response?.data?.message ?? 'Error al guardar.')
     } finally { setSaving(false) }
@@ -236,7 +273,7 @@ export default function RubrosAFPage() {
       if (form.rubroId === rubrosAF.find(r => r.afrubroid === afrubroid)?.rubroId) {
         setForm(emptyForm); setEditId(null)
       }
-      await cargar()
+      await refrescarRubros()
     } catch { showToast('error', 'Error al eliminar.') }
   }
 
@@ -252,7 +289,7 @@ export default function RubrosAFPage() {
         dinero:  goForm.dinero  ?? 0,
       })
       showToast('success', 'Gastos de Operación guardados.')
-      await cargar()
+      await refrescarGO()
     } catch (e: any) {
       showToast('error', e?.response?.data?.message ?? 'Error al guardar GO.')
     } finally { setSavingGO(false) }
@@ -276,7 +313,7 @@ export default function RubrosAFPage() {
         valor:         transForm.valor,
       })
       showToast('success', 'Transferencia guardada.')
-      await cargar()
+      await refrescarTrans()
     } catch (e: any) {
       showToast('error', e?.response?.data?.message ?? 'Error al guardar transferencia.')
     } finally { setSavingTrans(false) }
@@ -333,6 +370,8 @@ export default function RubrosAFPage() {
   const campos    = camposVisibles(form.caso)
   const rubroSel  = catalogo.find(c => c.rubroId === form.rubroId)
   const esTiquetes = rubroSel?.codigo?.trim().startsWith('R04') ?? false
+  // R013 (pólizas/garantías) solo admite Contrapartida en Dinero
+  const esSoloDinero = rubroSel?.codigo?.trim().startsWith('R013') ?? false
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -507,15 +546,20 @@ export default function RubrosAFPage() {
 
                 <div className="border-t border-neutral-100 pt-4 flex flex-col gap-3">
                   <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Distribución financiera</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  {esSoloDinero && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs text-amber-800">
+                      Este rubro solo admite <strong>Contrapartida en Dinero</strong> a cargo del conviniente.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
                       <label className={lbl}>Cofin. SENA ($)</label>
-                      <NumberInput min={0} className={inp} value={form.cofSena}
+                      <NumberInput min={0} disabled={esSoloDinero} className={inp} value={form.cofSena}
                         onChange={v => setField('cofSena', v)} />
                     </div>
                     <div>
                       <label className={lbl}>Contra. Especie ($)</label>
-                      <NumberInput min={0} className={inp} value={form.contraEspecie}
+                      <NumberInput min={0} disabled={esSoloDinero} className={inp} value={form.contraEspecie}
                         onChange={v => setField('contraEspecie', v)} />
                     </div>
                     <div>
@@ -595,6 +639,7 @@ export default function RubrosAFPage() {
                     <tr className="bg-neutral-50 border-b border-neutral-100">
                       <th className="text-left px-4 py-3 text-neutral-500 font-semibold">Rubro</th>
                       <th className="text-right px-3 py-3 text-neutral-500 font-semibold whitespace-nowrap">Unidades</th>
+                      <th className="text-right px-3 py-3 text-neutral-500 font-semibold whitespace-nowrap">Valor Unidad</th>
                       <th className="text-right px-3 py-3 text-neutral-500 font-semibold whitespace-nowrap">Cofin. SENA</th>
                       <th className="text-right px-3 py-3 text-neutral-500 font-semibold">%</th>
                       <th className="text-right px-3 py-3 text-neutral-500 font-semibold whitespace-nowrap">C. Especie</th>
@@ -615,6 +660,9 @@ export default function RubrosAFPage() {
                           <div className="text-neutral-500 max-w-[220px] truncate">{r.nombre.replace(r.codigo + ' ', '')}</div>
                         </td>
                         <td className="px-3 py-3 text-right whitespace-nowrap text-neutral-700 font-medium">{unidadesLabel(r)}</td>
+                        <td className="px-3 py-3 text-right whitespace-nowrap text-neutral-600">
+                          {(() => { const v = valorUnidad(r); return v != null ? fmt(v) : '—' })()}
+                        </td>
                         <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(r.cofSena ?? 0)}</td>
                         <td className="px-3 py-3 text-right text-neutral-400">{pct(r.porcSena ?? 0)}</td>
                         <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(r.contraEspecie ?? 0)}</td>
@@ -695,7 +743,7 @@ export default function RubrosAFPage() {
                 Para proyectos ≤ $200.000.000: máximo 16% del total de las acciones de formación (R09.2).
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className={lbl}>Cofinanciación SENA ($)</label>
                   <NumberInput min={0} disabled={!editable} className={inp}
@@ -717,7 +765,7 @@ export default function RubrosAFPage() {
               </div>
 
               {goTotal > 0 && (
-                <div className="grid grid-cols-4 gap-3 text-center text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
                   <div className={statBox}>
                     <div className="text-neutral-500">% Cofin. SENA</div>
                     <div className="font-bold text-[#00304D]">{pct(goPorcSena)}</div>
@@ -780,7 +828,8 @@ export default function RubrosAFPage() {
             <div className="flex flex-col gap-4">
               <div className="rounded-xl bg-teal-50 border border-teal-200 px-4 py-3 text-xs text-teal-800 leading-relaxed">
                 A cargo de la contrapartida en dinero del proponente. El número de beneficiarios de la Transferencia
-                debe corresponder mínimo al <strong>5%</strong> de los beneficiarios del proyecto.
+                debe corresponder mínimo al <strong>5%</strong> de los beneficiarios del proyecto, y el valor de la
+                Transferencia debe corresponder mínimo al <strong>1%</strong> del presupuesto del proyecto.
                 El valor base de cálculo corresponde a la sumatoria de los demás rubros presupuestales más los
                 Gastos de Operación.
               </div>
@@ -811,7 +860,7 @@ export default function RubrosAFPage() {
               </div>
 
               {((transForm?.beneficiarios ?? 0) > 0 || (transForm?.valor ?? 0) > 0) && (
-                <div className="grid grid-cols-3 gap-3 text-center text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs">
                   <div className={statBox}>
                     <div className="text-neutral-500">% Benef. / Total AF</div>
                     <div className={`font-bold ${porcBenefTrans < 5 ? 'text-red-600' : 'text-teal-700'}`}>{pct(porcBenefTrans)}</div>

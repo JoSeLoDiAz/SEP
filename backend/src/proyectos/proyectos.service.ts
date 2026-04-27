@@ -1673,7 +1673,7 @@ export class ProyectosService {
     const issues: string[] = []
     const [af] = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONNUMGRUPOS       AS "numGrupos",
-              af.ACCIONFORMACIONNUMTOTHORASGRUP AS "numTotHoras",
+              af.ACCIONFORMACIONNUMHORAGRUPO    AS "numHorasGrupo",
               af.TIPOEVENTOID                  AS "tipoEventoId",
               af.MODALIDADFORMACIONID          AS "modalidadId"
          FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
@@ -1681,12 +1681,12 @@ export class ProyectosService {
     )
     if (!af) return { ok: false, issues: ['AF no encontrada'] }
 
-    const numGruposAF = Number(af.numGrupos) || 0
-    const numTotHoras = Number(af.numTotHoras) || 0
+    const numGruposAF    = Number(af.numGrupos) || 0
+    const numHorasGrupo  = Number(af.numHorasGrupo) || 0
 
     if (!af.tipoEventoId || !af.modalidadId)
       issues.push('Falta guardar el tipo de evento y/o modalidad de formación.')
-    if (numTotHoras <= 0)
+    if (numHorasGrupo <= 0)
       issues.push('Falta definir el número de horas y grupos (guardar la sección "Grupos y Beneficiarios").')
 
     const [{ gruposCreados }] = await this.dataSource.query(
@@ -1707,7 +1707,7 @@ export class ProyectosService {
     if (Number(totalUTs) === 0)
       issues.push('Debe registrar al menos una Unidad Temática.')
 
-    if (numTotHoras > 0) {
+    if (numHorasGrupo > 0) {
       const [{ horasUTs }] = await this.dataSource.query(
         `SELECT NVL(SUM(
            NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
@@ -1716,8 +1716,8 @@ export class ProyectosService {
            NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
          ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
         [afId])
-      if (Number(horasUTs) < numTotHoras)
-        issues.push(`Las horas de las UTs (${Number(horasUTs)}h) no cubren el total de la AF (${numTotHoras}h). Agregue más horas en las UTs.`)
+      if (Number(horasUTs) < numHorasGrupo)
+        issues.push(`Las horas de las UTs (${Number(horasUTs)}h) no cubren las horas por grupo de la AF (${numHorasGrupo}h). Las UTs se formulan por grupo y se replican en cada uno. Agregue más horas en las UTs.`)
     }
 
     return { ok: issues.length === 0, issues }
@@ -1726,7 +1726,7 @@ export class ProyectosService {
   private async validarPrerequisitosRubros(afId: number) {
     const [af] = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONNUMGRUPOS       AS "numGrupos",
-              af.ACCIONFORMACIONNUMTOTHORASGRUP AS "numTotHoras",
+              af.ACCIONFORMACIONNUMHORAGRUPO    AS "numHorasGrupo",
               af.TIPOEVENTOID                  AS "tipoEventoId",
               af.MODALIDADFORMACIONID          AS "modalidadId"
          FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
@@ -1734,13 +1734,13 @@ export class ProyectosService {
     )
     if (!af) throw new BadRequestException('AF no encontrada')
 
-    const numGruposAF = Number(af.numGrupos) || 0
-    const numTotHoras = Number(af.numTotHoras) || 0
+    const numGruposAF   = Number(af.numGrupos) || 0
+    const numHorasGrupo = Number(af.numHorasGrupo) || 0
 
     // 1. Debe tener tipo de evento, modalidad y horas definidas
     if (!af.tipoEventoId || !af.modalidadId)
       throw new BadRequestException('Debe guardar primero el tipo de evento y modalidad de formación antes de registrar rubros.')
-    if (numTotHoras <= 0)
+    if (numHorasGrupo <= 0)
       throw new BadRequestException('Debe definir el número de horas y grupos antes de registrar rubros.')
 
     // 2. Cada grupo debe tener al menos una cobertura registrada
@@ -1783,8 +1783,8 @@ export class ProyectosService {
          FROM UNIDADTEMATICA ut WHERE ut.ACCIONFORMACIONID = :1`,
       [afId],
     )
-    if (Number(horasUTs) < numTotHoras)
-      throw new BadRequestException(`Las horas de las Unidades Temáticas (${Number(horasUTs)}h) no completan las horas totales de la AF (${numTotHoras}h). Complete las UTs antes de registrar rubros.`)
+    if (Number(horasUTs) < numHorasGrupo)
+      throw new BadRequestException(`Las horas de las Unidades Temáticas (${Number(horasUTs)}h) no completan las horas por grupo de la AF (${numHorasGrupo}h). Recuerde que las UTs se formulan por grupo y se replican en cada uno. Complete las UTs antes de registrar rubros.`)
   }
 
   async guardarRubroAF(proyectoId: number, afId: number, dto: {

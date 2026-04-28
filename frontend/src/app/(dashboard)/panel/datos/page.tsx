@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTime } from '@/lib/format-date'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   ChevronDown, FileText, Loader2,
@@ -409,7 +410,7 @@ export default function DatosBasicosPage() {
             <Field label="Usuario (correo)"><ReadOnly value={data.empresaEmail} /></Field>
             <Field label="Perfil"><ReadOnly value={data.perfilNombre ?? 'EMPRESA'} /></Field>
             <Field label="Fecha de Registro">
-              <ReadOnly value={data.fechaRegistro ? new Date(data.fechaRegistro).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—'} />
+              <ReadOnly value={fmtDateTime(data.fechaRegistro)} />
             </Field>
             <Field label="Nueva Contraseña">
               <input

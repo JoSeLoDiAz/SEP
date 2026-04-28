@@ -2,14 +2,15 @@
 
 import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
+import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  BookUser, CheckCircle2, ChevronRight, ClipboardList, FileText,
-  FolderKanban, Layers, Loader2, LogOut, Pencil, Plus, Save,
+  BookUser, CheckCircle2, ChevronRight, FileText, FolderKanban,
+  Loader2, LogOut, Plus, Save,
   Trash2, UserPlus, X,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -43,11 +44,11 @@ const CARGOS = ['Representante Legal', 'Responsable del Proyecto', 'Contacto Adm
 
 function estadoInfo(e: number | null) {
   switch (Number(e)) {
-    case 1: return { label: 'Radicado',    cls: 'bg-blue-100 text-blue-700 border-blue-200' }
-    case 2: return { label: 'Reversado',   cls: 'bg-amber-100 text-amber-700 border-amber-200' }
-    case 3: return { label: 'Aprobado',    cls: 'bg-green-100 text-green-700 border-green-200' }
-    case 4: return { label: 'Rechazado',   cls: 'bg-red-100 text-red-700 border-red-200' }
-    default: return { label: 'Sin Radicar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
+    case 1: return { label: 'Confirmado',     cls: 'bg-blue-100 text-blue-700 border-blue-200' }
+    case 2: return { label: 'Reversado',      cls: 'bg-amber-100 text-amber-700 border-amber-200' }
+    case 3: return { label: 'Aprobado',       cls: 'bg-green-100 text-green-700 border-green-200' }
+    case 4: return { label: 'Rechazado',      cls: 'bg-red-100 text-red-700 border-red-200' }
+    default: return { label: 'Sin Confirmar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
   }
 }
 
@@ -61,6 +62,7 @@ function puedeEditar(p: Proyecto) {
 export default function ProyectoDetallePage() {
   const { id } = useParams<{ id: string }>()
   const proyectoId = Number(id)
+  const searchParams = useSearchParams()
 
   const [proyecto, setProyecto]         = useState<Proyecto | null>(null)
   const [convocatorias, setConvocatorias] = useState<Opcion[]>([])
@@ -141,6 +143,14 @@ export default function ProyectoDetallePage() {
     cargarContactos()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proyectoId])
+
+  // Auto-abrir modal de Confirmar Proyecto cuando viene ?action=confirmar desde
+  // las otras páginas del proyecto (Acciones, Presupuesto, Rubros).
+  useEffect(() => {
+    if (searchParams.get('action') === 'confirmar') {
+      setConfirmRadicar(true)
+    }
+  }, [searchParams])
 
   // ── Guardar generalidades ─────────────────────────────────────────────────
 
@@ -314,25 +324,10 @@ export default function ProyectoDetallePage() {
         </span>
       </div>
 
-      {/* ── Menú de secciones ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2">
-        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
-          <FolderKanban size={13} /> Generalidades
-        </span>
-        <Link
-          href={`/panel/proyectos/${proyectoId}/acciones`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <ClipboardList size={13} /> Acciones de Formación
-        </Link>
-        <a
-          href={`https://sep.sena.edu.co/proyectosrubros.aspx?${proyectoId}`}
-          target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <Layers size={13} /> Rubros AF
-        </a>
-        {!esAprobado && (
+      {/* ── Menú de secciones (uniforme) ─────────────────────────────── */}
+      {/* hideConfirmar=true: aquí el botón Confirmar abre el modal local. */}
+      <ProyectoTabs proyectoId={proyectoId} active="generalidades" hideConfirmar extraTabs={
+        !esAprobado ? (
           <button
             onClick={() => setConfirmRadicar(true)}
             disabled={radicando}
@@ -345,12 +340,12 @@ export default function ProyectoDetallePage() {
             {radicando
               ? <Loader2 size={13} className="animate-spin" />
               : esRadicado
-                ? <><LogOut size={13} /> Desradicar</>
-                : <><CheckCircle2 size={13} /> Formalizar / Radicar</>
+                ? <><LogOut size={13} /> Desconfirmar</>
+                : <><CheckCircle2 size={13} /> Confirmar Proyecto</>
             }
           </button>
-        )}
-      </div>
+        ) : null
+      } />
 
       {/* ── Dos columnas: Generalidades + Objetivo ─────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -545,16 +540,16 @@ export default function ProyectoDetallePage() {
         )}
       </div>
 
-      {/* ── Modal confirmar radicar ─────────────────────────────────────── */}
+      {/* ── Modal confirmar proyecto ─────────────────────────────────────── */}
       <Modal open={confirmRadicar} onClose={() => setConfirmRadicar(false)} maxWidth="max-w-sm">
         <div className="p-6 flex flex-col gap-5">
           <h3 className="text-base font-bold text-neutral-800">
-            {esRadicado ? 'Desradicar proyecto' : 'Radicar proyecto'}
+            {esRadicado ? 'Desconfirmar proyecto' : 'Confirmar proyecto'}
           </h3>
           <p className="text-sm text-neutral-500">
             {esRadicado
-              ? '¿Está seguro de revertir la radicación de este proyecto?'
-              : '¿Está seguro de radicar este proyecto? Esta acción lo formalizará ante el SENA.'}
+              ? '¿Está seguro de revertir la confirmación de este proyecto?'
+              : '¿Está seguro de confirmar este proyecto? Esta acción lo dejará listo para envío a la siguiente plataforma.'}
           </p>
           <div className="flex gap-3 justify-end">
             <button onClick={() => setConfirmRadicar(false)} className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition">
@@ -564,7 +559,7 @@ export default function ProyectoDetallePage() {
               onClick={handleRadicar}
               className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition ${esRadicado ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#00304D] hover:bg-[#004a76]'}`}
             >
-              {esRadicado ? 'Sí, desradicar' : 'Sí, radicar'}
+              {esRadicado ? 'Sí, desconfirmar' : 'Sí, confirmar'}
             </button>
           </div>
         </div>

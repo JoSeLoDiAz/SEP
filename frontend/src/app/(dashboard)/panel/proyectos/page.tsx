@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTime } from '@/lib/format-date'
 import { FileText, FolderKanban, Loader2, Plus, Settings, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
@@ -48,8 +49,7 @@ function estadoDot(e: number | null): string {
 }
 
 function fmtFecha(f: string | null) {
-  if (!f) return '—'
-  return new Date(f).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })
+  return fmtDateTime(f)
 }
 
 export default function ProyectosPage() {

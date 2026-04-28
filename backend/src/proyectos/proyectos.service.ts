@@ -1472,13 +1472,19 @@ export class ProyectosService {
 
   async getTiposAmbiente() {
     return this.dataSource.query(
-      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE ORDER BY TIPOAMBIENTEID`,
+      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre"
+         FROM TIPOAMBIENTE
+        WHERE TIPOAMBIENTEACTIVO = 1
+        ORDER BY TIPOAMBIENTEID`,
     )
   }
 
   async getGestionConocimientos() {
     return this.dataSource.query(
-      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO ORDER BY GESTIONCONOCIMIENTOID`,
+      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre"
+         FROM GESTIONCONOCIMIENTO
+        WHERE GESTIONCONOCIMIENTOESTADO = 1
+        ORDER BY GESTIONCONOCIMIENTOID`,
     )
   }
 
@@ -2160,10 +2166,11 @@ export class ProyectosService {
     const transTotalBenef = transRich.reduce((s: number, t: any) => s + t.beneficiarios, 0)
     const transTotalValor = transRich.reduce((s: number, t: any) => s + t.valor, 0)
 
-    // Totales del proyecto
+    // Totales del proyecto: la Transferencia (R015) se paga con contrapartida
+    // en dinero del proponente → se suma al total de Contra. Dinero.
     const totalProyectoCofSena       = totalCofSena       + goTotalCofSena
     const totalProyectoContraEspecie = totalContraEspecie + goTotalContraEspecie
-    const totalProyectoContraDinero  = totalContraDinero  + goTotalContraDinero
+    const totalProyectoContraDinero  = totalContraDinero  + goTotalContraDinero + transTotalValor
     const valorTotalProyecto         = valorTotalAFs + goTotal + transTotalValor
 
     return {

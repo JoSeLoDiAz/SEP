@@ -38,7 +38,11 @@ interface Contacto  {
 }
 interface Disponible { contactoId: number; nombre: string; cargo: string; correo: string; proyectoActual: string | null }
 
-const CARGOS = ['Representante Legal', 'Responsable del Proyecto', 'Contacto Administrativo']
+const CARGOS = [
+  'Representante Legal',
+  'Persona encargada del área de Talento Humano',
+  'Persona encargada del área de Comunicaciones',
+]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

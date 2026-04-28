@@ -159,7 +159,8 @@ export class NecesidadesService {
     return this.dataSource.query(
       `SELECT FUENTEHERRAMIENTAID AS "id", FUENTEHERRAMIENTANOMBRE AS "nombre"
          FROM FUENTEHERRAMIENTA
-        ORDER BY FUENTEHERRAMIENTANOMBRE`,
+        WHERE FUENTEHERRAMIENTAESTADO = 1
+        ORDER BY FUENTEHERRAMIENTAID`,
     )
   }
 

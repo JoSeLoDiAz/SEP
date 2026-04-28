@@ -1,3 +1,10 @@
+// Forzar UTC en el proceso Node ANTES de cualquier import que toque fechas
+// (oracledb, TypeORM). Si Node corre en una TZ distinta a la BD, el driver
+// Oracle aplica una conversión incorrecta y las fechas llegan desplazadas.
+// Al fijar TZ=UTC, oracledb interpreta los DATE de la BD (que están en UTC)
+// como UTC, y la serialización JSON queda con `Z` correcto.
+process.env.TZ = 'UTC'
+
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'

@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -57,13 +58,6 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function fmtDateTime(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleString('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
 
 function Row({ label, value }: { label: string; value?: string | null }) {
   return (

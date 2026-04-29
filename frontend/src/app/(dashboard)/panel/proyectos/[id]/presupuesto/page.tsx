@@ -110,16 +110,42 @@ const pct = (n: number) => `${Number(n ?? 0).toFixed(2)}%`
 
 // ══════════════════════════════════════════════════════════════════════════════
 
+interface ProyectoMeta {
+  estado: number | null
+  convocatoriaEstado: number
+}
+
 export default function PresupuestoProyectoPage() {
   const { id } = useParams<{ id: string }>()
   const proyectoId = Number(id)
 
   const [data, setData] = useState<PresupuestoData | null>(null)
+  const [proyectoMeta, setProyectoMeta] = useState<ProyectoMeta | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [errores, setErrores] = useState<string[]>([])
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const [toastK, setToastK] = useState(0)
+
+  // Edición permitida solo si el proyecto NO está confirmado/aprobado/rechazado
+  // y la convocatoria sigue activa.
+  const editable = proyectoMeta
+    ? proyectoMeta.estado !== 1
+      && proyectoMeta.estado !== 3
+      && proyectoMeta.estado !== 4
+      && proyectoMeta.convocatoriaEstado !== 0
+    : false
+  const motivoNoEditable = !proyectoMeta
+    ? ''
+    : proyectoMeta.convocatoriaEstado === 0
+      ? 'La convocatoria está cerrada. El presupuesto es de solo lectura.'
+      : Number(proyectoMeta.estado) === 3
+        ? 'El proyecto está aprobado. El presupuesto es de solo lectura.'
+        : Number(proyectoMeta.estado) === 4
+          ? 'El proyecto está rechazado. El presupuesto es de solo lectura.'
+          : Number(proyectoMeta.estado) === 1
+            ? 'El proyecto está confirmado. El presupuesto es de solo lectura.'
+            : ''
 
   // Expansión por AF: detalle de rubros (excluye R09 GO y R015 Transferencia)
   const [expandedAfId, setExpandedAfId] = useState<number | null>(null)
@@ -147,8 +173,12 @@ export default function PresupuestoProyectoPage() {
   const cargar = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await api.get<PresupuestoData>(`/proyectos/${proyectoId}/presupuesto`)
-      setData(r.data)
+      const [presupResp, proyResp] = await Promise.all([
+        api.get<PresupuestoData>(`/proyectos/${proyectoId}/presupuesto`),
+        api.get<ProyectoMeta>(`/proyectos/${proyectoId}`).catch(() => null),
+      ])
+      setData(presupResp.data)
+      if (proyResp) setProyectoMeta({ estado: proyResp.data.estado, convocatoriaEstado: proyResp.data.convocatoriaEstado })
     } catch {
       showToast('error', 'Error cargando el presupuesto del proyecto')
     } finally {
@@ -224,6 +254,14 @@ export default function PresupuestoProyectoPage() {
 
       {/* Menú (uniforme) */}
       <ProyectoTabs proyectoId={proyectoId} active="presupuesto" />
+
+      {/* Banner de solo lectura */}
+      {!editable && motivoNoEditable && (
+        <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800">
+          <span className="text-lg">🔒</span>
+          <span>{motivoNoEditable}</span>
+        </div>
+      )}
 
       {/* Errores de validación */}
       {errores.length > 0 && (
@@ -578,13 +616,15 @@ export default function PresupuestoProyectoPage() {
             </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-            <button onClick={handleGuardar} disabled={saving}
-              className="inline-flex items-center gap-2 bg-[#00304D] hover:bg-[#004a76] text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Guardar Presupuesto del Proyecto
-            </button>
-          </div>
+          {editable && (
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+              <button onClick={handleGuardar} disabled={saving}
+                className="inline-flex items-center gap-2 bg-[#00304D] hover:bg-[#004a76] text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition">
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Guardar Presupuesto del Proyecto
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -399,10 +399,10 @@ export default function RubrosAFPage() {
   const porcValTrans   = totalAFconGO  > 0 ? ((transForm?.valor        ?? 0) / totalAFconGO  * 100) : 0
 
   // ── Editable ─────────────────────────────────────────────────────────────
-  // Solo se puede editar cuando: NO está radicado (1), NO está aprobado (3)
-  // y la convocatoria sigue activa.
+  // Solo se puede editar cuando: NO está confirmado (1), NO está aprobado (3),
+  // NO está rechazado (4) y la convocatoria sigue activa.
   const editable = proyecto
-    ? proyecto.estado !== 1 && proyecto.estado !== 3 && proyecto.convocatoriaEstado !== 0
+    ? proyecto.estado !== 1 && proyecto.estado !== 3 && proyecto.estado !== 4 && proyecto.convocatoriaEstado !== 0
     : false
   const motivoNoEditable = !proyecto
     ? ''
@@ -410,9 +410,11 @@ export default function RubrosAFPage() {
       ? 'La convocatoria está cerrada. Los rubros son de solo lectura.'
       : proyecto.estado === 3
         ? 'El proyecto está aprobado. Los rubros son de solo lectura.'
-        : proyecto.estado === 1
-          ? 'El proyecto está confirmado. Los rubros son de solo lectura.'
-          : ''
+        : proyecto.estado === 4
+          ? 'El proyecto está rechazado. Los rubros son de solo lectura.'
+          : proyecto.estado === 1
+            ? 'El proyecto está confirmado. Los rubros son de solo lectura.'
+            : ''
 
   // ── Styles ────────────────────────────────────────────────────────────────
 

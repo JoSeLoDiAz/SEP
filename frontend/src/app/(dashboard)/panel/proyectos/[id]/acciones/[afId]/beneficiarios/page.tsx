@@ -93,7 +93,7 @@ function perfilToForm(p: Perfil): FormState {
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  return e !== 1 && e !== 3 && p.convocatoriaEstado !== 0
+  return e !== 1 && e !== 3 && e !== 4 && p.convocatoriaEstado !== 0
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

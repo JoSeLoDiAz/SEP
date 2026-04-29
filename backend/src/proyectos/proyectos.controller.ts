@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
@@ -6,6 +6,8 @@ import { ProyectosService } from './proyectos.service'
 import type { AfDto, ActualizarAfDto, ContactoProyectoDto } from './proyectos.service'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
+
+const PERFIL_ADMIN = 1
 
 interface CrearProyectoDto {
   convocatoriaId: number
@@ -177,15 +179,79 @@ export class ProyectosController {
     return this.proyectosService.actualizarProyecto(user.email, id, dto)
   }
 
-  @Post(':id/radicar')
-  radicar(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
-    return this.proyectosService.radicar(user.email, id)
-  }
-
   @Get(':id/validacion')
   async validarParaConfirmar(@Param('id', ParseIntPipe) id: number) {
     const issues = await this.proyectosService.validarCompletitudParaConfirmar(id)
     return { ok: issues.length === 0, issues }
+  }
+
+  // ── Aprobación SENA (solo administrador) ──────────────────────────────────
+
+  @Post(':id/aprobar')
+  aprobarProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { comentario?: string } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede aprobar proyectos.')
+    }
+    return this.proyectosService.aprobarProyecto(id, user.email, body.comentario ?? null)
+  }
+
+  // ── Versiones del proyecto ────────────────────────────────────────────────
+
+  @Post(':id/versiones')
+  crearVersion(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { comentario?: string } = {},
+  ) {
+    return this.proyectosService.crearVersion(user.email, id, body.comentario ?? null)
+  }
+
+  @Get(':id/versiones')
+  listarVersiones(@Param('id', ParseIntPipe) id: number) {
+    return this.proyectosService.listarVersiones(id)
+  }
+
+  @Get('versiones/:versionId')
+  getVersionSnapshot(@Param('versionId', ParseIntPipe) versionId: number) {
+    return this.proyectosService.getVersionSnapshot(versionId)
+  }
+
+  @Post(':id/versiones/:versionId/final')
+  marcarVersionFinal(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+  ) {
+    return this.proyectosService.marcarVersionFinal(id, versionId, user.email)
+  }
+
+  @Delete(':id/versiones/:versionId/final')
+  desmarcarVersionFinal(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+  ) {
+    return this.proyectosService.desmarcarVersionFinal(id, versionId)
+  }
+
+  @Post(':id/versiones/:versionId/anular')
+  anularVersion(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+  ) {
+    return this.proyectosService.anularVersion(id, versionId, user.email)
+  }
+
+  @Delete(':id/versiones/:versionId/anular')
+  restaurarVersion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+  ) {
+    return this.proyectosService.restaurarVersion(id, versionId)
   }
 
   // ── Contactos del proyecto ────────────────────────────────────────────────

@@ -29,3 +29,7 @@ export function clearSepAuth() {
 export function isEmpresa(perfilId: number) {
   return perfilId === 7
 }
+// perfilId 1 = Administrador SENA
+export function isAdmin(perfilId: number) {
+  return perfilId === 1
+}

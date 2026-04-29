@@ -2,6 +2,7 @@
 
 import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
+import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import {
   Activity, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2,
@@ -10,7 +11,7 @@ import {
   TrendingUp, UserCheck, Users, Users2, Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 // ── Types base ────────────────────────────────────────────────────────────────
@@ -261,7 +262,20 @@ export default function ReporteProyectoPage() {
   // Modal de confirmación del proyecto
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
+
+  // Toast estilo Betowa
+  const toastKey = useRef(0)
+  const [toastKey2, setToastKey2] = useState(0)
+  const [toast, setToast] = useState<{ tipo: 'success' | 'error' | 'warning'; titulo: string; msg: string } | null>(null)
+  function showToast(tipo: 'success' | 'error' | 'warning', titulo: string, msg: string) {
+    toastKey.current++
+    setToast({ tipo, titulo, msg })
+    setToastKey2(toastKey.current)
+  }
+
+  // Validación de completitud para confirmar
+  const [validacion, setValidacion] = useState<{ ok: boolean; issues: string[] } | null>(null)
+  const [validando, setValidando] = useState(false)
 
   useEffect(() => {
     document.title = 'Reporte del Proyecto | SEP'
@@ -326,14 +340,43 @@ export default function ReporteProyectoPage() {
   async function handleConfirmar() {
     setConfirmando(true)
     try {
-      await api.post(`/proyectos/${id}/radicar`)
-      setToast('Proyecto confirmado correctamente.')
+      const resp = await api.post<{ message: string; estado: number }>(`/proyectos/${id}/radicar`)
+      const reversado = resp.data?.estado === 2
+      showToast(
+        'success',
+        reversado ? 'Proyecto reversado' : '¡Proyecto confirmado!',
+        reversado
+          ? 'La confirmación del proyecto fue revertida correctamente.'
+          : 'El proyecto quedó listo para envío a la siguiente plataforma.',
+      )
       setConfirmOpen(false)
       const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
       setData(r.data)
     } catch (e: any) {
-      setToast(e?.response?.data?.message ?? 'Error al confirmar el proyecto')
+      // Si el backend devuelve issues, los mostramos en el modal
+      const respIssues = e?.response?.data?.issues
+      if (Array.isArray(respIssues) && respIssues.length > 0) {
+        setValidacion({ ok: false, issues: respIssues })
+        showToast('warning', 'Faltan datos por completar', e?.response?.data?.message ?? 'Revise la lista de pendientes en el modal.')
+      } else {
+        showToast('error', 'No se pudo confirmar', e?.response?.data?.message ?? 'Ocurrió un error al confirmar el proyecto.')
+      }
     } finally { setConfirmando(false) }
+  }
+
+  async function abrirConfirmar() {
+    setConfirmOpen(true)
+    // Solo validamos cuando vamos a confirmar (no al desconfirmar)
+    if (data?.proyecto.estado !== 1) {
+      setValidando(true)
+      setValidacion(null)
+      try {
+        const r = await api.get<{ ok: boolean; issues: string[] }>(`/proyectos/${id}/validacion`)
+        setValidacion(r.data)
+      } catch {
+        setValidacion({ ok: false, issues: ['No se pudo verificar la completitud del proyecto.'] })
+      } finally { setValidando(false) }
+    }
   }
 
   if (loading) return (
@@ -905,7 +948,7 @@ export default function ReporteProyectoPage() {
     </div>
 
     {!aprobado && (
-      <button onClick={() => setConfirmOpen(true)}
+      <button onClick={abrirConfirmar}
         className={`fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print ${
           yaConfirmado
             ? 'bg-amber-500 hover:bg-amber-600 text-white'
@@ -916,7 +959,7 @@ export default function ReporteProyectoPage() {
       </button>
     )}
 
-    <Modal open={confirmOpen} onClose={() => !confirmando && setConfirmOpen(false)} maxWidth="max-w-sm">
+    <Modal open={confirmOpen} onClose={() => !confirmando && setConfirmOpen(false)} maxWidth="max-w-lg">
       <div className="p-6 flex flex-col gap-5">
         <h3 className="text-base font-bold text-neutral-800">
           {yaConfirmado ? 'Desconfirmar proyecto' : 'Confirmar proyecto'}
@@ -926,13 +969,41 @@ export default function ReporteProyectoPage() {
             ? '¿Está seguro de revertir la confirmación de este proyecto?'
             : '¿Está seguro de confirmar este proyecto? Esta acción lo dejará listo para envío a la siguiente plataforma.'}
         </p>
+
+        {!yaConfirmado && validando && (
+          <div className="flex items-center gap-2 text-xs text-neutral-500">
+            <Loader2 size={14} className="animate-spin" /> Verificando completitud del proyecto…
+          </div>
+        )}
+
+        {!yaConfirmado && !validando && validacion && validacion.ok && (
+          <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+            <CheckCircle2 size={14} className="shrink-0" />
+            El proyecto cumple con todos los requisitos para ser confirmado.
+          </div>
+        )}
+
+        {!yaConfirmado && !validando && validacion && !validacion.ok && (
+          <div className="flex flex-col gap-2 bg-red-50 border border-red-200 rounded-xl p-3">
+            <p className="text-xs font-bold text-red-700 uppercase tracking-wide">
+              Faltan datos por completar ({validacion.issues.length})
+            </p>
+            <ul className="text-xs text-red-700 list-disc list-inside flex flex-col gap-1 max-h-72 overflow-y-auto">
+              {validacion.issues.map((it, i) => (
+                <li key={i}>{it}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="flex gap-3 justify-end">
           <button onClick={() => setConfirmOpen(false)} disabled={confirmando}
             className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
             Cancelar
           </button>
-          <button onClick={handleConfirmar} disabled={confirmando}
-            className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 ${
+          <button onClick={handleConfirmar}
+            disabled={confirmando || validando || (!yaConfirmado && validacion ? !validacion.ok : false)}
+            className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed ${
               yaConfirmado ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#00304D] hover:bg-[#004a76]'
             }`}>
             {confirmando
@@ -944,10 +1015,15 @@ export default function ReporteProyectoPage() {
     </Modal>
 
     {toast && (
-      <div onClick={() => setToast(null)}
-        className="fixed top-6 right-6 z-50 px-4 py-3 bg-neutral-900 text-white text-xs rounded-xl shadow-lg cursor-pointer no-print">
-        {toast}
-      </div>
+      <ToastBetowa
+        key={toastKey2}
+        show
+        onClose={() => setToast(null)}
+        tipo={toast.tipo}
+        titulo={toast.titulo}
+        mensaje={toast.msg}
+        duration={4500}
+      />
     )}
     </>
   )

@@ -382,7 +382,7 @@ export default function ReporteProyectoPage() {
     <style>{`
       html { scroll-behavior: smooth; scroll-padding-top: 80px; }
       @media print {
-        @page { size: A4; margin: 12mm 10mm; }
+        @page { size: A4 landscape; margin: 8mm 8mm; }
         /* Forzar colores e impresión fiel */
         *, *::before, *::after {
           -webkit-print-color-adjust: exact !important;
@@ -396,23 +396,47 @@ export default function ReporteProyectoPage() {
         body > div > div { height: auto !important; overflow: visible !important; }
         main { overflow: visible !important; height: auto !important; padding: 0 !important; }
         /* Reducir paddings del contenedor principal */
-        .max-w-5xl { max-width: 100% !important; padding: 0 !important; gap: 12px !important; }
-        /* Evitar cortar tarjetas / secciones a mitad */
-        section, .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+        .max-w-5xl { max-width: 100% !important; padding: 0 !important; gap: 8px !important; }
+        /* Permitir que las secciones grandes fluyan entre páginas para no
+           dejar grandes huecos en blanco. Solo evitamos cortar lo marcado
+           explícitamente con .avoid-break y cabeceras / filas de tablas. */
+        section { page-break-inside: auto; break-inside: auto; }
+        .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+        /* Padding interno de las secciones más compacto al imprimir */
+        section .p-5, section .p-4 { padding: 8px !important; }
+        section .py-3 { padding-top: 6px !important; padding-bottom: 6px !important; }
+        section .pt-4 { padding-top: 6px !important; }
+        section .gap-6 { gap: 8px !important; }
+        section .gap-5 { gap: 8px !important; }
+        section .gap-4 { gap: 6px !important; }
+        section .mb-3 { margin-bottom: 6px !important; }
         /* Tablas: permitir cortes entre filas pero no dentro de una fila */
-        table { page-break-inside: auto; width: 100% !important; }
+        table { page-break-inside: auto; width: 100% !important; max-width: 100% !important; table-layout: auto; }
         thead { display: table-header-group; }
         tr, td, th { page-break-inside: avoid; }
         /* Evitar overflow horizontal: permitir wrap en celdas largas */
-        .overflow-x-auto { overflow: visible !important; }
+        .overflow-x-auto { overflow: visible !important; width: 100% !important; }
         td.whitespace-nowrap, th.whitespace-nowrap { white-space: normal !important; }
+        /* Quitar truncados (e.g. título de la AF) para que el nombre completo salga */
+        .truncate { overflow: visible !important; text-overflow: clip !important; white-space: normal !important; }
+        /* Tablas anchas (Plan Operativo / Rubros): fuente y padding compactos
+           para que entren en la página sin recortes */
+        .print-wide-table {
+          font-size: 7.5pt !important;
+          table-layout: fixed !important;
+          width: 100% !important;
+        }
+        .print-wide-table th, .print-wide-table td {
+          padding: 3px 4px !important;
+          word-break: break-word !important;
+          overflow-wrap: anywhere !important;
+          white-space: normal !important;
+        }
         /* Tipografía algo más compacta para impresión */
-        body { font-size: 10pt; }
+        body { font-size: 9.5pt; }
         h1, h2, h3 { page-break-after: avoid; }
         /* Sombras planas */
         .shadow-sm, .shadow-lg { box-shadow: none !important; }
-        /* Ajustar ancho de tablas largas */
-        section table { table-layout: auto; }
       }
     `}</style>
 
@@ -672,7 +696,7 @@ export default function ReporteProyectoPage() {
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <SectionHeader icon={Activity}>Plan Operativo del Proyecto de Formación</SectionHeader>
           <div className="p-5 overflow-x-auto">
-            <table className="w-full text-[11px] border-collapse">
+            <table className="w-full text-[11px] border-collapse print-wide-table">
               <thead>
                 <tr style={{ backgroundColor: '#E6EEF5' }}>
                   <th className="border border-neutral-200 px-2 py-2 text-center font-semibold" style={{ color: TITLE_COLOR }}>AF N°</th>
@@ -1324,7 +1348,7 @@ function AfDetalleSection({
                 <p className="text-xs text-neutral-400 italic">Sin rubros registrados.</p>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-neutral-200">
-                  <table className="w-full text-[11px] border-collapse">
+                  <table className="w-full text-[11px] border-collapse print-wide-table">
                     <thead>
                       <tr style={{ backgroundColor: '#E6EEF5' }}>
                         <th className="border border-neutral-200 px-2 py-2 text-left font-semibold" style={{ color: TITLE_COLOR }}>Rubro</th>

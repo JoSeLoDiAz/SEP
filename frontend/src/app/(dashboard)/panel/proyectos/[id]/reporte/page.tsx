@@ -1,18 +1,20 @@
 'use client'
 
 import api from '@/lib/api'
+import { isAdmin, getSepUsuario } from '@/lib/auth'
 import { Modal } from '@/components/ui/modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import {
   Activity, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2,
-  ClipboardList, Compass, FileText, FolderKanban, Info, Layers, Loader2,
-  MapPin, Notebook, Package, Printer, Receipt, Repeat, Search, Target,
-  TrendingUp, UserCheck, Users, Users2, Wallet,
+  ClipboardList, Compass, FileText, FolderKanban, History as HistoryIcon, Info,
+  Layers, Loader2, MapPin, Notebook, Package, Printer, Receipt, Repeat, Search,
+  Target, TrendingUp, UserCheck, Users, Users2, Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 
 // ── Types base ────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,17 @@ interface PresupuestoData {
     contraDinero: number; porcContraDinero: number; valorTotal: number }
 }
 
+interface VersionActual {
+  numero: number
+  codigo: string
+  fecha: string | null
+  usuario: string | null
+  comentario: string | null
+  hash: string | null
+  esFinal?: number
+  anulada?: number
+}
+
 interface Reporte {
   proyecto: {
     id: number; codigo: string | null; nombre: string; objetivo: string | null
@@ -85,6 +98,7 @@ interface Reporte {
   acciones: AfReporte[]
   diagnosticos: DiagnosticoReporte[]
   presupuesto: PresupuestoData | null
+  versionActual: VersionActual | null
 }
 
 // ── Types detalle por AF (consumidos desde endpoints existentes) ─────────────
@@ -245,9 +259,19 @@ function ListTable({ items }: { items: string[] }) {
 export default function ReporteProyectoPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const versionIdParam = searchParams.get('versionId')
+  const verVersionId = versionIdParam ? Number(versionIdParam) : null
+  const esVersionHistorica = verVersionId != null && !isNaN(verVersionId)
+
   const [data, setData]       = useState<Reporte | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(false)
+  // Metadatos de la versión histórica que se está mostrando (solo cuando aplica)
+  const [versionVista, setVersionVista] = useState<{
+    versionId: number; numero: number; codigo: string
+    fecha: string | null; usuario: string | null; comentario: string | null
+  } | null>(null)
 
   // Detalle por AF (cargado tras el reporte base)
   const [afsDetalle, setAfsDetalle] = useState<Record<number, AfDetalle>>({})
@@ -278,12 +302,40 @@ export default function ReporteProyectoPage() {
   const [validando, setValidando] = useState(false)
 
   useEffect(() => {
-    document.title = 'Reporte del Proyecto | SEP'
-    api.get<Reporte>(`/proyectos/${id}/reporte`)
-      .then(r => setData(r.data))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
-  }, [id])
+    if (esVersionHistorica && verVersionId != null) {
+      document.title = 'Versión histórica del Proyecto | SEP'
+      setLoading(true)
+      api.get<{
+        versionId: number; numero: number; codigo: string
+        fecha: string | null; usuario: string | null; comentario: string | null
+        snapshot: Reporte & { accionesDetalle?: Array<{ afId: number } & AfDetalle> }
+      }>(`/proyectos/versiones/${verVersionId}`)
+        .then(r => {
+          const { snapshot, ...meta } = r.data
+          setData(snapshot)
+          setVersionVista({
+            versionId: meta.versionId, numero: meta.numero, codigo: meta.codigo,
+            fecha: meta.fecha, usuario: meta.usuario, comentario: meta.comentario,
+          })
+          // Hidratar afsDetalle directamente desde el snapshot
+          const map: Record<number, AfDetalle> = {}
+          for (const item of snapshot.accionesDetalle ?? []) {
+            const { afId, ...detalle } = item
+            map[afId] = detalle as AfDetalle
+          }
+          setAfsDetalle(map)
+        })
+        .catch(() => setError(true))
+        .finally(() => setLoading(false))
+    } else {
+      document.title = 'Reporte del Proyecto | SEP'
+      api.get<Reporte>(`/proyectos/${id}/reporte`)
+        .then(r => setData(r.data))
+        .catch(() => setError(true))
+        .finally(() => setLoading(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, verVersionId])
 
   // Catálogos auxiliares (una sola vez)
   useEffect(() => {
@@ -293,9 +345,11 @@ export default function ReporteProyectoPage() {
     api.get<Opcion[]>('/proyectos/materialformacion').then(r => setMaterialesForm(r.data)).catch(() => {})
   }, [])
 
-  // Una vez tenemos el reporte, cargar el detalle de cada AF en paralelo
+  // Una vez tenemos el reporte, cargar el detalle de cada AF en paralelo.
+  // En modo "versión histórica" no fetchamos: ya viene en el snapshot.
   useEffect(() => {
     if (!data) return
+    if (esVersionHistorica) return
     setLoadingDetalles(true)
     const fetchAf = async (afId: number): Promise<AfDetalle> => {
       const proyectoId = data.proyecto.id
@@ -337,46 +391,78 @@ export default function ReporteProyectoPage() {
     ).finally(() => setLoadingDetalles(false))
   }, [data])
 
-  async function handleConfirmar() {
-    setConfirmando(true)
+  // Comentario opcional al crear nueva versión
+  const [comentarioVersion, setComentarioVersion] = useState('')
+
+  // Modal/estado para aprobación SENA (solo admin)
+  const [aprobarOpen, setAprobarOpen] = useState(false)
+  const [aprobando, setAprobando] = useState(false)
+  const [comentarioAprobacion, setComentarioAprobacion] = useState('')
+  const usuario = typeof window !== 'undefined' ? getSepUsuario() : null
+  const esAdmin = usuario ? isAdmin(usuario.perfilId) : false
+
+  async function handleAprobar() {
+    setAprobando(true)
     try {
-      const resp = await api.post<{ message: string; estado: number }>(`/proyectos/${id}/radicar`)
-      const reversado = resp.data?.estado === 2
-      showToast(
-        'success',
-        reversado ? 'Proyecto reversado' : '¡Proyecto confirmado!',
-        reversado
-          ? 'La confirmación del proyecto fue revertida correctamente.'
-          : 'El proyecto quedó listo para envío a la siguiente plataforma.',
-      )
-      setConfirmOpen(false)
+      // La restauración recorre muchas tablas; subimos el timeout a 2 min para
+      // evitar falsos errores cuando la operación es lenta pero exitosa.
+      await api.post(`/proyectos/${id}/aprobar`, {
+        comentario: comentarioAprobacion.trim() || undefined,
+      }, { timeout: 120_000 })
+      showToast('success', '¡Proyecto aprobado!',
+        'Las tablas vivas fueron restauradas desde la versión FINAL. El proyecto ya está en estado Aprobado.')
+      setAprobarOpen(false)
+      setComentarioAprobacion('')
       const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
       setData(r.data)
     } catch (e: any) {
-      // Si el backend devuelve issues, los mostramos en el modal
+      showToast('error', 'No se pudo aprobar', e?.response?.data?.message ?? 'Error inesperado.')
+    } finally { setAprobando(false) }
+  }
+
+  async function handleConfirmar() {
+    setConfirmando(true)
+    try {
+      const resp = await api.post<{
+        message: string;
+        version: { versionNumero: number; versionCodigo: string } | null
+      }>(`/proyectos/${id}/versiones`, {
+        comentario: comentarioVersion.trim() || undefined,
+      })
+      const v = resp.data?.version
+      showToast(
+        'success',
+        v ? `¡Versión V${v.versionNumero} creada!` : 'Versión creada',
+        v
+          ? `Código: ${v.versionCodigo}. El proyecto sigue editable. Para confirmarlo, ve a "Versiones" y marca esta versión como FINAL.`
+          : 'Snapshot guardado correctamente.',
+      )
+      setConfirmOpen(false)
+      setComentarioVersion('')
+      const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
+      setData(r.data)
+    } catch (e: any) {
       const respIssues = e?.response?.data?.issues
       if (Array.isArray(respIssues) && respIssues.length > 0) {
         setValidacion({ ok: false, issues: respIssues })
         showToast('warning', 'Faltan datos por completar', e?.response?.data?.message ?? 'Revise la lista de pendientes en el modal.')
       } else {
-        showToast('error', 'No se pudo confirmar', e?.response?.data?.message ?? 'Ocurrió un error al confirmar el proyecto.')
+        showToast('error', 'No se pudo crear la versión', e?.response?.data?.message ?? 'Ocurrió un error al crear la versión.')
       }
     } finally { setConfirmando(false) }
   }
 
   async function abrirConfirmar() {
     setConfirmOpen(true)
-    // Solo validamos cuando vamos a confirmar (no al desconfirmar)
-    if (data?.proyecto.estado !== 1) {
-      setValidando(true)
-      setValidacion(null)
-      try {
-        const r = await api.get<{ ok: boolean; issues: string[] }>(`/proyectos/${id}/validacion`)
-        setValidacion(r.data)
-      } catch {
-        setValidacion({ ok: false, issues: ['No se pudo verificar la completitud del proyecto.'] })
-      } finally { setValidando(false) }
-    }
+    setComentarioVersion('')
+    setValidando(true)
+    setValidacion(null)
+    try {
+      const r = await api.get<{ ok: boolean; issues: string[] }>(`/proyectos/${id}/validacion`)
+      setValidacion(r.data)
+    } catch {
+      setValidacion({ ok: false, issues: ['No se pudo verificar la completitud del proyecto.'] })
+    } finally { setValidando(false) }
   }
 
   if (loading) return (
@@ -395,8 +481,15 @@ export default function ReporteProyectoPage() {
           sectoresRepresenta, subsectoresRepresenta, contactos, acciones, diagnosticos, presupuesto } = data
 
   const telCel = [empresa.telefono, empresa.celular].filter(Boolean).join(' / ') || '—'
-  const yaConfirmado = proyecto.estado === 1
+  // Estados:
+  //   0 → Sin confirmar (puede crear versiones)
+  //   1 → Confirmado (tiene versión FINAL — bloqueado para edición/nuevas versiones)
+  //   2 → Reversado (tuvo FINAL, la quitó — vuelve a poder crear versiones)
+  //   3 → Aprobado SENA · 4 → Rechazado SENA (congelados)
+  const tieneFinal = proyecto.estado === 1
   const aprobado = proyecto.estado === 3
+  const rechazado = proyecto.estado === 4
+  const puedeCrearVersion = !tieneFinal && !aprobado && !rechazado && !esVersionHistorica
 
   // ── Plan Operativo: cada fila combina AF + GO por contrapartida ─────────────
   // Override SOLO en este reporte: para TALLER-PUESTO DE TRABAJO REAL las horas
@@ -485,6 +578,29 @@ export default function ReporteProyectoPage() {
 
     <div className="p-4 sm:p-7 xl:p-10 max-w-5xl mx-auto flex flex-col gap-5 sm:gap-6 print:p-4 print:gap-4 pb-32">
 
+      {/* Banner cuando se está viendo una versión histórica */}
+      {esVersionHistorica && versionVista && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 flex items-start gap-3 no-print">
+          <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+            <HistoryIcon size={20} strokeWidth={2.4} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-amber-900">
+              Estás viendo una versión histórica del proyecto · V{versionVista.numero}
+            </p>
+            <p className="text-xs text-amber-800 mt-0.5 font-mono break-all">{versionVista.codigo}</p>
+            <p className="text-[11px] text-amber-700 mt-1">
+              Esta vista es de <strong>solo lectura</strong> y refleja el snapshot guardado al momento de confirmar.
+              Los cambios posteriores no se ven aquí.
+            </p>
+            <Link href={`/panel/proyectos/${id}/reporte`}
+              className="inline-block mt-2 text-xs font-semibold text-amber-900 underline hover:text-amber-700">
+              ← Ver el reporte actual del proyecto
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Encabezado tipo formulario SENA */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row items-center gap-4 p-4 sm:p-5 border-b border-neutral-200">
@@ -500,11 +616,15 @@ export default function ReporteProyectoPage() {
             )}
             <p className="text-[10px] text-neutral-500 mt-1">FORMULARIO DIGITAL DE PROYECTO</p>
           </div>
-          <div className="flex gap-2 print:hidden">
+          <div className="flex gap-2 flex-wrap print:hidden">
             <button onClick={() => router.back()}
               className="px-3 py-2 text-xs text-neutral-600 border border-neutral-200 rounded-xl hover:bg-neutral-50 transition">
               ← Volver
             </button>
+            <Link href={`/panel/proyectos/${id}/versiones`}
+              className="px-3 py-2 text-xs font-semibold text-neutral-700 border border-neutral-200 rounded-xl hover:bg-neutral-50 transition inline-flex items-center gap-1.5">
+              <HistoryIcon size={13} /> Versiones
+            </Link>
             <button onClick={() => window.print()}
               className="px-3 py-2 text-xs font-semibold text-white rounded-xl transition inline-flex items-center gap-1.5 hover:opacity-90"
               style={{ backgroundColor: TITLE_COLOR }}>
@@ -514,7 +634,7 @@ export default function ReporteProyectoPage() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Código</span>
+            <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Código de Proyecto</span>
             <span className="text-sm font-bold" style={{ color: TITLE_COLOR }}>{proyecto.codigo ?? proyecto.id}</span>
           </div>
           <div className="flex flex-col gap-0.5">
@@ -529,6 +649,76 @@ export default function ReporteProyectoPage() {
             <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Fecha de Confirmación</span>
             <span className="text-xs font-bold" style={{ color: TITLE_COLOR }}>{proyecto.fechaRadicacion ? fmtDateTime(proyecto.fechaRadicacion) : '—'}</span>
           </div>
+        </div>
+
+        {/* Bloque de versión del proyecto */}
+        <div className="px-4 pb-4">
+          {(() => {
+            const v = esVersionHistorica && versionVista
+              ? { numero: versionVista.numero, codigo: versionVista.codigo,
+                  fecha: versionVista.fecha, usuario: versionVista.usuario,
+                  comentario: versionVista.comentario, esFinal: 0, anulada: 0 }
+              : data.versionActual
+            const esFinal = (v as any)?.esFinal === 1
+            return v ? (
+              esFinal ? (
+                <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 to-amber-100 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                    <span className="text-lg" aria-hidden>🏆</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide">FINAL · Lista para descarga y envío a SECOP</span>
+                      <span className="text-lg font-bold text-amber-900">V{v.numero}</span>
+                    </div>
+                    <div className="text-sm font-mono font-bold text-amber-800 break-all mt-0.5">{v.codigo}</div>
+                    <div className="text-[10px] text-amber-700/90 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      {v.fecha && <span>📅 {fmtDateTime(v.fecha)}</span>}
+                      {v.usuario && <span>👤 {v.usuario}</span>}
+                    </div>
+                    {v.comentario && (
+                      <p className="text-xs text-amber-900/90 mt-2 italic bg-white/70 rounded-lg px-3 py-1.5 border border-amber-200">
+                        “{v.comentario}”
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <CheckCircle2 size={20} strokeWidth={2.4} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Versión del Proyecto</span>
+                      <span className="text-lg font-bold text-emerald-900">V{v.numero}</span>
+                    </div>
+                    <div className="text-sm font-mono font-bold text-emerald-800 break-all mt-0.5">{v.codigo}</div>
+                    <div className="text-[10px] text-emerald-700/80 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      {v.fecha && <span>📅 {fmtDateTime(v.fecha)}</span>}
+                      {v.usuario && <span>👤 {v.usuario}</span>}
+                    </div>
+                    {v.comentario && (
+                      <p className="text-xs text-emerald-900/90 mt-2 italic bg-white/70 rounded-lg px-3 py-1.5 border border-emerald-100">
+                        “{v.comentario}”
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50 p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-neutral-200 text-neutral-500 flex items-center justify-center shrink-0">
+                  <FileText size={18} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide">Versión del Proyecto</p>
+                  <p className="text-sm font-bold text-neutral-600">Borrador — sin versión publicada</p>
+                  <p className="text-[10px] text-neutral-400 mt-0.5">Al confirmar el proyecto se generará la primera versión con su código único.</p>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
 
@@ -947,43 +1137,97 @@ export default function ReporteProyectoPage() {
 
     </div>
 
-    {!aprobado && (
+    {puedeCrearVersion && (
       <button onClick={abrirConfirmar}
-        className={`fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print ${
-          yaConfirmado
-            ? 'bg-amber-500 hover:bg-amber-600 text-white'
-            : 'bg-[#00304D] hover:bg-[#004a76] text-white'
-        }`}>
+        className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-[#00304D] hover:bg-[#004a76] text-white">
         <CheckCircle2 size={16} />
-        {yaConfirmado ? 'Desconfirmar Proyecto' : 'Confirmar Proyecto'}
+        Crear Nueva Versión
       </button>
     )}
 
+    {/* Botón APROBAR — solo visible para admin SENA cuando hay FINAL marcada */}
+    {esAdmin && tieneFinal && !esVersionHistorica && (
+      <button onClick={() => setAprobarOpen(true)}
+        className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-emerald-600 hover:bg-emerald-700 text-white">
+        <CheckCircle2 size={16} />
+        Aprobar Proyecto
+      </button>
+    )}
+
+    {/* Modal de aprobación */}
+    <Modal open={aprobarOpen} onClose={() => !aprobando && setAprobarOpen(false)} maxWidth="max-w-lg">
+      <div className="p-6 flex flex-col gap-5">
+        <h3 className="text-base font-bold text-neutral-800">Aprobar Proyecto</h3>
+        <p className="text-sm text-neutral-600">
+          Vas a aprobar oficialmente este proyecto en nombre del SENA. Esta acción:
+        </p>
+        <ul className="text-xs text-neutral-700 list-disc list-inside flex flex-col gap-1 pl-1">
+          <li>Restaura todas las tablas vivas del proyecto desde el snapshot de la versión <strong>FINAL</strong>.</li>
+          <li>Registra la aprobación con su hash SHA-256 en <code className="font-mono text-[10px]">PROYECTOAPROBADO</code>.</li>
+          <li>Cambia el estado del proyecto a <strong>Aprobado</strong> (irreversible mediante este flujo).</li>
+          <li>El proyecto pasa a fase de ejecución; las tablas vivas quedan disponibles para ajustes administrativos.</li>
+        </ul>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          ⚠️ Si el proponente había hecho cambios después de marcar FINAL (en versiones más recientes no marcadas), <strong>esos cambios se perderán de las tablas vivas</strong> — pero los snapshots históricos en PROYECTOVERSION se conservan.
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] font-semibold text-neutral-600 uppercase tracking-wide">
+            Comentario de aprobación <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional)</span>
+          </label>
+          <textarea
+            value={comentarioAprobacion}
+            onChange={e => setComentarioAprobacion(e.target.value)}
+            maxLength={1000}
+            rows={3}
+            placeholder="Ej.: Proyecto aprobado en comité del 30/04/2026"
+            className="w-full text-xs px-3 py-2 border border-neutral-200 rounded-xl outline-none focus:border-[#00304D] resize-none" />
+          <p className="text-[10px] text-neutral-400 text-right">{comentarioAprobacion.length}/1000</p>
+        </div>
+
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setAprobarOpen(false)} disabled={aprobando}
+            className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
+            Cancelar
+          </button>
+          <button onClick={handleAprobar} disabled={aprobando}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 bg-emerald-600 hover:bg-emerald-700">
+            {aprobando
+              ? <Loader2 size={14} className="animate-spin inline-block" />
+              : 'Sí, aprobar proyecto'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+
+    {(() => {
+      const proxVersion = (data?.versionActual?.numero ?? 0) + 1
+      return (
     <Modal open={confirmOpen} onClose={() => !confirmando && setConfirmOpen(false)} maxWidth="max-w-lg">
       <div className="p-6 flex flex-col gap-5">
         <h3 className="text-base font-bold text-neutral-800">
-          {yaConfirmado ? 'Desconfirmar proyecto' : 'Confirmar proyecto'}
+          Crear Versión V{proxVersion}
         </h3>
         <p className="text-sm text-neutral-500">
-          {yaConfirmado
-            ? '¿Está seguro de revertir la confirmación de este proyecto?'
-            : '¿Está seguro de confirmar este proyecto? Esta acción lo dejará listo para envío a la siguiente plataforma.'}
+          Se generará un snapshot inmutable con código único. <strong>El proyecto sigue editable</strong>.
+          Para confirmarlo finalmente y enviarlo a SECOP, después debes ir a "Versiones" y marcar una de
+          ellas como FINAL.
         </p>
 
-        {!yaConfirmado && validando && (
+        {validando && (
           <div className="flex items-center gap-2 text-xs text-neutral-500">
             <Loader2 size={14} className="animate-spin" /> Verificando completitud del proyecto…
           </div>
         )}
 
-        {!yaConfirmado && !validando && validacion && validacion.ok && (
+        {!validando && validacion && validacion.ok && (
           <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
             <CheckCircle2 size={14} className="shrink-0" />
-            El proyecto cumple con todos los requisitos para ser confirmado.
+            El proyecto cumple con todos los requisitos para crear una nueva versión.
           </div>
         )}
 
-        {!yaConfirmado && !validando && validacion && !validacion.ok && (
+        {!validando && validacion && !validacion.ok && (
           <div className="flex flex-col gap-2 bg-red-50 border border-red-200 rounded-xl p-3">
             <p className="text-xs font-bold text-red-700 uppercase tracking-wide">
               Faltan datos por completar ({validacion.issues.length})
@@ -996,23 +1240,41 @@ export default function ReporteProyectoPage() {
           </div>
         )}
 
+        {!validando && validacion?.ok && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-semibold text-neutral-600 uppercase tracking-wide">
+              Comentario de la versión <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional)</span>
+            </label>
+            <textarea
+              value={comentarioVersion}
+              onChange={e => setComentarioVersion(e.target.value)}
+              maxLength={500}
+              rows={3}
+              placeholder={proxVersion > 1
+                ? 'Ej.: Ajuste en presupuesto AF2 y eliminación AF5'
+                : 'Ej.: Versión inicial completa'}
+              className="w-full text-xs px-3 py-2 border border-neutral-200 rounded-xl outline-none focus:border-[#00304D] resize-none" />
+            <p className="text-[10px] text-neutral-400 text-right">{comentarioVersion.length}/500</p>
+          </div>
+        )}
+
         <div className="flex gap-3 justify-end">
           <button onClick={() => setConfirmOpen(false)} disabled={confirmando}
             className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
             Cancelar
           </button>
           <button onClick={handleConfirmar}
-            disabled={confirmando || validando || (!yaConfirmado && validacion ? !validacion.ok : false)}
-            className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed ${
-              yaConfirmado ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#00304D] hover:bg-[#004a76]'
-            }`}>
+            disabled={confirmando || validando || (validacion ? !validacion.ok : false)}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed bg-[#00304D] hover:bg-[#004a76]">
             {confirmando
               ? <Loader2 size={14} className="animate-spin inline-block" />
-              : yaConfirmado ? 'Sí, desconfirmar' : 'Sí, confirmar'}
+              : `Sí, crear V${proxVersion}`}
           </button>
         </div>
       </div>
     </Modal>
+      )
+    })()}
 
     {toast && (
       <ToastBetowa

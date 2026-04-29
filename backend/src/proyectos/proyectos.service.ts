@@ -125,6 +125,236 @@ export class ProyectosService {
     return { message: 'Proyecto actualizado correctamente' }
   }
 
+  // ── Validación de completitud (antes de confirmar) ────────────────────────
+
+  /** Recorre todas las dimensiones del proyecto y devuelve la lista de
+   *  problemas que impiden confirmarlo. Si la lista viene vacía, el proyecto
+   *  está completo. */
+  async validarCompletitudParaConfirmar(proyectoId: number): Promise<string[]> {
+    const issues: string[] = []
+
+    // 1. Empresa + representante + generalidades
+    const [emp] = await this.dataSource.query(
+      `SELECT e.EMPRESARAZONSOCIAL        AS "razonSocial",
+              e.EMPRESAIDENTIFICACION     AS "nit",
+              e.EMPRESAEMAIL              AS "email",
+              e.EMPRESADIRECCION          AS "direccion",
+              e.EMPRESACELULAR            AS "celular",
+              e.EMPRESATELEFONO           AS "telefono",
+              e.DEPARTAMENTOEMPRESAID     AS "deptoId",
+              e.CIUDADEMPRESAID           AS "ciudadId",
+              e.COBERTURAEMPRESAID        AS "coberturaId",
+              e.CIIUID                    AS "ciiuId",
+              e.TIPOEMPRESAID             AS "tipoEmpresaId",
+              e.TAMANOEMPRESAID           AS "tamanoEmpresaId",
+              e.EMPRESAREP                AS "rep",
+              e.EMPRESAREPDOCUMENTO       AS "repDoc",
+              e.EMPRESAREPCARGO           AS "repCargo",
+              e.EMPRESAREPCORREO          AS "repCorreo",
+              e.EMPRESAREPTEL             AS "repTel",
+              DBMS_LOB.SUBSTR(e.EMPRESAOBJETO,4000,1)       AS "objeto",
+              DBMS_LOB.SUBSTR(e.EMPRESAPRODUCTOS,4000,1)    AS "productos",
+              DBMS_LOB.SUBSTR(e.EMPRESASITUACION,4000,1)    AS "situacion",
+              DBMS_LOB.SUBSTR(e.EMPRESAPAPEL,4000,1)        AS "papel",
+              DBMS_LOB.SUBSTR(e.EMPRESARETOS,4000,1)        AS "retos",
+              DBMS_LOB.SUBSTR(e.EMPRESAEXPERIENCIA,4000,1)  AS "experiencia"
+         FROM PROYECTO p
+         JOIN EMPRESA e ON e.EMPRESAID = p.EMPRESAID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!emp) throw new NotFoundException('Proyecto no encontrado')
+
+    if (!emp.razonSocial)     issues.push('Empresa: falta razón social.')
+    if (!emp.nit)             issues.push('Empresa: falta NIT.')
+    if (!emp.email)           issues.push('Empresa: falta correo electrónico.')
+    if (!emp.direccion)       issues.push('Empresa: falta dirección.')
+    if (!emp.celular && !emp.telefono) issues.push('Empresa: falta teléfono o celular.')
+    if (!emp.deptoId)         issues.push('Empresa: falta departamento.')
+    if (!emp.ciudadId)        issues.push('Empresa: falta ciudad/municipio.')
+    if (!emp.coberturaId)     issues.push('Empresa: falta cobertura.')
+    if (!emp.ciiuId)          issues.push('Empresa: falta código CIIU.')
+    if (!emp.tipoEmpresaId)   issues.push('Empresa: falta tipo de empresa.')
+    if (!emp.tamanoEmpresaId) issues.push('Empresa: falta tamaño de empresa.')
+    if (!emp.rep)             issues.push('Representante Legal: falta nombre.')
+    if (!emp.repDoc)          issues.push('Representante Legal: falta documento.')
+    if (!emp.repCargo)        issues.push('Representante Legal: falta cargo.')
+    if (!emp.repCorreo)       issues.push('Representante Legal: falta correo.')
+    if (!emp.repTel)          issues.push('Representante Legal: falta teléfono.')
+    if (!emp.objeto)          issues.push('Generalidades: falta objeto social.')
+    if (!emp.productos)       issues.push('Generalidades: faltan productos/servicios.')
+    if (!emp.situacion)       issues.push('Generalidades: falta situación actual.')
+    if (!emp.papel)           issues.push('Generalidades: falta papel del proponente.')
+    if (!emp.retos)           issues.push('Generalidades: faltan retos estratégicos.')
+    if (!emp.experiencia)     issues.push('Generalidades: falta experiencia en formación.')
+
+    // 2. Datos del proyecto
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTONOMBRE AS "nombre",
+              DBMS_LOB.SUBSTR(PROYECTOOBJETIVO,4000,1) AS "objetivo"
+         FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy.nombre)   issues.push('Proyecto: falta nombre.')
+    if (!proy.objetivo) issues.push('Proyecto: falta objetivo general.')
+
+    // 3. AFs (mínimo 1) + completitud por AF
+    const afs = await this.dataSource.query(
+      `SELECT ACCIONFORMACIONID            AS "afId",
+              ACCIONFORMACIONNUMERO        AS "numero",
+              ACCIONFORMACIONNOMBRE        AS "nombre",
+              TIPOEVENTOID                 AS "tipoEventoId",
+              MODALIDADFORMACIONID         AS "modalidadId",
+              METODOLOGIAAPRENDIZAJEID     AS "metodologiaId",
+              ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
+              ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
+              ACCIONFORMACIONNUMBENEF      AS "numBenef",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTNEC,4000,1)      AS "justnec",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONCAUSA,4000,1)        AS "causa",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESULTADOS,4000,1)   AS "efectos",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONOBJETIVO,4000,1)     AS "objetivo",
+              NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
+              AFENFOQUEID                  AS "enfoqueId",
+              TIPOAMBIENTEID               AS "tipoAmbienteId",
+              ACCIONFORMACIONCOMPONENTEID  AS "componenteId",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONCOMPOD,4000,1)        AS "compod",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTIFICACION,4000,1) AS "justAlin",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESDESEM,5000,1)      AS "resDesem",
+              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESFORM,5000,1)       AS "resForm"
+         FROM ACCIONFORMACION
+        WHERE PROYECTOID = :1
+        ORDER BY ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    if (afs.length === 0) {
+      issues.push('Debe registrar al menos una Acción de Formación.')
+    } else {
+      for (const af of afs) {
+        const tag = `AF ${af.numero}`
+        if (!af.nombre)               issues.push(`${tag}: falta nombre.`)
+        if (!af.tipoEventoId)         issues.push(`${tag}: falta tipo de evento.`)
+        if (!af.modalidadId)          issues.push(`${tag}: falta modalidad.`)
+        if (!af.metodologiaId)        issues.push(`${tag}: falta metodología.`)
+        if (!Number(af.numHorasGrupo))issues.push(`${tag}: faltan horas por grupo.`)
+        if (!Number(af.numGrupos))    issues.push(`${tag}: falta número de grupos.`)
+        if (!Number(af.numBenef))     issues.push(`${tag}: faltan beneficiarios.`)
+        if (!af.justnec)              issues.push(`${tag}: falta justificación de la necesidad.`)
+        if (!af.causa)                issues.push(`${tag}: falta causa.`)
+        if (!af.efectos)              issues.push(`${tag}: faltan efectos.`)
+        if (!af.objetivo)             issues.push(`${tag}: falta objetivo.`)
+        if (!af.necesidadFormacionId) issues.push(`${tag}: no está vinculada a una necesidad de formación.`)
+        if (!af.enfoqueId)            issues.push(`${tag}: falta enfoque.`)
+        if (!af.tipoAmbienteId)       issues.push(`${tag}: falta el ambiente de aprendizaje.`)
+
+        // Alineación
+        if (!af.componenteId) issues.push(`${tag}: falta componente estratégico (Reto Nacional).`)
+        if (!af.compod)       issues.push(`${tag}: falta justificación de la alineación.`)
+        if (!af.justAlin)     issues.push(`${tag}: falta justificación de AF Especializada.`)
+        if (!af.resDesem)     issues.push(`${tag}: faltan resultados de impacto en el desempeño.`)
+        if (!af.resForm)      issues.push(`${tag}: faltan resultados de impacto en productividad.`)
+
+        // Áreas / Niveles / CUOC (perfil)
+        const [{ totAreas }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totAreas" FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF = :1`,
+          [af.afId],
+        )
+        if (Number(totAreas) === 0) issues.push(`${tag}: no tiene áreas funcionales.`)
+        const [{ totNiv }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totNiv" FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = :1`,
+          [af.afId],
+        )
+        if (Number(totNiv) === 0) issues.push(`${tag}: no tiene niveles ocupacionales.`)
+        const [{ totCuoc }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totCuoc" FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID = :1`,
+          [af.afId],
+        )
+        if (Number(totCuoc) === 0) issues.push(`${tag}: no tiene ocupaciones CUOC.`)
+
+        // Sectores beneficiarios
+        const [{ totSecBen }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totSecBen" FROM AFPSECTOR WHERE ACCIONFORMACIONID = :1`,
+          [af.afId],
+        )
+        if (Number(totSecBen) === 0) issues.push(`${tag}: no tiene sectores beneficiarios.`)
+
+        // Grupos vs cobertura
+        const [{ gruposCreados }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
+          [af.afId],
+        )
+        const numGruposAF = Number(af.numGrupos) || 0
+        if (Number(gruposCreados) < numGruposAF) {
+          issues.push(`${tag}: faltan grupos de cobertura (${gruposCreados}/${numGruposAF}).`)
+        }
+        const [{ gruposSinCob }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "gruposSinCob" FROM AFGRUPO g
+            WHERE g.ACCIONFORMACIONID = :1
+              AND NOT EXISTS (SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID)`,
+          [af.afId],
+        )
+        if (Number(gruposSinCob) > 0) {
+          issues.push(`${tag}: hay ${gruposSinCob} grupo(s) sin cobertura registrada.`)
+        }
+
+        // Unidades temáticas
+        const [{ totUTs }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+          [af.afId],
+        )
+        if (Number(totUTs) === 0) {
+          issues.push(`${tag}: no tiene unidades temáticas.`)
+        } else {
+          const numHorasGrupo = Number(af.numHorasGrupo) || 0
+          if (numHorasGrupo > 0) {
+            const [{ horasUTs }] = await this.dataSource.query(
+              `SELECT NVL(SUM(
+                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
+                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
+                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
+                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+               ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+              [af.afId],
+            )
+            if (Number(horasUTs) < numHorasGrupo) {
+              issues.push(`${tag}: las horas de las UTs (${horasUTs}h) no cubren las horas por grupo (${numHorasGrupo}h).`)
+            }
+          }
+        }
+
+        // Rubros del presupuesto (excluye R09 y R015 que son GO y transferencia)
+        const [{ totRubros }] = await this.dataSource.query(
+          `SELECT COUNT(1) AS "totRubros" FROM AFRUBRO ar
+             JOIN RUBRO r ON r.RUBROID = ar.RUBROID
+            WHERE ar.ACCIONFORMACIONID = :1
+              AND TRIM(r.RUBROCODIGO) NOT IN ('R09','R015')`,
+          [af.afId],
+        )
+        if (Number(totRubros) === 0) issues.push(`${tag}: no tiene rubros registrados en el presupuesto.`)
+      }
+    }
+
+    // 4. Presupuesto general (topes)
+    try {
+      const r = await this.getPresupuestoProyecto(proyectoId)
+      if (r.totalesAfs.valorTotalAFs <= 0) {
+        issues.push('Presupuesto: las acciones de formación no tienen presupuesto registrado.')
+      } else {
+        if (r.go.porcSobreAFs > r.go.topePermitido) {
+          issues.push(`Presupuesto: Gastos de Operación (${r.go.porcSobreAFs.toFixed(2)}%) supera el tope ${r.go.codigo} (${r.go.topePermitido}%).`)
+        }
+        if (r.transferencia.porcBeneficiarios < 5) {
+          issues.push(`Presupuesto: beneficiarios de Transferencia (${r.transferencia.porcBeneficiarios.toFixed(2)}%) deben ser mínimo 5%.`)
+        }
+        if (r.transferencia.porcValor < 1) {
+          issues.push(`Presupuesto: valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo 1% del total de AFs.`)
+        }
+      }
+    } catch { /* si falla la consulta de presupuesto, lo dejamos pasar y otras validaciones lo cubren */ }
+
+    return issues
+  }
+
   // ── Radicar / Desradicar ──────────────────────────────────────────────────
 
   async radicar(email: string, proyectoId: number) {
@@ -142,6 +372,7 @@ export class ProyectosService {
     const nuevoEstado = Number(estado) === 1 ? 2 : 1
 
     if (nuevoEstado === 1) {
+      // Unicidad: una empresa solo puede tener un proyecto radicado por convocatoria
       const [{ total }] = await this.dataSource.query(
         `SELECT COUNT(PROYECTOID) AS "total"
            FROM PROYECTO
@@ -150,6 +381,15 @@ export class ProyectosService {
       )
       if (Number(total) > 0)
         throw new BadRequestException('Ya existe un proyecto radicado en esta convocatoria.')
+
+      // Validación de completitud antes de confirmar
+      const issues = await this.validarCompletitudParaConfirmar(proyectoId)
+      if (issues.length > 0) {
+        throw new BadRequestException({
+          message: 'No se puede confirmar el proyecto: faltan datos por completar.',
+          issues,
+        })
+      }
     }
 
     await this.dataSource.query(

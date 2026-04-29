@@ -394,7 +394,7 @@ function mensajeNoEditable(p: Proyecto | null): string {
   if (!p) return ''
   if (p.convocatoriaEstado === 0) return 'La convocatoria está cerrada. No se puede editar.'
   if (Number(p.estado) === 3) return 'El proyecto está aprobado. No se puede editar.'
-  if (Number(p.estado) === 1) return 'El proyecto está radicado. No se puede editar.'
+  if (Number(p.estado) === 1) return 'El proyecto está confirmado. No se puede editar.'
   return ''
 }
 
@@ -1624,7 +1624,7 @@ export default function AFDetallePage() {
           <span className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl border ${
             esRadicado ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white border-neutral-200 text-neutral-400'
           }`}>
-            {esRadicado ? <><LogOut size={13} /> Radicado</> : <><CheckCircle2 size={13} /> Sin Radicar</>}
+            {esRadicado ? <><LogOut size={13} /> Confirmado</> : <><CheckCircle2 size={13} /> Sin Confirmar</>}
           </span>
         )}
       </div>

@@ -193,7 +193,7 @@ export default function ProyectosPage() {
                 <div className="flex gap-1"><span className="font-semibold text-neutral-400 w-24 flex-shrink-0">Convocatoria</span><span>{p.convocatoria || '—'}</span></div>
                 <div className="flex gap-1"><span className="font-semibold text-neutral-400 w-24 flex-shrink-0">Modalidad</span><span>{p.modalidad || '—'}</span></div>
                 <div className="flex gap-1"><span className="font-semibold text-neutral-400 w-24 flex-shrink-0">F. Registro</span><span>{fmtFecha(p.fechaRegistro)}</span></div>
-                <div className="flex gap-1"><span className="font-semibold text-neutral-400 w-24 flex-shrink-0">F. Radicación</span><span>{fmtFecha(p.fechaRadicacion)}</span></div>
+                <div className="flex gap-1"><span className="font-semibold text-neutral-400 w-24 flex-shrink-0">F. Confirmación</span><span>{fmtFecha(p.fechaRadicacion)}</span></div>
               </div>
 
               {/* Acciones */}

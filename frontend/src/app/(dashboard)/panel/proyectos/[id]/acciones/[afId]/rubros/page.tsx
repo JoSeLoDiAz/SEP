@@ -3,11 +3,10 @@
 import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
 import { NumberInput } from '@/components/ui/number-input'
-import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  AlertTriangle, ArrowRightCircle, ChevronRight, ChevronUp, ClipboardList, DollarSign,
-  Loader2, Plus, Save, Trash2, X,
+  AlertTriangle, ArrowRightCircle, BookOpen, CheckCircle2, ChevronRight, ChevronUp,
+  ClipboardList, DollarSign, FolderKanban, Layers, Loader2, LogOut, Plus, Save, Trash2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -400,9 +399,20 @@ export default function RubrosAFPage() {
   const porcValTrans   = totalAFconGO  > 0 ? ((transForm?.valor        ?? 0) / totalAFconGO  * 100) : 0
 
   // ── Editable ─────────────────────────────────────────────────────────────
+  // Solo se puede editar cuando: NO está radicado (1), NO está aprobado (3)
+  // y la convocatoria sigue activa.
   const editable = proyecto
-    ? proyecto.estado !== 3 && proyecto.convocatoriaEstado !== 0
+    ? proyecto.estado !== 1 && proyecto.estado !== 3 && proyecto.convocatoriaEstado !== 0
     : false
+  const motivoNoEditable = !proyecto
+    ? ''
+    : proyecto.convocatoriaEstado === 0
+      ? 'La convocatoria está cerrada. Los rubros son de solo lectura.'
+      : proyecto.estado === 3
+        ? 'El proyecto está aprobado. Los rubros son de solo lectura.'
+        : proyecto.estado === 1
+          ? 'El proyecto está confirmado. Los rubros son de solo lectura.'
+          : ''
 
   // ── Styles ────────────────────────────────────────────────────────────────
 
@@ -469,11 +479,7 @@ export default function RubrosAFPage() {
       {!editable && (
         <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800">
           <span className="text-lg">🔒</span>
-          <span>
-            {proyecto?.estado === 3
-              ? 'El proyecto está aprobado. Los rubros son de solo lectura.'
-              : 'La convocatoria está cerrada. Los rubros son de solo lectura.'}
-          </span>
+          <span>{motivoNoEditable}</span>
         </div>
       )}
 
@@ -496,18 +502,31 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* Menú (uniforme + sub-tabs específicos del AF) */}
-      <ProyectoTabs proyectoId={proyectoId} active="acciones" extraTabs={
-        <>
-          <Link href={`/panel/proyectos/${proyectoId}/acciones/${afIdNum}`}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
-            <ClipboardList size={13} /> Detalle AF {af.numero}
-          </Link>
-          <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
-            <DollarSign size={13} /> Rubros AF {af.numero}
+      {/* Menú — mismo estilo que la página de detalle AF */}
+      <div className="flex flex-wrap gap-2">
+        <Link href={`/panel/proyectos/${proyectoId}`}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
+          <FolderKanban size={13} /> Generalidades
+        </Link>
+        <Link href={`/panel/proyectos/${proyectoId}/acciones`}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
+          <Layers size={13} /> Acciones de Formación
+        </Link>
+        <Link href={`/panel/proyectos/${proyectoId}/acciones/${afIdNum}`}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
+          <ClipboardList size={13} /> Detalle AF {af.numero}
+        </Link>
+        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
+          <BookOpen size={13} /> Rubros
+        </span>
+        {proyecto && proyecto.estado !== 3 && (
+          <span className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl border ${
+            proyecto.estado === 1 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white border-neutral-200 text-neutral-400'
+          }`}>
+            {proyecto.estado === 1 ? <><LogOut size={13} /> Confirmado</> : <><CheckCircle2 size={13} /> Sin Confirmar</>}
           </span>
-        </>
-      } />
+        )}
+      </div>
 
       {editable && !prereqs.ok && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 flex flex-col gap-3">

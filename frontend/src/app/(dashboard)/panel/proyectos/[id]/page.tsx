@@ -368,7 +368,7 @@ export default function ProyectoDetallePage() {
                   ? 'La convocatoria está cerrada, no es posible modificar los datos del proyecto.'
                   : Number(proyecto.estado) === 3
                     ? 'El proyecto está aprobado, los datos no son modificables.'
-                    : 'Los datos no son editables mientras el proyecto esté radicado.'}
+                    : 'Los datos no son editables mientras el proyecto esté confirmado.'}
               </p>
             )}
           </div>

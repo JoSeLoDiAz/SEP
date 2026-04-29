@@ -182,6 +182,12 @@ export class ProyectosController {
     return this.proyectosService.radicar(user.email, id)
   }
 
+  @Get(':id/validacion')
+  async validarParaConfirmar(@Param('id', ParseIntPipe) id: number) {
+    const issues = await this.proyectosService.validarCompletitudParaConfirmar(id)
+    return { ok: issues.length === 0, issues }
+  }
+
   // ── Contactos del proyecto ────────────────────────────────────────────────
 
   @Get(':id/contactos/disponibles')

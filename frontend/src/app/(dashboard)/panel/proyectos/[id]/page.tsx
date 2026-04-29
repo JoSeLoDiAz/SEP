@@ -58,7 +58,7 @@ function estadoInfo(e: number | null) {
 
 function puedeEditar(p: Proyecto) {
   const estado = Number(p.estado)
-  return estado !== 1 && estado !== 3 && p.convocatoriaEstado !== 0
+  return estado !== 1 && estado !== 3 && estado !== 4 && p.convocatoriaEstado !== 0
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -368,7 +368,9 @@ export default function ProyectoDetallePage() {
                   ? 'La convocatoria está cerrada, no es posible modificar los datos del proyecto.'
                   : Number(proyecto.estado) === 3
                     ? 'El proyecto está aprobado, los datos no son modificables.'
-                    : 'Los datos no son editables mientras el proyecto esté confirmado.'}
+                    : Number(proyecto.estado) === 4
+                      ? 'El proyecto está rechazado, los datos no son modificables.'
+                      : 'Los datos no son editables mientras el proyecto esté confirmado.'}
               </p>
             )}
           </div>

@@ -388,12 +388,13 @@ function buildForm(af: AFDetalle, perfil: Perfil, justSec?: string | null): Form
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  return e !== 1 && e !== 3 && p.convocatoriaEstado !== 0
+  return e !== 1 && e !== 3 && e !== 4 && p.convocatoriaEstado !== 0
 }
 function mensajeNoEditable(p: Proyecto | null): string {
   if (!p) return ''
   if (p.convocatoriaEstado === 0) return 'La convocatoria está cerrada. No se puede editar.'
   if (Number(p.estado) === 3) return 'El proyecto está aprobado. No se puede editar.'
+  if (Number(p.estado) === 4) return 'El proyecto está rechazado. No se puede editar.'
   if (Number(p.estado) === 1) return 'El proyecto está confirmado. No se puede editar.'
   return ''
 }

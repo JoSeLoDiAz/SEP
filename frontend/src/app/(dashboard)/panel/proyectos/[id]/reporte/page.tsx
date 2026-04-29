@@ -9,7 +9,7 @@ import {
   Activity, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2,
   ClipboardList, Compass, FileText, FolderKanban, History as HistoryIcon, Info,
   Layers, Loader2, MapPin, Notebook, Package, Printer, Receipt, Repeat, Search,
-  Target, TrendingUp, UserCheck, Users, Users2, Wallet,
+  ShieldCheck, Target, TrendingUp, UserCheck, Users, Users2, Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import Link from 'next/link'
@@ -74,6 +74,7 @@ interface PresupuestoData {
 }
 
 interface VersionActual {
+  versionId?: number
   numero: number
   codigo: string
   fecha: string | null
@@ -272,6 +273,15 @@ export default function ReporteProyectoPage() {
     versionId: number; numero: number; codigo: string
     fecha: string | null; usuario: string | null; comentario: string | null
   } | null>(null)
+  // Cuando un admin abre el reporte y existe versión FINAL, mostramos el
+  // snapshot de esa versión en lugar de los datos vivos (que el proponente
+  // pudo haber editado después). Este flag distingue ese modo del modo
+  // "histórica via URL ?versionId=X".
+  const [vistaSnapshotAuto, setVistaSnapshotAuto] = useState(false)
+  // Detectar admin temprano (antes del useEffect de carga)
+  const usuarioEarly = typeof window !== 'undefined' ? getSepUsuario() : null
+  const esAdminEarly = usuarioEarly ? isAdmin(usuarioEarly.perfilId) : false
+  const mostrandoSnapshot = esVersionHistorica || vistaSnapshotAuto
 
   // Detalle por AF (cargado tras el reporte base)
   const [afsDetalle, setAfsDetalle] = useState<Record<number, AfDetalle>>({})
@@ -329,10 +339,50 @@ export default function ReporteProyectoPage() {
         .finally(() => setLoading(false))
     } else {
       document.title = 'Reporte del Proyecto | SEP'
-      api.get<Reporte>(`/proyectos/${id}/reporte`)
-        .then(r => setData(r.data))
-        .catch(() => setError(true))
-        .finally(() => setLoading(false))
+      ;(async () => {
+        try {
+          const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
+          const live = r.data
+          const vAct = live.versionActual
+          // Admin: si existe versión FINAL, cargamos el snapshot inmutable de
+          // esa versión para que vea exactamente lo que va a aprobar (no los
+          // datos vivos que el proponente pueda seguir editando).
+          if (esAdminEarly && vAct?.esFinal === 1 && vAct.versionId) {
+            try {
+              const s = await api.get<{
+                versionId: number; numero: number; codigo: string
+                fecha: string | null; usuario: string | null; comentario: string | null
+                snapshot: Reporte & { accionesDetalle?: Array<{ afId: number } & AfDetalle> }
+              }>(`/proyectos/versiones/${vAct.versionId}`)
+              const { snapshot, ...meta } = s.data
+              // Conservamos versionActual del live (refleja FINAL/aprobado actuales);
+              // el snapshot puede tener un versionActual desactualizado (capturado
+              // ANTES de marcarse como FINAL).
+              setData({ ...snapshot, versionActual: live.versionActual })
+              setVersionVista({
+                versionId: meta.versionId, numero: meta.numero, codigo: meta.codigo,
+                fecha: meta.fecha, usuario: meta.usuario, comentario: meta.comentario,
+              })
+              setVistaSnapshotAuto(true)
+              const map: Record<number, AfDetalle> = {}
+              for (const item of snapshot.accionesDetalle ?? []) {
+                const { afId, ...detalle } = item
+                map[afId] = detalle as AfDetalle
+              }
+              setAfsDetalle(map)
+            } catch {
+              // Si falla la carga del snapshot, mostramos los datos vivos como fallback
+              setData(live)
+            }
+          } else {
+            setData(live)
+          }
+        } catch {
+          setError(true)
+        } finally {
+          setLoading(false)
+        }
+      })()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, verVersionId])
@@ -349,7 +399,7 @@ export default function ReporteProyectoPage() {
   // En modo "versión histórica" no fetchamos: ya viene en el snapshot.
   useEffect(() => {
     if (!data) return
-    if (esVersionHistorica) return
+    if (mostrandoSnapshot) return
     setLoadingDetalles(true)
     const fetchAf = async (afId: number): Promise<AfDetalle> => {
       const proyectoId = data.proyecto.id
@@ -398,8 +448,7 @@ export default function ReporteProyectoPage() {
   const [aprobarOpen, setAprobarOpen] = useState(false)
   const [aprobando, setAprobando] = useState(false)
   const [comentarioAprobacion, setComentarioAprobacion] = useState('')
-  const usuario = typeof window !== 'undefined' ? getSepUsuario() : null
-  const esAdmin = usuario ? isAdmin(usuario.perfilId) : false
+  const esAdmin = esAdminEarly
 
   async function handleAprobar() {
     setAprobando(true)
@@ -428,7 +477,7 @@ export default function ReporteProyectoPage() {
         version: { versionNumero: number; versionCodigo: string } | null
       }>(`/proyectos/${id}/versiones`, {
         comentario: comentarioVersion.trim() || undefined,
-      })
+      }, { timeout: 50_000 })
       const v = resp.data?.version
       showToast(
         'success',
@@ -597,6 +646,26 @@ export default function ReporteProyectoPage() {
               className="inline-block mt-2 text-xs font-semibold text-amber-900 underline hover:text-amber-700">
               ← Ver el reporte actual del proyecto
             </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Banner cuando un admin abre el reporte y existe versión FINAL: estamos
+          mostrando el snapshot inmutable de esa versión, no los datos vivos. */}
+      {vistaSnapshotAuto && versionVista && (
+        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 flex items-start gap-3 no-print">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <ShieldCheck size={20} strokeWidth={2.4} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-emerald-900">
+              Mostrando snapshot de la versión FINAL · V{versionVista.numero}
+            </p>
+            <p className="text-xs text-emerald-800 mt-0.5 font-mono break-all">{versionVista.codigo}</p>
+            <p className="text-[11px] text-emerald-700 mt-1">
+              Esto es <strong>exactamente lo que aprobarías</strong>. Si el proponente sigue editando, esos cambios no se reflejan aquí.
+              Para revisar otras versiones del histórico ve a <Link href={`/panel/proyectos/${id}/versiones`} className="underline font-semibold">Versiones</Link>.
+            </p>
           </div>
         </div>
       )}

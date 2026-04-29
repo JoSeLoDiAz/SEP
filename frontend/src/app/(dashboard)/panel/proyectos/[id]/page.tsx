@@ -5,12 +5,12 @@ import { Modal } from '@/components/ui/modal'
 import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  BookUser, CheckCircle2, ChevronRight, FileText, FolderKanban,
-  Loader2, LogOut, Plus, Save,
+  BookUser, ChevronRight, FileText, FolderKanban,
+  Loader2, Plus, Save,
   Trash2, UserPlus, X,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -66,7 +66,6 @@ function puedeEditar(p: Proyecto) {
 export default function ProyectoDetallePage() {
   const { id } = useParams<{ id: string }>()
   const proyectoId = Number(id)
-  const searchParams = useSearchParams()
 
   const [proyecto, setProyecto]         = useState<Proyecto | null>(null)
   const [convocatorias, setConvocatorias] = useState<Opcion[]>([])
@@ -82,9 +81,7 @@ export default function ProyectoDetallePage() {
   const [objetivo, setObjetivo] = useState('')
   const [guardando, setGuardando] = useState(false)
 
-  // Radicar
-  const [radicando, setRadicando]         = useState(false)
-  const [confirmRadicar, setConfirmRadicar] = useState(false)
+  // (La confirmación del proyecto se hace desde la página de Reporte.)
 
   // Asignar contacto existente
   const [modalAsignar, setModalAsignar]   = useState(false)
@@ -148,14 +145,6 @@ export default function ProyectoDetallePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proyectoId])
 
-  // Auto-abrir modal de Confirmar Proyecto cuando viene ?action=confirmar desde
-  // las otras páginas del proyecto (Acciones, Presupuesto, Rubros).
-  useEffect(() => {
-    if (searchParams.get('action') === 'confirmar') {
-      setConfirmRadicar(true)
-    }
-  }, [searchParams])
-
   // ── Guardar generalidades ─────────────────────────────────────────────────
 
   async function guardar() {
@@ -178,22 +167,7 @@ export default function ProyectoDetallePage() {
     }
   }
 
-  // ── Radicar / Desradicar ──────────────────────────────────────────────────
-
-  async function handleRadicar() {
-    setConfirmRadicar(false)
-    setRadicando(true)
-    try {
-      const r = await api.post<{ message: string; estado: number }>(`/proyectos/${proyectoId}/radicar`)
-      showToast('success', r.data.message)
-      await cargarProyecto()
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al radicar'
-      showToast('error', msg)
-    } finally {
-      setRadicando(false)
-    }
-  }
+  // (La confirmación/desconfirmación se ejecuta desde la página de Reporte.)
 
   // ── Asignar contacto existente ────────────────────────────────────────────
 
@@ -295,8 +269,6 @@ export default function ProyectoDetallePage() {
 
   const editable = puedeEditar(proyecto)
   const { label: estadoLabel, cls: estadoCls } = estadoInfo(proyecto.estado)
-  const esRadicado = Number(proyecto.estado) === 1
-  const esAprobado = Number(proyecto.estado) === 3
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -329,27 +301,7 @@ export default function ProyectoDetallePage() {
       </div>
 
       {/* ── Menú de secciones (uniforme) ─────────────────────────────── */}
-      {/* hideConfirmar=true: aquí el botón Confirmar abre el modal local. */}
-      <ProyectoTabs proyectoId={proyectoId} active="generalidades" hideConfirmar extraTabs={
-        !esAprobado ? (
-          <button
-            onClick={() => setConfirmRadicar(true)}
-            disabled={radicando}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl transition ${
-              esRadicado
-                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-white border border-neutral-200 text-[#00304D] hover:bg-[#00304D] hover:text-white'
-            }`}
-          >
-            {radicando
-              ? <Loader2 size={13} className="animate-spin" />
-              : esRadicado
-                ? <><LogOut size={13} /> Desconfirmar</>
-                : <><CheckCircle2 size={13} /> Confirmar Proyecto</>
-            }
-          </button>
-        ) : null
-      } />
+      <ProyectoTabs proyectoId={proyectoId} active="generalidades" />
 
       {/* ── Dos columnas: Generalidades + Objetivo ─────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -543,31 +495,6 @@ export default function ProyectoDetallePage() {
           </>
         )}
       </div>
-
-      {/* ── Modal confirmar proyecto ─────────────────────────────────────── */}
-      <Modal open={confirmRadicar} onClose={() => setConfirmRadicar(false)} maxWidth="max-w-sm">
-        <div className="p-6 flex flex-col gap-5">
-          <h3 className="text-base font-bold text-neutral-800">
-            {esRadicado ? 'Desconfirmar proyecto' : 'Confirmar proyecto'}
-          </h3>
-          <p className="text-sm text-neutral-500">
-            {esRadicado
-              ? '¿Está seguro de revertir la confirmación de este proyecto?'
-              : '¿Está seguro de confirmar este proyecto? Esta acción lo dejará listo para envío a la siguiente plataforma.'}
-          </p>
-          <div className="flex gap-3 justify-end">
-            <button onClick={() => setConfirmRadicar(false)} className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition">
-              Cancelar
-            </button>
-            <button
-              onClick={handleRadicar}
-              className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition ${esRadicado ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#00304D] hover:bg-[#004a76]'}`}
-            >
-              {esRadicado ? 'Sí, desconfirmar' : 'Sí, confirmar'}
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       {/* ── Modal asignar contacto existente ───────────────────────────── */}
       <Modal open={modalAsignar} onClose={() => setModalAsignar(false)} maxWidth="max-w-md">

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
+import { NecesidadesService } from '../necesidades/necesidades.service'
 import { randomBytes } from 'crypto'
 
 const PROYECTO_SIN_ASIGNAR = 1
@@ -47,6 +48,7 @@ export class ProyectosService {
     @InjectRepository(Empresa)
     private readonly empresaRepo: Repository<Empresa>,
     private readonly dataSource: DataSource,
+    private readonly necesidadesService: NecesidadesService,
   ) {}
 
   private async getEmpresaId(email: string): Promise<number> {
@@ -1472,19 +1474,13 @@ export class ProyectosService {
 
   async getTiposAmbiente() {
     return this.dataSource.query(
-      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre"
-         FROM TIPOAMBIENTE
-        WHERE TIPOAMBIENTEACTIVO = 1
-        ORDER BY TIPOAMBIENTEID`,
+      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE ORDER BY TIPOAMBIENTEID`,
     )
   }
 
   async getGestionConocimientos() {
     return this.dataSource.query(
-      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre"
-         FROM GESTIONCONOCIMIENTO
-        WHERE GESTIONCONOCIMIENTOESTADO = 1
-        ORDER BY GESTIONCONOCIMIENTOID`,
+      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO ORDER BY GESTIONCONOCIMIENTOID`,
     )
   }
 
@@ -2331,5 +2327,204 @@ export class ProyectosService {
       [nid, proyectoId, ...params],
     )
     return { id: nid, message: 'Presupuesto del proyecto guardado correctamente' }
+  }
+
+  // ── Reporte completo del Proyecto ─────────────────────────────────────────
+
+  /** Devuelve el snapshot completo del proyecto para el reporte / impresión:
+   *  proyecto, empresa, contactos, análisis, sectores, AFs con detalle,
+   *  diagnósticos asociados (uno por cada necesidad distinta vinculada a las
+   *  AFs) y presupuesto general. */
+  async getReporteProyecto(proyectoId: number) {
+    // 1. Datos del proyecto + convocatoria + modalidad + empresaId
+    const [proy] = await this.dataSource.query(
+      `SELECT p.PROYECTOID                AS "proyectoId",
+              p.PROYECTONOMBRE            AS "nombre",
+              p.PROYECTOOBJETIVO          AS "objetivo",
+              p.PROYECTOFECHAREGISTRO     AS "fechaRegistro",
+              p.PROYECTOFECHARADICACION   AS "fechaRadicacion",
+              p.PROYECTOESTADO            AS "estado",
+              p.EMPRESAID                 AS "empresaId",
+              c.CONVOCATORIANOMBRE        AS "convocatoria",
+              m.MODALIDADNOMBRE           AS "modalidad",
+              m.MODALIDADID               AS "modalidadId"
+         FROM PROYECTO p
+         LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
+         LEFT JOIN MODALIDAD m    ON m.MODALIDADID    = p.MODALIDADID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    const empresaId: number = proy.empresaId
+
+    // 2. Empresa: datos básicos + análisis + cadena productiva
+    const [empresa] = await this.dataSource.query(
+      `SELECT e.EMPRESARAZONSOCIAL              AS "razonSocial",
+              e.EMPRESASIGLA                    AS "sigla",
+              e.EMPRESAIDENTIFICACION           AS "nit",
+              e.EMPRESADIGITOVERIFICACION       AS "digitoV",
+              e.EMPRESAEMAIL                    AS "email",
+              e.EMPRESADIRECCION                AS "direccion",
+              e.EMPRESATELEFONO                 AS "telefono",
+              e.EMPRESACELULAR                  AS "celular",
+              e.EMPRESAWEBSITE                  AS "website",
+              dep.DEPARTAMENTONOMBRE            AS "departamento",
+              ciu.CIUDADNOMBRE                  AS "ciudad",
+              cob.COBERTURADESCRIPCION          AS "cobertura",
+              ciiu.CIIUCODIGO                   AS "ciiuCodigo",
+              ciiu.CIIUDESCRIPCION              AS "ciiuDescripcion",
+              te.TIPOEMPRESANOMBRE              AS "tipoEmpresa",
+              tam.TAMANOEMPRESANOMBRE           AS "tamanoEmpresa",
+              e.EMPRESAREP                      AS "repNombre",
+              e.EMPRESAREPCARGO                 AS "repCargo",
+              e.EMPRESAREPCORREO                AS "repCorreo",
+              e.EMPRESAREPTEL                   AS "repTel",
+              e.EMPRESAREPDOCUMENTO             AS "repDocumento",
+              tdoc.TIPODOCUMENTOIDENTIDADNOMBRE AS "repTipoDoc",
+              e.EMPRESAOBJETO                   AS "objeto",
+              e.EMPRESAPRODUCTOS                AS "productos",
+              e.EMPRESASITUACION                AS "situacion",
+              e.EMPRESAPAPEL                    AS "papel",
+              e.EMPRESARETOS                    AS "retos",
+              e.EMPRESAEXPERIENCIA              AS "experiencia",
+              e.EMPRESAESLABONES                AS "eslabones",
+              e.EMPRESAINTERACCIONES            AS "interacciones"
+         FROM EMPRESA e
+         LEFT JOIN DEPARTAMENTO dep         ON dep.DEPARTAMENTOID  = e.DEPARTAMENTOEMPRESAID
+         LEFT JOIN CIUDAD ciu               ON ciu.CIUDADID        = e.CIUDADEMPRESAID
+         LEFT JOIN COBERTURA cob            ON cob.COBERTURAID     = e.COBERTURAEMPRESAID
+         LEFT JOIN CIIU ciiu                ON ciiu.CIIUID         = e.CIIUID
+         LEFT JOIN TIPOEMPRESA te           ON te.TIPOEMPRESAID    = e.TIPOEMPRESAID
+         LEFT JOIN TAMANOEMPRESA tam        ON tam.TAMANOEMPRESAID = e.TAMANOEMPRESAID
+         LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = e.TIPOIDENTIFICACIONREP
+        WHERE e.EMPRESAID = :1`,
+      [empresaId],
+    )
+
+    // 3. Mesas sectoriales de la empresa
+    const mesasSectoriales = await this.dataSource.query(
+      `SELECT ms.MESASECTORIALNOMBRE AS "nombre"
+         FROM EMPRESAMESASECTORIAL me
+         JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = me.MESASECTORIALIDEMPRESA
+        WHERE me.EMPRESAIDMESASECTORIAL = :1
+        ORDER BY ms.MESASECTORIALNOMBRE`,
+      [empresaId],
+    )
+
+    // 4. Sectores / Subsectores
+    //    PERTENECE → tablas SECTORPEMPRESA / SUBSECTORPEMPRESA (FK *EMPRESAIDP*)
+    //    REPRESENTA → tablas SECTOREMPRESA / SUBSECTOREMPRESA (FK EMPRESAID)
+    const sectoresPertenece = await this.dataSource.query(
+      `SELECT s.SECTORDESCRIPCION AS "nombre"
+         FROM SECTORPEMPRESA sp JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
+        WHERE sp.EMPRESAIDPSECTOR = :1 ORDER BY s.SECTORDESCRIPCION`,
+      [empresaId],
+    ).catch(() => [])
+    const subsectoresPertenece = await this.dataSource.query(
+      `SELECT sub.SUBSECTORNOMBRE AS "nombre"
+         FROM SUBSECTORPEMPRESA sp JOIN SUBSECTOR sub ON sub.SUBSECTORID = sp.SUBSECTORIDPEMPRESA
+        WHERE sp.EMPRESAIDPSUBSECTOR = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+      [empresaId],
+    ).catch(() => [])
+    const sectoresRepresenta = await this.dataSource.query(
+      `SELECT s.SECTORDESCRIPCION AS "nombre"
+         FROM SECTOREMPRESA se JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
+        WHERE se.EMPRESAID = :1 ORDER BY s.SECTORDESCRIPCION`,
+      [empresaId],
+    ).catch(() => [])
+    const subsectoresRepresenta = await this.dataSource.query(
+      `SELECT sub.SUBSECTORNOMBRE AS "nombre"
+         FROM SUBSECTOREMPRESA se JOIN SUBSECTOR sub ON sub.SUBSECTORID = se.SUBSECTORIDEMPRESA
+        WHERE se.EMPRESAID = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+      [empresaId],
+    ).catch(() => [])
+
+    // 5. Contactos asociados al proyecto (tabla CONTACTOEMPRESA)
+    const contactos = await this.dataSource.query(
+      `SELECT c.CONTACTOEMPRESANOMBRE          AS "nombre",
+              c.CONTACTOEMPRESACARGO           AS "cargo",
+              c.CONTACTOEMPRESACORREO          AS "correo",
+              c.CONTACTOEMPRESATELEFONO        AS "telefono",
+              c.CONTACTOEMPRESADOCUMENTO       AS "documento",
+              tdoc.TIPODOCUMENTOIDENTIDADNOMBRE AS "tipoDoc"
+         FROM CONTACTOEMPRESA c
+         LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = c.TIPOIDENTIFICACIONCONTACTOP
+        WHERE c.PROYECTOIDCONTACTOS = :1
+        ORDER BY c.CONTACTOEMPRESAID`,
+      [proyectoId],
+    ).catch(() => [])
+
+    // 6. Acciones de Formación + sus datos clave
+    const acciones = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID                  AS "afId",
+              af.ACCIONFORMACIONNUMERO              AS "numero",
+              af.ACCIONFORMACIONNOMBRE              AS "nombre",
+              af.ACCIONFORMACIONJUSTNEC             AS "justnec",
+              af.ACCIONFORMACIONCAUSA               AS "causa",
+              af.ACCIONFORMACIONRESULTADOS          AS "efectos",
+              af.ACCIONFORMACIONOBJETIVO            AS "objetivo",
+              af.ACCIONFORMACIONNUMHORAGRUPO        AS "numHorasGrupo",
+              af.ACCIONFORMACIONNUMGRUPOS           AS "numGrupos",
+              af.ACCIONFORMACIONNUMTOTHORASGRUP     AS "numTotHoras",
+              af.ACCIONFORMACIONBENEFGRUPO          AS "benefGrupo",
+              af.ACCIONFORMACIONBENEFVIGRUPO        AS "benefViGrupo",
+              af.ACCIONFORMACIONNUMBENEF            AS "numBenef",
+              af.NECESIDADFORMACIONIDAF             AS "necesidadFormacionId",
+              te.TIPOEVENTONOMBRE                   AS "tipoEvento",
+              mf.MODALIDADFORMACIONNOMBRE           AS "modalidad",
+              ma.METODOLOGIAAPRENDIZAJENOMBRE       AS "metodologia",
+              nf.NECESIDADFORMACIONNOMBRE           AS "necesidadFormacionNombre",
+              nf.NECESIDADFORMACIONNUMERO           AS "necesidadFormacionNumero",
+              nf.NECESIDADID                        AS "necesidadId"
+         FROM ACCIONFORMACION af
+         LEFT JOIN TIPOEVENTO te                ON te.TIPOEVENTOID                = af.TIPOEVENTOID
+         LEFT JOIN MODALIDADFORMACION mf        ON mf.MODALIDADFORMACIONID        = af.MODALIDADFORMACIONID
+         LEFT JOIN METODOLOGIAAPRENDIZAJE ma    ON ma.METODOLOGIAAPRENDIZAJEID    = af.METODOLOGIAAPRENDIZAJEID
+         LEFT JOIN NECESIDADFORMACION nf        ON nf.NECESIDADFORMACIONID        = af.NECESIDADFORMACIONIDAF
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    // 7. Diagnósticos asociados — uno por cada `necesidadId` distinto
+    const necesidadesIdsUsados = Array.from(
+      new Set(acciones.map((a: any) => Number(a.necesidadId)).filter((n: number) => n && !isNaN(n))),
+    ) as number[]
+    const diagnosticos = await Promise.all(
+      necesidadesIdsUsados.map(async (id) => {
+        try { return await this.necesidadesService.getReporte(id) }
+        catch { return null }
+      }),
+    )
+
+    // 8. Presupuesto general (reusa el método existente)
+    let presupuesto: unknown = null
+    try { presupuesto = await this.getPresupuestoProyecto(proyectoId) }
+    catch { /* si falla, deja null y el frontend lo maneja */ }
+
+    return {
+      proyecto: {
+        id: Number(proy.proyectoId),
+        codigo: String(proy.proyectoId), // el código del proyecto es el ID
+        nombre: proy.nombre,
+        objetivo: proy.objetivo,
+        convocatoria: proy.convocatoria,
+        modalidad: proy.modalidad,
+        modalidadId: Number(proy.modalidadId) || 0,
+        estado: Number(proy.estado) || 0,
+        fechaRegistro: proy.fechaRegistro,
+        fechaRadicacion: proy.fechaRadicacion,
+      },
+      empresa,
+      mesasSectoriales: mesasSectoriales.map((m: any) => m.nombre),
+      sectoresPertenece: sectoresPertenece.map((s: any) => s.nombre),
+      subsectoresPertenece: subsectoresPertenece.map((s: any) => s.nombre),
+      sectoresRepresenta: sectoresRepresenta.map((s: any) => s.nombre),
+      subsectoresRepresenta: subsectoresRepresenta.map((s: any) => s.nombre),
+      contactos,
+      acciones,
+      diagnosticos: diagnosticos.filter(d => d !== null),
+      presupuesto,
+    }
   }
 }

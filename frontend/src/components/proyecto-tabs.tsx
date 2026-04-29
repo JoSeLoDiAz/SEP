@@ -39,7 +39,7 @@ export function ProyectoTabs({ proyectoId, active, hideConfirmar, extraTabs }: P
       {tab('generalidades', `/panel/proyectos/${proyectoId}`,             'Generalidades',         FolderKanban)}
       {tab('acciones',      `/panel/proyectos/${proyectoId}/acciones`,    'Acciones de Formación', Layers)}
       {tab('presupuesto',   `/panel/proyectos/${proyectoId}/presupuesto`, 'Presupuesto del Proyecto', PiggyBank)}
-      {!hideConfirmar && tab('confirmar', `/panel/proyectos/${proyectoId}?action=confirmar`, 'Confirmar Proyecto', CheckCircle2)}
+      {!hideConfirmar && tab('confirmar', `/panel/proyectos/${proyectoId}/reporte`, 'Reporte / Confirmación del Proyecto', CheckCircle2)}
       {extraTabs}
     </div>
   )

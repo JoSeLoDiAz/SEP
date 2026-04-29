@@ -31,7 +31,11 @@ interface Form {
   proyectoId: string
 }
 
-const CARGOS = ['Representante Legal', 'Responsable del Proyecto', 'Contacto Administrativo']
+const CARGOS = [
+  'Representante Legal',
+  'Persona encargada del área de Talento Humano',
+  'Persona encargada del área de Comunicaciones',
+]
 const FORM_VACIO: Form = {
   nombre: '', cargo: CARGOS[0], correo: '',
   telefono: '', documento: '', tipoIdentificacionId: '', proyectoId: '',

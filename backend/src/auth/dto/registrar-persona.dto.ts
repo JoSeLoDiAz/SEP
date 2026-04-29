@@ -6,6 +6,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  Min,
 } from 'class-validator'
 
 export class RegistrarPersonaDto {
@@ -15,6 +17,8 @@ export class RegistrarPersonaDto {
 
   @ApiProperty({ example: 1234567890 })
   @IsNumber()
+  @Min(1, { message: 'El número de identificación debe ser mayor a 0.' })
+  @Max(9_999_999_999, { message: 'El número de identificación no puede tener más de 10 dígitos.' })
   personaIdentificacion: number
 
   @ApiProperty({ example: 'Juan Carlos' })

@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTime } from '@/lib/format-date'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ClipboardList, FileText, Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -79,8 +80,7 @@ export default function NecesidadesPage() {
   }
 
   function formatFecha(f: string | null) {
-    if (!f) return '—'
-    return new Date(f).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })
+    return fmtDateTime(f)
   }
 
   return (

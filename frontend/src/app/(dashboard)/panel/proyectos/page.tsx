@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTime } from '@/lib/format-date'
 import { FileText, FolderKanban, Loader2, Plus, Settings, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
@@ -19,11 +20,11 @@ interface Opcion { id: number; nombre: string }
 
 function estadoLabel(e: number | null): string {
   switch (Number(e)) {
-    case 1: return 'Radicado'
+    case 1: return 'Confirmado'
     case 2: return 'Reversado'
     case 3: return 'Aprobado'
     case 4: return 'Rechazado'
-    default: return 'Sin Radicar'
+    default: return 'Sin Confirmar'
   }
 }
 
@@ -48,8 +49,7 @@ function estadoDot(e: number | null): string {
 }
 
 function fmtFecha(f: string | null) {
-  if (!f) return '—'
-  return new Date(f).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })
+  return fmtDateTime(f)
 }
 
 export default function ProyectosPage() {
@@ -145,11 +145,11 @@ export default function ProyectosPage() {
       {/* Leyenda estados */}
       <div className="flex flex-wrap gap-2 text-xs">
         {[
-          { label: 'Sin Radicar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' },
-          { label: 'Radicado',    cls: 'bg-blue-100 text-blue-700 border-blue-200' },
-          { label: 'Reversado',   cls: 'bg-amber-100 text-amber-700 border-amber-200' },
-          { label: 'Aprobado',    cls: 'bg-green-100 text-green-700 border-green-200' },
-          { label: 'Rechazado',   cls: 'bg-red-100 text-red-700 border-red-200' },
+          { label: 'Sin Confirmar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' },
+          { label: 'Confirmado',    cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+          { label: 'Reversado',     cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+          { label: 'Aprobado',      cls: 'bg-green-100 text-green-700 border-green-200' },
+          { label: 'Rechazado',     cls: 'bg-red-100 text-red-700 border-red-200' },
         ].map(s => (
           <span key={s.label} className={`px-3 py-1 rounded-full border font-semibold ${s.cls}`}>
             {s.label}
@@ -202,11 +202,10 @@ export default function ProyectosPage() {
                   className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl bg-[#00304D] hover:bg-[#004a76] text-white transition">
                   <Settings size={13} /> Gestionar
                 </Link>
-                <a href={`https://sep.sena.edu.co/WPReporteProyecto.aspx?${p.proyectoId}`}
-                  target="_blank" rel="noreferrer"
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl bg-[#00304D] hover:bg-[#004a76] text-white transition">
+                <Link href={`/panel/proyectos/${p.proyectoId}/reporte`}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl bg-[#39A900] hover:bg-[#2d8700] text-white transition">
                   <FileText size={13} /> Reporte
-                </a>
+                </Link>
               </div>
             </div>
           ))}

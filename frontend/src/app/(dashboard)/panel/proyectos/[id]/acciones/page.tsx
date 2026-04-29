@@ -2,10 +2,11 @@
 
 import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
+import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  ChevronRight, ClipboardList, CheckCircle2, Eye, FolderKanban,
-  Layers, Loader2, LogOut, Plus, Save, Trash2, X,
+  ChevronRight, ClipboardList, CheckCircle2, Eye, Layers,
+  Loader2, LogOut, Plus, Save, Trash2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -187,7 +188,7 @@ export default function AccionesPage() {
 
       {/* ── Encabezado ─────────────────────────────────────────────────── */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
-        <ClipboardList size={22} className="text-white flex-shrink-0" />
+        <Layers size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex items-center gap-2 text-white/60 text-xs flex-wrap">
             <Link href="/panel/proyectos" className="hover:text-white transition">Proyectos</Link>
@@ -202,34 +203,18 @@ export default function AccionesPage() {
         </div>
       </div>
 
-      {/* ── Menú secciones ─────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={`/panel/proyectos/${proyectoId}`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <FolderKanban size={13} /> Generalidades
-        </Link>
-        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
-          <ClipboardList size={13} /> Acciones de Formación
-        </span>
-        <a
-          href={`https://sep.sena.edu.co/proyectosrubros.aspx?${proyectoId}`}
-          target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <Layers size={13} /> Rubros AF
-        </a>
-        {Number(proyecto?.estado) !== 3 && (
+      {/* ── Menú secciones (uniforme) ────────────────────────────────── */}
+      <ProyectoTabs proyectoId={proyectoId} active="acciones" extraTabs={
+        Number(proyecto?.estado) !== 3 ? (
           <span className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl border ${
             esRadicado
               ? 'bg-amber-50 text-amber-600 border-amber-200'
               : 'bg-white border-neutral-200 text-neutral-400'
           }`}>
-            {esRadicado ? <><LogOut size={13} /> Radicado</> : <><CheckCircle2 size={13} /> Sin Radicar</>}
+            {esRadicado ? <><LogOut size={13} /> Confirmado</> : <><CheckCircle2 size={13} /> Sin Confirmar</>}
           </span>
-        )}
-      </div>
+        ) : null
+      } />
 
       {/* ── Tabla / Cards ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden">

@@ -1,11 +1,13 @@
 'use client'
 
 import api from '@/lib/api'
+import { Modal } from '@/components/ui/modal'
 import { NumberInput } from '@/components/ui/number-input'
+import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  AlertTriangle, ArrowRightCircle, ChevronRight, ClipboardList, DollarSign, FolderKanban,
-  Layers, Loader2, Plus, Save, Trash2, X,
+  AlertTriangle, ArrowRightCircle, ChevronRight, ChevronUp, ClipboardList, DollarSign,
+  Loader2, Plus, Save, Trash2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -122,6 +124,7 @@ export default function RubrosAFPage() {
   const [saving, setSaving]       = useState(false)
   const [form, setForm]           = useState(emptyForm)
   const [editId, setEditId]       = useState<number | null>(null)
+  const [deletingRubroId, setDeletingRubroId] = useState<number | null>(null)
   const [toast, setToast]         = useState<{tipo:'success'|'error'; msg:string}|null>(null)
   const [toastK, setToastK]       = useState(0)
 
@@ -133,6 +136,13 @@ export default function RubrosAFPage() {
 
   // Prerequisitos
   const [prereqs, setPrereqs] = useState<{ ok: boolean; issues: string[] }>({ ok: true, issues: [] })
+
+  // Confirmación con modal cuando hay advertencias antes de guardar
+  const [confirmar, setConfirmar] = useState<{
+    titulo: string
+    razones: string[]
+    onConfirm: () => Promise<void> | void
+  } | null>(null)
 
   const showToast = (tipo: 'success'|'error', msg: string) => {
     setToast({ tipo, msg }); setToastK(k => k + 1)
@@ -164,6 +174,9 @@ export default function RubrosAFPage() {
   }, [proyectoId, afIdNum])
 
   useEffect(() => { cargar() }, [cargar])
+  useEffect(() => {
+    document.title = af ? `Rubros AF${af.numero} | SEP` : 'Rubros | SEP'
+  }, [af])
 
   // Refrescos parciales — evitan que `cargar()` sobrescriba inputs no guardados
   // de otras secciones (p. ej. guardar GO no debe borrar Transferencia en edición).
@@ -266,21 +279,24 @@ export default function RubrosAFPage() {
   }
 
   async function handleEliminar(afrubroid: number) {
-    if (!confirm('¿Eliminar este rubro?')) return
     try {
       await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/${afrubroid}`)
       showToast('success', 'Rubro eliminado.')
       if (form.rubroId === rubrosAF.find(r => r.afrubroid === afrubroid)?.rubroId) {
         setForm(emptyForm); setEditId(null)
       }
+      setDeletingRubroId(null)
       await refrescarRubros()
-    } catch { showToast('error', 'Error al eliminar.') }
+    } catch {
+      showToast('error', 'Error al eliminar.')
+      setDeletingRubroId(null)
+    }
   }
 
   // ── Guardar GO ────────────────────────────────────────────────────────────
 
-  async function handleGuardarGO() {
-    if (goTotal < 1) return showToast('error', 'El valor total de Gastos de Operación debe ser mayor a cero.')
+  // Persiste GO (sin chequeos, ya validados antes de llamar)
+  async function persistirGO() {
     setSavingGO(true)
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/go`, {
@@ -295,17 +311,29 @@ export default function RubrosAFPage() {
     } finally { setSavingGO(false) }
   }
 
+  async function handleGuardarGO() {
+    if (goTotal < 1) return showToast('error', 'El valor total de Gastos de Operación debe ser mayor a cero.')
+    // Tope de GO: 10% si proyecto > $200M, 16% si ≤ $200M. Como aquí solo
+    // tenemos el total de esta AF, usamos 10% (el más estricto) como umbral
+    // del modal — el backend hará la validación final con el total de proyecto.
+    const razones: string[] = []
+    if (porcGOvsAF > 10) {
+      razones.push(`Los Gastos de Operación representan el ${pct(porcGOvsAF)} del total de la AF, lo cual puede superar el tope del 10% (R09.1) si el proyecto es mayor a $200.000.000. El máximo permitido es 16% (R09.2) en proyectos ≤ $200.000.000.`)
+    }
+    if (razones.length > 0) {
+      setConfirmar({
+        titulo: 'Gastos de Operación por encima del tope sugerido',
+        razones,
+        onConfirm: async () => { setConfirmar(null); await persistirGO() },
+      })
+      return
+    }
+    await persistirGO()
+  }
+
   // ── Guardar Transferencia ─────────────────────────────────────────────────
 
-  async function handleGuardarTrans() {
-    if (!transForm.beneficiarios || transForm.beneficiarios < 1)
-      return showToast('error', 'Ingrese el número de beneficiarios de transferencia.')
-    if (!transForm.valor || transForm.valor < 1)
-      return showToast('error', 'Ingrese el valor del presupuesto de transferencia.')
-    if (porcBenefTrans < 5)
-      showToast('error', `Advertencia: beneficiarios de transferencia (${pct(porcBenefTrans)}) están por debajo del mínimo recomendado del 5%. Guardando de todas formas.`)
-    if (porcValTrans < 1)
-      showToast('error', `Advertencia: el valor de transferencia (${pct(porcValTrans)}) está por debajo del 1% del presupuesto base. Guardando de todas formas.`)
+  async function persistirTrans() {
     setSavingTrans(true)
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros/transferencia`, {
@@ -317,6 +345,29 @@ export default function RubrosAFPage() {
     } catch (e: any) {
       showToast('error', e?.response?.data?.message ?? 'Error al guardar transferencia.')
     } finally { setSavingTrans(false) }
+  }
+
+  async function handleGuardarTrans() {
+    if (!transForm.beneficiarios || transForm.beneficiarios < 1)
+      return showToast('error', 'Ingrese el número de beneficiarios de transferencia.')
+    if (!transForm.valor || transForm.valor < 1)
+      return showToast('error', 'Ingrese el valor del presupuesto de transferencia.')
+
+    const razones: string[] = []
+    if (porcBenefTrans < 5)
+      razones.push(`Los beneficiarios de Transferencia (${pct(porcBenefTrans)}) están por debajo del mínimo del 5% del total de beneficiarios del proyecto.`)
+    if (porcValTrans < 1)
+      razones.push(`El valor de Transferencia (${pct(porcValTrans)}) está por debajo del 1% del presupuesto base (AF + GO).`)
+
+    if (razones.length > 0) {
+      setConfirmar({
+        titulo: 'Transferencia por debajo de los mínimos recomendados',
+        razones,
+        onConfirm: async () => { setConfirmar(null); await persistirTrans() },
+      })
+      return
+    }
+    await persistirTrans()
   }
 
   // ── Totales ───────────────────────────────────────────────────────────────
@@ -382,6 +433,39 @@ export default function RubrosAFPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
+      {/* Modal de confirmación cuando hay advertencias antes de guardar */}
+      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} maxWidth="max-w-lg">
+        <div className="p-6 flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+              <AlertTriangle size={20} className="text-amber-700" />
+            </div>
+            <div className="flex flex-col gap-1 min-w-0">
+              <h3 className="text-base font-bold text-neutral-900">{confirmar?.titulo ?? ''}</h3>
+              <p className="text-xs text-neutral-500">¿Está seguro de guardar así?</p>
+            </div>
+          </div>
+          <ul className="flex flex-col gap-2 pl-1">
+            {(confirmar?.razones ?? []).map((r, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center text-xs font-bold">{i + 1}</span>
+                <span>{r}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={() => setConfirmar(null)}
+              className="px-4 py-2 rounded-xl border border-neutral-200 bg-white text-xs font-semibold text-neutral-700 hover:bg-neutral-50 transition">
+              Cancelar
+            </button>
+            <button onClick={() => confirmar?.onConfirm()}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition">
+              Sí, guardar así
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {!editable && (
         <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800">
           <span className="text-lg">🔒</span>
@@ -412,24 +496,18 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* Menú */}
-      <div className="flex flex-wrap gap-2">
-        <Link href={`/panel/proyectos/${proyectoId}`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
-          <FolderKanban size={13} /> Generalidades
-        </Link>
-        <Link href={`/panel/proyectos/${proyectoId}/acciones`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
-          <Layers size={13} /> Acciones de Formación
-        </Link>
-        <Link href={`/panel/proyectos/${proyectoId}/acciones/${afIdNum}`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
-          <ClipboardList size={13} /> Detalle AF {af.numero}
-        </Link>
-        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
-          <DollarSign size={13} /> Rubros
-        </span>
-      </div>
+      {/* Menú (uniforme + sub-tabs específicos del AF) */}
+      <ProyectoTabs proyectoId={proyectoId} active="acciones" extraTabs={
+        <>
+          <Link href={`/panel/proyectos/${proyectoId}/acciones/${afIdNum}`}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
+            <ClipboardList size={13} /> Detalle AF {af.numero}
+          </Link>
+          <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
+            <DollarSign size={13} /> Rubros AF {af.numero}
+          </span>
+        </>
+      } />
 
       {editable && !prereqs.ok && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 flex flex-col gap-3">
@@ -671,11 +749,21 @@ export default function RubrosAFPage() {
                         <td className="px-3 py-3 text-right text-neutral-400">{pct(r.porcDinero ?? 0)}</td>
                         <td className="px-4 py-3 text-right font-bold text-[#00304D] whitespace-nowrap">{fmt(r.totalRubro ?? 0)}</td>
                         {editable && (
-                          <td className="px-3 py-3">
-                            <button onClick={e => { e.stopPropagation(); handleEliminar(r.afrubroid) }}
-                              className="text-neutral-300 hover:text-red-500 transition">
-                              <Trash2 size={14} />
-                            </button>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            {deletingRubroId === r.afrubroid ? (
+                              <div className="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                                <span className="text-[11px] text-red-700 font-medium">¿Eliminar?</span>
+                                <button onClick={e => { e.stopPropagation(); handleEliminar(r.afrubroid) }}
+                                  className="px-2 py-0.5 bg-red-600 text-white text-[11px] font-bold rounded hover:bg-red-700 transition">Sí</button>
+                                <button onClick={e => { e.stopPropagation(); setDeletingRubroId(null) }}
+                                  className="px-2 py-0.5 border border-neutral-200 bg-white text-[11px] text-neutral-600 rounded hover:bg-neutral-100 transition">No</button>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); setDeletingRubroId(r.afrubroid) }}
+                                className="text-neutral-300 hover:text-red-500 transition">
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -888,6 +976,14 @@ export default function RubrosAFPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Volver arriba */}
+      <div className="flex pt-2 pb-6">
+        <button onClick={() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-neutral-50 transition">
+          <ChevronUp size={14} /> Volver arriba
+        </button>
       </div>
 
     </div>

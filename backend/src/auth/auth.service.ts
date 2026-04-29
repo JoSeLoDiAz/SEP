@@ -315,8 +315,20 @@ export class AuthService {
         message: 'Usuario registrado exitosamente',
         usuarioId: usuarioGuardado.usuarioId,
       }
-    } catch (err) {
+    } catch (err: any) {
       await queryRunner.rollbackTransaction()
+      // Traducir errores de Oracle a mensajes legibles (en lugar de
+      // "Internal server error" genérico).
+      if (err?.code === 'ORA-01438' || err?.errorNum === 1438) {
+        throw new BadRequestException(
+          'Algún campo numérico excede el tamaño permitido. Revise el NIT (máx. 10 dígitos) y el dígito de verificación (0-9).',
+        )
+      }
+      if (err?.code === 'ORA-12899' || err?.errorNum === 12899) {
+        throw new BadRequestException(
+          'Algún campo de texto excede el tamaño permitido. Acorte la razón social, sigla o correo.',
+        )
+      }
       throw err
     } finally {
       await queryRunner.release()
@@ -397,8 +409,18 @@ export class AuthService {
         message: 'Usuario registrado exitosamente',
         usuarioId: usuarioGuardado.usuarioId,
       }
-    } catch (err) {
+    } catch (err: any) {
       await queryRunner.rollbackTransaction()
+      if (err?.code === 'ORA-01438' || err?.errorNum === 1438) {
+        throw new BadRequestException(
+          'Algún campo numérico excede el tamaño permitido. Revise el número de identificación (máx. 10 dígitos).',
+        )
+      }
+      if (err?.code === 'ORA-12899' || err?.errorNum === 12899) {
+        throw new BadRequestException(
+          'Algún campo de texto excede el tamaño permitido. Acorte los nombres, apellidos o correo.',
+        )
+      }
       throw err
     } finally {
       await queryRunner.release()

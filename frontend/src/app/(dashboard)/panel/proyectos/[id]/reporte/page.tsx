@@ -355,10 +355,20 @@ export default function ReporteProyectoPage() {
                 snapshot: Reporte & { accionesDetalle?: Array<{ afId: number } & AfDetalle> }
               }>(`/proyectos/versiones/${vAct.versionId}`)
               const { snapshot, ...meta } = s.data
-              // Conservamos versionActual del live (refleja FINAL/aprobado actuales);
-              // el snapshot puede tener un versionActual desactualizado (capturado
-              // ANTES de marcarse como FINAL).
-              setData({ ...snapshot, versionActual: live.versionActual })
+              // Mezclamos snapshot (datos aprobables) con campos del live que
+              // gobiernan la máquina de estados y los botones de acción
+              // (estado, fechaRadicacion, versionActual). El snapshot fue
+              // capturado ANTES de marcarse como FINAL, así que su
+              // proyecto.estado y versionActual están desactualizados.
+              setData({
+                ...snapshot,
+                proyecto: {
+                  ...snapshot.proyecto,
+                  estado: live.proyecto.estado,
+                  fechaRadicacion: live.proyecto.fechaRadicacion,
+                },
+                versionActual: live.versionActual,
+              })
               setVersionVista({
                 versionId: meta.versionId, numero: meta.numero, codigo: meta.codigo,
                 fecha: meta.fecha, usuario: meta.usuario, comentario: meta.comentario,

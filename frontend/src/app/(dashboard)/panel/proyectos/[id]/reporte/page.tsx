@@ -493,8 +493,8 @@ export default function ReporteProyectoPage() {
         'success',
         v ? `¡Versión V${v.versionNumero} creada!` : 'Versión creada',
         v
-          ? `Código: ${v.versionCodigo}. El proyecto sigue editable. Para confirmarlo, ve a "Versiones" y marca esta versión como FINAL.`
-          : 'Snapshot guardado correctamente.',
+          ? `Código: ${v.versionCodigo}. El proyecto sigue editable. Para presentarla oficialmente, ve a "Versiones" y márcala como FINAL.`
+          : 'Copia oficial guardada correctamente.',
       )
       setConfirmOpen(false)
       setComentarioVersion('')
@@ -649,7 +649,7 @@ export default function ReporteProyectoPage() {
             </p>
             <p className="text-xs text-amber-800 mt-0.5 font-mono break-all">{versionVista.codigo}</p>
             <p className="text-[11px] text-amber-700 mt-1">
-              Esta vista es de <strong>solo lectura</strong> y refleja el snapshot guardado al momento de confirmar.
+              Esta vista es de <strong>solo lectura</strong> y refleja la copia oficial guardada al momento de crear esta versión.
               Los cambios posteriores no se ven aquí.
             </p>
             <Link href={`/panel/proyectos/${id}/reporte`}
@@ -669,11 +669,11 @@ export default function ReporteProyectoPage() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-emerald-900">
-              Mostrando snapshot de la versión FINAL · V{versionVista.numero}
+              Mostrando la copia oficial de la versión FINAL · V{versionVista.numero}
             </p>
             <p className="text-xs text-emerald-800 mt-0.5 font-mono break-all">{versionVista.codigo}</p>
             <p className="text-[11px] text-emerald-700 mt-1">
-              Esto es <strong>exactamente lo que aprobarías</strong>. Si el proponente sigue editando, esos cambios no se reflejan aquí.
+              Esto es <strong>exactamente lo que aprobarías</strong>. Si el proponente sigue editando el proyecto, esos cambios no se reflejan aquí.
               Para revisar otras versiones del histórico ve a <Link href={`/panel/proyectos/${id}/versiones`} className="underline font-semibold">Versiones</Link>.
             </p>
           </div>
@@ -747,7 +747,7 @@ export default function ReporteProyectoPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide">FINAL · Lista para descarga y envío a SECOP</span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide">FINAL · Lista para descarga y continuación del proceso de la convocatoria</span>
                       <span className="text-lg font-bold text-amber-900">V{v.numero}</span>
                     </div>
                     <div className="text-sm font-mono font-bold text-amber-800 break-all mt-0.5">{v.codigo}</div>
@@ -1288,9 +1288,10 @@ export default function ReporteProyectoPage() {
           Crear Versión V{proxVersion}
         </h3>
         <p className="text-sm text-neutral-500">
-          Se generará un snapshot inmutable con código único. <strong>El proyecto sigue editable</strong>.
-          Para confirmarlo finalmente y enviarlo a SECOP, después debes ir a "Versiones" y marcar una de
-          ellas como FINAL.
+          Se guardará una <strong>copia oficial</strong> de tu proyecto tal como está ahora, con un código único
+          que la identifica. <strong>El proyecto sigue editable</strong> después de guardarla.
+          Cuando estés listo para presentarlo, ve a <strong>"Versiones"</strong> y marca una de ellas como
+          <strong> FINAL</strong> — esa será la oficial para descargar y continuar con el proceso de la convocatoria.
         </p>
 
         {validando && (

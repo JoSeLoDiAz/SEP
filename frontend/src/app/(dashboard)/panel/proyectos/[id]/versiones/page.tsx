@@ -96,7 +96,7 @@ export default function VersionesProyectoPage() {
       const { type, version } = pendingAction
       if (type === 'final') {
         await api.post(`/proyectos/${proyectoId}/versiones/${version.versionId}/final`)
-        showToast('success', '¡Proyecto confirmado!', `${version.codigo} quedó marcada como FINAL. Lista para descargar y enviar a SECOP.`)
+        showToast('success', '¡Proyecto confirmado!', `${version.codigo} quedó marcada como FINAL. Lista para descargar y continuar con el proceso de la convocatoria.`)
       } else if (type === 'unfinal') {
         await api.delete(`/proyectos/${proyectoId}/versiones/${version.versionId}/final`)
         showToast('success', 'Proyecto reversado', `Marca FINAL retirada. El proyecto vuelve a estado Reversado y puedes editar / crear nuevas versiones.`)
@@ -168,7 +168,7 @@ export default function VersionesProyectoPage() {
             <Award size={22} strokeWidth={2.4} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Versión FINAL · Lista para descarga y envío a SECOP</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Versión FINAL · Lista para descarga y continuación del proceso de la convocatoria</p>
             <p className="text-base font-bold text-amber-900">V{versionFinal.numero} — <span className="font-mono break-all">{versionFinal.codigo}</span></p>
             <p className="text-xs text-amber-700 mt-1">
               Mientras esta versión esté marcada como FINAL, el proyecto no se puede desconfirmar ni editar.
@@ -183,7 +183,7 @@ export default function VersionesProyectoPage() {
           <FileText size={42} className="text-neutral-300 mx-auto mb-3" />
           <p className="text-sm font-semibold text-neutral-600 mb-1">Aún no hay versiones</p>
           <p className="text-xs text-neutral-400">
-            Cuando confirmes el proyecto se creará la primera versión con su código único e inmutable.
+            Cuando confirmes el proyecto se guardará una copia oficial con su código único — esa es la primera versión.
           </p>
           <Link href={`/panel/proyectos/${proyectoId}/reporte`}
             className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 bg-[#00304D] hover:bg-[#004a76] text-white text-xs font-semibold rounded-xl transition">
@@ -221,7 +221,7 @@ export default function VersionesProyectoPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         {esFinal && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wide">
-                            <Award size={10} /> FINAL · Lista para SECOP
+                            <Award size={10} /> FINAL · Versión oficial
                           </span>
                         )}
                         {anulada && (
@@ -284,11 +284,19 @@ export default function VersionesProyectoPage() {
                     </div>
                   )}
                   {v.hash && (
-                    <div className="flex items-center gap-2 col-span-1 sm:col-span-2">
-                      <ShieldCheck size={13} className="text-neutral-400 shrink-0" />
-                      <span className="text-neutral-500 font-semibold">SHA-256:</span>
-                      <span className="text-neutral-500 font-mono text-[10px] break-all">{v.hash}</span>
-                    </div>
+                    <details className="col-span-1 sm:col-span-2 group">
+                      <summary className="flex items-center gap-2 cursor-pointer list-none text-neutral-400 hover:text-neutral-600 transition">
+                        <ShieldCheck size={13} className="shrink-0" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wide">Ver detalles técnicos</span>
+                        <ChevronRight size={11} className="transition-transform group-open:rotate-90" />
+                      </summary>
+                      <div className="mt-2 pl-5 flex flex-col gap-1">
+                        <p className="text-[10px] text-neutral-400">
+                          Huella digital de seguridad (SHA-256) — garantiza que el contenido de esta versión no ha sido alterado:
+                        </p>
+                        <p className="text-[10px] text-neutral-500 font-mono break-all bg-neutral-50 border border-neutral-100 rounded-lg px-2 py-1">{v.hash}</p>
+                      </div>
+                    </details>
                   )}
                   {v.comentario && (
                     <div className="col-span-1 sm:col-span-2 mt-1">
@@ -339,13 +347,17 @@ export default function VersionesProyectoPage() {
 
       {/* Nota informativa */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-900">
-        <p className="font-bold mb-1">¿Cómo funciona el historial de versiones?</p>
+        <p className="font-bold mb-2">¿Cómo funciona el historial de versiones?</p>
+        <p className="leading-relaxed mb-2">
+          Piensa en cada versión como una <strong>foto fija</strong> de tu proyecto en un momento exacto.
+          Una vez guardada, esa foto no se puede modificar — ni siquiera tú.
+        </p>
         <ul className="leading-relaxed list-disc list-inside flex flex-col gap-1 mt-1">
-          <li>Cada vez que confirmas el proyecto se crea un <strong>snapshot inmutable</strong> con código único.</li>
-          <li>Al desconfirmar, editar y volver a confirmar se crea una nueva versión. Las anteriores se conservan.</li>
-          <li>Una sola versión puede estar marcada como <strong>FINAL</strong> — esa es la que enviarás a SECOP. Mientras esté marcada, el proyecto no se puede desconfirmar.</li>
-          <li>Las versiones <strong>anuladas</strong> son borradores intermedios que decidiste descartar; quedan en el histórico pero no se consideran "vigentes".</li>
-          <li>El código de cada versión sirve para validar contra SECOP qué fue lo enviado.</li>
+          <li>Si después haces cambios y guardas otra versión, la anterior se conserva intacta como respaldo.</li>
+          <li>Cuando estés listo para presentar el proyecto, marca <strong>UNA</strong> de tus versiones como <strong>FINAL</strong> — esa es la oficial para descargar y continuar con el proceso de la convocatoria.</li>
+          <li>Mientras haya una versión marcada como FINAL, el proyecto no se puede editar. Si necesitas hacer cambios, retira la marca y vuelve a editarlo.</li>
+          <li>Si alguna versión ya no te sirve (por ejemplo, era un borrador intermedio) puedes <strong>anularla</strong>; queda en el histórico pero no se considera vigente.</li>
+          <li>Cada versión tiene un <strong>código único</strong> que sirve para verificar oficialmente cuál fue la que presentaste.</li>
         </ul>
       </div>
 

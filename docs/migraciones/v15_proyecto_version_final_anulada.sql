@@ -26,10 +26,18 @@ ALTER TABLE PROYECTOVERSION ADD (
   VERSIONANULADAUSUARIO VARCHAR2(200) NULL
 );
 
--- Una sola versión FINAL por proyecto (Oracle: índice condicional con CASE).
--- Cuando VERSIONESFINAL=0 el valor indexado es NULL (no entra al unique).
+-- Una sola versión FINAL por proyecto.
+-- Patrón de "índice único parcial" en Oracle: cuando VERSIONESFINAL != 1 el
+-- valor indexado es NULL en un índice mono-columna, por lo que la fila NO
+-- entra al índice (Oracle no indexa filas con valor NULL en un índice de una
+-- sola columna). Cuando VERSIONESFINAL = 1 el valor indexado es PROYECTOID,
+-- garantizando unicidad por proyecto.
+--
+-- Nota: NO usar la variante compuesta (PROYECTOID, CASE…) — en Oracle ese
+-- patrón sigue indexando filas con NULL en la 2ª columna y enforza uniqueness
+-- sobre PROYECTOID solo, bloqueando cualquier 2ª versión del mismo proyecto.
 CREATE UNIQUE INDEX UX_PROYECTOVERSION_FINAL
-  ON PROYECTOVERSION (PROYECTOID, CASE WHEN VERSIONESFINAL = 1 THEN 1 ELSE NULL END);
+  ON PROYECTOVERSION (CASE WHEN VERSIONESFINAL = 1 THEN PROYECTOID ELSE NULL END);
 
 -- Nota: VERSIONCODIGO ya tiene UNIQUE constraint desde v14, no se redefine.
 

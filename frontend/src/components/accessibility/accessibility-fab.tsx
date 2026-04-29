@@ -68,7 +68,7 @@ export function AccessibilityFab() {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? 'Cerrar accesibilidad' : 'Abrir opciones de accesibilidad'}
         aria-expanded={open}
-        className="fixed bottom-5 right-5 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-[#6C29B3] to-[#4A1A82] text-white shadow-lg shadow-purple-900/30 hover:scale-105 active:scale-95 transition flex items-center justify-center ring-2 ring-white/20"
+        className="fixed bottom-5 right-5 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-[#6C29B3] to-[#4A1A82] text-white shadow-lg shadow-purple-900/30 hover:scale-105 active:scale-95 transition flex items-center justify-center ring-2 ring-white/20 print:hidden no-print"
       >
         <Accessibility size={26} strokeWidth={2.2} />
       </button>

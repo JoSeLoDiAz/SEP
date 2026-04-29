@@ -592,4 +592,11 @@ export class ProyectosController {
   guardarPresupuestoProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
     return this.proyectosService.guardarPresupuestoProyecto(proyectoId)
   }
+
+  // ── Reporte completo del Proyecto ─────────────────────────────────────────
+
+  @Get(':id/reporte')
+  getReporteProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
+    return this.proyectosService.getReporteProyecto(proyectoId)
+  }
 }

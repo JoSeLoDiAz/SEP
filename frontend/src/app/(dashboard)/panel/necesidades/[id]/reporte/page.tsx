@@ -264,14 +264,13 @@ export default function ReporteDiagnosticoPage() {
           </div>
 
           {/* Cadena productiva */}
-          {(data.eslabones || data.interacciones) && (
-            <div className="flex flex-col gap-4 border-t border-neutral-100 pt-4">
-              <TextBlock label="Identificación de los eslabones de la cadena productiva del proponente"
-                value={data.eslabones} />
-              <TextBlock label="Descripción de las interacciones del proponente con otros actores"
-                value={data.interacciones} />
-            </div>
-          )}
+          <div className="flex flex-col gap-4 border-t border-neutral-100 pt-4">
+            <p className="text-xs font-semibold text-[#003366]">Cadena productiva e interacciones</p>
+            <TextBlock label="Identificación de los eslabones de la cadena productiva del proponente"
+              value={data.eslabones || '—'} />
+            <TextBlock label="Descripción de las interacciones del proponente con otros actores"
+              value={data.interacciones || '—'} />
+          </div>
         </div>
       </section>
 

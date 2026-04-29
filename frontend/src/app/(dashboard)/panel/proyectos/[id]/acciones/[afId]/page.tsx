@@ -144,7 +144,7 @@ function getHorasTeor(ut: UTDetalle) {
   return (ut.horasTP ?? 0) + (ut.horasTV ?? 0) + (ut.horasTPAT ?? 0) + (ut.horasTHib ?? 0)
 }
 function labelHorasUT(m: number | null) {
-  if (m === 2) return { prac: 'Horas Prácticas (PP-AT)', teor: 'Horas Teóricas (TP-AT)' }
+  if (m === 2) return { prac: 'Horas Prácticas (PP-PAT)', teor: 'Horas Teóricas (TP-PAT)' }
   if (m === 4) return { prac: 'Horas Prácticas (Virtual)', teor: 'Horas Teóricas (Virtual)' }
   if (m === 3 || m === 5 || m === 6) return { prac: 'Horas Prácticas (Híbrida)', teor: 'Horas Teóricas (Híbrida)' }
   return { prac: 'Horas Prácticas (Presencial)', teor: 'Horas Teóricas (Presencial)' }
@@ -487,6 +487,69 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── Helper component: dropdown buscable para selects largos ────────────────
+function SearchableSelect({
+  value, onChange, options, placeholder = '— Seleccione —',
+  searchPlaceholder = 'Buscar…', disabled = false,
+}: {
+  value: number | null
+  onChange: (id: number | null) => void
+  options: Opcion[]
+  placeholder?: string
+  searchPlaceholder?: string
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [busq, setBusq] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const selectedName = value != null ? options.find(o => o.id === value)?.nombre ?? '' : ''
+  const filtered = !busq.trim()
+    ? options
+    : options.filter(o => o.nombre.toLowerCase().includes(busq.toLowerCase()))
+
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" disabled={disabled}
+        onClick={() => { setOpen(o => !o); setBusq('') }}
+        className={`w-full border border-neutral-300 rounded-xl px-3 py-2 text-sm flex items-center justify-between gap-2 bg-white text-left disabled:bg-neutral-50 disabled:text-neutral-400 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#00304D]`}>
+        <span className={`${selectedName ? 'text-neutral-800' : 'text-neutral-400'} truncate`}>
+          {selectedName || placeholder}
+        </span>
+        <ChevronDown size={14} className="text-neutral-400 flex-shrink-0" />
+      </button>
+      {open && !disabled && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-xl shadow-lg flex flex-col max-h-64 overflow-hidden">
+          <div className="p-2 border-b border-neutral-100 sticky top-0 bg-white">
+            <input autoFocus value={busq} onChange={e => setBusq(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full text-xs px-3 py-1.5 border border-neutral-200 rounded-lg outline-none focus:border-[#00304D]" />
+          </div>
+          <div className="overflow-y-auto">
+            {filtered.length === 0
+              ? <p className="text-xs text-neutral-400 text-center py-4">Sin resultados</p>
+              : filtered.map(o => (
+                <button key={o.id} type="button"
+                  onClick={() => { onChange(o.id); setOpen(false); setBusq('') }}
+                  className={`w-full text-left text-xs px-4 py-2 hover:bg-[#00304D]/5 transition leading-relaxed whitespace-normal break-words ${value === o.id ? 'bg-[#00304D]/10 font-semibold text-[#00304D]' : 'text-neutral-700'}`}>
+                  {o.nombre}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AFDetallePage() {
   const { id, afId } = useParams<{ id: string; afId: string }>()
   const proyectoId = Number(id)
@@ -553,6 +616,9 @@ export default function AFDetallePage() {
   const [actSelUT,          setActSelUT]          = useState('')
   const [actOtroUT,         setActOtroUT]         = useState('')
   const [actAddingUT,       setActAddingUT]       = useState(false)
+  const [actBusqueda,       setActBusqueda]       = useState('')
+  const [actDropdownOpen,   setActDropdownOpen]   = useState(false)
+  const actDropRef = useRef<HTMLDivElement>(null)
   // Perfil capacitador
   const [perfilAddUT,       setPerfilAddUT]       = useState({ rubroId: '', horasCap: '' })
   const [perfilAddingUT,    setPerfilAddingUT]    = useState(false)
@@ -565,6 +631,9 @@ export default function AFDetallePage() {
   const [afComponentesCat, setAfComponentesCat] = useState<Opcion[]>([])
   const [alineacion,       setAlineacion]       = useState<AlineacionData | null>(null)
   const [alinRetoSel,      setAlinRetoSel]      = useState('')
+  const [alinRetoBusq,       setAlinRetoBusq]       = useState('')
+  const [alinRetoOpen,       setAlinRetoOpen]       = useState(false)
+  const alinRetoRef = useRef<HTMLDivElement>(null)
   const [alinCompBusq,       setAlinCompBusq]       = useState('')
   const [alinCompSel,        setAlinCompSel]        = useState<number | null>(null)
   const [alinCompOpen,       setAlinCompOpen]       = useState(false)
@@ -746,6 +815,8 @@ export default function AFDetallePage() {
       if (necRef.current     && !necRef.current.contains(e.target     as Node)) setNecOpen(false)
       if (cuocRef.current    && !cuocRef.current.contains(e.target    as Node)) setCuocOpen(false)
       if (alinCompRef.current && !alinCompRef.current.contains(e.target as Node)) setAlinCompOpen(false)
+      if (alinRetoRef.current && !alinRetoRef.current.contains(e.target as Node)) setAlinRetoOpen(false)
+      if (actDropRef.current && !actDropRef.current.contains(e.target as Node)) setActDropdownOpen(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
@@ -1105,6 +1176,7 @@ export default function AFDetallePage() {
       })
       setActSelUT('')
       setActOtroUT('')
+      setActBusqueda('')
       await cargarDetalleUT(expandedUtId)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error'
@@ -2381,27 +2453,57 @@ export default function AFDetallePage() {
                                 ))}
                                 {detalleUT.actividades.length === 0 && <span className="text-xs text-neutral-400">Sin actividades</span>}
                               </div>
-                              {editable && (
-                                <div className="flex gap-2 flex-wrap items-end">
-                                  <div className="flex-1 min-w-[200px]">
-                                    <select value={actSelUT} onChange={e => setActSelUT(e.target.value)} className={select}>
-                                      <option value="">— Seleccione actividad —</option>
-                                      {actividadesCat.filter(a => !detalleUT.actividades.some(d => d.actividadId === a.id)).map(a =>
-                                        <option key={a.id} value={a.id}>{a.nombre}</option>)}
-                                    </select>
-                                  </div>
-                                  {actNeedsOtro && (
-                                    <div className="flex-1 min-w-[140px]">
-                                      <input value={actOtroUT} onChange={e => setActOtroUT(e.target.value)}
-                                        className={input} placeholder="Especifique…" maxLength={200} />
+                              {editable && (() => {
+                                const actDisponibles = actividadesCat.filter(a => !detalleUT.actividades.some(d => d.actividadId === a.id))
+                                const actFiltradas = !actBusqueda.trim()
+                                  ? actDisponibles.slice(0, 50)
+                                  : actDisponibles.filter(a => a.nombre.toLowerCase().includes(actBusqueda.trim().toLowerCase())).slice(0, 50)
+                                return (
+                                  <div className="flex gap-2 flex-wrap items-end">
+                                    <div ref={actDropRef} className="relative flex-1 min-w-[200px]">
+                                      <button type="button"
+                                        onClick={() => { setActDropdownOpen(v => !v); setActBusqueda('') }}
+                                        className="w-full flex items-center justify-between border border-neutral-300 rounded-xl px-3 py-2 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-[#00304D]">
+                                        <span className={actSelNombre ? 'text-neutral-800' : 'text-neutral-400'}>
+                                          {actSelNombre || '— Seleccione actividad —'}
+                                        </span>
+                                        <Search size={13} className="shrink-0 text-neutral-400" />
+                                      </button>
+                                      {actDropdownOpen && (
+                                        <div className="absolute z-50 mt-1 w-full bg-white border border-neutral-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                                          <div className="p-2 border-b border-neutral-100 sticky top-0 bg-white">
+                                            <input autoFocus type="text" placeholder="Buscar actividad…"
+                                              value={actBusqueda} onChange={e => setActBusqueda(e.target.value)}
+                                              className="w-full text-sm border border-neutral-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#00304D]" />
+                                          </div>
+                                          {actFiltradas.length === 0
+                                            ? <p className="text-sm text-neutral-400 text-center py-4">Sin resultados</p>
+                                            : actFiltradas.map(a => (
+                                              <button key={a.id} type="button"
+                                                onClick={() => { setActSelUT(String(a.id)); setActDropdownOpen(false); setActBusqueda('') }}
+                                                className={`w-full text-left px-3 py-2 text-xs hover:bg-[#00304D]/10 transition ${actSelUT === String(a.id) ? 'bg-[#00304D]/5 font-semibold text-[#00304D]' : 'text-neutral-700'}`}>
+                                                {a.nombre}
+                                              </button>
+                                            ))}
+                                          {actBusqueda.trim() === '' && actDisponibles.length > 50 && (
+                                            <p className="text-xs text-neutral-400 text-center py-2">Mostrando primeros 50. Escriba para filtrar.</p>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                  <button onClick={handleAgregarActividadUT} disabled={actAddingUT || !actSelUT}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl hover:bg-[#004a76] disabled:opacity-50 transition">
-                                    {actAddingUT ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Agregar
-                                  </button>
-                                </div>
-                              )}
+                                    {actNeedsOtro && (
+                                      <div className="flex-1 min-w-[140px]">
+                                        <input value={actOtroUT} onChange={e => setActOtroUT(e.target.value)}
+                                          className={input} placeholder="Especifique…" maxLength={200} />
+                                      </div>
+                                    )}
+                                    <button onClick={handleAgregarActividadUT} disabled={actAddingUT || !actSelUT}
+                                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl hover:bg-[#004a76] disabled:opacity-50 transition">
+                                      {actAddingUT ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Agregar
+                                    </button>
+                                  </div>
+                                )
+                              })()}
                             </div>
 
                             {/* Descripción de actividades (solo si virtual o aumentada) */}
@@ -2502,6 +2604,12 @@ export default function AFDetallePage() {
           Card 7 — Alineación de la Acción de Formación
       ════════════════════════════════════════════════════════════════════ */}
       {(() => {
+        const alinRetoFiltrados = retosCat.filter(r =>
+          !alinRetoBusq || r.nombre.toLowerCase().includes(alinRetoBusq.toLowerCase()),
+        )
+        const alinRetoSelNombre = alinRetoSel
+          ? (retosCat.find(r => String(r.id) === alinRetoSel)?.nombre ?? '')
+          : ''
         const alinCompFiltrados = afComponentesCat.filter(c =>
           !alinCompBusq || c.nombre.toLowerCase().includes(alinCompBusq.toLowerCase()),
         )
@@ -2522,17 +2630,45 @@ export default function AFDetallePage() {
               <div className="flex flex-col gap-3">
                 <p className={secTitle}>Componente Estratégico</p>
 
-                {/* Reto Nacional */}
+                {/* Reto Nacional — combobox buscable */}
                 <div>
                   <label className={label}>Reto Nacional</label>
-                  <select value={alinRetoSel}
-                    onChange={e => handleCargarComponentesByReto(e.target.value)}
-                    className={select}>
-                    <option value="">— Seleccione un reto —</option>
-                    {retosCat.map(r => (
-                      <option key={r.id} value={r.id}>{r.nombre}</option>
-                    ))}
-                  </select>
+                  <div className="relative" ref={alinRetoRef}>
+                    <div
+                      onClick={() => setAlinRetoOpen(o => !o)}
+                      className={`${input} flex items-center justify-between gap-2 cursor-pointer`}
+                    >
+                      <span className={`${alinRetoSel ? 'text-neutral-800' : 'text-neutral-400'} line-clamp-2 leading-tight`}>
+                        {alinRetoSel ? alinRetoSelNombre : '— Seleccione un reto —'}
+                      </span>
+                      <ChevronDown size={14} className="text-neutral-400 flex-shrink-0" />
+                    </div>
+                    {alinRetoOpen && (
+                      <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-xl shadow-lg flex flex-col max-h-72 overflow-hidden">
+                        <div className="p-2 border-b border-neutral-100">
+                          <input
+                            autoFocus
+                            value={alinRetoBusq}
+                            onChange={e => setAlinRetoBusq(e.target.value)}
+                            className="w-full text-xs px-3 py-1.5 border border-neutral-200 rounded-lg outline-none focus:border-[#00304D]"
+                            placeholder="Buscar reto…"
+                          />
+                        </div>
+                        <div className="overflow-y-auto">
+                          {alinRetoFiltrados.length === 0 && (
+                            <p className="text-xs text-neutral-400 text-center py-4">Sin resultados</p>
+                          )}
+                          {alinRetoFiltrados.map(r => (
+                            <button key={r.id}
+                              onClick={() => { handleCargarComponentesByReto(String(r.id)); setAlinRetoOpen(false); setAlinRetoBusq('') }}
+                              className={`w-full text-left text-xs px-4 py-2 hover:bg-[#00304D]/5 transition leading-relaxed whitespace-normal break-words ${alinRetoSel === String(r.id) ? 'bg-[#00304D]/10 font-semibold text-[#00304D]' : 'text-neutral-700'}`}>
+                              {r.nombre}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Componente buscable */}
@@ -2541,9 +2677,9 @@ export default function AFDetallePage() {
                   <div className="relative" ref={alinCompRef}>
                     <div
                       onClick={() => alinRetoSel && setAlinCompOpen(o => !o)}
-                      className={`${input} flex items-center justify-between cursor-pointer ${!alinRetoSel ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`${input} flex items-center justify-between gap-2 cursor-pointer ${!alinRetoSel ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      <span className={alinCompSel ? 'text-neutral-800' : 'text-neutral-400'}>
+                      <span className={`${alinCompSel ? 'text-neutral-800' : 'text-neutral-400'} line-clamp-2 leading-tight`}>
                         {alinCompSel ? alinSelNombre : 'Seleccione o busque…'}
                       </span>
                       <ChevronDown size={14} className="text-neutral-400 flex-shrink-0" />
@@ -2566,7 +2702,7 @@ export default function AFDetallePage() {
                           {alinCompFiltrados.map(c => (
                             <button key={c.id}
                               onClick={() => { setAlinCompSel(c.id); setAlinCompOpen(false); setAlinCompBusq('') }}
-                              className={`w-full text-left text-xs px-4 py-2 hover:bg-[#00304D]/5 transition ${alinCompSel === c.id ? 'bg-[#00304D]/10 font-semibold text-[#00304D]' : 'text-neutral-700'}`}>
+                              className={`w-full text-left text-xs px-4 py-2 hover:bg-[#00304D]/5 transition leading-relaxed whitespace-normal break-words ${alinCompSel === c.id ? 'bg-[#00304D]/10 font-semibold text-[#00304D]' : 'text-neutral-700'}`}>
                               {c.nombre}
                             </button>
                           ))}
@@ -2745,30 +2881,6 @@ export default function AFDetallePage() {
                     {isExpanded && (
                       <div className="p-4 flex flex-col gap-5 border-t border-neutral-100">
 
-                        {/* Justificación */}
-                        <div>
-                          <label className={label}>Justificación de la cobertura del grupo</label>
-                          <textarea
-                            disabled={!editable}
-                            rows={3}
-                            maxLength={3000}
-                            className={textarea}
-                            value={grupoJust[grupo.grupoId] ?? ''}
-                            onChange={e => setGrupoJust(prev => ({ ...prev, [grupo.grupoId]: e.target.value }))}
-                            placeholder="Describa la justificación de la cobertura para este grupo…"
-                          />
-                          <p className="text-xs text-neutral-400 text-right mt-0.5">{(grupoJust[grupo.grupoId] ?? '').length}/3000</p>
-                          {editable && (
-                            <div className="flex mt-2">
-                              <button onClick={() => handleSaveJustificacion(grupo.grupoId)} disabled={isSavingJ}
-                                className="inline-flex items-center gap-2 bg-neutral-700 hover:bg-neutral-800 text-white px-4 py-1.5 rounded-xl text-xs font-semibold transition disabled:opacity-60">
-                                {isSavingJ ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                                {isSavingJ ? 'Guardando…' : 'Guardar justificación'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
                         {/* ── Formulario de cobertura según modalidad ── */}
                         <div>
                           <p className={secTitle}>
@@ -2786,25 +2898,18 @@ export default function AFDetallePage() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div>
                                     <label className={label}>Departamento</label>
-                                    <select disabled={!editable} className={select}
-                                      value={row.deptoId ?? ''}
-                                      onChange={e => {
-                                        const deptoId = Number(e.target.value) || null
+                                    <SearchableSelect disabled={!editable} options={deptosCat}
+                                      value={row.deptoId} placeholder="— Departamento —" searchPlaceholder="Buscar departamento…"
+                                      onChange={deptoId => {
                                         setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...row, deptoId, ciudadId: null } }))
                                         if (deptoId) loadCiudades(deptoId)
-                                      }}>
-                                      <option value="">— Departamento —</option>
-                                      {deptosCat.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
-                                    </select>
+                                      }} />
                                   </div>
                                   <div>
                                     <label className={label}>Ciudad / Municipio</label>
-                                    <select disabled={!editable || !row.deptoId} className={select}
-                                      value={row.ciudadId ?? ''}
-                                      onChange={e => setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...row, ciudadId: Number(e.target.value) || null } }))}>
-                                      <option value="">— Ciudad —</option>
-                                      {(ciudadesCat[row.deptoId ?? 0] ?? []).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                                    </select>
+                                    <SearchableSelect disabled={!editable || !row.deptoId} options={ciudadesCat[row.deptoId ?? 0] ?? []}
+                                      value={row.ciudadId} placeholder="— Ciudad —" searchPlaceholder="Buscar ciudad / municipio…"
+                                      onChange={ciudadId => setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...row, ciudadId } }))} />
                                   </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
@@ -2832,19 +2937,19 @@ export default function AFDetallePage() {
                             const target = esPat ? benefTarget : benefViTarget
                             return (
                               <div className="flex flex-col gap-3">
-                                {rows.map((row, idx) => (
+                                {rows.map((row, idx) => {
+                                  const usadosEnOtras = new Set(rows.map((r, i) => i !== idx ? r.deptoId : null).filter((d): d is number => d != null))
+                                  const optsFiltrados = deptosCat.filter(d => !usadosEnOtras.has(d.id))
+                                  return (
                                   <div key={idx} className="flex gap-2 items-end">
                                     <div className="flex-1">
                                       {idx === 0 && <label className={label}>Departamento</label>}
-                                      <select disabled={!editable} className={select}
-                                        value={row.deptoId ?? ''}
-                                        onChange={e => {
-                                          const updated = rows.map((r, i) => i === idx ? { ...r, deptoId: Number(e.target.value) || null } : r)
+                                      <SearchableSelect disabled={!editable} options={optsFiltrados}
+                                        value={row.deptoId} placeholder="— Departamento —" searchPlaceholder="Buscar departamento…"
+                                        onChange={deptoId => {
+                                          const updated = rows.map((r, i) => i === idx ? { ...r, deptoId } : r)
                                           setCobVirt(prev => ({ ...prev, [grupo.grupoId]: updated }))
-                                        }}>
-                                        <option value="">— Departamento —</option>
-                                        {deptosCat.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
-                                      </select>
+                                        }} />
                                     </div>
                                     <div className="w-28">
                                       {idx === 0 && <label className={label}>Beneficiarios</label>}
@@ -2863,7 +2968,8 @@ export default function AFDetallePage() {
                                       </button>
                                     )}
                                   </div>
-                                ))}
+                                  )
+                                })}
                                 {editable && (
                                   <button onClick={() => setCobVirt(prev => ({ ...prev, [grupo.grupoId]: [...rows, { deptoId: null, ciudadId: null, benef: '', rural: 0 }] }))}
                                     className="inline-flex items-center gap-1 text-xs text-[#00304D] hover:underline self-start">
@@ -2892,25 +2998,18 @@ export default function AFDetallePage() {
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div>
                                       <label className={label}>Departamento</label>
-                                      <select disabled={!editable} className={select}
-                                        value={pRow.deptoId ?? ''}
-                                        onChange={e => {
-                                          const deptoId = Number(e.target.value) || null
+                                      <SearchableSelect disabled={!editable} options={deptosCat}
+                                        value={pRow.deptoId} placeholder="— Departamento —" searchPlaceholder="Buscar departamento…"
+                                        onChange={deptoId => {
                                           setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...pRow, deptoId, ciudadId: null } }))
                                           if (deptoId) loadCiudades(deptoId)
-                                        }}>
-                                        <option value="">— Departamento —</option>
-                                        {deptosCat.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
-                                      </select>
+                                        }} />
                                     </div>
                                     <div>
                                       <label className={label}>Ciudad / Municipio</label>
-                                      <select disabled={!editable || !pRow.deptoId} className={select}
-                                        value={pRow.ciudadId ?? ''}
-                                        onChange={e => setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...pRow, ciudadId: Number(e.target.value) || null } }))}>
-                                        <option value="">— Ciudad —</option>
-                                        {(ciudadesCat[pRow.deptoId ?? 0] ?? []).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                                      </select>
+                                      <SearchableSelect disabled={!editable || !pRow.deptoId} options={ciudadesCat[pRow.deptoId ?? 0] ?? []}
+                                        value={pRow.ciudadId} placeholder="— Ciudad —" searchPlaceholder="Buscar ciudad / municipio…"
+                                        onChange={ciudadId => setCobPres(prev => ({ ...prev, [grupo.grupoId]: { ...pRow, ciudadId } }))} />
                                     </div>
                                   </div>
                                   <div className="w-40">
@@ -2930,19 +3029,19 @@ export default function AFDetallePage() {
                                 {/* Sincrónico */}
                                 <div className="bg-purple-50 rounded-xl p-4 flex flex-col gap-3">
                                   <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">Sincrónico (virtual)</p>
-                                  {sRows.map((row, idx) => (
+                                  {sRows.map((row, idx) => {
+                                    const usadosEnOtras = new Set(sRows.map((r, i) => i !== idx ? r.deptoId : null).filter((d): d is number => d != null))
+                                    const optsFiltrados = deptosCat.filter(d => !usadosEnOtras.has(d.id))
+                                    return (
                                     <div key={idx} className="flex gap-2 items-end">
                                       <div className="flex-1">
                                         {idx === 0 && <label className={label}>Departamento</label>}
-                                        <select disabled={!editable} className={select}
-                                          value={row.deptoId ?? ''}
-                                          onChange={e => {
-                                            const updated = sRows.map((r, i) => i === idx ? { ...r, deptoId: Number(e.target.value) || null } : r)
+                                        <SearchableSelect disabled={!editable} options={optsFiltrados}
+                                          value={row.deptoId} placeholder="— Departamento —" searchPlaceholder="Buscar departamento…"
+                                          onChange={deptoId => {
+                                            const updated = sRows.map((r, i) => i === idx ? { ...r, deptoId } : r)
                                             setCobVirt(prev => ({ ...prev, [grupo.grupoId]: updated }))
-                                          }}>
-                                          <option value="">— Departamento —</option>
-                                          {deptosCat.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
-                                        </select>
+                                          }} />
                                       </div>
                                       <div className="w-28">
                                         {idx === 0 && <label className={label}>Beneficiarios</label>}
@@ -2961,7 +3060,8 @@ export default function AFDetallePage() {
                                         </button>
                                       )}
                                     </div>
-                                  ))}
+                                    )
+                                  })}
                                   {editable && (
                                     <button onClick={() => setCobVirt(prev => ({ ...prev, [grupo.grupoId]: [...sRows, { deptoId: null, ciudadId: null, benef: '', rural: 0 }] }))}
                                       className="inline-flex items-center gap-1 text-xs text-purple-700 hover:underline self-start">
@@ -2989,6 +3089,30 @@ export default function AFDetallePage() {
                             </button>
                           </div>
                         )}
+
+                        {/* Justificación de la cobertura del grupo (después de las coberturas) */}
+                        <div className="pt-4 border-t border-neutral-100">
+                          <label className={label}>Justificación de la cobertura del grupo</label>
+                          <textarea
+                            disabled={!editable}
+                            rows={3}
+                            maxLength={3000}
+                            className={textarea}
+                            value={grupoJust[grupo.grupoId] ?? ''}
+                            onChange={e => setGrupoJust(prev => ({ ...prev, [grupo.grupoId]: e.target.value }))}
+                            placeholder="Describa la justificación de la cobertura para este grupo…"
+                          />
+                          <p className="text-xs text-neutral-400 text-right mt-0.5">{(grupoJust[grupo.grupoId] ?? '').length}/3000</p>
+                          {editable && (
+                            <div className="flex mt-2">
+                              <button onClick={() => handleSaveJustificacion(grupo.grupoId)} disabled={isSavingJ}
+                                className="inline-flex items-center gap-2 bg-neutral-700 hover:bg-neutral-800 text-white px-4 py-1.5 rounded-xl text-xs font-semibold transition disabled:opacity-60">
+                                {isSavingJ ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                {isSavingJ ? 'Guardando…' : 'Guardar justificación'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

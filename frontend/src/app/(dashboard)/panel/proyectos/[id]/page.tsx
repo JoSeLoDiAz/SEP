@@ -2,10 +2,11 @@
 
 import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
+import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  BookUser, CheckCircle2, ChevronRight, ClipboardList, FileText,
-  FolderKanban, Layers, Loader2, LogOut, Pencil, Plus, Save,
+  BookUser, ChevronRight, FileText, FolderKanban,
+  Loader2, Plus, Save,
   Trash2, UserPlus, X,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -37,17 +38,21 @@ interface Contacto  {
 }
 interface Disponible { contactoId: number; nombre: string; cargo: string; correo: string; proyectoActual: string | null }
 
-const CARGOS = ['Representante Legal', 'Responsable del Proyecto', 'Contacto Administrativo']
+const CARGOS = [
+  'Representante Legal',
+  'Persona encargada del área de Talento Humano',
+  'Persona encargada del área de Comunicaciones',
+]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function estadoInfo(e: number | null) {
   switch (Number(e)) {
-    case 1: return { label: 'Radicado',    cls: 'bg-blue-100 text-blue-700 border-blue-200' }
-    case 2: return { label: 'Reversado',   cls: 'bg-amber-100 text-amber-700 border-amber-200' }
-    case 3: return { label: 'Aprobado',    cls: 'bg-green-100 text-green-700 border-green-200' }
-    case 4: return { label: 'Rechazado',   cls: 'bg-red-100 text-red-700 border-red-200' }
-    default: return { label: 'Sin Radicar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
+    case 1: return { label: 'Confirmado',     cls: 'bg-blue-100 text-blue-700 border-blue-200' }
+    case 2: return { label: 'Reversado',      cls: 'bg-amber-100 text-amber-700 border-amber-200' }
+    case 3: return { label: 'Aprobado',       cls: 'bg-green-100 text-green-700 border-green-200' }
+    case 4: return { label: 'Rechazado',      cls: 'bg-red-100 text-red-700 border-red-200' }
+    default: return { label: 'Sin Confirmar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
   }
 }
 
@@ -76,9 +81,7 @@ export default function ProyectoDetallePage() {
   const [objetivo, setObjetivo] = useState('')
   const [guardando, setGuardando] = useState(false)
 
-  // Radicar
-  const [radicando, setRadicando]         = useState(false)
-  const [confirmRadicar, setConfirmRadicar] = useState(false)
+  // (La confirmación del proyecto se hace desde la página de Reporte.)
 
   // Asignar contacto existente
   const [modalAsignar, setModalAsignar]   = useState(false)
@@ -164,22 +167,7 @@ export default function ProyectoDetallePage() {
     }
   }
 
-  // ── Radicar / Desradicar ──────────────────────────────────────────────────
-
-  async function handleRadicar() {
-    setConfirmRadicar(false)
-    setRadicando(true)
-    try {
-      const r = await api.post<{ message: string; estado: number }>(`/proyectos/${proyectoId}/radicar`)
-      showToast('success', r.data.message)
-      await cargarProyecto()
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al radicar'
-      showToast('error', msg)
-    } finally {
-      setRadicando(false)
-    }
-  }
+  // (La confirmación/desconfirmación se ejecuta desde la página de Reporte.)
 
   // ── Asignar contacto existente ────────────────────────────────────────────
 
@@ -281,8 +269,6 @@ export default function ProyectoDetallePage() {
 
   const editable = puedeEditar(proyecto)
   const { label: estadoLabel, cls: estadoCls } = estadoInfo(proyecto.estado)
-  const esRadicado = Number(proyecto.estado) === 1
-  const esAprobado = Number(proyecto.estado) === 3
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -314,43 +300,8 @@ export default function ProyectoDetallePage() {
         </span>
       </div>
 
-      {/* ── Menú de secciones ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2">
-        <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00304D] text-white text-xs font-semibold rounded-xl">
-          <FolderKanban size={13} /> Generalidades
-        </span>
-        <Link
-          href={`/panel/proyectos/${proyectoId}/acciones`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <ClipboardList size={13} /> Acciones de Formación
-        </Link>
-        <a
-          href={`https://sep.sena.edu.co/proyectosrubros.aspx?${proyectoId}`}
-          target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition"
-        >
-          <Layers size={13} /> Rubros AF
-        </a>
-        {!esAprobado && (
-          <button
-            onClick={() => setConfirmRadicar(true)}
-            disabled={radicando}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl transition ${
-              esRadicado
-                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-white border border-neutral-200 text-[#00304D] hover:bg-[#00304D] hover:text-white'
-            }`}
-          >
-            {radicando
-              ? <Loader2 size={13} className="animate-spin" />
-              : esRadicado
-                ? <><LogOut size={13} /> Desradicar</>
-                : <><CheckCircle2 size={13} /> Formalizar / Radicar</>
-            }
-          </button>
-        )}
-      </div>
+      {/* ── Menú de secciones (uniforme) ─────────────────────────────── */}
+      <ProyectoTabs proyectoId={proyectoId} active="generalidades" />
 
       {/* ── Dos columnas: Generalidades + Objetivo ─────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -544,31 +495,6 @@ export default function ProyectoDetallePage() {
           </>
         )}
       </div>
-
-      {/* ── Modal confirmar radicar ─────────────────────────────────────── */}
-      <Modal open={confirmRadicar} onClose={() => setConfirmRadicar(false)} maxWidth="max-w-sm">
-        <div className="p-6 flex flex-col gap-5">
-          <h3 className="text-base font-bold text-neutral-800">
-            {esRadicado ? 'Desradicar proyecto' : 'Radicar proyecto'}
-          </h3>
-          <p className="text-sm text-neutral-500">
-            {esRadicado
-              ? '¿Está seguro de revertir la radicación de este proyecto?'
-              : '¿Está seguro de radicar este proyecto? Esta acción lo formalizará ante el SENA.'}
-          </p>
-          <div className="flex gap-3 justify-end">
-            <button onClick={() => setConfirmRadicar(false)} className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition">
-              Cancelar
-            </button>
-            <button
-              onClick={handleRadicar}
-              className={`px-4 py-2 text-sm font-semibold text-white rounded-xl transition ${esRadicado ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#00304D] hover:bg-[#004a76]'}`}
-            >
-              {esRadicado ? 'Sí, desradicar' : 'Sí, radicar'}
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       {/* ── Modal asignar contacto existente ───────────────────────────── */}
       <Modal open={modalAsignar} onClose={() => setModalAsignar(false)} maxWidth="max-w-md">

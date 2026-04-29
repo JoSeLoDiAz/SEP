@@ -580,4 +580,23 @@ export class ProyectosController {
   ) {
     return this.proyectosService.eliminarRubroAF(afId, afrubroid)
   }
+
+  // ── Presupuesto General del Proyecto ──────────────────────────────────────
+
+  @Get(':id/presupuesto')
+  getPresupuestoProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
+    return this.proyectosService.getPresupuestoProyecto(proyectoId)
+  }
+
+  @Post(':id/presupuesto/guardar')
+  guardarPresupuestoProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
+    return this.proyectosService.guardarPresupuestoProyecto(proyectoId)
+  }
+
+  // ── Reporte completo del Proyecto ─────────────────────────────────────────
+
+  @Get(':id/reporte')
+  getReporteProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
+    return this.proyectosService.getReporteProyecto(proyectoId)
+  }
 }

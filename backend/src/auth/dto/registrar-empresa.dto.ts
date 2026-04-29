@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsNumber,
   IsString,
+  Max,
   Min,
 } from 'class-validator'
 
@@ -15,11 +16,14 @@ export class RegistrarEmpresaDto {
 
   @ApiProperty({ example: 900123456 })
   @IsNumber()
+  @Min(1, { message: 'El número de identificación debe ser mayor a 0.' })
+  @Max(9_999_999_999, { message: 'El número de identificación no puede tener más de 10 dígitos.' })
   empresaIdentificacion: number
 
   @ApiProperty({ example: 7, description: 'Dígito de verificación del NIT' })
   @IsNumber()
   @Min(0)
+  @Max(9, { message: 'El dígito de verificación debe estar entre 0 y 9.' })
   empresaDigitoVerificacion: number
 
   @ApiProperty({ example: 'EMPRESA EJEMPLO S.A.S.' })

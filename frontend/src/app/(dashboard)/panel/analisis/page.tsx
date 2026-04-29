@@ -80,7 +80,7 @@ export default function AnalisisPage() {
     setToastKey2(toastKey.current)
   }
 
-  useEffect(() => { document.title = 'Análisis Empresarial | SEP' }, [])
+  useEffect(() => { document.title = 'Análisis del Proponente | SEP' }, [])
 
   useEffect(() => {
     async function load() {
@@ -208,13 +208,13 @@ export default function AnalisisPage() {
       {/* Header */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex items-center gap-3">
         <BarChart2 size={22} className="text-white" />
-        <h1 className="text-white font-bold text-base">Análisis Empresarial / Gremial</h1>
+        <h1 className="text-white font-bold text-base">Análisis del Proponente</h1>
       </div>
 
       {/* ── Generalidades ─────────────────────────────────────────── */}
-      <SectionCard title="Generalidades de la Empresa / Gremio / Asociación">
+      <SectionCard title="Generalidades del Proponente">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <Field label="Objeto social de la empresa / gremio" req hint="Máx. 5000 caracteres">
+          <Field label="Objeto social del proponente" req hint="Máx. 5000 caracteres">
             <textarea maxLength={5000} value={objeto} onChange={e => setObjeto(e.target.value)} className={textareaCls} rows={5} placeholder="Describa el objeto social..." />
             <span className="text-xs text-neutral-400 text-right">{objeto.length}/5000</span>
           </Field>
@@ -222,19 +222,19 @@ export default function AnalisisPage() {
             <textarea maxLength={3000} value={productos} onChange={e => setProductos(e.target.value)} className={textareaCls} rows={5} placeholder="Describa los productos y/o servicios..." />
             <span className="text-xs text-neutral-400 text-right">{productos.length}/3000</span>
           </Field>
-          <Field label="Situación actual y proyección de la empresa / gremio" req hint="Máx. 3000 caracteres">
+          <Field label="Situación actual y proyección del proponente" req hint="Máx. 3000 caracteres">
             <textarea maxLength={3000} value={situacion} onChange={e => setSituacion(e.target.value)} className={textareaCls} rows={5} placeholder="Describa la situación actual y proyección..." />
             <span className="text-xs text-neutral-400 text-right">{situacion.length}/3000</span>
           </Field>
-          <Field label="Papel de la empresa / gremio en el sector y/o región que pertenece o representa" req hint="Máx. 3000 caracteres">
+          <Field label="Papel del proponente en el sector y/o región que pertenece o representa" req hint="Máx. 3000 caracteres">
             <textarea maxLength={3000} value={papel} onChange={e => setPapel(e.target.value)} className={textareaCls} rows={5} placeholder="Describa el papel en el sector..." />
             <span className="text-xs text-neutral-400 text-right">{papel.length}/3000</span>
           </Field>
-          <Field label="Retos estratégicos de la empresa / gremio, vinculados a la formación" req hint="Máx. 3000 caracteres">
+          <Field label="Retos estratégicos del proponente, vinculados a la formación" req hint="Máx. 3000 caracteres">
             <textarea maxLength={3000} value={retos} onChange={e => setRetos(e.target.value)} className={textareaCls} rows={5} placeholder="Describa los retos estratégicos..." />
             <span className="text-xs text-neutral-400 text-right">{retos.length}/3000</span>
           </Field>
-          <Field label="Experiencia de la empresa / gremio en actividades formativas" req hint="Máx. 3000 caracteres">
+          <Field label="Experiencia del proponente en actividades formativas" req hint="Máx. 3000 caracteres">
             <textarea maxLength={3000} value={experiencia} onChange={e => setExperiencia(e.target.value)} className={textareaCls} rows={5} placeholder="Describa la experiencia en actividades formativas..." />
             <span className="text-xs text-neutral-400 text-right">{experiencia.length}/3000</span>
           </Field>

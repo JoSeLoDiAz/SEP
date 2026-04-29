@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
+import { NecesidadesService } from '../necesidades/necesidades.service'
 import { randomBytes } from 'crypto'
 
 const PROYECTO_SIN_ASIGNAR = 1
@@ -47,6 +48,7 @@ export class ProyectosService {
     @InjectRepository(Empresa)
     private readonly empresaRepo: Repository<Empresa>,
     private readonly dataSource: DataSource,
+    private readonly necesidadesService: NecesidadesService,
   ) {}
 
   private async getEmpresaId(email: string): Promise<number> {
@@ -1589,6 +1591,22 @@ export class ProyectosService {
 
   // ── Rubros ────────────────────────────────────────────────────────────────
 
+  /** Mapea cada MODALIDADFORMACIONID al / los keyword(s) cortos que aparecen en
+   *  la columna RUBROMODALIDAD del catálogo de rubros. La columna guarda listas
+   *  como "PRESENCIAL,PRESENCIAL HÍBRIDA,PAT,VIRTUAL" — por eso buscamos por
+   *  keyword y no por el nombre completo de la modalidad. */
+  private modalidadKeywords(modalidadId: number): string[] {
+    switch (modalidadId) {
+      case 1: return ['PRESENCIAL']                  // Presencial
+      case 2: return ['PAT']                         // Presencial asistida por tecnologías-PAT
+      case 3: return ['HIBRIDA']                     // Presencial Híbrida (TRANSLATE quita tilde)
+      case 4: return ['VIRTUAL']                     // Virtual
+      case 5: return ['PRESENCIAL', 'VIRTUAL']       // Combinada Presencial-Virtual
+      case 6: return ['PAT', 'VIRTUAL']              // Combinada PAT-Virtual
+      default: return []
+    }
+  }
+
   async getRubrosCatalogo(afId: number) {
     // Get convocatoria + modalidad of the AF
     const [af] = await this.dataSource.query(
@@ -1602,8 +1620,23 @@ export class ProyectosService {
     )
     if (!af) throw new BadRequestException('AF no encontrada')
 
-    const modalidad = (af.modalidad as string).toUpperCase().trim()
     const convId: number = af.convocatoriaId
+    const keywords = this.modalidadKeywords(Number(af.modalidadId))
+
+    // Construir filtro de modalidad: pasa si RUBROMODALIDAD es NULL/vacío
+    // o contiene CUALQUIERA de las keywords (OR). Para combinadas (ids 5,6)
+    // hay 2 keywords; para el resto, 1.
+    let filtroModalidad = `(r.RUBROMODALIDAD IS NULL OR r.RUBROMODALIDAD = '')`
+    const params: unknown[] = [convId]
+    if (keywords.length > 0) {
+      const orClauses = keywords.map((_, i) =>
+        `INSTR(TRANSLATE(UPPER(r.RUBROMODALIDAD), 'ÁÉÍÓÚÑáéíóúñ', 'AEIOUNAEIOUN'), :${params.length + i + 1}) > 0`,
+      ).join(' OR ')
+      filtroModalidad = `(r.RUBROMODALIDAD IS NULL OR r.RUBROMODALIDAD = '' OR ${orClauses})`
+      params.push(...keywords)
+    }
+    params.push(afId)
+    const afIdParamIdx = params.length
 
     const rubros = await this.dataSource.query(
       `SELECT r.RUBROID       AS "rubroId",
@@ -1621,18 +1654,17 @@ export class ProyectosService {
         WHERE r.CONVOCATORIAIDRUBRO = :1
           AND r.RUBROACTIVO = 1
           AND r.RUBROAF = 1
-          AND (r.RUBROMODALIDAD IS NULL OR r.RUBROMODALIDAD = ''
-               OR INSTR(UPPER(r.RUBROMODALIDAD), :2) > 0)
+          AND ${filtroModalidad}
           AND (
             r.RUBROPERFILUT = 0
             OR r.RUBROID IN (
               SELECT DISTINCT p.RUBROIDUT
                 FROM PERFILUT p
                 JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = p.UNIDADTEMATICAID
-               WHERE ut.ACCIONFORMACIONID = :3
+               WHERE ut.ACCIONFORMACIONID = :${afIdParamIdx}
             )
           )
-        ORDER BY r.RUBROID`, [convId, modalidad, afId]
+        ORDER BY r.RUBROID`, params,
     )
     return rubros
   }
@@ -1970,5 +2002,529 @@ export class ProyectosService {
       [nid, proyectoId, afId, rubro.rubroId, dto.beneficiarios, dto.valor, dto.valor, rubro.paquete]
     )
     return { afrubroid: nid }
+  }
+
+  // ── Presupuesto General del Proyecto ──────────────────────────────────────
+
+  /** Devuelve el resumen presupuestal completo del proyecto: lista de AFs con
+   *  totales por rubro, GO por AF, Transferencia por AF, totales generales y
+   *  estado de guardado. */
+  async getPresupuestoProyecto(proyectoId: number) {
+    // 1. AFs con sus totales de rubros (excluyendo R09 y R015)
+    const afs = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID                                            AS "afId",
+              af.ACCIONFORMACIONNUMERO                                        AS "numero",
+              af.ACCIONFORMACIONNOMBRE                                        AS "nombre",
+              NVL(af.ACCIONFORMACIONNUMBENEF, 0)                              AS "beneficiarios",
+              NVL(t.cofSena, 0)                                               AS "cofSena",
+              NVL(t.contraEspecie, 0)                                         AS "contraEspecie",
+              NVL(t.contraDinero, 0)                                          AS "contraDinero",
+              NVL(t.total, 0)                                                 AS "total"
+         FROM ACCIONFORMACION af
+         LEFT JOIN (
+              SELECT ar.ACCIONFORMACIONID,
+                     SUM(ar.AFRUBROCOFINANCIACION) AS cofSena,
+                     SUM(ar.AFRUBROESPECIE)        AS contraEspecie,
+                     SUM(ar.AFRUBRODINERO)         AS contraDinero,
+                     SUM(ar.AFRUBROVALOR)          AS total
+                FROM AFRUBRO ar
+                JOIN RUBRO r ON r.RUBROID = ar.RUBROID
+               WHERE TRIM(r.RUBROCODIGO) NOT IN ('R09','R015')
+               GROUP BY ar.ACCIONFORMACIONID
+         ) t ON t.ACCIONFORMACIONID = af.ACCIONFORMACIONID
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    // 2. Gastos de Operación por AF
+    const goPorAf = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID         AS "afId",
+              af.ACCIONFORMACIONNUMERO     AS "numero",
+              af.ACCIONFORMACIONNOMBRE     AS "nombre",
+              NVL(ar.AFRUBROCOFINANCIACION, 0) AS "cofSena",
+              NVL(ar.AFRUBROESPECIE, 0)        AS "contraEspecie",
+              NVL(ar.AFRUBRODINERO, 0)         AS "contraDinero",
+              NVL(ar.AFRUBROVALOR, 0)          AS "total"
+         FROM ACCIONFORMACION af
+         LEFT JOIN AFRUBRO ar
+              ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
+             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R09')
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    // 3. Transferencia por AF
+    const transPorAf = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID         AS "afId",
+              af.ACCIONFORMACIONNUMERO     AS "numero",
+              af.ACCIONFORMACIONNOMBRE     AS "nombre",
+              NVL(ar.AFRUBROBENEFICIARIOS, 0) AS "beneficiarios",
+              NVL(ar.AFRUBROVALOR, 0)         AS "valor"
+         FROM ACCIONFORMACION af
+         LEFT JOIN AFRUBRO ar
+              ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
+             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R015')
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    // 4. Modalidad del proyecto
+    const [proy] = await this.dataSource.query(
+      `SELECT p.MODALIDADID         AS "modalidadId",
+              m.MODALIDADNOMBRE     AS "modalidad",
+              p.PROYECTONOMBRE      AS "nombre"
+         FROM PROYECTO p
+         LEFT JOIN MODALIDAD m ON m.MODALIDADID = p.MODALIDADID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new BadRequestException('Proyecto no encontrado')
+
+    // 5. Presupuesto guardado (si existe)
+    const [presupuestoExistente] = await this.dataSource.query(
+      `SELECT PRESUPUESTOID AS "id", PRESUPUESTOFECHAREGISTRO AS "fechaRegistro"
+         FROM PRESUPUESTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+
+    // ── Cálculos de totales ───────────────────────────────────────────────
+    const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0)
+
+    // AFs: enriquecemos con %
+    const afsRich = afs.map((a: any) => {
+      const total = Number(a.total) || 0
+      return {
+        afId: Number(a.afId),
+        numero: Number(a.numero),
+        nombre: a.nombre,
+        beneficiarios: Number(a.beneficiarios),
+        cofSena: Number(a.cofSena),
+        porcSena: pct(Number(a.cofSena), total),
+        contraEspecie: Number(a.contraEspecie),
+        porcEspecie: pct(Number(a.contraEspecie), total),
+        contraDinero: Number(a.contraDinero),
+        porcDinero: pct(Number(a.contraDinero), total),
+        total,
+      }
+    })
+    const totalAfs           = afsRich.length
+    const totalBeneficiarios = afsRich.reduce((s: number, a: any) => s + a.beneficiarios, 0)
+    const totalCofSena       = afsRich.reduce((s: number, a: any) => s + a.cofSena, 0)
+    const totalContraEspecie = afsRich.reduce((s: number, a: any) => s + a.contraEspecie, 0)
+    const totalContraDinero  = afsRich.reduce((s: number, a: any) => s + a.contraDinero, 0)
+    const valorTotalAFs      = afsRich.reduce((s: number, a: any) => s + a.total, 0)
+
+    // GO
+    const goRich = goPorAf.map((g: any) => {
+      const total = Number(g.total) || 0
+      return {
+        afId: Number(g.afId),
+        numero: Number(g.numero),
+        nombre: g.nombre,
+        cofSena: Number(g.cofSena),
+        porcSena: pct(Number(g.cofSena), total),
+        contraEspecie: Number(g.contraEspecie),
+        porcEspecie: pct(Number(g.contraEspecie), total),
+        contraDinero: Number(g.contraDinero),
+        porcDinero: pct(Number(g.contraDinero), total),
+        total,
+      }
+    })
+    const goTotalCofSena       = goRich.reduce((s: number, g: any) => s + g.cofSena, 0)
+    const goTotalContraEspecie = goRich.reduce((s: number, g: any) => s + g.contraEspecie, 0)
+    const goTotalContraDinero  = goRich.reduce((s: number, g: any) => s + g.contraDinero, 0)
+    const goTotal              = goTotalCofSena + goTotalContraEspecie + goTotalContraDinero
+
+    // Mensaje R09.1 vs R09.2 según valor total de AFs
+    const r09Tope = valorTotalAFs > 200_000_000 ? 10 : 16
+    const r09Codigo = valorTotalAFs > 200_000_000 ? 'R09.1' : 'R09.2'
+    const r09Mensaje = valorTotalAFs > 200_000_000
+      ? 'R09.1: cuando se trate de proyectos por valor superior a $200.000.000, el porcentaje máximo para este rubro será hasta el 10% del valor total de las acciones de formación del proyecto.'
+      : 'R09.2: cuando se trate de proyectos por valor menor o igual a $200.000.000, el porcentaje máximo para este rubro será hasta el 16% del valor total de las acciones de formación del proyecto.'
+
+    // Transferencia
+    const transRich = transPorAf.map((t: any) => {
+      const beneficiarios = Number(t.beneficiarios) || 0
+      const valor         = Number(t.valor) || 0
+      return {
+        afId: Number(t.afId),
+        numero: Number(t.numero),
+        nombre: t.nombre,
+        beneficiarios,
+        porcBeneficiarios: pct(beneficiarios, totalBeneficiarios),
+        valor,
+        porcValor: pct(valor, valorTotalAFs),
+      }
+    })
+    const transTotalBenef = transRich.reduce((s: number, t: any) => s + t.beneficiarios, 0)
+    const transTotalValor = transRich.reduce((s: number, t: any) => s + t.valor, 0)
+
+    // Totales del proyecto: la Transferencia (R015) se paga con contrapartida
+    // en dinero del proponente → se suma al total de Contra. Dinero.
+    const totalProyectoCofSena       = totalCofSena       + goTotalCofSena
+    const totalProyectoContraEspecie = totalContraEspecie + goTotalContraEspecie
+    const totalProyectoContraDinero  = totalContraDinero  + goTotalContraDinero + transTotalValor
+    const valorTotalProyecto         = valorTotalAFs + goTotal + transTotalValor
+
+    return {
+      proyecto: {
+        id: proyectoId,
+        nombre: proy.nombre,
+        modalidadId: Number(proy.modalidadId) || 0,
+        modalidad: proy.modalidad ?? '',
+      },
+      afs: afsRich,
+      totalesAfs: {
+        totalAfs, totalBeneficiarios,
+        totalCofSena,       porcCofSena:       pct(totalCofSena,       valorTotalAFs),
+        totalContraEspecie, porcContraEspecie: pct(totalContraEspecie, valorTotalAFs),
+        totalContraDinero,  porcContraDinero:  pct(totalContraDinero,  valorTotalAFs),
+        valorTotalAFs,
+      },
+      go: {
+        porAf: goRich,
+        totalCofSena:       goTotalCofSena,       porcCofSena:       pct(goTotalCofSena,       goTotal),
+        totalContraEspecie: goTotalContraEspecie, porcContraEspecie: pct(goTotalContraEspecie, goTotal),
+        totalContraDinero:  goTotalContraDinero,  porcContraDinero:  pct(goTotalContraDinero,  goTotal),
+        total: goTotal,
+        porcSobreAFs: pct(goTotal, valorTotalAFs),
+        topePermitido: r09Tope,
+        codigo: r09Codigo,
+        mensaje: r09Mensaje,
+      },
+      transferencia: {
+        porAf: transRich,
+        totalBeneficiarios: transTotalBenef,
+        porcBeneficiarios:  pct(transTotalBenef, totalBeneficiarios),
+        totalValor:         transTotalValor,
+        porcValor:          pct(transTotalValor, valorTotalAFs),
+      },
+      totalProyecto: {
+        cofSena:       totalProyectoCofSena,       porcCofSena:       pct(totalProyectoCofSena,       valorTotalProyecto),
+        contraEspecie: totalProyectoContraEspecie, porcContraEspecie: pct(totalProyectoContraEspecie, valorTotalProyecto),
+        contraDinero:  totalProyectoContraDinero,  porcContraDinero:  pct(totalProyectoContraDinero,  valorTotalProyecto),
+        valorTotal:    valorTotalProyecto,
+      },
+      guardado: !!presupuestoExistente,
+      fechaRegistro: presupuestoExistente?.fechaRegistro ?? null,
+    }
+  }
+
+  /** Valida y persiste el presupuesto del proyecto. Si alguna validación falla,
+   *  lanza BadRequestException con la lista de errores y NO guarda nada. */
+  async guardarPresupuestoProyecto(proyectoId: number) {
+    const r = await this.getPresupuestoProyecto(proyectoId)
+    const errores: string[] = []
+
+    // 1. Sumas no negativas
+    if (r.totalesAfs.valorTotalAFs <= 0)
+      errores.push('Las acciones de formación no tienen presupuesto registrado.')
+
+    // 2. Tope GO según R09.1 / R09.2
+    if (r.go.porcSobreAFs > r.go.topePermitido)
+      errores.push(`El porcentaje de Gastos de Operación (${r.go.porcSobreAFs.toFixed(2)}%) supera el tope ${r.go.codigo} de ${r.go.topePermitido}% del total de AFs.`)
+
+    // 3. Transferencia: # beneficiarios ≥ 5% del total benef del proyecto
+    if (r.transferencia.porcBeneficiarios < 5)
+      errores.push(`Los beneficiarios de Transferencia (${r.transferencia.porcBeneficiarios.toFixed(2)}%) deben ser mínimo el 5% del total de beneficiarios del proyecto.`)
+
+    // 4. Transferencia: valor ≥ 1% del total AFs
+    if (r.transferencia.porcValor < 1)
+      errores.push(`El valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo el 1% del valor total de las acciones de formación.`)
+
+    // 5. Beneficiarios y valor de transferencia no pueden exceder 100%
+    if (r.transferencia.porcBeneficiarios > 100)
+      errores.push('Los beneficiarios de Transferencia no pueden exceder el 100% del total de beneficiarios.')
+    if (r.transferencia.porcValor > 100)
+      errores.push('El valor de Transferencia no puede exceder el 100% del valor total de las AFs.')
+
+    // 6. Contrapartida en dinero ≥ valor de transferencia
+    if (r.totalesAfs.totalContraDinero < r.transferencia.totalValor)
+      errores.push('La contrapartida en dinero debe ser al menos igual al valor de la transferencia.')
+
+    // 7. % contrapartida según modalidad
+    const modalidad = (r.proyecto.modalidad ?? '').toUpperCase()
+    const porcContrapartida = r.totalesAfs.porcContraEspecie + r.totalesAfs.porcContraDinero
+    if (modalidad.includes('INDIVIDUAL')) {
+      if (porcContrapartida < 40 || porcContrapartida > 60)
+        errores.push(`Para modalidad Individual la contrapartida total debe estar entre 40% y 60% (actual: ${porcContrapartida.toFixed(2)}%).`)
+    } else if (modalidad.includes('GREMIO')) {
+      if (porcContrapartida < 20 || porcContrapartida > 80)
+        errores.push(`Para modalidad Gremio la contrapartida total debe estar entre 20% y 80% (actual: ${porcContrapartida.toFixed(2)}%).`)
+    }
+
+    // 8. Contrapartida en dinero ≥ 50% de la contrapartida total
+    const dineroMin = porcContrapartida * 0.5
+    if (r.totalesAfs.porcContraDinero < dineroMin)
+      errores.push(`La contrapartida en dinero (${r.totalesAfs.porcContraDinero.toFixed(2)}%) debe ser al menos el 50% de la contrapartida total (${porcContrapartida.toFixed(2)}%, mínimo ${dineroMin.toFixed(2)}%).`)
+
+    if (errores.length > 0) {
+      throw new BadRequestException({ message: 'No se puede guardar el presupuesto', errores })
+    }
+
+    // ── Persistir ─────────────────────────────────────────────────────────
+    const [existing] = await this.dataSource.query(
+      `SELECT PRESUPUESTOID AS "id" FROM PRESUPUESTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+
+    const params = [
+      r.totalesAfs.totalAfs,
+      r.totalesAfs.totalBeneficiarios,
+      r.go.total,
+      r.go.totalCofSena,
+      r.go.totalContraEspecie,
+      r.go.totalContraDinero,
+      r.transferencia.totalValor,
+      r.transferencia.totalBeneficiarios,
+      r.go.porcSobreAFs,
+      r.totalesAfs.valorTotalAFs,
+      r.totalProyecto.valorTotal,
+      r.totalesAfs.totalCofSena,
+      r.totalesAfs.totalContraEspecie,
+      r.totalesAfs.totalContraDinero,
+    ]
+
+    if (existing) {
+      await this.dataSource.query(
+        `UPDATE PRESUPUESTO SET
+            PRESUPUESTOTOTALAF              = :1,
+            PRESUPUESTONUMEROBENEFICIARIOS  = :2,
+            PRESUPUESTOGASTOSOPERACION      = :3,
+            PRESUPUESTOGOCOFINANCIACION     = :4,
+            PRESUPUESTOGOESPECIE            = :5,
+            PRESUPUESTOGODINERO             = :6,
+            PRESUPUESTOVALORTRANSFERENCIA   = :7,
+            PRESUPUESTOBENEFICIARIOSTRANSF  = :8,
+            PRESUPUESTOPORCENTAJEGO         = :9,
+            PRESUPUESTOVALORAF              = :10,
+            PRESUPUESTOVALORTOTALPROYECTO   = :11,
+            PRESUPUESTOCOFINANCIACION       = :12,
+            PRESUPUESTOESPECIE              = :13,
+            PRESUPUESTODINERO               = :14,
+            PRESUPUESTOFECHAREGISTRO        = SYSDATE
+          WHERE PRESUPUESTOID = :15`,
+        [...params, existing.id],
+      )
+      return { id: existing.id, message: 'Presupuesto del proyecto actualizado correctamente' }
+    }
+
+    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(PRESUPUESTOID), 0) + 1 AS "nid" FROM PRESUPUESTO`)
+    await this.dataSource.query(
+      `INSERT INTO PRESUPUESTO (PRESUPUESTOID, PROYECTOID,
+          PRESUPUESTOTOTALAF, PRESUPUESTONUMEROBENEFICIARIOS,
+          PRESUPUESTOGASTOSOPERACION, PRESUPUESTOGOCOFINANCIACION,
+          PRESUPUESTOGOESPECIE, PRESUPUESTOGODINERO,
+          PRESUPUESTOVALORTRANSFERENCIA, PRESUPUESTOBENEFICIARIOSTRANSF,
+          PRESUPUESTOPORCENTAJEGO, PRESUPUESTOVALORAF,
+          PRESUPUESTOVALORTOTALPROYECTO, PRESUPUESTOCOFINANCIACION,
+          PRESUPUESTOESPECIE, PRESUPUESTODINERO,
+          PRESUPUESTOFECHAREGISTRO)
+        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, SYSDATE)`,
+      [nid, proyectoId, ...params],
+    )
+    return { id: nid, message: 'Presupuesto del proyecto guardado correctamente' }
+  }
+
+  // ── Reporte completo del Proyecto ─────────────────────────────────────────
+
+  /** Devuelve el snapshot completo del proyecto para el reporte / impresión:
+   *  proyecto, empresa, contactos, análisis, sectores, AFs con detalle,
+   *  diagnósticos asociados (uno por cada necesidad distinta vinculada a las
+   *  AFs) y presupuesto general. */
+  async getReporteProyecto(proyectoId: number) {
+    // 1. Datos del proyecto + convocatoria + modalidad + empresaId
+    const [proy] = await this.dataSource.query(
+      `SELECT p.PROYECTOID                AS "proyectoId",
+              p.PROYECTONOMBRE            AS "nombre",
+              p.PROYECTOOBJETIVO          AS "objetivo",
+              p.PROYECTOFECHAREGISTRO     AS "fechaRegistro",
+              p.PROYECTOFECHARADICACION   AS "fechaRadicacion",
+              p.PROYECTOESTADO            AS "estado",
+              p.EMPRESAID                 AS "empresaId",
+              c.CONVOCATORIANOMBRE        AS "convocatoria",
+              m.MODALIDADNOMBRE           AS "modalidad",
+              m.MODALIDADID               AS "modalidadId"
+         FROM PROYECTO p
+         LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
+         LEFT JOIN MODALIDAD m    ON m.MODALIDADID    = p.MODALIDADID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    const empresaId: number = proy.empresaId
+
+    // 2. Empresa: datos básicos + análisis + cadena productiva
+    const [empresa] = await this.dataSource.query(
+      `SELECT e.EMPRESARAZONSOCIAL              AS "razonSocial",
+              e.EMPRESASIGLA                    AS "sigla",
+              e.EMPRESAIDENTIFICACION           AS "nit",
+              e.EMPRESADIGITOVERIFICACION       AS "digitoV",
+              e.EMPRESAEMAIL                    AS "email",
+              e.EMPRESADIRECCION                AS "direccion",
+              e.EMPRESATELEFONO                 AS "telefono",
+              e.EMPRESACELULAR                  AS "celular",
+              e.EMPRESAWEBSITE                  AS "website",
+              dep.DEPARTAMENTONOMBRE            AS "departamento",
+              ciu.CIUDADNOMBRE                  AS "ciudad",
+              cob.COBERTURADESCRIPCION          AS "cobertura",
+              ciiu.CIIUCODIGO                   AS "ciiuCodigo",
+              ciiu.CIIUDESCRIPCION              AS "ciiuDescripcion",
+              te.TIPOEMPRESANOMBRE              AS "tipoEmpresa",
+              tam.TAMANOEMPRESANOMBRE           AS "tamanoEmpresa",
+              e.EMPRESAREP                      AS "repNombre",
+              e.EMPRESAREPCARGO                 AS "repCargo",
+              e.EMPRESAREPCORREO                AS "repCorreo",
+              e.EMPRESAREPTEL                   AS "repTel",
+              e.EMPRESAREPDOCUMENTO             AS "repDocumento",
+              tdoc.TIPODOCUMENTOIDENTIDADNOMBRE AS "repTipoDoc",
+              e.EMPRESAOBJETO                   AS "objeto",
+              e.EMPRESAPRODUCTOS                AS "productos",
+              e.EMPRESASITUACION                AS "situacion",
+              e.EMPRESAPAPEL                    AS "papel",
+              e.EMPRESARETOS                    AS "retos",
+              e.EMPRESAEXPERIENCIA              AS "experiencia",
+              e.EMPRESAESLABONES                AS "eslabones",
+              e.EMPRESAINTERACCIONES            AS "interacciones"
+         FROM EMPRESA e
+         LEFT JOIN DEPARTAMENTO dep         ON dep.DEPARTAMENTOID  = e.DEPARTAMENTOEMPRESAID
+         LEFT JOIN CIUDAD ciu               ON ciu.CIUDADID        = e.CIUDADEMPRESAID
+         LEFT JOIN COBERTURA cob            ON cob.COBERTURAID     = e.COBERTURAEMPRESAID
+         LEFT JOIN CIIU ciiu                ON ciiu.CIIUID         = e.CIIUID
+         LEFT JOIN TIPOEMPRESA te           ON te.TIPOEMPRESAID    = e.TIPOEMPRESAID
+         LEFT JOIN TAMANOEMPRESA tam        ON tam.TAMANOEMPRESAID = e.TAMANOEMPRESAID
+         LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = e.TIPOIDENTIFICACIONREP
+        WHERE e.EMPRESAID = :1`,
+      [empresaId],
+    )
+
+    // 3. Mesas sectoriales de la empresa
+    const mesasSectoriales = await this.dataSource.query(
+      `SELECT ms.MESASECTORIALNOMBRE AS "nombre"
+         FROM EMPRESAMESASECTORIAL me
+         JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = me.MESASECTORIALIDEMPRESA
+        WHERE me.EMPRESAIDMESASECTORIAL = :1
+        ORDER BY ms.MESASECTORIALNOMBRE`,
+      [empresaId],
+    )
+
+    // 4. Sectores / Subsectores
+    //    PERTENECE → tablas SECTORPEMPRESA / SUBSECTORPEMPRESA (FK *EMPRESAIDP*)
+    //    REPRESENTA → tablas SECTOREMPRESA / SUBSECTOREMPRESA (FK EMPRESAID)
+    const sectoresPertenece = await this.dataSource.query(
+      `SELECT s.SECTORDESCRIPCION AS "nombre"
+         FROM SECTORPEMPRESA sp JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
+        WHERE sp.EMPRESAIDPSECTOR = :1 ORDER BY s.SECTORDESCRIPCION`,
+      [empresaId],
+    ).catch(() => [])
+    const subsectoresPertenece = await this.dataSource.query(
+      `SELECT sub.SUBSECTORNOMBRE AS "nombre"
+         FROM SUBSECTORPEMPRESA sp JOIN SUBSECTOR sub ON sub.SUBSECTORID = sp.SUBSECTORIDPEMPRESA
+        WHERE sp.EMPRESAIDPSUBSECTOR = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+      [empresaId],
+    ).catch(() => [])
+    const sectoresRepresenta = await this.dataSource.query(
+      `SELECT s.SECTORDESCRIPCION AS "nombre"
+         FROM SECTOREMPRESA se JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
+        WHERE se.EMPRESAID = :1 ORDER BY s.SECTORDESCRIPCION`,
+      [empresaId],
+    ).catch(() => [])
+    const subsectoresRepresenta = await this.dataSource.query(
+      `SELECT sub.SUBSECTORNOMBRE AS "nombre"
+         FROM SUBSECTOREMPRESA se JOIN SUBSECTOR sub ON sub.SUBSECTORID = se.SUBSECTORIDEMPRESA
+        WHERE se.EMPRESAID = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+      [empresaId],
+    ).catch(() => [])
+
+    // 5. Contactos asociados al proyecto (tabla CONTACTOEMPRESA)
+    const contactos = await this.dataSource.query(
+      `SELECT c.CONTACTOEMPRESANOMBRE          AS "nombre",
+              c.CONTACTOEMPRESACARGO           AS "cargo",
+              c.CONTACTOEMPRESACORREO          AS "correo",
+              c.CONTACTOEMPRESATELEFONO        AS "telefono",
+              c.CONTACTOEMPRESADOCUMENTO       AS "documento",
+              tdoc.TIPODOCUMENTOIDENTIDADNOMBRE AS "tipoDoc"
+         FROM CONTACTOEMPRESA c
+         LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = c.TIPOIDENTIFICACIONCONTACTOP
+        WHERE c.PROYECTOIDCONTACTOS = :1
+        ORDER BY c.CONTACTOEMPRESAID`,
+      [proyectoId],
+    ).catch(() => [])
+
+    // 6. Acciones de Formación + sus datos clave
+    const acciones = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID                  AS "afId",
+              af.ACCIONFORMACIONNUMERO              AS "numero",
+              af.ACCIONFORMACIONNOMBRE              AS "nombre",
+              af.ACCIONFORMACIONJUSTNEC             AS "justnec",
+              af.ACCIONFORMACIONCAUSA               AS "causa",
+              af.ACCIONFORMACIONRESULTADOS          AS "efectos",
+              af.ACCIONFORMACIONOBJETIVO            AS "objetivo",
+              af.ACCIONFORMACIONNUMHORAGRUPO        AS "numHorasGrupo",
+              af.ACCIONFORMACIONNUMGRUPOS           AS "numGrupos",
+              af.ACCIONFORMACIONNUMTOTHORASGRUP     AS "numTotHoras",
+              af.ACCIONFORMACIONBENEFGRUPO          AS "benefGrupo",
+              af.ACCIONFORMACIONBENEFVIGRUPO        AS "benefViGrupo",
+              af.ACCIONFORMACIONNUMBENEF            AS "numBenef",
+              af.NECESIDADFORMACIONIDAF             AS "necesidadFormacionId",
+              te.TIPOEVENTONOMBRE                   AS "tipoEvento",
+              mf.MODALIDADFORMACIONNOMBRE           AS "modalidad",
+              ma.METODOLOGIAAPRENDIZAJENOMBRE       AS "metodologia",
+              nf.NECESIDADFORMACIONNOMBRE           AS "necesidadFormacionNombre",
+              nf.NECESIDADFORMACIONNUMERO           AS "necesidadFormacionNumero",
+              nf.NECESIDADID                        AS "necesidadId"
+         FROM ACCIONFORMACION af
+         LEFT JOIN TIPOEVENTO te                ON te.TIPOEVENTOID                = af.TIPOEVENTOID
+         LEFT JOIN MODALIDADFORMACION mf        ON mf.MODALIDADFORMACIONID        = af.MODALIDADFORMACIONID
+         LEFT JOIN METODOLOGIAAPRENDIZAJE ma    ON ma.METODOLOGIAAPRENDIZAJEID    = af.METODOLOGIAAPRENDIZAJEID
+         LEFT JOIN NECESIDADFORMACION nf        ON nf.NECESIDADFORMACIONID        = af.NECESIDADFORMACIONIDAF
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
+      [proyectoId],
+    )
+
+    // 7. Diagnósticos asociados — uno por cada `necesidadId` distinto
+    const necesidadesIdsUsados = Array.from(
+      new Set(acciones.map((a: any) => Number(a.necesidadId)).filter((n: number) => n && !isNaN(n))),
+    ) as number[]
+    const diagnosticos = await Promise.all(
+      necesidadesIdsUsados.map(async (id) => {
+        try { return await this.necesidadesService.getReporte(id) }
+        catch { return null }
+      }),
+    )
+
+    // 8. Presupuesto general (reusa el método existente)
+    let presupuesto: unknown = null
+    try { presupuesto = await this.getPresupuestoProyecto(proyectoId) }
+    catch { /* si falla, deja null y el frontend lo maneja */ }
+
+    return {
+      proyecto: {
+        id: Number(proy.proyectoId),
+        codigo: String(proy.proyectoId), // el código del proyecto es el ID
+        nombre: proy.nombre,
+        objetivo: proy.objetivo,
+        convocatoria: proy.convocatoria,
+        modalidad: proy.modalidad,
+        modalidadId: Number(proy.modalidadId) || 0,
+        estado: Number(proy.estado) || 0,
+        fechaRegistro: proy.fechaRegistro,
+        fechaRadicacion: proy.fechaRadicacion,
+      },
+      empresa,
+      mesasSectoriales: mesasSectoriales.map((m: any) => m.nombre),
+      sectoresPertenece: sectoresPertenece.map((s: any) => s.nombre),
+      subsectoresPertenece: subsectoresPertenece.map((s: any) => s.nombre),
+      sectoresRepresenta: sectoresRepresenta.map((s: any) => s.nombre),
+      subsectoresRepresenta: subsectoresRepresenta.map((s: any) => s.nombre),
+      contactos,
+      acciones,
+      diagnosticos: diagnosticos.filter(d => d !== null),
+      presupuesto,
+    }
   }
 }

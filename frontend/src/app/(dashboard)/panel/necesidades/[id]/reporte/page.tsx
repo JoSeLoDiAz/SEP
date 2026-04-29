@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -57,13 +58,6 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function fmtDateTime(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleString('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
 
 function Row({ label, value }: { label: string; value?: string | null }) {
   return (
@@ -270,14 +264,13 @@ export default function ReporteDiagnosticoPage() {
           </div>
 
           {/* Cadena productiva */}
-          {(data.eslabones || data.interacciones) && (
-            <div className="flex flex-col gap-4 border-t border-neutral-100 pt-4">
-              <TextBlock label="Identificación de los eslabones de la cadena productiva del proponente"
-                value={data.eslabones} />
-              <TextBlock label="Descripción de las interacciones del proponente con otros actores"
-                value={data.interacciones} />
-            </div>
-          )}
+          <div className="flex flex-col gap-4 border-t border-neutral-100 pt-4">
+            <p className="text-xs font-semibold text-[#003366]">Cadena productiva e interacciones</p>
+            <TextBlock label="Identificación de los eslabones de la cadena productiva del proponente"
+              value={data.eslabones || '—'} />
+            <TextBlock label="Descripción de las interacciones del proponente con otros actores"
+              value={data.interacciones || '—'} />
+          </div>
         </div>
       </section>
 

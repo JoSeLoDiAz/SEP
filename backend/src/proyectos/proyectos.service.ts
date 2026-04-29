@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
 import { NecesidadesService } from '../necesidades/necesidades.service'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 
 const PROYECTO_SIN_ASIGNAR = 1
 
@@ -355,9 +355,939 @@ export class ProyectosService {
     return issues
   }
 
-  // ── Radicar / Desradicar ──────────────────────────────────────────────────
+  // ── Versionado del proyecto ──────────────────────────────────────────────
 
-  async radicar(email: string, proyectoId: number) {
+  /** Construye un snapshot completo del proyecto para guardar como versión:
+   *  reporte base + detalle por AF (perfil, sectores, grupos+coberturas,
+   *  unidades temáticas, material, alineación, rubros, GO, transferencia). */
+  async getProyectoSnapshot(proyectoId: number): Promise<Record<string, unknown>> {
+    const reporte = await this.getReporteProyecto(proyectoId) as Record<string, any>
+
+    const acciones = (reporte.acciones as Array<{ afId: number }>) ?? []
+    const accionesDetalle = await Promise.all(
+      acciones.map(async (a) => {
+        const afId = Number(a.afId)
+        const [perfil, sectores, gruposBasicos, utsResumen, material, alineacion, rubros, gastoOperacion, transferencia] =
+          await Promise.all([
+            this.getPerfilBeneficiarios(afId).catch(() => null),
+            this.getSectoresYSubsectores(afId).catch(() => null),
+            this.getGruposCobertura(afId).catch(() => [] as any[]),
+            this.listarUTs(afId).catch(() => [] as any[]),
+            this.getMaterialAF(afId).catch(() => null),
+            this.getAlineacionAF(afId).catch(() => null),
+            this.getRubrosAF(afId).catch(() => [] as any[]),
+            this.getGastosOperacion(afId).catch(() => null),
+            this.getTransferencia(afId).catch(() => null),
+          ])
+
+        const grupos = await Promise.all(
+          (gruposBasicos as any[]).map(async (g: any) => ({
+            ...g,
+            coberturas: await this.getCoberturaGrupo(Number(g.grupoId)).catch(() => []),
+          })),
+        )
+
+        const unidadesTematicas = await Promise.all(
+          (utsResumen as any[]).map(async (ut: any) =>
+            this.getUTDetalle(Number(ut.utId)).catch(() => null),
+          ),
+        ).then(arr => arr.filter(Boolean))
+
+        return {
+          afId,
+          perfil, sectores, grupos, unidadesTematicas,
+          material, alineacion, rubros, gastoOperacion, transferencia,
+        }
+      }),
+    )
+
+    return { ...reporte, accionesDetalle, snapshotFecha: new Date().toISOString() }
+  }
+
+  /** Crea una nueva versión del proyecto con su snapshot inmutable y código
+   *  único. Devuelve el número y código de la versión recién creada. */
+  async crearVersionProyecto(
+    proyectoId: number, email: string, comentario?: string | null,
+  ): Promise<{ versionNumero: number; versionCodigo: string }> {
+    const snapshot = await this.getProyectoSnapshot(proyectoId)
+    const snapshotJson = JSON.stringify(snapshot)
+
+    // Próximo número de versión para este proyecto
+    const [{ next }] = await this.dataSource.query(
+      `SELECT NVL(MAX(VERSIONNUMERO), 0) + 1 AS "next"
+         FROM PROYECTOVERSION WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    const versionNumero = Number(next)
+
+    // Hash completo del snapshot (integridad) y código corto (legible)
+    const fullHash = createHash('sha256').update(snapshotJson).digest('hex')
+    const seedStr = `${proyectoId}-V${versionNumero}-${Date.now()}-${snapshotJson.length}`
+    const codigoHash = createHash('sha256')
+      .update(snapshotJson + seedStr)
+      .digest('hex')
+      .slice(0, 8)
+      .toUpperCase()
+    const versionCodigo = `PRY-${proyectoId}-V${versionNumero}-${codigoHash}`
+
+    const [{ nid }] = await this.dataSource.query(
+      `SELECT NVL(MAX(PROYECTOVERSIONID), 0) + 1 AS "nid" FROM PROYECTOVERSION`,
+    )
+
+    await this.dataSource.query(
+      `INSERT INTO PROYECTOVERSION
+         (PROYECTOVERSIONID, PROYECTOID, VERSIONNUMERO, VERSIONCODIGO,
+          VERSIONFECHA, VERSIONUSUARIO, VERSIONSNAPSHOT, VERSIONHASH,
+          VERSIONESTADOAL, VERSIONCOMENTARIO)
+       VALUES (:1, :2, :3, :4, SYSDATE, :5, :6, :7, 1, :8)`,
+      [nid, proyectoId, versionNumero, versionCodigo, email,
+       snapshotJson, fullHash, comentario?.trim() || null],
+    )
+
+    return { versionNumero, versionCodigo }
+  }
+
+  /** Devuelve la versión "actual" del proyecto:
+   *  - Si hay versión marcada como FINAL, esa es la actual.
+   *  - Si no, la más reciente NO anulada.
+   *  - Si no hay ninguna, null. */
+  async getUltimaVersion(proyectoId: number) {
+    // Primero intentar la marcada como FINAL
+    const finals = await this.dataSource.query(
+      `SELECT PROYECTOVERSIONID AS "versionId",
+              VERSIONNUMERO     AS "numero",
+              VERSIONCODIGO     AS "codigo",
+              VERSIONFECHA      AS "fecha",
+              VERSIONUSUARIO    AS "usuario",
+              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO,2000,1) AS "comentario",
+              VERSIONHASH       AS "hash",
+              VERSIONESFINAL    AS "esFinal",
+              VERSIONANULADA    AS "anulada"
+         FROM PROYECTOVERSION
+        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+      [proyectoId],
+    )
+    if (finals.length) return finals[0]
+
+    // Si no hay FINAL, devolvemos la más reciente NO anulada
+    const rows = await this.dataSource.query(
+      `SELECT * FROM (
+          SELECT PROYECTOVERSIONID AS "versionId",
+                 VERSIONNUMERO     AS "numero",
+                 VERSIONCODIGO     AS "codigo",
+                 VERSIONFECHA      AS "fecha",
+                 VERSIONUSUARIO    AS "usuario",
+                 DBMS_LOB.SUBSTR(VERSIONCOMENTARIO,2000,1) AS "comentario",
+                 VERSIONHASH       AS "hash",
+                 VERSIONESFINAL    AS "esFinal",
+                 VERSIONANULADA    AS "anulada"
+            FROM PROYECTOVERSION
+           WHERE PROYECTOID = :1 AND VERSIONANULADA = 0
+           ORDER BY VERSIONNUMERO DESC
+        ) WHERE ROWNUM = 1`,
+      [proyectoId],
+    )
+    return rows[0] ?? null
+  }
+
+  /** Lista todas las versiones del proyecto (sin el snapshot pesado, solo
+   *  metadatos para mostrar en el historial). Más reciente primero. */
+  async listarVersiones(proyectoId: number) {
+    return this.dataSource.query(
+      `SELECT PROYECTOVERSIONID  AS "versionId",
+              VERSIONNUMERO      AS "numero",
+              VERSIONCODIGO      AS "codigo",
+              VERSIONFECHA       AS "fecha",
+              VERSIONUSUARIO     AS "usuario",
+              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO, 2000, 1) AS "comentario",
+              VERSIONESTADOAL    AS "estadoAl",
+              VERSIONHASH        AS "hash",
+              VERSIONESFINAL     AS "esFinal",
+              VERSIONANULADA     AS "anulada",
+              VERSIONFINALFECHA  AS "finalFecha",
+              VERSIONFINALUSUARIO AS "finalUsuario",
+              VERSIONANULADAFECHA AS "anuladaFecha",
+              VERSIONANULADAUSUARIO AS "anuladaUsuario"
+         FROM PROYECTOVERSION
+        WHERE PROYECTOID = :1
+        ORDER BY VERSIONNUMERO DESC`,
+      [proyectoId],
+    )
+  }
+
+  /** Marca una versión como FINAL (la "oficial" enviada a SECOP). Solo puede
+   *  haber una FINAL por proyecto. Marcar como FINAL **confirma** el proyecto:
+   *  cambia PROYECTOESTADO a 1 y registra la fecha de radicación. */
+  async marcarVersionFinal(proyectoId: number, versionId: number, email: string) {
+    // Verificar versión
+    const [row] = await this.dataSource.query(
+      `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    if (!row) throw new NotFoundException('Versión no encontrada')
+    if (Number(row.proyectoId) !== Number(proyectoId)) {
+      throw new BadRequestException('La versión no pertenece a este proyecto.')
+    }
+    if (Number(row.anulada) === 1) {
+      throw new BadRequestException('No se puede marcar como FINAL una versión anulada. Restaúrala primero.')
+    }
+    if (Number(row.esFinal) === 1) {
+      return { message: 'La versión ya está marcada como FINAL.', alreadyFinal: true }
+    }
+
+    // Verificar estado del proyecto: solo se puede marcar FINAL si está
+    // en borrador (0) o reversado (2).
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTOESTADO AS "estado", CONVOCATORIAID AS "convocatoriaId", EMPRESAID AS "empresaId"
+         FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    if (Number(proy.estado) === 3) {
+      throw new BadRequestException('El proyecto está aprobado y no admite cambios.')
+    }
+    if (Number(proy.estado) === 4) {
+      throw new BadRequestException('El proyecto está rechazado y no admite cambios.')
+    }
+
+    // Unicidad: la empresa no puede tener otro proyecto confirmado/aprobado
+    // en la misma convocatoria al pasar este a estado 1.
+    const [{ duplicados }] = await this.dataSource.query(
+      `SELECT COUNT(PROYECTOID) AS "duplicados"
+         FROM PROYECTO
+        WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2
+          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != :3`,
+      [proy.empresaId, proy.convocatoriaId, proyectoId],
+    )
+    if (Number(duplicados) > 0)
+      throw new BadRequestException('Ya existe otro proyecto confirmado o aprobado en esta convocatoria.')
+
+    // Desmarcar cualquier otra FINAL del mismo proyecto (defensa)
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONESFINAL = 0,
+              VERSIONFINALFECHA = NULL,
+              VERSIONFINALUSUARIO = NULL
+        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1`,
+      [proyectoId],
+    )
+    // Marcar esta como FINAL
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONESFINAL = 1,
+              VERSIONFINALFECHA = SYSDATE,
+              VERSIONFINALUSUARIO = :1
+        WHERE PROYECTOVERSIONID = :2`,
+      [email, versionId],
+    )
+    // Confirmar el proyecto: estado 1 + fecha de radicación
+    await this.dataSource.query(
+      `UPDATE PROYECTO
+          SET PROYECTOESTADO = 1, PROYECTOFECHARADICACION = SYSDATE
+        WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    return {
+      message: 'Versión marcada como FINAL. El proyecto quedó confirmado y listo para envío a SECOP.',
+      estado: 1,
+    }
+  }
+
+  /** Quita la marca FINAL de una versión. **Reversa** el proyecto: cambia
+   *  PROYECTOESTADO a 2 y limpia la fecha de radicación. */
+  async desmarcarVersionFinal(proyectoId: number, versionId: number) {
+    const [row] = await this.dataSource.query(
+      `SELECT VERSIONESFINAL AS "esFinal", PROYECTOID AS "proyectoId"
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    if (!row) throw new NotFoundException('Versión no encontrada')
+    if (Number(row.proyectoId) !== Number(proyectoId)) {
+      throw new BadRequestException('La versión no pertenece a este proyecto.')
+    }
+    if (Number(row.esFinal) !== 1) {
+      return { message: 'La versión no estaba marcada como FINAL.', wasNotFinal: true }
+    }
+
+    // No se puede desmarcar si el proyecto ya fue aprobado/rechazado por SENA
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (proy && Number(proy.estado) === 3) {
+      throw new BadRequestException('El proyecto está aprobado y no admite cambios.')
+    }
+    if (proy && Number(proy.estado) === 4) {
+      throw new BadRequestException('El proyecto está rechazado y no admite cambios.')
+    }
+
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONESFINAL = 0,
+              VERSIONFINALFECHA = NULL,
+              VERSIONFINALUSUARIO = NULL
+        WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    // Reversar el proyecto: estado 2 (Reversado), limpia fecha de radicación
+    await this.dataSource.query(
+      `UPDATE PROYECTO
+          SET PROYECTOESTADO = 2, PROYECTOFECHARADICACION = NULL
+        WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    return {
+      message: 'Marca FINAL retirada. El proyecto vuelve a borrador y puedes editar / crear nuevas versiones.',
+      estado: 2,
+    }
+  }
+
+  /** Anula una versión (soft-delete). No se puede anular la versión FINAL. */
+  async anularVersion(proyectoId: number, versionId: number, email: string) {
+    const [row] = await this.dataSource.query(
+      `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    if (!row) throw new NotFoundException('Versión no encontrada')
+    if (Number(row.proyectoId) !== Number(proyectoId)) {
+      throw new BadRequestException('La versión no pertenece a este proyecto.')
+    }
+    if (Number(row.esFinal) === 1) {
+      throw new BadRequestException('No se puede anular la versión marcada como FINAL. Quita la marca primero.')
+    }
+    if (Number(row.anulada) === 1) {
+      return { message: 'La versión ya estaba anulada.', alreadyAnulada: true }
+    }
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONANULADA = 1,
+              VERSIONANULADAFECHA = SYSDATE,
+              VERSIONANULADAUSUARIO = :1
+        WHERE PROYECTOVERSIONID = :2`,
+      [email, versionId],
+    )
+    return { message: 'Versión anulada correctamente.' }
+  }
+
+  /** Restaura una versión previamente anulada. */
+  async restaurarVersion(proyectoId: number, versionId: number) {
+    const [row] = await this.dataSource.query(
+      `SELECT VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    if (!row) throw new NotFoundException('Versión no encontrada')
+    if (Number(row.proyectoId) !== Number(proyectoId)) {
+      throw new BadRequestException('La versión no pertenece a este proyecto.')
+    }
+    if (Number(row.anulada) !== 1) {
+      return { message: 'La versión no estaba anulada.', wasNotAnulada: true }
+    }
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONANULADA = 0,
+              VERSIONANULADAFECHA = NULL,
+              VERSIONANULADAUSUARIO = NULL
+        WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    return { message: 'Versión restaurada correctamente.' }
+  }
+
+  /** Verificación pública por código de versión. Devuelve metadatos
+   *  básicos sin requerir autenticación. */
+  async verificarCodigoPublico(codigo: string) {
+    const [row] = await this.dataSource.query(
+      `SELECT pv.PROYECTOVERSIONID  AS "versionId",
+              pv.PROYECTOID          AS "proyectoId",
+              pv.VERSIONNUMERO       AS "numero",
+              pv.VERSIONCODIGO       AS "codigo",
+              pv.VERSIONFECHA        AS "fecha",
+              pv.VERSIONHASH         AS "hash",
+              pv.VERSIONESFINAL      AS "esFinal",
+              pv.VERSIONANULADA      AS "anulada",
+              pv.VERSIONFINALFECHA   AS "finalFecha",
+              p.PROYECTONOMBRE       AS "proyectoNombre",
+              p.PROYECTOESTADO       AS "proyectoEstado",
+              c.CONVOCATORIANOMBRE   AS "convocatoria",
+              e.EMPRESARAZONSOCIAL   AS "empresa",
+              e.EMPRESAIDENTIFICACION AS "nit",
+              e.EMPRESADIGITOVERIFICACION AS "digitoV"
+         FROM PROYECTOVERSION pv
+         JOIN PROYECTO p   ON p.PROYECTOID    = pv.PROYECTOID
+         LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
+         JOIN EMPRESA e    ON e.EMPRESAID     = p.EMPRESAID
+        WHERE TRIM(pv.VERSIONCODIGO) = :1`,
+      [codigo.trim()],
+    )
+    if (!row) {
+      return { valido: false, codigo: codigo.trim() }
+    }
+    return {
+      valido: true,
+      codigo: row.codigo,
+      version: {
+        numero: Number(row.numero),
+        fecha: row.fecha,
+        hash: row.hash,
+        esFinal: Number(row.esFinal) === 1,
+        anulada: Number(row.anulada) === 1,
+        finalFecha: row.finalFecha,
+      },
+      proyecto: {
+        id: Number(row.proyectoId),
+        nombre: row.proyectoNombre,
+        estado: Number(row.proyectoEstado) || 0,
+        convocatoria: row.convocatoria,
+      },
+      empresa: {
+        razonSocial: row.empresa,
+        nit: `${row.nit}-${row.digitoV}`,
+      },
+    }
+  }
+
+  /** Devuelve una versión específica con su snapshot completo deserializado.
+   *  El snapshot ya tiene la misma forma que getReporteProyecto + accionesDetalle. */
+  async getVersionSnapshot(versionId: number) {
+    const [row] = await this.dataSource.query(
+      `SELECT PROYECTOVERSIONID AS "versionId",
+              PROYECTOID         AS "proyectoId",
+              VERSIONNUMERO      AS "numero",
+              VERSIONCODIGO      AS "codigo",
+              VERSIONFECHA       AS "fecha",
+              VERSIONUSUARIO     AS "usuario",
+              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO, 2000, 1) AS "comentario",
+              VERSIONESTADOAL    AS "estadoAl",
+              VERSIONHASH        AS "hash",
+              VERSIONSNAPSHOT    AS "snapshotRaw"
+         FROM PROYECTOVERSION
+        WHERE PROYECTOVERSIONID = :1`,
+      [versionId],
+    )
+    if (!row) throw new NotFoundException('Versión no encontrada')
+
+    // En Oracle el CLOB puede llegar como Lob o ya como string según el driver.
+    let snapshotJson: string
+    if (typeof row.snapshotRaw === 'string') {
+      snapshotJson = row.snapshotRaw
+    } else if (row.snapshotRaw && typeof (row.snapshotRaw as any).getData === 'function') {
+      // node-oracledb Lob → string
+      snapshotJson = await new Promise<string>((resolve, reject) => {
+        (row.snapshotRaw as any).getData((err: Error | null, data: string) => {
+          if (err) reject(err); else resolve(data)
+        })
+      })
+    } else {
+      snapshotJson = String(row.snapshotRaw ?? '')
+    }
+
+    let snapshot: unknown = null
+    try { snapshot = JSON.parse(snapshotJson) }
+    catch { throw new BadRequestException('El snapshot de la versión está corrupto.') }
+
+    return {
+      versionId:  Number(row.versionId),
+      proyectoId: Number(row.proyectoId),
+      numero:     Number(row.numero),
+      codigo:     row.codigo,
+      fecha:      row.fecha,
+      usuario:    row.usuario,
+      comentario: row.comentario,
+      estadoAl:   Number(row.estadoAl) || 0,
+      hash:       row.hash,
+      snapshot,
+    }
+  }
+
+  // ── Aprobación de proyecto + restauración desde snapshot ────────────────
+
+  /** Restaura todas las tablas vivas del proyecto desde el snapshot JSON de
+   *  una versión. DELETE de las tablas dependientes + INSERT manteniendo los
+   *  IDs originales del snapshot. Toda la operación es atómica. */
+  async restaurarLiveDesdeSnapshot(proyectoId: number, versionId: number): Promise<void> {
+    const versionData = await this.getVersionSnapshot(versionId)
+    if (Number(versionData.proyectoId) !== Number(proyectoId)) {
+      throw new BadRequestException('La versión no pertenece a este proyecto.')
+    }
+    const snap = versionData.snapshot as Record<string, any>
+    if (!snap || typeof snap !== 'object') {
+      throw new BadRequestException('Snapshot inválido: no se puede restaurar.')
+    }
+    const acciones: any[] = Array.isArray(snap.acciones) ? snap.acciones : []
+    const detalles: any[] = Array.isArray(snap.accionesDetalle) ? snap.accionesDetalle : []
+    const contactos: any[] = Array.isArray(snap.contactos) ? snap.contactos : []
+    const proyectoSnap = snap.proyecto as Record<string, any> | undefined
+
+    // Mapa rápido: afId → metadata básica (incluye IDs)
+    const accionesById = new Map<number, any>()
+    for (const a of acciones) accionesById.set(Number(a.afId), a)
+
+    await this.dataSource.transaction(async (m) => {
+      const q = (sql: string, params: any[] = []) => m.query(sql, params)
+
+      // ── DELETE en orden de FKs ──────────────────────────────────────────
+      const afIds: number[] = (await q(
+        `SELECT ACCIONFORMACIONID AS "id" FROM ACCIONFORMACION WHERE PROYECTOID = :1`,
+        [proyectoId],
+      )).map((r: any) => Number(r.id))
+
+      if (afIds.length > 0) {
+        await q(`DELETE FROM AFRUBRO WHERE PROYECTOIDRUBROAF = :1`, [proyectoId])
+        await q(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID IN
+                   (SELECT AFGRUPOID FROM AFGRUPO WHERE ACCIONFORMACIONID IN
+                     (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1))`, [proyectoId])
+        await q(`DELETE FROM AFGRUPO WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID IN
+                   (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1)`, [proyectoId])
+        await q(`DELETE FROM PERFILUT WHERE UNIDADTEMATICAID IN
+                   (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1)`, [proyectoId])
+        await q(`DELETE FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1`, [proyectoId])
+        await q(`DELETE FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFPSECTOR WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFPSUBSECTOR WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFSECTOR WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFSUBSECTOR WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID IN
+                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
+        await q(`DELETE FROM ACCIONFORMACION WHERE PROYECTOID = :1`, [proyectoId])
+      }
+      // Contactos del proyecto (no contactos generales de la empresa)
+      await q(`DELETE FROM CONTACTOEMPRESA WHERE PROYECTOIDCONTACTOS = :1`, [proyectoId])
+
+      // ── UPDATE PROYECTO con datos del snapshot ──────────────────────────
+      if (proyectoSnap) {
+        await q(
+          `UPDATE PROYECTO
+              SET PROYECTONOMBRE  = :1,
+                  PROYECTOOBJETIVO = :2
+            WHERE PROYECTOID = :3`,
+          [proyectoSnap.nombre ?? null, proyectoSnap.objetivo ?? null, proyectoId],
+        )
+      }
+
+      // ── INSERT CONTACTOEMPRESA ──────────────────────────────────────────
+      // El snapshot guarda contactos sin tipoIdentificacionId (solo nombre).
+      // Reusamos la EMPRESAID del proyecto.
+      const [proy] = await q(
+        `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = :1`, [proyectoId],
+      )
+      const empresaIdProy = Number(proy.empresaId)
+      for (const c of contactos) {
+        // Buscar el TIPODOCUMENTOIDENTIDADID por nombre (snapshot guarda nombre)
+        let tipoIdentId: number | null = null
+        if (c.tipoDoc) {
+          const tipoRows = await q(
+            `SELECT TIPODOCUMENTOIDENTIDADID AS "id"
+               FROM TIPODOCUMENTOIDENTIDAD
+              WHERE UPPER(TRIM(TIPODOCUMENTOIDENTIDADNOMBRE)) = UPPER(TRIM(:1))`,
+            [c.tipoDoc],
+          )
+          tipoIdentId = tipoRows[0]?.id ?? null
+        }
+        const [{ nid }] = await q(
+          `SELECT NVL(MAX(CONTACTOEMPRESAID), 0) + 1 AS "nid" FROM CONTACTOEMPRESA`,
+        )
+        await q(
+          `INSERT INTO CONTACTOEMPRESA
+             (CONTACTOEMPRESAID, EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
+              CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
+              TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)`,
+          [nid, empresaIdProy, c.nombre, c.cargo, c.correo,
+           c.telefono ?? null, c.documento ?? null, tipoIdentId, proyectoId],
+        )
+      }
+
+      // Fallback para snapshots viejos: buscar IDs por nombre si no vienen.
+      const lookupId = async (
+        table: string, nameCol: string, idCol: string, name: string | null | undefined,
+      ): Promise<number | null> => {
+        if (!name) return null
+        const rows = await q(
+          `SELECT ${idCol} AS "id" FROM ${table} WHERE UPPER(TRIM(${nameCol})) = UPPER(TRIM(:1))`,
+          [String(name).trim()],
+        )
+        return rows[0]?.id ? Number(rows[0].id) : null
+      }
+
+      // ── INSERT por cada AF ──────────────────────────────────────────────
+      for (const det of detalles) {
+        const afId = Number(det.afId)
+        const meta = accionesById.get(afId) ?? {}
+        const perfil = det.perfil ?? null
+        const sectores = det.sectores ?? null
+        const grupos: any[] = Array.isArray(det.grupos) ? det.grupos : []
+        const uts: any[] = Array.isArray(det.unidadesTematicas) ? det.unidadesTematicas : []
+        const material = det.material ?? null
+        const alineacion = det.alineacion ?? null
+        const rubros: any[] = Array.isArray(det.rubros) ? det.rubros : []
+        const goAf = det.gastoOperacion ?? null
+        const transAf = det.transferencia ?? null
+
+        // Resolver IDs faltantes en snapshots viejos buscando por nombre
+        const tipoEventoId = meta.tipoEventoId
+          ?? await lookupId('TIPOEVENTO', 'TIPOEVENTONOMBRE', 'TIPOEVENTOID', meta.tipoEvento)
+        const modalidadFormacionId = meta.modalidadFormacionId
+          ?? await lookupId('MODALIDADFORMACION', 'MODALIDADFORMACIONNOMBRE', 'MODALIDADFORMACIONID', meta.modalidad)
+        const metodologiaAprendizajeId = meta.metodologiaAprendizajeId
+          ?? await lookupId('METODOLOGIAAPRENDIZAJE', 'METODOLOGIAAPRENDIZAJENOMBRE', 'METODOLOGIAAPRENDIZAJEID', meta.metodologia)
+        const modeloAprendizajeId = meta.modeloAprendizajeId ?? null
+
+        if (modalidadFormacionId == null) {
+          throw new BadRequestException(
+            `No se pudo resolver MODALIDADFORMACIONID para la AF ${meta.numero ?? afId} (modalidad="${meta.modalidad ?? ''}"). ` +
+            'El snapshot está incompleto. Crea una nueva versión con el código actualizado y márcala como FINAL antes de aprobar.',
+          )
+        }
+        if (tipoEventoId == null) {
+          throw new BadRequestException(
+            `No se pudo resolver TIPOEVENTOID para la AF ${meta.numero ?? afId} (evento="${meta.tipoEvento ?? ''}"). ` +
+            'El snapshot está incompleto. Crea una nueva versión con el código actualizado y márcala como FINAL antes de aprobar.',
+          )
+        }
+
+        // ACCIONFORMACION (con todos los campos del snapshot)
+        await q(
+          `INSERT INTO ACCIONFORMACION
+             (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
+              NECESIDADFORMACIONIDAF, ACCIONFORMACIONJUSTNEC, ACCIONFORMACIONCAUSA,
+              ACCIONFORMACIONRESULTADOS, ACCIONFORMACIONOBJETIVO,
+              TIPOEVENTOID, MODALIDADFORMACIONID, METODOLOGIAAPRENDIZAJEID, MODELOAPRENDIZAJEID,
+              ACCIONFORMACIONNUMHORAGRUPO, ACCIONFORMACIONNUMGRUPOS, ACCIONFORMACIONNUMTOTHORASGRUP,
+              ACCIONFORMACIONBENEFGRUPO, ACCIONFORMACIONBENEFVIGRUPO, ACCIONFORMACIONNUMBENEF,
+              AFENFOQUEID, ACCIONFORMACIONAREAFUN, ACCIONFORMACIONNIVELOCUPD,
+              ACCIONFORMACIONMUJER, ACCIONFORMACIONNUMCAMPESINO, ACCIONFORMACIONJUSTCAMPESINO,
+              ACCIONFORMACIONNUMPOPULAR, ACCIONFORMACIONJUSTPOPULAR,
+              ACCIONFORMACIONTRABDISCAPAC, ACCIONFORMACIONTRABAJADORBIC,
+              ACCIONFORMACIONMIPYMES, ACCIONFORMACIONTRABMIPYMES, ACCIONFORMACIONMIPYMESD,
+              ACCIONFORMACIONCADENAPROD, ACCIONFORMACIONTRABCADPROD, ACCIONFORMACIONCADENAPRODD,
+              ACCIONFORMACIONSECSUBD, ACCIONFORMACIONCOMPONENTEID,
+              ACCIONFORMACIONCOMPOD, ACCIONFORMACIONJUSTIFICACION,
+              ACCIONFORMACIONRESDESEM, ACCIONFORMACIONRESFORM,
+              TIPOAMBIENTEID, ACCIONFORMACIONJUSTMAT,
+              ACCIONFORMACIONINSUMO, ACCIONFORMACIONJUSTINSUMO,
+              ACCIONFORMACIONFECHAREGISTRO)
+           VALUES (:1,:2,:3,:4,
+                   :5,:6,:7,:8,:9,
+                   :10,:11,:12,:13,
+                   :14,:15,:16,:17,:18,:19,
+                   :20,:21,:22,
+                   :23,:24,:25,:26,:27,
+                   :28,:29,
+                   :30,:31,:32,
+                   :33,:34,:35,
+                   :36,:37,
+                   :38,:39,:40,:41,
+                   :42,:43,
+                   :44,:45,
+                   SYSDATE)`,
+          [
+            afId, proyectoId, meta.numero ?? null, meta.nombre ?? null,
+            meta.necesidadFormacionId ?? null, meta.justnec ?? null, meta.causa ?? null,
+            meta.efectos ?? null, meta.objetivo ?? null,
+            tipoEventoId, modalidadFormacionId,
+            metodologiaAprendizajeId, modeloAprendizajeId,
+            meta.numHorasGrupo ?? null, meta.numGrupos ?? null, meta.numTotHoras ?? null,
+            meta.benefGrupo ?? null, meta.benefViGrupo ?? null, meta.numBenef ?? null,
+            perfil?.afEnfoqueId ?? null, perfil?.justAreas ?? null, perfil?.justNivelesOcu ?? null,
+            perfil?.mujer ?? null, perfil?.numCampesino ?? null, perfil?.justCampesino ?? null,
+            perfil?.numPopular ?? null, perfil?.justPopular ?? null,
+            perfil?.trabDiscapac ?? null, perfil?.trabajadorBic ?? null,
+            perfil?.mipymes ?? null, perfil?.trabMipymes ?? null, perfil?.mipymesD ?? null,
+            perfil?.cadenaProd ?? null, perfil?.trabCadProd ?? null, perfil?.cadenaProdD ?? null,
+            sectores?.justificacion ?? null, alineacion?.componenteId ?? null,
+            alineacion?.compod ?? null, alineacion?.justificacion ?? null,
+            alineacion?.resDesem ?? null, alineacion?.resForm ?? null,
+            material?.tipoAmbienteId ?? null, material?.justMat ?? null,
+            material?.insumo ?? null, material?.justInsumo ?? null,
+          ],
+        )
+
+        // Áreas funcionales / Niveles / CUOC
+        for (const a of (perfil?.areas ?? [])) {
+          await q(
+            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
+             VALUES (:1, :2, :3, :4)`,
+            [Number(a.aafId), afId, Number(a.areaId), a.otro ?? null],
+          )
+        }
+        for (const n of (perfil?.niveles ?? [])) {
+          await q(
+            `INSERT INTO AFNIVELOCUPACIONAL (AFNIVELOCUPACIONALID, ACCIONFORMACIONID, NIVELOCUPACIONALIDAF)
+             VALUES (:1, :2, :3)`,
+            [Number(n.anId), afId, Number(n.nivelId)],
+          )
+        }
+        for (const c of (perfil?.cuoc ?? [])) {
+          await q(
+            `INSERT INTO OCUPACIONCOUCAF (OCUPACIONCOUCAFID, ACCIONFORMACIONID, OCUPACIONCUOCID)
+             VALUES (:1, :2, :3)`,
+            [Number(c.ocAfId), afId, Number(c.cuocId)],
+          )
+        }
+
+        // Sectores / Subsectores benef + AF
+        for (const s of (sectores?.sectoresBenef ?? [])) {
+          await q(
+            `INSERT INTO AFPSECTOR (AFPSECTORID, ACCIONFORMACIONID, SECTORAFID, AFPSECTORESTADO) VALUES (:1, :2, :3, 1)`,
+            [Number(s.psId), afId, Number(s.sectorId)],
+          )
+        }
+        for (const s of (sectores?.subsectoresBenef ?? [])) {
+          await q(
+            `INSERT INTO AFPSUBSECTOR (AFPSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID, AFPSUBSECTORESTADO) VALUES (:1, :2, :3, 1)`,
+            [Number(s.pssId), afId, Number(s.subsectorId)],
+          )
+        }
+        for (const s of (sectores?.sectoresAf ?? [])) {
+          await q(
+            `INSERT INTO AFSECTOR (AFSECTORID, ACCIONFORMACIONID, SECTORAFID) VALUES (:1, :2, :3)`,
+            [Number(s.saId), afId, Number(s.sectorId)],
+          )
+        }
+        for (const s of (sectores?.subsectoresAf ?? [])) {
+          await q(
+            `INSERT INTO AFSUBSECTOR (AFSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID) VALUES (:1, :2, :3)`,
+            [Number(s.ssaId), afId, Number(s.subsectorId)],
+          )
+        }
+
+        // Material — gestión / material / recursos
+        if (material?.gestionConocimientoId) {
+          const [{ nid }] = await q(`SELECT NVL(MAX(AFGESTIONCONOCIMIENTOID), 0) + 1 AS "nid" FROM AFGESTIONCONOCIMIENTO`)
+          await q(
+            `INSERT INTO AFGESTIONCONOCIMIENTO (AFGESTIONCONOCIMIENTOID, ACCIONFORMACIONID, GESTIONCONOCIMIENTOID) VALUES (:1, :2, :3)`,
+            [nid, afId, Number(material.gestionConocimientoId)],
+          )
+        }
+        if (material?.materialFormacionId) {
+          const [{ nid }] = await q(`SELECT NVL(MAX(MATERIALFORMACIONAFID), 0) + 1 AS "nid" FROM MATERIALFORMACIONAF`)
+          await q(
+            `INSERT INTO MATERIALFORMACIONAF (MATERIALFORMACIONAFID, ACCIONFORMACIONID, MATERIALFORMACIONID) VALUES (:1, :2, :3)`,
+            [nid, afId, Number(material.materialFormacionId)],
+          )
+        }
+        for (const r of (material?.recursos ?? [])) {
+          await q(
+            `INSERT INTO RECURSOSDIDACTICOSAF (RECURSOSDIDACTICOSAFID, ACCIONFORMACIONID, RECURSOSDIDACTICOSID)
+             VALUES (:1, :2, :3)`,
+            [Number(r.rdafId), afId, Number(r.recursoId)],
+          )
+        }
+
+        // Grupos + coberturas
+        for (const g of grupos) {
+          await q(
+            `INSERT INTO AFGRUPO (AFGRUPOID, ACCIONFORMACIONID, AFGRUPONUMERO, AFGRUPOJUSTIFICACION) VALUES (:1, :2, :3, :4)`,
+            [Number(g.grupoId), afId, Number(g.grupoNumero), g.justificacion ?? null],
+          )
+          for (const cob of (g.coberturas ?? [])) {
+            await q(
+              `INSERT INTO AFGRUPOCOBERTURA
+                 (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
+                  AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
+               VALUES (:1, :2, :3, :4, :5, :6, :7, :8)`,
+              [Number(cob.cobId), Number(g.grupoId), cob.deptoId ?? null, cob.ciudadId ?? null,
+               cob.benef ?? 0, afId, cob.modal ?? 'P', cob.rural ?? 0],
+            )
+          }
+        }
+
+        // Unidades temáticas + actividades + perfiles
+        for (const ut of uts) {
+          await q(
+            `INSERT INTO UNIDADTEMATICA (
+               UNIDADTEMATICAID, PROYECTOIDUT, ACCIONFORMACIONID, UNIDADTEMATICANUMERO,
+               UNIDADTEMATICANOMBRE, UNIDADTEMATICACOMPETENCIAS, UNIDADTEMATICACONTENIDO,
+               UNIDADTEMATICAJUSTACTIVIDAD,
+               UNIDADTEMATICAHORASPP, UNIDADTEMATICAHORASPV, UNIDADTEMATICAHORASPPAT, UNIDADTEMATICAHORASPHIB,
+               UNIDADTEMATICAHORASTP, UNIDADTEMATICAHORASTV, UNIDADTEMATICAHORASTPAT, UNIDADTEMATICAHORASTHIB,
+               UNIDADTEMATICAESTRANSVERSAL, UNIDADTEMATICAHORASTRANSVERSAL,
+               ARTICULACIONTERRITORIALID, UNIDADTEMATICAFECHAREGISTRO
+             ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,SYSDATE)`,
+            [Number(ut.utId), proyectoId, afId, Number(ut.numero),
+             ut.nombre, ut.competencias ?? null, ut.contenido ?? null, ut.justActividad ?? null,
+             ut.horasPP ?? 0, ut.horasPV ?? 0, ut.horasPPAT ?? 0, ut.horasPHib ?? 0,
+             ut.horasTP ?? 0, ut.horasTV ?? 0, ut.horasTPAT ?? 0, ut.horasTHib ?? 0,
+             Number(ut.esTransversal) || 0, ut.horasTransversal ?? null,
+             ut.articulacionTerritorialId ?? null],
+          )
+          for (const act of (ut.actividades ?? [])) {
+            await q(
+              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
+               VALUES (:1, :2, :3, :4)`,
+              [Number(act.actId), Number(ut.utId), Number(act.actividadId), act.otro ?? null],
+            )
+          }
+          for (const p of (ut.perfiles ?? [])) {
+            await q(
+              `INSERT INTO PERFILUT (PERFILUTID, UNIDADTEMATICAID, RUBROIDUT, PERFILUTHORASCAP, PERFILUTDIAS, PERFILUTFECHAREGISTRO)
+               VALUES (:1, :2, :3, :4, :5, SYSDATE)`,
+              [Number(p.perfilId), Number(ut.utId), Number(p.rubroId),
+               p.horasCap ?? 0, p.dias ?? null],
+            )
+          }
+        }
+
+        // Rubros (excluye R09 / R015 que se insertan aparte abajo)
+        for (const r of rubros) {
+          await q(
+            `INSERT INTO AFRUBRO (
+               AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+               AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
+               AFRUBROBENEFICIARIOS, AFRUBRODIAS, AFRUBRONUMEROGRUPOS,
+               AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
+               AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
+               AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
+               AFRUBROFECHAREGISTRO)
+             VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,SYSDATE)`,
+            [Number(r.afrubroid), proyectoId, afId, Number(r.rubroId),
+             r.justificacion ?? null, r.numHoras ?? 0, r.cantidad ?? 0,
+             r.beneficiarios ?? 0, r.dias ?? 0, r.numGrupos ?? 0,
+             Number(r.totalRubro) || 0, Number(r.cofSena) || 0,
+             Number(r.contraEspecie) || 0, Number(r.contraDinero) || 0,
+             Number(r.valorMaximo) || 0, Number(r.valorBenef) || 0, r.paquete ?? null,
+             Number(r.porcSena) || 0, Number(r.porcEspecie) || 0, Number(r.porcDinero) || 0],
+          )
+        }
+
+        // Gasto de operación (R09)
+        if (goAf && Number(goAf.total) > 0) {
+          // Buscar el RUBROID correcto para R09 según convocatoria
+          const [r09] = await q(
+            `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
+               FROM RUBRO r
+              WHERE TRIM(r.RUBROCODIGO) = 'R09'
+                AND ROWNUM = 1`,
+          )
+          if (r09) {
+            await q(
+              `INSERT INTO AFRUBRO (
+                 AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+                 AFRUBROJUSTIFICACION, AFRUBROCANTIDAD,
+                 AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
+                 AFRUBROPAQUETE, AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
+                 AFRUBROFECHAREGISTRO)
+               VALUES (:1,:2,:3,:4,'GASTOS DE OPERACIÓN',1,:5,:6,:7,:8,:9,:10,:11,:12,SYSDATE)`,
+              [Number(goAf.afrubroid), proyectoId, afId, Number(r09.rubroId),
+               Number(goAf.total) || 0, Number(goAf.cofSena) || 0,
+               Number(goAf.especie) || 0, Number(goAf.dinero) || 0,
+               r09.paquete ?? null,
+               Number(goAf.total) > 0 ? (Number(goAf.cofSena) / Number(goAf.total)) * 100 : 0,
+               Number(goAf.total) > 0 ? (Number(goAf.especie) / Number(goAf.total)) * 100 : 0,
+               Number(goAf.total) > 0 ? (Number(goAf.dinero) / Number(goAf.total)) * 100 : 0],
+            )
+          }
+        }
+
+        // Transferencia (R015)
+        if (transAf && Number(transAf.valor) > 0) {
+          const [r015] = await q(
+            `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
+               FROM RUBRO r
+              WHERE TRIM(r.RUBROCODIGO) = 'R015'
+                AND ROWNUM = 1`,
+          )
+          if (r015) {
+            await q(
+              `INSERT INTO AFRUBRO (
+                 AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
+                 AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROBENEFICIARIOS,
+                 AFRUBROVALOR, AFRUBRODINERO,
+                 AFRUBROPAQUETE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
+               VALUES (:1,:2,:3,:4,'TRANSFERENCIA CONOCIMIENTO',1,:5,:6,:7,:8,100,SYSDATE)`,
+              [Number(transAf.afrubroid), proyectoId, afId, Number(r015.rubroId),
+               Number(transAf.beneficiarios) || 0,
+               Number(transAf.valor) || 0, Number(transAf.valor) || 0,
+               r015.paquete ?? null],
+            )
+          }
+        }
+      }
+    })
+  }
+
+  /** Aprueba el proyecto (rol admin SENA): restaura las tablas vivas desde
+   *  la versión FINAL, registra el hash en PROYECTOAPROBADO y pasa el
+   *  estado a 3 (Aprobado). */
+  async aprobarProyecto(proyectoId: number, email: string, comentario?: string | null) {
+    // 1) Verificar que el proyecto está confirmado y tiene FINAL
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    if (Number(proy.estado) !== 1) {
+      throw new BadRequestException('Solo se pueden aprobar proyectos en estado Confirmado.')
+    }
+
+    const [versionFinal] = await this.dataSource.query(
+      `SELECT PROYECTOVERSIONID AS "versionId",
+              VERSIONCODIGO     AS "codigo",
+              VERSIONHASH       AS "hash"
+         FROM PROYECTOVERSION
+        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+      [proyectoId],
+    )
+    if (!versionFinal) {
+      throw new BadRequestException('No hay versión marcada como FINAL en este proyecto.')
+    }
+
+    // 2) Restaurar tablas vivas desde el snapshot FINAL
+    await this.restaurarLiveDesdeSnapshot(proyectoId, Number(versionFinal.versionId))
+
+    // 3) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
+    await this.dataSource.query(
+      `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
+    )
+    await this.dataSource.query(
+      `INSERT INTO PROYECTOAPROBADO
+         (PROYECTOID, PROYECTOVERSIONID, VERSIONCODIGO, VERSIONHASH,
+          FECHAAPROBACION, USUARIOAPROBO, COMENTARIOAPROBACION)
+       VALUES (:1, :2, :3, :4, SYSDATE, :5, :6)`,
+      [proyectoId, Number(versionFinal.versionId), versionFinal.codigo,
+       versionFinal.hash, email, comentario?.trim() || null],
+    )
+
+    // 4) Cambiar estado a 3 (Aprobado)
+    await this.dataSource.query(
+      `UPDATE PROYECTO SET PROYECTOESTADO = 3 WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+
+    return {
+      message: 'Proyecto aprobado correctamente. Las tablas vivas fueron restauradas desde la versión FINAL.',
+      versionAprobada: {
+        versionId: Number(versionFinal.versionId),
+        codigo: versionFinal.codigo,
+        hash: versionFinal.hash,
+      },
+    }
+  }
+
+  // ── Crear nueva versión del proyecto ─────────────────────────────────────
+
+  /** Crea una nueva versión (snapshot) del proyecto. NO cambia el estado del
+   *  proyecto. La transición a estado 1 (Confirmado) ocurre solo cuando el
+   *  proponente marca explícitamente una versión como FINAL. */
+  async crearVersion(email: string, proyectoId: number, comentario?: string | null) {
     const empresaId = await this.getEmpresaId(email)
 
     const rows = await this.dataSource.query(
@@ -368,38 +1298,46 @@ export class ProyectosService {
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
     const { estado, convocatoriaId } = rows[0]
 
-    // Toggle: 0/null → 1 (radicar), 1 → 2 (desradicar/reversar), 2 → 1 (re-radicar)
-    const nuevoEstado = Number(estado) === 1 ? 2 : 1
-
-    if (nuevoEstado === 1) {
-      // Unicidad: una empresa solo puede tener un proyecto radicado por convocatoria
-      const [{ total }] = await this.dataSource.query(
-        `SELECT COUNT(PROYECTOID) AS "total"
-           FROM PROYECTO
-          WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2 AND PROYECTOESTADO = 1 AND PROYECTOID != :3`,
-        [empresaId, convocatoriaId, proyectoId],
-      )
-      if (Number(total) > 0)
-        throw new BadRequestException('Ya existe un proyecto radicado en esta convocatoria.')
-
-      // Validación de completitud antes de confirmar
-      const issues = await this.validarCompletitudParaConfirmar(proyectoId)
-      if (issues.length > 0) {
-        throw new BadRequestException({
-          message: 'No se puede confirmar el proyecto: faltan datos por completar.',
-          issues,
-        })
-      }
+    // Estados que bloquean crear una nueva versión:
+    if (Number(estado) === 1) {
+      throw new BadRequestException('El proyecto tiene una versión FINAL marcada. Quita la marca FINAL para poder crear una nueva versión.')
+    }
+    if (Number(estado) === 3) {
+      throw new BadRequestException('El proyecto está aprobado y no admite nuevas versiones.')
+    }
+    if (Number(estado) === 4) {
+      throw new BadRequestException('El proyecto está rechazado y no admite nuevas versiones.')
     }
 
-    await this.dataSource.query(
-      `UPDATE PROYECTO
-          SET PROYECTOESTADO = :1, PROYECTOFECHARADICACION = SYSDATE
-        WHERE PROYECTOID = :2`,
-      [nuevoEstado, proyectoId],
+    // Unicidad: la empresa no puede tener otro proyecto confirmado o
+    // aprobado en la misma convocatoria. Aplica también para versiones
+    // (porque el snapshot debe ser válido para enviar a SECOP).
+    const [{ total }] = await this.dataSource.query(
+      `SELECT COUNT(PROYECTOID) AS "total"
+         FROM PROYECTO
+        WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2
+          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != :3`,
+      [empresaId, convocatoriaId, proyectoId],
     )
+    if (Number(total) > 0)
+      throw new BadRequestException('Ya existe otro proyecto confirmado o aprobado en esta convocatoria.')
 
-    return { message: nuevoEstado === 1 ? 'Proyecto radicado correctamente' : 'Proyecto reversado correctamente', estado: nuevoEstado }
+    // Validación de completitud antes de generar el snapshot
+    const issues = await this.validarCompletitudParaConfirmar(proyectoId)
+    if (issues.length > 0) {
+      throw new BadRequestException({
+        message: 'No se puede crear una nueva versión: faltan datos por completar.',
+        issues,
+      })
+    }
+
+    // Crear snapshot inmutable
+    const nuevaVersion = await this.crearVersionProyecto(proyectoId, email, comentario)
+
+    return {
+      message: `Versión V${nuevaVersion.versionNumero} creada correctamente. El proyecto sigue editable hasta que marques una versión como FINAL.`,
+      version: nuevaVersion,
+    }
   }
 
   // ── Catálogos ─────────────────────────────────────────────────────────────
@@ -2710,6 +3648,10 @@ export class ProyectosService {
               af.ACCIONFORMACIONBENEFVIGRUPO        AS "benefViGrupo",
               af.ACCIONFORMACIONNUMBENEF            AS "numBenef",
               af.NECESIDADFORMACIONIDAF             AS "necesidadFormacionId",
+              af.TIPOEVENTOID                       AS "tipoEventoId",
+              af.MODALIDADFORMACIONID               AS "modalidadFormacionId",
+              af.METODOLOGIAAPRENDIZAJEID           AS "metodologiaAprendizajeId",
+              af.MODELOAPRENDIZAJEID                AS "modeloAprendizajeId",
               te.TIPOEVENTONOMBRE                   AS "tipoEvento",
               mf.MODALIDADFORMACIONNOMBRE           AS "modalidad",
               ma.METODOLOGIAAPRENDIZAJENOMBRE       AS "metodologia",
@@ -2742,6 +3684,9 @@ export class ProyectosService {
     try { presupuesto = await this.getPresupuestoProyecto(proyectoId) }
     catch { /* si falla, deja null y el frontend lo maneja */ }
 
+    // 9. Versión actual (si existe)
+    const versionActual = await this.getUltimaVersion(proyectoId).catch(() => null)
+
     return {
       proyecto: {
         id: Number(proy.proyectoId),
@@ -2765,6 +3710,7 @@ export class ProyectosService {
       acciones,
       diagnosticos: diagnosticos.filter(d => d !== null),
       presupuesto,
+      versionActual,
     }
   }
 }

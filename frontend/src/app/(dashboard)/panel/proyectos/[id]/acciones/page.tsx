@@ -37,7 +37,7 @@ interface Opcion { id: number; nombre: string }
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const estado = Number(p.estado)
-  return estado !== 1 && estado !== 3 && p.convocatoriaEstado !== 0
+  return estado !== 1 && estado !== 3 && estado !== 4 && p.convocatoriaEstado !== 0
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

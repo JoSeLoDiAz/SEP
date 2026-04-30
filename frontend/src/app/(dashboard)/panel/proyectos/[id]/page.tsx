@@ -46,10 +46,16 @@ const CARGOS = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function estadoInfo(e: number | null) {
+function estadoInfo(e: number | null, convocatoriaEstado?: number) {
   switch (Number(e)) {
     case 1: return { label: 'Confirmado',     cls: 'bg-blue-100 text-blue-700 border-blue-200' }
-    case 2: return { label: 'Reversado',      cls: 'bg-amber-100 text-amber-700 border-amber-200' }
+    // Estado 2: si la convocatoria sigue abierta es "Reversado" (el proponente
+    // puede reabrirlo); si la convocatoria cerró ya es "Subsanación" (SENA lo
+    // mandó a corregir).
+    case 2: return {
+      label: convocatoriaEstado === 0 ? 'Subsanación' : 'Reversado',
+      cls: 'bg-amber-100 text-amber-700 border-amber-200',
+    }
     case 3: return { label: 'Aprobado',       cls: 'bg-green-100 text-green-700 border-green-200' }
     case 4: return { label: 'Rechazado',      cls: 'bg-red-100 text-red-700 border-red-200' }
     default: return { label: 'Sin Confirmar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
@@ -58,7 +64,9 @@ function estadoInfo(e: number | null) {
 
 function puedeEditar(p: Proyecto) {
   const estado = Number(p.estado)
-  return estado !== 1 && estado !== 3 && estado !== 4 && p.convocatoriaEstado !== 0
+  // Estado 2 (Subsanación/Reversado) siempre editable. Estado 0 requiere
+  // convocatoria abierta.
+  return estado === 2 || (estado === 0 && p.convocatoriaEstado !== 0)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -268,7 +276,7 @@ export default function ProyectoDetallePage() {
   }
 
   const editable = puedeEditar(proyecto)
-  const { label: estadoLabel, cls: estadoCls } = estadoInfo(proyecto.estado)
+  const { label: estadoLabel, cls: estadoCls } = estadoInfo(proyecto.estado, proyecto.convocatoriaEstado)
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">

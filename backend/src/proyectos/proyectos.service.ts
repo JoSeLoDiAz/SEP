@@ -68,6 +68,7 @@ export class ProyectosService {
               p.PROYECTOFECHAREGISTRO   AS "fechaRegistro",
               p.PROYECTOFECHARADICACION AS "fechaRadicacion",
               TRIM(cv.CONVOCATORIANOMBRE) AS "convocatoria",
+              cv.CONVOCATORIAESTADO     AS "convocatoriaEstado",
               TRIM(m.MODALIDADNOMBRE)    AS "modalidad"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
@@ -134,6 +135,10 @@ export class ProyectosService {
     const issues: string[] = []
 
     // 1. Empresa + representante + generalidades
+    // Para los CLOBs solo nos interesa saber si están vacíos: usamos
+    // DBMS_LOB.GETLENGTH (NUMBER) en vez de SUBSTR para evitar
+    // ORA-06502 cuando el contenido tiene caracteres multibyte y
+    // 4000 chars exceden los 4000 bytes de un VARCHAR2 estándar.
     const [emp] = await this.dataSource.query(
       `SELECT e.EMPRESARAZONSOCIAL        AS "razonSocial",
               e.EMPRESAIDENTIFICACION     AS "nit",
@@ -152,12 +157,12 @@ export class ProyectosService {
               e.EMPRESAREPCARGO           AS "repCargo",
               e.EMPRESAREPCORREO          AS "repCorreo",
               e.EMPRESAREPTEL             AS "repTel",
-              DBMS_LOB.SUBSTR(e.EMPRESAOBJETO,4000,1)       AS "objeto",
-              DBMS_LOB.SUBSTR(e.EMPRESAPRODUCTOS,4000,1)    AS "productos",
-              DBMS_LOB.SUBSTR(e.EMPRESASITUACION,4000,1)    AS "situacion",
-              DBMS_LOB.SUBSTR(e.EMPRESAPAPEL,4000,1)        AS "papel",
-              DBMS_LOB.SUBSTR(e.EMPRESARETOS,4000,1)        AS "retos",
-              DBMS_LOB.SUBSTR(e.EMPRESAEXPERIENCIA,4000,1)  AS "experiencia"
+              DBMS_LOB.GETLENGTH(e.EMPRESAOBJETO)       AS "objetoLen",
+              DBMS_LOB.GETLENGTH(e.EMPRESAPRODUCTOS)    AS "productosLen",
+              DBMS_LOB.GETLENGTH(e.EMPRESASITUACION)    AS "situacionLen",
+              DBMS_LOB.GETLENGTH(e.EMPRESAPAPEL)        AS "papelLen",
+              DBMS_LOB.GETLENGTH(e.EMPRESARETOS)        AS "retosLen",
+              DBMS_LOB.GETLENGTH(e.EMPRESAEXPERIENCIA)  AS "experienciaLen"
          FROM PROYECTO p
          JOIN EMPRESA e ON e.EMPRESAID = p.EMPRESAID
         WHERE p.PROYECTOID = :1`,
@@ -181,24 +186,26 @@ export class ProyectosService {
     if (!emp.repCargo)        issues.push('Representante Legal: falta cargo.')
     if (!emp.repCorreo)       issues.push('Representante Legal: falta correo.')
     if (!emp.repTel)          issues.push('Representante Legal: falta teléfono.')
-    if (!emp.objeto)          issues.push('Generalidades: falta objeto social.')
-    if (!emp.productos)       issues.push('Generalidades: faltan productos/servicios.')
-    if (!emp.situacion)       issues.push('Generalidades: falta situación actual.')
-    if (!emp.papel)           issues.push('Generalidades: falta papel del proponente.')
-    if (!emp.retos)           issues.push('Generalidades: faltan retos estratégicos.')
-    if (!emp.experiencia)     issues.push('Generalidades: falta experiencia en formación.')
+    if (!Number(emp.objetoLen))      issues.push('Generalidades: falta objeto social.')
+    if (!Number(emp.productosLen))   issues.push('Generalidades: faltan productos/servicios.')
+    if (!Number(emp.situacionLen))   issues.push('Generalidades: falta situación actual.')
+    if (!Number(emp.papelLen))       issues.push('Generalidades: falta papel del proponente.')
+    if (!Number(emp.retosLen))       issues.push('Generalidades: faltan retos estratégicos.')
+    if (!Number(emp.experienciaLen)) issues.push('Generalidades: falta experiencia en formación.')
 
     // 2. Datos del proyecto
     const [proy] = await this.dataSource.query(
-      `SELECT PROYECTONOMBRE AS "nombre",
-              DBMS_LOB.SUBSTR(PROYECTOOBJETIVO,4000,1) AS "objetivo"
+      `SELECT PROYECTONOMBRE                       AS "nombre",
+              DBMS_LOB.GETLENGTH(PROYECTOOBJETIVO) AS "objetivoLen"
          FROM PROYECTO WHERE PROYECTOID = :1`,
       [proyectoId],
     )
-    if (!proy.nombre)   issues.push('Proyecto: falta nombre.')
-    if (!proy.objetivo) issues.push('Proyecto: falta objetivo general.')
+    if (!proy.nombre)              issues.push('Proyecto: falta nombre.')
+    if (!Number(proy.objetivoLen)) issues.push('Proyecto: falta objetivo general.')
 
     // 3. AFs (mínimo 1) + completitud por AF
+    // Usamos GETLENGTH para los CLOBs (solo nos importa si están vacíos),
+    // así evitamos el ORA-06502 con contenido multibyte UTF-8.
     const afs = await this.dataSource.query(
       `SELECT ACCIONFORMACIONID            AS "afId",
               ACCIONFORMACIONNUMERO        AS "numero",
@@ -209,18 +216,18 @@ export class ProyectosService {
               ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
               ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
               ACCIONFORMACIONNUMBENEF      AS "numBenef",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTNEC,4000,1)      AS "justnec",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONCAUSA,4000,1)        AS "causa",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESULTADOS,4000,1)   AS "efectos",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONOBJETIVO,4000,1)     AS "objetivo",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONJUSTNEC)       AS "justnecLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONCAUSA)         AS "causaLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESULTADOS)    AS "efectosLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONOBJETIVO)      AS "objetivoLen",
               NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
               AFENFOQUEID                  AS "enfoqueId",
               TIPOAMBIENTEID               AS "tipoAmbienteId",
               ACCIONFORMACIONCOMPONENTEID  AS "componenteId",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONCOMPOD,4000,1)        AS "compod",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTIFICACION,4000,1) AS "justAlin",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESDESEM,5000,1)      AS "resDesem",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONRESFORM,5000,1)       AS "resForm"
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONCOMPOD)        AS "compodLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONJUSTIFICACION) AS "justAlinLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESDESEM)      AS "resDesemLen",
+              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESFORM)       AS "resFormLen"
          FROM ACCIONFORMACION
         WHERE PROYECTOID = :1
         ORDER BY ACCIONFORMACIONNUMERO`,
@@ -239,20 +246,20 @@ export class ProyectosService {
         if (!Number(af.numHorasGrupo))issues.push(`${tag}: faltan horas por grupo.`)
         if (!Number(af.numGrupos))    issues.push(`${tag}: falta número de grupos.`)
         if (!Number(af.numBenef))     issues.push(`${tag}: faltan beneficiarios.`)
-        if (!af.justnec)              issues.push(`${tag}: falta justificación de la necesidad.`)
-        if (!af.causa)                issues.push(`${tag}: falta causa.`)
-        if (!af.efectos)              issues.push(`${tag}: faltan efectos.`)
-        if (!af.objetivo)             issues.push(`${tag}: falta objetivo.`)
+        if (!Number(af.justnecLen))   issues.push(`${tag}: falta justificación de la necesidad.`)
+        if (!Number(af.causaLen))     issues.push(`${tag}: falta causa.`)
+        if (!Number(af.efectosLen))   issues.push(`${tag}: faltan efectos.`)
+        if (!Number(af.objetivoLen))  issues.push(`${tag}: falta objetivo.`)
         if (!af.necesidadFormacionId) issues.push(`${tag}: no está vinculada a una necesidad de formación.`)
         if (!af.enfoqueId)            issues.push(`${tag}: falta enfoque.`)
         if (!af.tipoAmbienteId)       issues.push(`${tag}: falta el ambiente de aprendizaje.`)
 
         // Alineación
-        if (!af.componenteId) issues.push(`${tag}: falta componente estratégico (Reto Nacional).`)
-        if (!af.compod)       issues.push(`${tag}: falta justificación de la alineación.`)
-        if (!af.justAlin)     issues.push(`${tag}: falta justificación de AF Especializada.`)
-        if (!af.resDesem)     issues.push(`${tag}: faltan resultados de impacto en el desempeño.`)
-        if (!af.resForm)      issues.push(`${tag}: faltan resultados de impacto en productividad.`)
+        if (!af.componenteId)            issues.push(`${tag}: falta componente estratégico (Reto Nacional).`)
+        if (!Number(af.compodLen))       issues.push(`${tag}: falta justificación de la alineación.`)
+        if (!Number(af.justAlinLen))     issues.push(`${tag}: falta justificación de AF Especializada.`)
+        if (!Number(af.resDesemLen))     issues.push(`${tag}: faltan resultados de impacto en el desempeño.`)
+        if (!Number(af.resFormLen))      issues.push(`${tag}: faltan resultados de impacto en productividad.`)
 
         // Áreas / Niveles / CUOC (perfil)
         const [{ totAreas }] = await this.dataSource.query(
@@ -347,7 +354,7 @@ export class ProyectosService {
           issues.push(`Presupuesto: beneficiarios de Transferencia (${r.transferencia.porcBeneficiarios.toFixed(2)}%) deben ser mínimo 5%.`)
         }
         if (r.transferencia.porcValor < 1) {
-          issues.push(`Presupuesto: valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo 1% del total de AFs.`)
+          issues.push(`Presupuesto: valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo 1% del total (AFs + Gastos de Operación).`)
         }
       }
     } catch { /* si falla la consulta de presupuesto, lo dejamos pasar y otras validaciones lo cubren */ }
@@ -490,6 +497,35 @@ export class ProyectosService {
     return rows[0] ?? null
   }
 
+  /** Lista (para el admin SENA) proyectos que tengan al menos una versión
+   *  FINAL no anulada — son los que pueden generar el Excel oficial. */
+  async listarProyectosConVersionFinal() {
+    return this.dataSource.query(
+      `SELECT p.PROYECTOID                  AS "proyectoId",
+              p.PROYECTONOMBRE              AS "nombre",
+              p.PROYECTOESTADO              AS "estado",
+              p.PROYECTOFECHARADICACION     AS "fechaConfirmacion",
+              c.CONVOCATORIANOMBRE          AS "convocatoria",
+              c.CONVOCATORIAID              AS "convocatoriaId",
+              m.MODALIDADNOMBRE             AS "modalidad",
+              e.EMPRESARAZONSOCIAL          AS "empresa",
+              e.EMPRESAIDENTIFICACION       AS "nit",
+              e.EMPRESADIGITOVERIFICACION   AS "digitoV",
+              v.PROYECTOVERSIONID           AS "versionId",
+              v.VERSIONNUMERO               AS "versionNumero",
+              v.VERSIONCODIGO               AS "versionCodigo",
+              v.VERSIONFINALFECHA           AS "versionFinalFecha"
+         FROM PROYECTO p
+         JOIN PROYECTOVERSION v ON v.PROYECTOID = p.PROYECTOID
+                              AND v.VERSIONESFINAL = 1
+                              AND v.VERSIONANULADA = 0
+         LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
+         LEFT JOIN MODALIDAD m    ON m.MODALIDADID    = p.MODALIDADID
+         LEFT JOIN EMPRESA e      ON e.EMPRESAID      = p.EMPRESAID
+        ORDER BY v.VERSIONFINALFECHA DESC NULLS LAST, p.PROYECTOID DESC`,
+    )
+  }
+
   /** Lista todas las versiones del proyecto (sin el snapshot pesado, solo
    *  metadatos para mostrar en el historial). Más reciente primero. */
   async listarVersiones(proyectoId: number) {
@@ -510,7 +546,7 @@ export class ProyectosService {
               VERSIONANULADAUSUARIO AS "anuladaUsuario"
          FROM PROYECTOVERSION
         WHERE PROYECTOID = :1
-        ORDER BY VERSIONNUMERO DESC`,
+        ORDER BY VERSIONNUMERO ASC`,
       [proyectoId],
     )
   }
@@ -596,6 +632,60 @@ export class ProyectosService {
 
   /** Quita la marca FINAL de una versión. **Reversa** el proyecto: cambia
    *  PROYECTOESTADO a 2 y limpia la fecha de radicación. */
+  /** Acción del administrador SENA: revertir un proyecto Confirmado a estado
+   *  Subsanación (2). Desmarca la versión FINAL actual y limpia la fecha de
+   *  radicación. El proponente puede entonces editar y volver a marcar FINAL.
+   *  Cuando la convocatoria está cerrada, este estado se llama "Subsanación"
+   *  en la UI. */
+  async reversarProyectoComoAdmin(proyectoId: number, _adminEmail: string, _comentario?: string | null) {
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    if (Number(proy.estado) === 3) {
+      throw new BadRequestException('El proyecto ya fue aprobado. Para reversar un aprobado contacta soporte.')
+    }
+    if (Number(proy.estado) === 4) {
+      throw new BadRequestException('El proyecto está rechazado y no admite cambios.')
+    }
+    if (Number(proy.estado) === 2) {
+      return { message: 'El proyecto ya está en Subsanación.', estado: 2 }
+    }
+    if (Number(proy.estado) !== 1) {
+      throw new BadRequestException('Solo se pueden reversar proyectos confirmados (estado 1).')
+    }
+    // Buscar la versión FINAL vigente del proyecto
+    const [ver] = await this.dataSource.query(
+      `SELECT PROYECTOVERSIONID AS "versionId"
+         FROM PROYECTOVERSION
+        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+      [proyectoId],
+    )
+    if (!ver) {
+      throw new BadRequestException('El proyecto está confirmado pero no hay versión FINAL marcada.')
+    }
+    // Desmarca FINAL y deja al proyecto en estado 2 (Reversado/Subsanación)
+    await this.dataSource.query(
+      `UPDATE PROYECTOVERSION
+          SET VERSIONESFINAL = 0,
+              VERSIONFINALFECHA = NULL,
+              VERSIONFINALUSUARIO = NULL
+        WHERE PROYECTOVERSIONID = :1`,
+      [ver.versionId],
+    )
+    await this.dataSource.query(
+      `UPDATE PROYECTO
+          SET PROYECTOESTADO = 2, PROYECTOFECHARADICACION = NULL
+        WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    return {
+      message: 'Proyecto enviado a Subsanación. El proponente puede editar y volver a marcar FINAL.',
+      estado: 2,
+    }
+  }
+
   async desmarcarVersionFinal(proyectoId: number, versionId: number) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", PROYECTOID AS "proyectoId"
@@ -3125,7 +3215,7 @@ export class ProyectosService {
       await this.dataSource.query(
         `UPDATE AFRUBRO SET AFRUBROVALOR=:1, AFRUBROCOFINANCIACION=:2, AFRUBROESPECIE=:3, AFRUBRODINERO=:4,
            AFRUBROPORCENTAJECOFINANCIACION=:5, AFRUBROPORCENTAJEESPECIE=:6, AFRUBROPORCENTAJEDINERO=:7,
-           AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:8`,
+           AFRUBROCANTIDAD=1, AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:8`,
         [total, dto.cofSena, dto.especie, dto.dinero, porcSena, porcEspecie, porcDinero, existing.id]
       )
       return { afrubroid: existing.id }
@@ -3324,6 +3414,10 @@ export class ProyectosService {
       : 'R09.2: cuando se trate de proyectos por valor menor o igual a $200.000.000, el porcentaje máximo para este rubro será hasta el 16% del valor total de las acciones de formación del proyecto.'
 
     // Transferencia
+    // El % del valor de transferencia se calcula sobre (AFs + GO), no solo
+    // sobre AFs (especificación de SENA: el mínimo del 1% aplica sobre el
+    // total de AFs + Gastos de Operación del proyecto).
+    const baseTransPct = valorTotalAFs + goTotal
     const transRich = transPorAf.map((t: any) => {
       const beneficiarios = Number(t.beneficiarios) || 0
       const valor         = Number(t.valor) || 0
@@ -3334,7 +3428,7 @@ export class ProyectosService {
         beneficiarios,
         porcBeneficiarios: pct(beneficiarios, totalBeneficiarios),
         valor,
-        porcValor: pct(valor, valorTotalAFs),
+        porcValor: pct(valor, baseTransPct),
       }
     })
     const transTotalBenef = transRich.reduce((s: number, t: any) => s + t.beneficiarios, 0)
@@ -3378,7 +3472,8 @@ export class ProyectosService {
         totalBeneficiarios: transTotalBenef,
         porcBeneficiarios:  pct(transTotalBenef, totalBeneficiarios),
         totalValor:         transTotalValor,
-        porcValor:          pct(transTotalValor, valorTotalAFs),
+        // % sobre (AFs + GO) — base correcta de la spec SENA, no solo AFs.
+        porcValor:          pct(transTotalValor, baseTransPct),
       },
       totalProyecto: {
         cofSena:       totalProyectoCofSena,       porcCofSena:       pct(totalProyectoCofSena,       valorTotalProyecto),
@@ -3409,9 +3504,9 @@ export class ProyectosService {
     if (r.transferencia.porcBeneficiarios < 5)
       errores.push(`Los beneficiarios de Transferencia (${r.transferencia.porcBeneficiarios.toFixed(2)}%) deben ser mínimo el 5% del total de beneficiarios del proyecto.`)
 
-    // 4. Transferencia: valor ≥ 1% del total AFs
+    // 4. Transferencia: valor ≥ 1% del (AFs + Gastos de Operación)
     if (r.transferencia.porcValor < 1)
-      errores.push(`El valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo el 1% del valor total de las acciones de formación.`)
+      errores.push(`El valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo el 1% del valor total (AFs + Gastos de Operación).`)
 
     // 5. Beneficiarios y valor de transferencia no pueden exceder 100%
     if (r.transferencia.porcBeneficiarios > 100)
@@ -3546,6 +3641,9 @@ export class ProyectosService {
               e.EMPRESATELEFONO                 AS "telefono",
               e.EMPRESACELULAR                  AS "celular",
               e.EMPRESAWEBSITE                  AS "website",
+              e.EMPRESAINDICATIVO               AS "indicativo",
+              e.EMPRESACERTIFCOMP               AS "certifComp",
+              e.EMPRESAEXPERTTECN               AS "expertTecn",
               dep.DEPARTAMENTONOMBRE            AS "departamento",
               ciu.CIUDADNOMBRE                  AS "ciudad",
               cob.COBERTURADESCRIPCION          AS "cobertura",

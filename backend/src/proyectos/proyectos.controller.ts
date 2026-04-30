@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, ParseIntPipe, Post, Put, Query, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import type { Response } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
+import { ExcelReportService } from './excel-report.service'
 import { ProyectosService } from './proyectos.service'
 import type { AfDto, ActualizarAfDto, ContactoProyectoDto } from './proyectos.service'
 
@@ -27,7 +29,10 @@ interface ActualizarProyectoDto {
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ProyectosController {
-  constructor(private readonly proyectosService: ProyectosService) {}
+  constructor(
+    private readonly proyectosService: ProyectosService,
+    private readonly excelReportService: ExcelReportService,
+  ) {}
 
   // ── Catálogos (deben ir antes que :id) ────────────────────────────────────
 
@@ -158,6 +163,16 @@ export class ProyectosController {
     return this.proyectosService.listar(user.email)
   }
 
+  // Lista de proyectos con versión FINAL para el admin (módulo de reportes).
+  // Solo perfilId=1.
+  @Get('admin/con-final')
+  listarConFinal(@CurrentUser() user: JwtUser) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede consultar este listado.')
+    }
+    return this.proyectosService.listarProyectosConVersionFinal()
+  }
+
   @Post()
   crear(@CurrentUser() user: JwtUser, @Body() dto: CrearProyectoDto) {
     return this.proyectosService.crear(user.email, dto)
@@ -197,6 +212,72 @@ export class ProyectosController {
       throw new ForbiddenException('Solo un administrador SENA puede aprobar proyectos.')
     }
     return this.proyectosService.aprobarProyecto(id, user.email, body.comentario ?? null)
+  }
+
+  /** Revertir un proyecto Confirmado a Subsanación (estado 2).
+   *  Desmarca la versión FINAL actual; el proponente puede volver a editar. */
+  @Post(':id/reversar')
+  reversarProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { comentario?: string } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede reversar proyectos.')
+    }
+    return this.proyectosService.reversarProyectoComoAdmin(id, user.email, body.comentario ?? null)
+  }
+
+  // ── Excel oficial del proyecto (snapshot de la versión FINAL) ─────────────
+  // Solo lo descarga el administrador SENA. El proponente sigue usando el PDF.
+
+  @Get(':id/excel')
+  async descargarExcelFinal(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede descargar el Excel oficial del proyecto.')
+    }
+    const { filename, buffer } = await this.excelReportService.generateProyectoExcelFinal(id)
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    )
+    res.send(buffer)
+  }
+
+  /** Descarga masiva: ZIP con el Excel de cada proyecto con versión FINAL
+   *  cuyo estado esté en `estados` (ej. ?estados=1,3 = Confirmado o Aprobado).
+   *  Solo perfilId=1. */
+  @Get('admin/excel-bulk')
+  async descargarExcelBulk(
+    @CurrentUser() user: JwtUser,
+    @Query('estados') estadosCsv: string,
+    @Res() res: Response,
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede generar la descarga masiva.')
+    }
+    const estados = (estadosCsv ?? '').split(',')
+      .map(x => Number(x.trim()))
+      .filter(n => !isNaN(n) && n >= 0 && n <= 4)
+    if (!estados.length) {
+      throw new BadRequestException('Debe especificar al menos un estado en el parámetro `estados` (ej: 1,3).')
+    }
+    const { filename, buffer, total } = await this.excelReportService.generateBulkExcelZip(estados)
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    )
+    res.setHeader('X-Total-Generados', String(total))
+    res.send(buffer)
   }
 
   // ── Versiones del proyecto ────────────────────────────────────────────────

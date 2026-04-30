@@ -8,5 +8,9 @@
     "build:frontend": "pnpm --filter frontend build",
     "build:backend": "pnpm --filter backend build",
     "build": "pnpm -r build"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "xlsx": "^0.18.5"
   }
 }

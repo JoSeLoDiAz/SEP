@@ -37,7 +37,9 @@ interface Opcion { id: number; nombre: string }
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const estado = Number(p.estado)
-  return estado !== 1 && estado !== 3 && estado !== 4 && p.convocatoriaEstado !== 0
+  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
+  // convocatoria abierta. Los demás estados son solo lectura.
+  return estado === 2 || (estado === 0 && p.convocatoriaEstado !== 0)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

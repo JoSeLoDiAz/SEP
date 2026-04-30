@@ -1136,7 +1136,7 @@ export default function AFDetallePage() {
 
     setSavingUTDet(true)
     try {
-      await api.put(`/proyectos/${proyectoId}/acciones/${afIdNum}/unidades/${expandedUtId}`, {
+      const r = await api.put<{ warnings?: string[] }>(`/proyectos/${proyectoId}/acciones/${afIdNum}/unidades/${expandedUtId}`, {
         nombre: detalleUT.nombre,
         contenido: utDetForm.contenido.trim() || null,
         competencias: utDetForm.competencias.trim() || null,
@@ -1148,6 +1148,9 @@ export default function AFDetallePage() {
       showToast('success', 'Unidad temática guardada')
       setExpandedUtId(null); setDetalleUT(null); setUtDetForm(null)
       await cargarUTs()
+      // Avisos cumulativos del backend (mínimo UTs, 60% prácticas TALLER).
+      const warnings = r.data?.warnings ?? []
+      warnings.forEach((w, i) => setTimeout(() => showToast('warning', w), 700 * (i + 1)))
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al guardar'
       showToast('error', msg)

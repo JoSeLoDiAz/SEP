@@ -256,12 +256,18 @@ export default function UnidadesPage() {
     setSaving(true)
     try {
       const body = buildBodyFromForm()
+      // El backend devuelve `warnings: string[]` con avisos cumulativos del AF
+      // (mínimo de UTs, % horas prácticas TALLER) que no bloquean el save
+      // pero deben mostrarse al usuario para que sepa qué falta.
+      let warnings: string[] = []
       if (utId === null) {
-        await api.post(`/proyectos/${proyectoId}/acciones/${afId}/unidades`, body)
+        const r = await api.post<{ warnings?: string[] }>(`/proyectos/${proyectoId}/acciones/${afId}/unidades`, body)
+        warnings = r.data?.warnings ?? []
         showToast('Unidad temática creada')
         setCreando(false)
       } else {
-        await api.put(`/proyectos/${proyectoId}/acciones/${afId}/unidades/${utId}`, body)
+        const r = await api.put<{ warnings?: string[] }>(`/proyectos/${proyectoId}/acciones/${afId}/unidades/${utId}`, body)
+        warnings = r.data?.warnings ?? []
         showToast('Unidad temática actualizada')
         setEditingId(null)
         await recargarDetalle(utId)
@@ -270,6 +276,8 @@ export default function UnidadesPage() {
       await cargar()
       const rHabs = await api.get<Opcion[]>(`/proyectos/${proyectoId}/acciones/${afId}/habilidades`)
       setHabilidadesCat(rHabs.data)
+      // Mostrar warnings (uno a uno con un pequeño delay para que se vean).
+      warnings.forEach((w, i) => setTimeout(() => showToast(w, 'error'), 600 * (i + 1)))
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al guardar'
       showToast(msg, 'error')

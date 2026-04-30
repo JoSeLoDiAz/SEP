@@ -506,6 +506,31 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
+      {/* Datos clave de la AF (referencia rápida para llenar los rubros).
+          Mostramos horas por grupo, # grupos, total horas y beneficiarios. */}
+      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4 flex flex-wrap gap-3">
+        <div className="flex-1 min-w-[140px] rounded-xl bg-blue-50 border border-blue-100 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-600/80">Horas por grupo</p>
+          <p className="text-lg font-bold text-blue-900 leading-tight">
+            {Number(af.numTotHorasGrup) > 0 && Number(af.numGrupos) > 0
+              ? Math.round(Number(af.numTotHorasGrup) / Number(af.numGrupos))
+              : '—'} h
+          </p>
+        </div>
+        <div className="flex-1 min-w-[120px] rounded-xl bg-violet-50 border border-violet-100 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-600/80">N° de grupos</p>
+          <p className="text-lg font-bold text-violet-900 leading-tight">{af.numGrupos ?? '—'}</p>
+        </div>
+        <div className="flex-1 min-w-[140px] rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600/80">Total horas</p>
+          <p className="text-lg font-bold text-amber-900 leading-tight">{af.numTotHorasGrup ?? '—'} h</p>
+        </div>
+        <div className="flex-1 min-w-[140px] rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600/80">Beneficiarios</p>
+          <p className="text-lg font-bold text-emerald-900 leading-tight">{af.numBenef ?? '—'}</p>
+        </div>
+      </div>
+
       {/* Menú — mismo estilo que la página de detalle AF */}
       <div className="flex flex-wrap gap-2">
         <Link href={`/panel/proyectos/${proyectoId}`}

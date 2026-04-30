@@ -388,14 +388,17 @@ function buildForm(af: AFDetalle, perfil: Perfil, justSec?: string | null): Form
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  return e !== 1 && e !== 3 && e !== 4 && p.convocatoriaEstado !== 0
+  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
+  // convocatoria abierta. Estados 1/3/4 son solo lectura.
+  return e === 2 || (e === 0 && p.convocatoriaEstado !== 0)
 }
 function mensajeNoEditable(p: Proyecto | null): string {
   if (!p) return ''
+  const e = Number(p.estado)
+  if (e === 3) return 'El proyecto está aprobado. No se puede editar.'
+  if (e === 4) return 'El proyecto está rechazado. No se puede editar.'
+  if (e === 1) return 'El proyecto está confirmado. No se puede editar hasta que el SENA lo apruebe o lo envíe a subsanación.'
   if (p.convocatoriaEstado === 0) return 'La convocatoria está cerrada. No se puede editar.'
-  if (Number(p.estado) === 3) return 'El proyecto está aprobado. No se puede editar.'
-  if (Number(p.estado) === 4) return 'El proyecto está rechazado. No se puede editar.'
-  if (Number(p.estado) === 1) return 'El proyecto está confirmado. No se puede editar.'
   return ''
 }
 

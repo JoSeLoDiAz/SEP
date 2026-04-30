@@ -127,24 +127,25 @@ export default function PresupuestoProyectoPage() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const [toastK, setToastK] = useState(0)
 
-  // Edición permitida solo si el proyecto NO está confirmado/aprobado/rechazado
-  // y la convocatoria sigue activa.
+  // Edición permitida:
+  //   - Estado 0 (Sin Confirmar) requiere convocatoria abierta.
+  //   - Estado 2 (Subsanación / Reversado) SIEMPRE es editable, incluso con
+  //     convocatoria cerrada — el SENA reversó al proponente para que corrija.
+  // Los estados 1 (Confirmado), 3 (Aprobado) y 4 (Rechazado) son de solo lectura.
   const editable = proyectoMeta
-    ? proyectoMeta.estado !== 1
-      && proyectoMeta.estado !== 3
-      && proyectoMeta.estado !== 4
-      && proyectoMeta.convocatoriaEstado !== 0
+    ? Number(proyectoMeta.estado) === 2
+      || (Number(proyectoMeta.estado) === 0 && proyectoMeta.convocatoriaEstado !== 0)
     : false
   const motivoNoEditable = !proyectoMeta
     ? ''
-    : proyectoMeta.convocatoriaEstado === 0
-      ? 'La convocatoria está cerrada. El presupuesto es de solo lectura.'
-      : Number(proyectoMeta.estado) === 3
-        ? 'El proyecto está aprobado. El presupuesto es de solo lectura.'
-        : Number(proyectoMeta.estado) === 4
-          ? 'El proyecto está rechazado. El presupuesto es de solo lectura.'
-          : Number(proyectoMeta.estado) === 1
-            ? 'El proyecto está confirmado. El presupuesto es de solo lectura.'
+    : Number(proyectoMeta.estado) === 3
+      ? 'El proyecto está aprobado. El presupuesto es de solo lectura.'
+      : Number(proyectoMeta.estado) === 4
+        ? 'El proyecto está rechazado. El presupuesto es de solo lectura.'
+        : Number(proyectoMeta.estado) === 1
+          ? 'El proyecto está confirmado. El presupuesto es de solo lectura hasta que el SENA lo apruebe o lo envíe a subsanación.'
+          : proyectoMeta.convocatoriaEstado === 0
+            ? 'La convocatoria está cerrada. El presupuesto es de solo lectura.'
             : ''
 
   // Expansión por AF: detalle de rubros (excluye R09 GO y R015 Transferencia)
@@ -574,7 +575,7 @@ export default function PresupuestoProyectoPage() {
               <div className="font-bold text-[#00304D] text-sm">{fmt(transferencia.totalValor)}</div>
             </div>
             <div className={`${statBox} ${transferencia.porcValor < 1 ? 'bg-red-50 border-red-200' : 'bg-teal-50 border-teal-200'}`}>
-              <div className="text-xs text-neutral-500 mb-1">% del Total AFs</div>
+              <div className="text-xs text-neutral-500 mb-1">% del Total (AFs + GO)</div>
               <div className={`font-bold text-sm ${transferencia.porcValor < 1 ? 'text-red-700' : 'text-teal-700'}`}>{pct(transferencia.porcValor)}</div>
               <div className="text-[11px] text-neutral-400">mín. 1%</div>
             </div>

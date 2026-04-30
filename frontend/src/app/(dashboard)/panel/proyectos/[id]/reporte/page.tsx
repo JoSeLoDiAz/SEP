@@ -8,7 +8,7 @@ import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import {
   Activity, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2,
   ClipboardList, Compass, FileText, FolderKanban, History as HistoryIcon, Info,
-  Layers, Loader2, MapPin, Notebook, Package, Printer, Receipt, Repeat, Search,
+  Layers, Loader2, MapPin, Notebook, Package, Printer, Receipt, Repeat, RotateCcw, Search,
   ShieldCheck, Target, TrendingUp, UserCheck, Users, Users2, Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -458,6 +458,10 @@ export default function ReporteProyectoPage() {
   const [aprobarOpen, setAprobarOpen] = useState(false)
   const [aprobando, setAprobando] = useState(false)
   const [comentarioAprobacion, setComentarioAprobacion] = useState('')
+  // Modal/estado para reversar a Subsanación (solo admin)
+  const [reversarOpen, setReversarOpen] = useState(false)
+  const [reversando, setReversando] = useState(false)
+  const [comentarioReversar, setComentarioReversar] = useState('')
   const esAdmin = esAdminEarly
 
   async function handleAprobar() {
@@ -477,6 +481,24 @@ export default function ReporteProyectoPage() {
     } catch (e: any) {
       showToast('error', 'No se pudo aprobar', e?.response?.data?.message ?? 'Error inesperado.')
     } finally { setAprobando(false) }
+  }
+
+  async function handleReversar() {
+    setReversando(true)
+    try {
+      await api.post(`/proyectos/${id}/reversar`, {
+        comentario: comentarioReversar.trim() || undefined,
+      })
+      showToast('success', 'Proyecto enviado a Subsanación',
+        'La versión FINAL fue desmarcada. El proponente puede ahora editar el proyecto y volver a marcar una versión como FINAL.')
+      setReversarOpen(false)
+      setComentarioReversar('')
+      // Recargamos la página completa porque cambió el estado y la vista admin
+      // ya no debería mostrar el snapshot FINAL (no hay).
+      window.location.reload()
+    } catch (e: any) {
+      showToast('error', 'No se pudo reversar', e?.response?.data?.message ?? 'Error inesperado.')
+    } finally { setReversando(false) }
   }
 
   async function handleConfirmar() {
@@ -1181,7 +1203,7 @@ export default function ReporteProyectoPage() {
                   <div className="flex justify-between text-[11px]"><span className="text-emerald-700/70">Beneficiarios</span><span className="font-semibold text-emerald-900">{presupuesto.transferencia.totalBeneficiarios}</span></div>
                   <div className="flex justify-between text-[11px]"><span className="text-emerald-700/70">% Sobre Beneficiarios</span><span className={`font-semibold whitespace-nowrap ${presupuesto.transferencia.porcBeneficiarios < 5 ? 'text-red-600' : 'text-emerald-900'}`}>{pct(presupuesto.transferencia.porcBeneficiarios)}</span></div>
                   <div className="border-t border-emerald-200 my-1" />
-                  <div className="flex justify-between text-[11px]"><span className="text-emerald-700/70">% del Total AFs</span><span className={`font-semibold whitespace-nowrap ${presupuesto.transferencia.porcValor < 1 ? 'text-red-600' : 'text-emerald-900'}`}>{pct(presupuesto.transferencia.porcValor)}</span></div>
+                  <div className="flex justify-between text-[11px]"><span className="text-emerald-700/70">% del Total (AFs + GO)</span><span className={`font-semibold whitespace-nowrap ${presupuesto.transferencia.porcValor < 1 ? 'text-red-600' : 'text-emerald-900'}`}>{pct(presupuesto.transferencia.porcValor)}</span></div>
                 </div>
               </div>
             </div>
@@ -1224,13 +1246,21 @@ export default function ReporteProyectoPage() {
       </button>
     )}
 
-    {/* Botón APROBAR — solo visible para admin SENA cuando hay FINAL marcada */}
+    {/* Botones admin: Aprobar y Reversar a Subsanación. Solo visibles cuando
+        hay versión FINAL marcada y no estamos viendo una versión histórica. */}
     {esAdmin && tieneFinal && !esVersionHistorica && (
-      <button onClick={() => setAprobarOpen(true)}
-        className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-emerald-600 hover:bg-emerald-700 text-white">
-        <CheckCircle2 size={16} />
-        Aprobar Proyecto
-      </button>
+      <>
+        <button onClick={() => setAprobarOpen(true)}
+          className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-emerald-600 hover:bg-emerald-700 text-white">
+          <CheckCircle2 size={16} />
+          Aprobar Proyecto
+        </button>
+        <button onClick={() => setReversarOpen(true)}
+          className="fixed bottom-6 right-[15.5rem] z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-amber-500 hover:bg-amber-600 text-white">
+          <RotateCcw size={16} />
+          Enviar a Subsanación
+        </button>
+      </>
     )}
 
     {/* Modal de aprobación */}
@@ -1274,6 +1304,54 @@ export default function ReporteProyectoPage() {
             {aprobando
               ? <Loader2 size={14} className="animate-spin inline-block" />
               : 'Sí, aprobar proyecto'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+
+    {/* Modal de envío a Subsanación */}
+    <Modal open={reversarOpen} onClose={() => !reversando && setReversarOpen(false)} maxWidth="max-w-lg">
+      <div className="p-6 flex flex-col gap-5">
+        <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
+          <RotateCcw size={18} className="text-amber-600" />
+          Enviar a Subsanación
+        </h3>
+        <p className="text-sm text-neutral-600">
+          Vas a regresar este proyecto al proponente para que pueda corregir y volver a presentar. Esta acción:
+        </p>
+        <ul className="text-xs text-neutral-700 list-disc list-inside flex flex-col gap-1 pl-1">
+          <li>Retira la marca <strong>FINAL</strong> de la versión actual.</li>
+          <li>Cambia el estado del proyecto a <strong>Subsanación</strong> (Reversado).</li>
+          <li>El proponente podrá editar el proyecto y marcar una nueva versión como FINAL para volver a presentarlo.</li>
+        </ul>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          ⚠️ Las versiones anteriores se conservan en el historial — la copia oficial actual no se borra, solo deja de estar marcada como FINAL.
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] font-semibold text-neutral-600 uppercase tracking-wide">
+            Comentario / motivo <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional)</span>
+          </label>
+          <textarea
+            value={comentarioReversar}
+            onChange={e => setComentarioReversar(e.target.value)}
+            maxLength={1000}
+            rows={3}
+            placeholder="Ej.: Falta justificación de la AF 2 — favor revisar."
+            className="w-full text-xs px-3 py-2 border border-neutral-200 rounded-xl outline-none focus:border-[#00304D] resize-none" />
+          <p className="text-[10px] text-neutral-400 text-right">{comentarioReversar.length}/1000</p>
+        </div>
+
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setReversarOpen(false)} disabled={reversando}
+            className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
+            Cancelar
+          </button>
+          <button onClick={handleReversar} disabled={reversando}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 bg-amber-500 hover:bg-amber-600">
+            {reversando
+              ? <Loader2 size={14} className="animate-spin inline-block" />
+              : 'Sí, enviar a subsanación'}
           </button>
         </div>
       </div>

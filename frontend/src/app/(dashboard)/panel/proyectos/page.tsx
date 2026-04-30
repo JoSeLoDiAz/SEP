@@ -13,15 +13,16 @@ interface Proyecto {
   fechaRegistro: string | null
   fechaRadicacion: string | null
   convocatoria: string | null
+  convocatoriaEstado: number | null
   modalidad: string | null
 }
 
 interface Opcion { id: number; nombre: string }
 
-function estadoLabel(e: number | null): string {
+function estadoLabel(e: number | null, convEstado?: number | null): string {
   switch (Number(e)) {
     case 1: return 'Confirmado'
-    case 2: return 'Reversado'
+    case 2: return Number(convEstado) === 0 ? 'Subsanación' : 'Reversado'
     case 3: return 'Aprobado'
     case 4: return 'Rechazado'
     default: return 'Sin Confirmar'
@@ -147,7 +148,7 @@ export default function ProyectosPage() {
         {[
           { label: 'Sin Confirmar', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' },
           { label: 'Confirmado',    cls: 'bg-blue-100 text-blue-700 border-blue-200' },
-          { label: 'Reversado',     cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+          { label: 'Reversado / Subsanación', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
           { label: 'Aprobado',      cls: 'bg-green-100 text-green-700 border-green-200' },
           { label: 'Rechazado',     cls: 'bg-red-100 text-red-700 border-red-200' },
         ].map(s => (
@@ -182,7 +183,7 @@ export default function ProyectosPage() {
                   <h2 className="text-sm font-bold text-[#00304D] leading-snug flex-1">{p.nombre || '—'}</h2>
                   <span className={`flex-shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${estadoClasses(p.estado)}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${estadoDot(p.estado)}`} />
-                    {estadoLabel(p.estado)}
+                    {estadoLabel(p.estado, p.convocatoriaEstado)}
                   </span>
                 </div>
                 <p className="text-[11px] text-neutral-400 font-semibold">Código: {p.proyectoId}</p>

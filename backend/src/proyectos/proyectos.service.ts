@@ -207,30 +207,34 @@ export class ProyectosService {
     // Usamos GETLENGTH para los CLOBs (solo nos importa si están vacíos),
     // así evitamos el ORA-06502 con contenido multibyte UTF-8.
     const afs = await this.dataSource.query(
-      `SELECT ACCIONFORMACIONID            AS "afId",
-              ACCIONFORMACIONNUMERO        AS "numero",
-              ACCIONFORMACIONNOMBRE        AS "nombre",
-              TIPOEVENTOID                 AS "tipoEventoId",
-              MODALIDADFORMACIONID         AS "modalidadId",
-              METODOLOGIAAPRENDIZAJEID     AS "metodologiaId",
-              ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
-              ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
-              ACCIONFORMACIONNUMBENEF      AS "numBenef",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONJUSTNEC)       AS "justnecLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONCAUSA)         AS "causaLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESULTADOS)    AS "efectosLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONOBJETIVO)      AS "objetivoLen",
-              NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
-              AFENFOQUEID                  AS "enfoqueId",
-              TIPOAMBIENTEID               AS "tipoAmbienteId",
-              ACCIONFORMACIONCOMPONENTEID  AS "componenteId",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONCOMPOD)        AS "compodLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONJUSTIFICACION) AS "justAlinLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESDESEM)      AS "resDesemLen",
-              DBMS_LOB.GETLENGTH(ACCIONFORMACIONRESFORM)       AS "resFormLen"
-         FROM ACCIONFORMACION
-        WHERE PROYECTOID = :1
-        ORDER BY ACCIONFORMACIONNUMERO`,
+      `SELECT af.ACCIONFORMACIONID            AS "afId",
+              af.ACCIONFORMACIONNUMERO        AS "numero",
+              af.ACCIONFORMACIONNOMBRE        AS "nombre",
+              af.TIPOEVENTOID                 AS "tipoEventoId",
+              TRIM(te.TIPOEVENTONOMBRE)       AS "tipoEvento",
+              af.MODALIDADFORMACIONID         AS "modalidadId",
+              af.METODOLOGIAAPRENDIZAJEID     AS "metodologiaId",
+              TRIM(ma.METODOLOGIAAPRENDIZAJENOMBRE) AS "metodologia",
+              af.ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
+              af.ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
+              af.ACCIONFORMACIONNUMBENEF      AS "numBenef",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONJUSTNEC)       AS "justnecLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONCAUSA)         AS "causaLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESULTADOS)    AS "efectosLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONOBJETIVO)      AS "objetivoLen",
+              af.NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
+              af.AFENFOQUEID                  AS "enfoqueId",
+              af.TIPOAMBIENTEID               AS "tipoAmbienteId",
+              af.ACCIONFORMACIONCOMPONENTEID  AS "componenteId",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONCOMPOD)        AS "compodLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONJUSTIFICACION) AS "justAlinLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESDESEM)      AS "resDesemLen",
+              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESFORM)       AS "resFormLen"
+         FROM ACCIONFORMACION af
+         LEFT JOIN TIPOEVENTO te             ON te.TIPOEVENTOID             = af.TIPOEVENTOID
+         LEFT JOIN METODOLOGIAAPRENDIZAJE ma ON ma.METODOLOGIAAPRENDIZAJEID = af.METODOLOGIAAPRENDIZAJEID
+        WHERE af.PROYECTOID = :1
+        ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
 
@@ -325,6 +329,77 @@ export class ProyectosService {
             )
             if (Number(horasUTs) < numHorasGrupo) {
               issues.push(`${tag}: las horas de las UTs (${horasUTs}h) no cubren las horas por grupo (${numHorasGrupo}h).`)
+            }
+          }
+
+          // Mínimo de UTs por tipo de evento (regla del pliego SENA, ver
+          // validaciones del VBA en bt_siguiente_Click). Las CONFERENCIA y
+          // FORO están exentas de mínimo.
+          const tipoEventoUp = String(af.tipoEvento ?? '').toUpperCase().trim()
+          const horasGrupo = Number(af.numHorasGrupo) || 0
+          const totUTsN = Number(totUTs)
+          let minUTs = 0
+          if (tipoEventoUp === 'SEMINARIO') minUTs = 3
+          else if (tipoEventoUp === 'CURSO') minUTs = 4
+          else if (tipoEventoUp === 'DIPLOMADO') minUTs = 5
+          else if (tipoEventoUp.includes('BOOTCAMP')) minUTs = horasGrupo <= 6 ? 4 : 3
+          else if (tipoEventoUp.includes('PUESTO DE TRABAJO')) minUTs = 3
+          else if (tipoEventoUp === 'TALLER') minUTs = horasGrupo <= 6 ? 2 : 3
+          if (minUTs > 0 && totUTsN < minUTs) {
+            issues.push(
+              `${tag}: el evento ${tipoEventoUp} requiere mínimo ${minUTs} unidad(es) temática(s) (registradas: ${totUTsN}).`,
+            )
+          }
+
+          // QA #2 — Para CURSO o DIPLOMADO, si hay UT con articulación
+          // territorial, sus horas deben ser ≥ 5% del total horas del evento.
+          if ((tipoEventoUp === 'CURSO' || tipoEventoUp === 'DIPLOMADO') && horasGrupo > 0) {
+            const [{ horasArt }] = await this.dataSource.query(
+              `SELECT NVL(SUM(
+                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
+                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
+                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
+                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+               ),0) AS "horasArt"
+                 FROM UNIDADTEMATICA
+                WHERE ACCIONFORMACIONID = :1
+                  AND ARTICULACIONTERRITORIALID IS NOT NULL`,
+              [af.afId],
+            )
+            const horasArtN = Number(horasArt) || 0
+            if (horasArtN > 0) {
+              const porcArt = (horasArtN / horasGrupo) * 100
+              if (porcArt < 5) {
+                issues.push(
+                  `${tag}: la UT de articulación territorial debe representar mínimo el 5% del total de horas del evento (actual: ${porcArt.toFixed(2)}%).`,
+                )
+              }
+            }
+          }
+
+          // QA #4 — Para TALLER (no aplica a PUESTO DE TRABAJO REAL ni BOOTCAMP),
+          // las horas prácticas deben ser ≥ 60% del total de horas de UTs.
+          if (tipoEventoUp === 'TALLER' && horasGrupo > 0) {
+            const [{ horasPrac, horasTeor }] = await this.dataSource.query(
+              `SELECT NVL(SUM(
+                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
+                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)
+               ),0) AS "horasPrac",
+                     NVL(SUM(
+                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
+                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+               ),0) AS "horasTeor"
+                 FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+              [af.afId],
+            )
+            const totalHoras = Number(horasPrac) + Number(horasTeor)
+            if (totalHoras > 0) {
+              const porcPrac = (Number(horasPrac) / totalHoras) * 100
+              if (porcPrac < 60) {
+                issues.push(
+                  `${tag}: para evento TALLER las horas prácticas deben ser mínimo el 60% del total (actual: ${porcPrac.toFixed(2)}%).`,
+                )
+              }
             }
           }
         }
@@ -2406,6 +2481,10 @@ export class ProyectosService {
     const modalidad = await this.getModalidadAF(afId)
     const h = this.horasParaColumnas(dto.horasPrac ?? null, dto.horasTeor ?? null, modalidad)
 
+    // QA #2 — Articulación territorial 5% (CURSO/DIPLOMADO): bloquea el save
+    // si la UT es articulación y sus horas son < 5% del total horas evento.
+    await this.validarArticulacion5pct(afId, dto.articulacionTerritorialId, dto.horasPrac, dto.horasTeor)
+
     const [{ nextNum }] = await this.dataSource.query(
       `SELECT NVL(MAX(UNIDADTEMATICANUMERO), 0) + 1 AS "nextNum" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
       [afId],
@@ -2433,7 +2512,103 @@ export class ProyectosService {
        esArticulacion, dto.horasTransversal ?? null,
        dto.articulacionTerritorialId ?? null],
     )
-    return { message: 'Unidad temática creada correctamente', utId: nid }
+    // Después de guardar, calculamos warnings cumulativos (#1 mínimo UTs, #4
+    // 60% prácticas TALLER) para mostrarlos al usuario sin bloquear.
+    const warnings = await this.calcularWarningsUTs(afId)
+    return { message: 'Unidad temática creada correctamente', utId: nid, warnings }
+  }
+
+  /** QA #2 — bloquea si la UT es de articulación territorial y sus horas
+   *  representan menos del 5% del total horas del evento, en CURSO/DIPLOMADO. */
+  private async validarArticulacion5pct(
+    afId: number,
+    articulacionTerritorialId: number | null | undefined,
+    horasPrac: number | null | undefined,
+    horasTeor: number | null | undefined,
+  ): Promise<void> {
+    if (!articulacionTerritorialId) return
+    const [af] = await this.dataSource.query(
+      `SELECT TRIM(te.TIPOEVENTONOMBRE)             AS "tipoEvento",
+              af.ACCIONFORMACIONNUMHORAGRUPO        AS "horasGrupo"
+         FROM ACCIONFORMACION af
+         LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = af.TIPOEVENTOID
+        WHERE af.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!af) return
+    const tipo = String(af.tipoEvento ?? '').toUpperCase().trim()
+    const horasGrupo = Number(af.horasGrupo) || 0
+    if (horasGrupo <= 0) return
+    if (tipo !== 'CURSO' && tipo !== 'DIPLOMADO') return
+    const horasUT = (Number(horasPrac) || 0) + (Number(horasTeor) || 0)
+    const porc = (horasUT / horasGrupo) * 100
+    if (porc < 5) {
+      throw new BadRequestException(
+        `Para ${tipo} se debe destinar mínimo el 5% de las horas del evento al desarrollo de la unidad temática de articulación territorial (actual: ${porc.toFixed(2)}%).`,
+      )
+    }
+  }
+
+  /** Calcula warnings cumulativos a nivel AF: mínimo de UTs y % horas prácticas
+   *  para TALLER. No bloquea — solo informa al frontend. */
+  private async calcularWarningsUTs(afId: number): Promise<string[]> {
+    const warnings: string[] = []
+    const [af] = await this.dataSource.query(
+      `SELECT TRIM(te.TIPOEVENTONOMBRE)        AS "tipoEvento",
+              af.ACCIONFORMACIONNUMHORAGRUPO   AS "horasGrupo"
+         FROM ACCIONFORMACION af
+         LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = af.TIPOEVENTOID
+        WHERE af.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!af) return warnings
+    const tipo = String(af.tipoEvento ?? '').toUpperCase().trim()
+    const horasGrupo = Number(af.horasGrupo) || 0
+    const [{ totUTs }] = await this.dataSource.query(
+      `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    const totUTsN = Number(totUTs) || 0
+
+    // #1 — Mínimo de UTs por tipo de evento
+    let minUTs = 0
+    if (tipo === 'SEMINARIO') minUTs = 3
+    else if (tipo === 'CURSO') minUTs = 4
+    else if (tipo === 'DIPLOMADO') minUTs = 5
+    else if (tipo.includes('BOOTCAMP')) minUTs = horasGrupo <= 6 ? 4 : 3
+    else if (tipo.includes('PUESTO DE TRABAJO')) minUTs = 3
+    else if (tipo === 'TALLER') minUTs = horasGrupo <= 6 ? 2 : 3
+    if (minUTs > 0 && totUTsN < minUTs) {
+      warnings.push(
+        `Para ${tipo} se requieren mínimo ${minUTs} unidades temáticas. Actualmente: ${totUTsN}. Faltan ${minUTs - totUTsN}.`,
+      )
+    }
+
+    // #4 — TALLER ≥ 60% horas prácticas
+    if (tipo === 'TALLER') {
+      const [{ horasPrac, horasTeor }] = await this.dataSource.query(
+        `SELECT NVL(SUM(
+           NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
+           NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)
+         ),0) AS "horasPrac",
+                NVL(SUM(
+           NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
+           NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+         ),0) AS "horasTeor"
+           FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+        [afId],
+      )
+      const total = Number(horasPrac) + Number(horasTeor)
+      if (total > 0) {
+        const porc = (Number(horasPrac) / total) * 100
+        if (porc < 60) {
+          warnings.push(
+            `Para evento TALLER las horas prácticas deben ser mínimo el 60% del total. Actual: ${porc.toFixed(2)}%.`,
+          )
+        }
+      }
+    }
+    return warnings
   }
 
   async actualizarUT(utId: number, dto: {
@@ -2455,6 +2630,9 @@ export class ProyectosService {
     const modalidad = await this.getModalidadAF(afId)
     const h = this.horasParaColumnas(dto.horasPrac ?? null, dto.horasTeor ?? null, modalidad)
     const esArticulacion = dto.articulacionTerritorialId ? 1 : 0
+
+    // QA #2 — bloquea articulación territorial < 5% en CURSO/DIPLOMADO.
+    await this.validarArticulacion5pct(afId, dto.articulacionTerritorialId, dto.horasPrac, dto.horasTeor)
 
     await this.dataSource.query(
       `UPDATE UNIDADTEMATICA
@@ -2481,7 +2659,8 @@ export class ProyectosService {
        dto.articulacionTerritorialId ?? null,
        utId],
     )
-    return { message: 'Unidad temática actualizada correctamente' }
+    const warnings = await this.calcularWarningsUTs(afId)
+    return { message: 'Unidad temática actualizada correctamente', warnings }
   }
 
   async eliminarUT(utId: number) {
@@ -2722,6 +2901,49 @@ export class ProyectosService {
   async guardarCoberturaGrupo(grupoId: number, afId: number, coberturas: {
     deptoId: number; ciudadId?: number | null; benef: number; modal: string; rural?: number
   }[]) {
+    // QA #5 — La suma de beneficiarios de todas las coberturas de un grupo
+    // debe coincidir exactamente con los beneficiarios esperados por grupo
+    // de la AF (ni más, ni menos). Los beneficiarios esperados dependen de
+    // la modalidad de la AF:
+    //   - Presencial puro: af.benefGrupo (presenciales)
+    //   - Virtual / PAT:    af.benefViGrupo (sincrónicos/virtuales)
+    //   - Híbrida:          af.benefGrupo + af.benefViGrupo
+    const [af] = await this.dataSource.query(
+      `SELECT NVL(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
+              NVL(af.ACCIONFORMACIONBENEFVIGRUPO, 0) AS "benefViGrupo",
+              TRIM(mf.MODALIDADFORMACIONNOMBRE)      AS "modalidad"
+         FROM ACCIONFORMACION af
+         LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
+        WHERE af.ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!af) throw new NotFoundException('Acción de formación no encontrada')
+
+    const modalidadUp = String(af.modalidad ?? '').toUpperCase()
+    const esVirtualOPat = modalidadUp.includes('VIRTUAL') || modalidadUp.includes('PAT')
+    const esHibrida = modalidadUp.includes('HÍBRID') || modalidadUp.includes('HIBRID')
+
+    const benefGrupo   = Number(af.benefGrupo)   || 0
+    const benefViGrupo = Number(af.benefViGrupo) || 0
+    const objetivoBenef = esHibrida
+      ? benefGrupo + benefViGrupo
+      : esVirtualOPat
+        ? benefViGrupo
+        : benefGrupo
+    const sumaCoberturas = (coberturas ?? []).reduce(
+      (acc, c) => acc + (Number(c.benef) || 0),
+      0,
+    )
+    if (objetivoBenef > 0 && sumaCoberturas !== objetivoBenef) {
+      const diff = sumaCoberturas - objetivoBenef
+      const detalle = diff < 0
+        ? `faltan ${Math.abs(diff)} beneficiario(s)`
+        : `sobran ${diff} beneficiario(s)`
+      throw new BadRequestException(
+        `La suma de beneficiarios de la cobertura (${sumaCoberturas}) debe ser exactamente ${objetivoBenef}. ${detalle}.`,
+      )
+    }
+
     await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1`, [grupoId])
     for (const cob of coberturas) {
       const [{ nid }] = await this.dataSource.query(
@@ -2741,26 +2963,41 @@ export class ProyectosService {
   // ── Material de Formación ─────────────────────────────────────────────────
 
   async getTiposAmbiente() {
+    // Solo items activos. Items con TIPOAMBIENTEACTIVO=0 quedan ocultos en
+    // el dropdown pero permanecen en BD por integridad referencial.
     return this.dataSource.query(
-      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE ORDER BY TIPOAMBIENTEID`,
+      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre"
+         FROM TIPOAMBIENTE
+        WHERE NVL(TIPOAMBIENTEACTIVO, 1) = 1
+        ORDER BY TIPOAMBIENTEID`,
     )
   }
 
   async getGestionConocimientos() {
+    // Filtrado por GESTIONCONOCIMIENTOESTADO (1=activo, 0=inactivo).
     return this.dataSource.query(
-      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO ORDER BY GESTIONCONOCIMIENTOID`,
+      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre"
+         FROM GESTIONCONOCIMIENTO
+        WHERE GESTIONCONOCIMIENTOESTADO = 1
+        ORDER BY GESTIONCONOCIMIENTOID`,
     )
   }
 
   async getMaterialFormacionCat() {
     return this.dataSource.query(
-      `SELECT MATERIALFORMACIONID AS "id", TRIM(MATERIALFORMACIONNOMBRE) AS "nombre" FROM MATERIALFORMACION ORDER BY MATERIALFORMACIONID`,
+      `SELECT MATERIALFORMACIONID AS "id", TRIM(MATERIALFORMACIONNOMBRE) AS "nombre"
+         FROM MATERIALFORMACION
+        WHERE MATERIALFORMACIONESTADO = 1
+        ORDER BY MATERIALFORMACIONID`,
     )
   }
 
   async getRecursosDidacticosCat() {
     return this.dataSource.query(
-      `SELECT RECURSOSDIDACTICOSID AS "id", TRIM(RECURSOSDIDACTICOSNOMBRE) AS "nombre" FROM RECURSOSDIDACTICOS ORDER BY RECURSOSDIDACTICOSID`,
+      `SELECT RECURSOSDIDACTICOSID AS "id", TRIM(RECURSOSDIDACTICOSNOMBRE) AS "nombre"
+         FROM RECURSOSDIDACTICOS
+        WHERE RECURSOSDIDACTICOSESTADO = 1
+        ORDER BY RECURSOSDIDACTICOSID`,
     )
   }
 
@@ -3102,6 +3339,80 @@ export class ProyectosService {
     // Cantidad mínima 1: aunque el rubro sea intangible (ej. rubroid 365),
     // siempre debe representar "al menos una unidad" en la BD.
     const cantidad = Math.max(1, Number(dto.cantidad) || 1)
+
+    // ── Validaciones del pliego SENA por código de rubro ─────────────────
+    // Necesitamos el código del rubro (R01.x.x, R05.x, R012.x...) y los
+    // datos de la AF para aplicar las reglas.
+    const [rubroInfo] = await this.dataSource.query(
+      `SELECT TRIM(RUBROCODIGO) AS "codigo", TRIM(RUBRONOMBRE) AS "nombre"
+         FROM RUBRO WHERE RUBROID = :1`,
+      [rubroId],
+    )
+    const codigo = String(rubroInfo?.codigo ?? '').toUpperCase()
+    const [afInfo] = await this.dataSource.query(
+      `SELECT ACCIONFORMACIONNUMBENEF      AS "numBenef",
+              ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
+              ACCIONFORMACIONNUMGRUPOS     AS "numGrupos"
+         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    const numBenefAF      = Number(afInfo?.numBenef) || 0
+    const numHorasGrupoAF = Number(afInfo?.numHorasGrupo) || 0
+    const numGruposAF     = Number(afInfo?.numGrupos) || 0
+    const totalHorasAF    = numHorasGrupoAF * numGruposAF
+
+    // QA #3 — Material de formación (R05.* excepto R05.3 que es Diagramación):
+    // las unidades no pueden superar el número de beneficiarios de la AF.
+    if (codigo.startsWith('R05.') && !codigo.startsWith('R05.3') && numBenefAF > 0) {
+      if (cantidad > numBenefAF) {
+        throw new BadRequestException(
+          `Las unidades del rubro de material de formación (${cantidad}) no pueden superar el número de beneficiarios de la AF (${numBenefAF}).`,
+        )
+      }
+    }
+
+    // QA #8 — R012 (Promoción y Divulgación): exclusivamente contrapartida
+    // en DINERO del conviniente. No admite SENA ni Especie.
+    if (codigo.startsWith('R012')) {
+      if (cofSena > 0 || contraEspecie > 0) {
+        throw new BadRequestException(
+          `R012 (Promoción y Divulgación) está exclusivamente a cargo de la contrapartida en DINERO del conviniente. No puede tener Cofinanciación SENA ni Contrapartida en Especie.`,
+        )
+      }
+    }
+
+    // QA #9 — R014 (Alimentación y transporte sector agropecuario): a cargo
+    // de la contrapartida del conviniente (no admite Cofinanciación SENA).
+    if (codigo.startsWith('R014')) {
+      if (cofSena > 0) {
+        throw new BadRequestException(
+          `R014 (Alimentación y transporte sector agropecuario) está exclusivamente a cargo de la contrapartida del conviniente. No puede tener Cofinanciación SENA.`,
+        )
+      }
+    }
+
+    // QA #10 — R012 admite máximo 1 unidad por acción de formación.
+    if (codigo.startsWith('R012') && cantidad > 1) {
+      throw new BadRequestException(
+        `R012 (Promoción y Divulgación) solo permite 1 unidad por acción de formación.`,
+      )
+    }
+
+    // QA #11 — R05.3 (Diagramación): se paga 1 sola vez por AF, sin importar
+    // unidades/páginas. Forzamos cantidad = 1 si viene en otro valor.
+    if (codigo.startsWith('R05.3') && cantidad > 1) {
+      throw new BadRequestException(
+        `R05.3 (Diagramación) se paga una sola vez por acción de formación. La cantidad debe ser 1.`,
+      )
+    }
+
+    // QA #12 — Honorarios capacitador (R01.*): el # HORAS del rubro no puede
+    // superar el total de horas de la AF (horasGrupo × numGrupos).
+    if (codigo.startsWith('R01.') && totalHorasAF > 0 && numHoras > totalHorasAF) {
+      throw new BadRequestException(
+        `Las horas del rubro (${numHoras}h) no pueden superar el total de horas de la AF: ${totalHorasAF}h (${numHorasGrupoAF}h × ${numGruposAF} grupos).`,
+      )
+    }
 
     const porcSena    = totalRubro > 0 ? (cofSena    / totalRubro) * 100 : 0
     const porcEspecie = totalRubro > 0 ? (contraEspecie / totalRubro) * 100 : 0

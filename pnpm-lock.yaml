@@ -6,14 +6,7 @@ settings:
 
 importers:
 
-  .:
-    dependencies:
-      jszip:
-        specifier: ^3.10.1
-        version: 3.10.1
-      xlsx:
-        specifier: ^0.18.5
-        version: 0.18.5
+  .: {}
 
   backend:
     dependencies:
@@ -53,6 +46,9 @@ importers:
       class-validator:
         specifier: ^0.15.1
         version: 0.15.1
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       nodemailer:
         specifier: ^8.0.5
         version: 8.0.5
@@ -80,6 +76,9 @@ importers:
       typeorm:
         specifier: ^0.3.28
         version: 0.3.28(oracledb@6.10.0)(ts-node@10.9.2(@types/node@22.19.15)(typescript@5.9.3))
+      xlsx:
+        specifier: ^0.18.5
+        version: 0.18.5
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.2.0

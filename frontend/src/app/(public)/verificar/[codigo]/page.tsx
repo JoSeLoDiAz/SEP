@@ -171,12 +171,19 @@ export default function VerificarCodigoPage() {
                 <Row label="Marcada como FINAL el" value={fmtDateTimeFull(result.version.finalFecha)} fullWidth />
               )}
               {result.version?.hash && (
-                <div className="col-span-1 sm:col-span-2 mt-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">SHA-256 del snapshot</p>
-                  <p className="text-[10px] font-mono text-neutral-500 break-all bg-neutral-50 border border-neutral-100 rounded-lg px-3 py-2">
-                    {result.version.hash}
-                  </p>
-                </div>
+                <details className="col-span-1 sm:col-span-2 mt-1 group">
+                  <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500 hover:text-neutral-700 transition">
+                    Ver detalles técnicos
+                  </summary>
+                  <div className="mt-2 pl-1">
+                    <p className="text-[10px] text-neutral-400 mb-1">
+                      Huella digital de seguridad (SHA-256) — garantiza que el contenido de esta versión no ha sido alterado.
+                    </p>
+                    <p className="text-[10px] font-mono text-neutral-500 break-all bg-neutral-50 border border-neutral-100 rounded-lg px-3 py-2">
+                      {result.version.hash}
+                    </p>
+                  </div>
+                </details>
               )}
             </div>
           </div>
@@ -185,9 +192,9 @@ export default function VerificarCodigoPage() {
             <div className="flex items-start gap-2">
               <ShieldAlert size={14} className="text-blue-700 shrink-0 mt-0.5" />
               <p className="leading-relaxed">
-                Esta verificación demuestra que el código fue generado por el sistema SEP y corresponde a un
-                snapshot inmutable guardado al momento de la confirmación. El hash SHA-256 garantiza que el contenido
-                no fue alterado.
+                Esta verificación demuestra que el código fue generado por el sistema SEP y corresponde a una
+                <strong> copia oficial</strong> del proyecto, guardada al momento de la confirmación.
+                El sistema garantiza que su contenido no ha sido alterado desde entonces.
               </p>
             </div>
           </div>

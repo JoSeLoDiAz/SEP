@@ -93,7 +93,9 @@ function perfilToForm(p: Perfil): FormState {
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  return e !== 1 && e !== 3 && e !== 4 && p.convocatoriaEstado !== 0
+  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
+  // convocatoria abierta. Estados 1/3/4 son solo lectura.
+  return e === 2 || (e === 0 && p.convocatoriaEstado !== 0)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

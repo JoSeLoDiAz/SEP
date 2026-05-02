@@ -160,7 +160,87 @@ export class ProyectosController {
 
   @Get()
   listar(@CurrentUser() user: JwtUser) {
-    return this.proyectosService.listar(user.email)
+    return this.proyectosService.listar(user.email, user.perfilId)
+  }
+
+  // ── Gestión de convocatorias (admin) ──────────────────────────────────────
+
+  @Get('admin/convocatorias')
+  listarConvocatoriasAdmin(@CurrentUser() user: JwtUser) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede consultar este listado.')
+    }
+    return this.proyectosService.listarConvocatoriasAdmin()
+  }
+
+  @Post('admin/convocatorias')
+  crearConvocatoria(
+    @CurrentUser() user: JwtUser,
+    @Body() body: {
+      nombre: string; anio: number
+      presupuestoTotal: number; presupuestoMaximo: number
+      mesesProyecto: number; tipoFinanciacion: string
+      fechaInicio?: string | null; fechaCierre?: string | null
+      programaId?: number
+    },
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede crear convocatorias.')
+    }
+    return this.proyectosService.crearConvocatoria(body)
+  }
+
+  @Put('admin/convocatorias/:id')
+  actualizarConvocatoriaAdmin(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      nombre?: string; anio?: number
+      presupuestoTotal?: number; presupuestoMaximo?: number
+      mesesProyecto?: number; tipoFinanciacion?: string
+      fechaInicio?: string | null; fechaCierre?: string | null
+    },
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede editar convocatorias.')
+    }
+    return this.proyectosService.actualizarConvocatoria(id, body)
+  }
+
+  @Post('admin/convocatorias/:id/estado')
+  toggleEstadoConvocatoria(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { abrir?: boolean } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede cambiar el estado de la convocatoria.')
+    }
+    return this.proyectosService.toggleEstadoConvocatoria(id, !!body.abrir)
+  }
+
+  @Post('admin/convocatorias/:id/ocultar')
+  toggleOcultarConvocatoria(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { ocultar?: boolean } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede ocultar/mostrar convocatorias.')
+    }
+    return this.proyectosService.toggleOcultarConvocatoria(id, !!body.ocultar)
+  }
+
+  @Post('admin/convocatorias/:id/publicar-resultados')
+  publicarResultadosConvocatoria(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { publicar?: boolean } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede publicar resultados.')
+    }
+    return this.proyectosService.publicarResultadosConvocatoria(id, !!body.publicar)
   }
 
   // Lista de proyectos con versión FINAL para el admin (módulo de reportes).
@@ -181,8 +261,11 @@ export class ProyectosController {
   // ── Detalle y edición ─────────────────────────────────────────────────────
 
   @Get(':id')
-  getDetalle(@Param('id', ParseIntPipe) id: number) {
-    return this.proyectosService.getDetalle(id)
+  getDetalle(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.proyectosService.getDetalle(id, user.perfilId)
   }
 
   @Put(':id')
@@ -206,12 +289,60 @@ export class ProyectosController {
   aprobarProyecto(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { comentario?: string } = {},
+    @Body() body: {
+      comentario?: string
+      afsRechazadas?: Array<{ afId: number; motivo: string }>
+      conceptosAprobadas?: Array<{ afId: number; concepto: string }>
+    } = {},
   ) {
     if (user.perfilId !== PERFIL_ADMIN) {
       throw new ForbiddenException('Solo un administrador SENA puede aprobar proyectos.')
     }
-    return this.proyectosService.aprobarProyecto(id, user.email, body.comentario ?? null)
+    return this.proyectosService.aprobarProyecto(
+      id, user.email, body.comentario ?? null,
+      body.afsRechazadas ?? [],
+      body.conceptosAprobadas ?? [],
+    )
+  }
+
+  /** Rechazar el proyecto completo (estado 4) con motivo a nivel del proyecto.
+   *  Aun cuando el proyecto se rechaza, el admin puede dar concepto positivo
+   *  a algunas AFs (afsAprobadas, con concepto opcional) o motivos individuales
+   *  por AF rechazada (afsRechazadas). Solo perfilId=1. */
+  @Post(':id/rechazar')
+  rechazarProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      motivo?: string
+      afsAprobadas?: Array<{ afId: number; concepto?: string }>
+      afsRechazadas?: Array<{ afId: number; motivo: string }>
+    } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede rechazar proyectos.')
+    }
+    return this.proyectosService.rechazarProyecto(
+      id, user.email, body.motivo ?? '',
+      body.afsAprobadas ?? [],
+      body.afsRechazadas ?? [],
+    )
+  }
+
+  /** Publica/despublica los resultados de la convocatoria a la que pertenece
+   *  el proyecto. Es una acción conjunta a nivel de convocatoria: todos los
+   *  proyectos evaluados de esa convocatoria se vuelven visibles (o se
+   *  ocultan) simultáneamente para sus respectivos proponentes. */
+  @Post(':id/publicar-resultados')
+  publicarResultados(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { publicar?: boolean } = {},
+  ) {
+    if (user.perfilId !== PERFIL_ADMIN) {
+      throw new ForbiddenException('Solo un administrador SENA puede publicar/despublicar resultados.')
+    }
+    return this.proyectosService.publicarResultados(id, !!body.publicar)
   }
 
   /** Revertir un proyecto Confirmado a Subsanación (estado 2).
@@ -372,8 +503,11 @@ export class ProyectosController {
   // ── Acciones de Formación ─────────────────────────────────────────────────
 
   @Get(':id/acciones')
-  listarAFs(@Param('id', ParseIntPipe) id: number) {
-    return this.proyectosService.listarAFs(id)
+  listarAFs(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.proyectosService.listarAFs(id, user.perfilId)
   }
 
   @Post(':id/acciones')
@@ -737,8 +871,11 @@ export class ProyectosController {
   // ── Presupuesto General del Proyecto ──────────────────────────────────────
 
   @Get(':id/presupuesto')
-  getPresupuestoProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
-    return this.proyectosService.getPresupuestoProyecto(proyectoId)
+  getPresupuestoProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) proyectoId: number,
+  ) {
+    return this.proyectosService.getPresupuestoProyecto(proyectoId, user.perfilId)
   }
 
   @Post(':id/presupuesto/guardar')
@@ -749,7 +886,10 @@ export class ProyectosController {
   // ── Reporte completo del Proyecto ─────────────────────────────────────────
 
   @Get(':id/reporte')
-  getReporteProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
-    return this.proyectosService.getReporteProyecto(proyectoId)
+  getReporteProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) proyectoId: number,
+  ) {
+    return this.proyectosService.getReporteProyecto(proyectoId, user.perfilId)
   }
 }

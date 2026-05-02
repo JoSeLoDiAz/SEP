@@ -4,10 +4,11 @@ import api from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
 import { ProyectoTabs } from '@/components/proyecto-tabs'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
+import { fmtDateTimeNumeric as fmtDateTime } from '@/lib/format-date'
 import {
-  BookUser, ChevronRight, FileText, FolderKanban,
+  BookUser, CheckCircle2, ChevronRight, FileCheck2, FileText, FolderKanban,
   Loader2, Plus, Save,
-  Trash2, UserPlus, X,
+  Trash2, UserPlus, X, XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -28,6 +29,7 @@ interface Proyecto {
   fechaRadicacion: string | null
   empresaId: number
   convocatoriaEstado: number
+  motivoRechazo: string | null
 }
 
 interface Opcion    { id: number; nombre: string }
@@ -37,6 +39,10 @@ interface Contacto  {
   tipoIdentificacionId: number | null
 }
 interface Disponible { contactoId: number; nombre: string; cargo: string; correo: string; proyectoActual: string | null }
+interface AfResumen {
+  afId: number; numero: number; nombre: string
+  estadoAprobacion: number | null; motivoRechazo: string | null
+}
 
 const CARGOS = [
   'Representante Legal',
@@ -80,6 +86,7 @@ export default function ProyectoDetallePage() {
   const [modalidades, setModalidades]   = useState<Opcion[]>([])
   const [contactos, setContactos]       = useState<Contacto[]>([])
   const [disponibles, setDisponibles]   = useState<Disponible[]>([])
+  const [afsEval, setAfsEval]           = useState<AfResumen[]>([])
   const [loading, setLoading]           = useState(true)
 
   // Form generalidades
@@ -132,6 +139,15 @@ export default function ProyectoDetallePage() {
       setObjetivo(rP.data.objetivo ?? '')
       setConvocatorias(rC.data)
       setModalidades(rM.data)
+      // Solo cargamos las AF si el proyecto ya fue evaluado, para mostrar el
+      // bloque "Resultado de la evaluación".
+      const est = Number(rP.data.estado)
+      if (est === 3 || est === 4) {
+        try {
+          const rAF = await api.get<AfResumen[]>(`/proyectos/${proyectoId}/acciones`)
+          setAfsEval(rAF.data)
+        } catch { /* ignore */ }
+      }
     } catch {
       showToast('error', 'Error al cargar el proyecto')
     } finally {
@@ -307,6 +323,14 @@ export default function ProyectoDetallePage() {
           {estadoLabel}
         </span>
       </div>
+
+      {/* ── Resultado de la evaluación: visible cuando SENA ya decidió ── */}
+      {(Number(proyecto.estado) === 3 || Number(proyecto.estado) === 4) && (
+        <ResultadoEvaluacion
+          proyecto={proyecto}
+          afs={afsEval}
+        />
+      )}
 
       {/* ── Menú de secciones (uniforme) ─────────────────────────────── */}
       <ProyectoTabs proyectoId={proyectoId} active="generalidades" />
@@ -628,5 +652,174 @@ export default function ProyectoDetallePage() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+// ── Resultado de la evaluación ───────────────────────────────────────────────
+//
+// Bloque que se muestra en la pestaña Generalidades cuando el proyecto ya pasó
+// por la evaluación del SENA (estado 3 = aprobado, 4 = rechazado). Está pensado
+// con lenguaje claro para que un proponente sin perfil técnico entienda en qué
+// quedó su proyecto y qué AF se le aprobaron o rechazaron.
+
+function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfResumen[] }) {
+  const aprobado  = Number(proyecto.estado) === 3
+  const rechazado = Number(proyecto.estado) === 4
+
+  const afsAprobadas  = afs.filter(a => a.estadoAprobacion === 1)
+  const afsRechazadas = afs.filter(a => a.estadoAprobacion === 0)
+  const afsSinMarca   = afs.filter(a => a.estadoAprobacion == null)
+  const totalAf       = afs.length
+
+  // Cuando el proyecto está aprobado y aún no llegan las AF (carga lenta) o
+  // ninguna está marcada (caso muy raro), tratamos el aprobado como total.
+  const aprobadasEfectivas = aprobado && afsAprobadas.length === 0 && afsSinMarca.length > 0
+    ? afsSinMarca.length
+    : afsAprobadas.length
+
+  const headerColor = aprobado ? 'bg-emerald-600' : 'bg-red-600'
+  const borderColor = aprobado ? 'border-emerald-200' : 'border-red-200'
+  const HeaderIcon  = aprobado ? FileCheck2 : XCircle
+  const titulo      = aprobado ? 'Proyecto aprobado por SENA' : 'Proyecto rechazado por SENA'
+
+  return (
+    <section className={`bg-white rounded-2xl border-2 ${borderColor} shadow-sm overflow-hidden`}>
+      {/* Header */}
+      <div className={`${headerColor} px-5 py-4 flex items-center gap-3`}>
+        <div className="w-11 h-11 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0">
+          <HeaderIcon size={20} strokeWidth={2.4} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Resultado de la evaluación</p>
+          <h3 className="text-white font-bold text-base truncate">{titulo}</h3>
+        </div>
+        {proyecto.fechaRadicacion && (
+          <div className="text-right text-white/90 text-[11px] hidden sm:block">
+            <p className="uppercase tracking-wide font-semibold opacity-80">Fecha</p>
+            <p className="font-mono">{fmtDateTime(proyecto.fechaRadicacion)}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="p-5 flex flex-col gap-5">
+
+        {/* Mensaje en lenguaje claro */}
+        {aprobado && (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4">
+            <p className="text-sm text-neutral-800 leading-relaxed">
+              <strong className="text-emerald-900">El proyecto está listo para el proceso de ejecución una vez se firme el convenio.</strong>
+              {' '}Esto significa que el SENA ya evaluó tu proyecto y aprobó las acciones de formación que se ejecutarán.
+              {afsRechazadas.length > 0 && ' Algunas acciones de formación fueron rechazadas y no harán parte del proyecto ejecutado; abajo puedes ver cuáles y por qué.'}
+            </p>
+          </div>
+        )}
+        {rechazado && (
+          <div className="rounded-xl bg-red-50 border border-red-200 p-4">
+            <p className="text-sm text-neutral-800 leading-relaxed">
+              <strong className="text-red-900">El SENA rechazó este proyecto.</strong>
+              {' '}El proyecto se queda guardado en el sistema como registro, pero ya no continúa el proceso de ejecución.
+            </p>
+            {proyecto.motivoRechazo && (
+              <div className="mt-3 pt-3 border-t border-red-200">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-red-700">Motivo del rechazo</p>
+                <p className="text-sm text-neutral-800 whitespace-pre-wrap mt-1 leading-relaxed">{proyecto.motivoRechazo}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Totales */}
+        {totalAf > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-center">
+              <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wide">Total de AF</p>
+              <p className="text-2xl font-bold text-[#00304D] mt-0.5">{totalAf}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center">
+              <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Aprobadas</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-0.5">{aprobadasEfectivas}</p>
+            </div>
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-center">
+              <p className="text-[10px] font-semibold text-red-700 uppercase tracking-wide">Rechazadas</p>
+              <p className="text-2xl font-bold text-red-700 mt-0.5">{afsRechazadas.length}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de AF rechazadas con su motivo */}
+        {afsRechazadas.length > 0 && (
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-red-700 mb-2">Acciones de formación rechazadas</p>
+            <div className="flex flex-col gap-2">
+              {afsRechazadas.map(af => (
+                <div key={af.afId} className="rounded-xl border border-red-200 bg-red-50/60 p-3 flex gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center shrink-0 text-xs font-bold">
+                    {af.numero}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-neutral-800 line-through decoration-red-300">{af.nombre}</p>
+                    {af.motivoRechazo ? (
+                      <>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-red-700 mt-1.5">Motivo</p>
+                        <p className="text-xs text-neutral-700 whitespace-pre-wrap mt-0.5 leading-relaxed">{af.motivoRechazo}</p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-neutral-500 italic mt-1">Sin motivo registrado.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Lista de AF aprobadas — con concepto (cards) + sin concepto (chips) */}
+        {aprobado && afsAprobadas.length > 0 && (
+          (() => {
+            const conConcepto = afsAprobadas.filter(af => (af.motivoRechazo ?? '').trim())
+            const sinConcepto = afsAprobadas.filter(af => !(af.motivoRechazo ?? '').trim())
+            return (
+              <div className="flex flex-col gap-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Acciones de formación aprobadas</p>
+                {conConcepto.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {conConcepto.map(af => (
+                      <div key={af.afId} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 flex gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 text-xs font-bold">
+                          {af.numero}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-neutral-800">{af.nombre}</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 mt-1.5">Concepto</p>
+                          <p className="text-xs text-neutral-700 whitespace-pre-wrap mt-0.5 leading-relaxed">{af.motivoRechazo}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {sinConcepto.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {sinConcepto.map(af => (
+                      <span key={af.afId} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold">
+                        <CheckCircle2 size={12} />
+                        AF {af.numero} — {af.nombre}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()
+        )}
+
+        {/* Pista a la guía */}
+        <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-[12px] text-blue-900 leading-relaxed">
+          <p>
+            ¿Tienes dudas sobre qué viene ahora? Abre la <strong>Guía del Proponente</strong> con el botón <strong>Ayuda</strong>
+            {' '}arriba, en la sección <em>“¿Y cuando me aprueben?”</em>.
+          </p>
+        </div>
+      </div>
+    </section>
   )
 }

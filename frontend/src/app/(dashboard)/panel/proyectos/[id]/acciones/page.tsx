@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ interface AF {
   numBenef: number
   tipoEvento: string | null
   modalidad: string | null
+  estadoAprobacion: number | null  // 1 aprobada, 0 rechazada, null sin evaluar
+  motivoRechazo: string | null
 }
 
 interface Opcion { id: number; nombre: string }
@@ -255,12 +257,29 @@ export default function AccionesPage() {
           <>
             {/* Mobile: tarjetas */}
             <div className="flex flex-col gap-3 p-4 sm:hidden">
-              {afs.map(af => (
-                <div key={af.afId} className="border border-neutral-100 rounded-xl p-4 flex flex-col gap-2">
+              {afs.map(af => {
+                const rechazada = af.estadoAprobacion === 0
+                const aprobada  = af.estadoAprobacion === 1
+                return (
+                <div key={af.afId} className={`border rounded-xl p-4 flex flex-col gap-2 ${
+                  rechazada ? 'border-red-200 bg-red-50/40' : 'border-neutral-100'
+                }`}>
                   <div className="flex items-start justify-between gap-2">
-                    <span className="w-7 h-7 rounded-lg bg-[#00304D] text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
-                      {af.numero}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-lg bg-[#00304D] text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                        {af.numero}
+                      </span>
+                      {rechazada && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                          ✗ Rechazada
+                        </span>
+                      )}
+                      {aprobada && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                          ✓ Aprobada
+                        </span>
+                      )}
+                    </div>
                     <div className="flex gap-1.5 flex-shrink-0">
                       <Link
                         href={`/panel/proyectos/${proyectoId}/acciones/${af.afId}`}
@@ -281,13 +300,26 @@ export default function AccionesPage() {
                     </div>
                   </div>
                   <p className="text-sm font-semibold text-neutral-800 leading-snug">{af.nombre}</p>
+                  {rechazada && af.motivoRechazo && (
+                    <div className="bg-white border border-red-200 rounded-lg px-3 py-2 text-xs">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-red-700 mb-0.5">Motivo del rechazo</p>
+                      <p className="text-neutral-700 whitespace-pre-wrap">{af.motivoRechazo}</p>
+                    </div>
+                  )}
+                  {af.estadoAprobacion === 1 && af.motivoRechazo && (
+                    <div className="bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-0.5">Concepto / observación</p>
+                      <p className="text-neutral-700 whitespace-pre-wrap">{af.motivoRechazo}</p>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">
                     {af.tipoEvento && <span><span className="font-medium">Evento:</span> {af.tipoEvento}</span>}
                     {af.modalidad  && <span><span className="font-medium">Modalidad:</span> {af.modalidad}</span>}
                     <span><span className="font-medium">Beneficiarios:</span> {af.numBenef ?? '—'}</span>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
 
             {/* Desktop: tabla */}
@@ -304,15 +336,33 @@ export default function AccionesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {afs.map((af, i) => (
-                    <tr key={af.afId} className={i % 2 === 0 ? 'bg-white' : 'bg-neutral-50/50'}>
+                  {afs.map((af, i) => {
+                    const rechazada = af.estadoAprobacion === 0
+                    const aprobada  = af.estadoAprobacion === 1
+                    return (
+                    <Fragment key={af.afId}>
+                    <tr className={rechazada
+                      ? 'bg-red-50/40'
+                      : (i % 2 === 0 ? 'bg-white' : 'bg-neutral-50/50')}>
                       <td className="px-4 py-3 text-center">
                         <span className="w-7 h-7 rounded-lg bg-[#00304D] text-white text-xs font-bold inline-flex items-center justify-center">
                           {af.numero}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-neutral-800 font-semibold text-xs leading-snug max-w-xs">
-                        {af.nombre}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{af.nombre}</span>
+                          {rechazada && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                              ✗ Rechazada
+                            </span>
+                          )}
+                          {aprobada && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                              ✓ Aprobada
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-neutral-600 text-xs whitespace-nowrap">{af.tipoEvento || '—'}</td>
                       <td className="px-4 py-3 text-neutral-600 text-xs whitespace-nowrap">{af.modalidad  || '—'}</td>
@@ -338,7 +388,29 @@ export default function AccionesPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    {rechazada && af.motivoRechazo && (
+                      <tr className="bg-red-50/40">
+                        <td colSpan={6} className="px-4 pb-3 pt-0">
+                          <div className="bg-white border border-red-200 rounded-lg px-3 py-2 text-xs">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-red-700 mb-0.5">Motivo del rechazo</p>
+                            <p className="text-neutral-700 whitespace-pre-wrap">{af.motivoRechazo}</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {aprobada && af.motivoRechazo && (
+                      <tr className={i % 2 === 0 ? 'bg-white' : 'bg-neutral-50/50'}>
+                        <td colSpan={6} className="px-4 pb-3 pt-0">
+                          <div className="bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-0.5">Concepto / observación</p>
+                            <p className="text-neutral-700 whitespace-pre-wrap">{af.motivoRechazo}</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

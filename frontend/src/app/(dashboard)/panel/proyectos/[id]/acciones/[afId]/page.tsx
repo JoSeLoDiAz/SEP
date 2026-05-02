@@ -697,9 +697,9 @@ export default function AFDetallePage() {
   // Toast
   const toastKey = useRef(0)
   const [toastK2, setToastK2] = useState(0)
-  const [toast,   setToast]   = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
+  const [toast,   setToast]   = useState<{ tipo: 'success' | 'warning' | 'error'; msg: string } | null>(null)
 
-  function showToast(tipo: 'success' | 'error', msg: string) {
+  function showToast(tipo: 'success' | 'warning' | 'error', msg: string) {
     toastKey.current++
     setToast({ tipo, msg })
     setToastK2(toastKey.current)

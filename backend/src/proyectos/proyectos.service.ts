@@ -59,12 +59,23 @@ export class ProyectosService {
 
   // ── Listar proyectos de la empresa ────────────────────────────────────────
 
-  async listar(email: string) {
+  async listar(email: string, perfilId?: number) {
     const empresaId = await this.getEmpresaId(email)
+    const esAdmin = perfilId === 1
+    // Para el proponente enmascaramos el estado: si el proyecto está aprobado
+    // o rechazado pero la convocatoria todavía no publicó resultados, lo
+    // mostramos como "Confirmado" (1). El admin siempre ve el estado real.
+    const estadoExpr = esAdmin
+      ? 'p.PROYECTOESTADO'
+      : `CASE
+           WHEN p.PROYECTOESTADO IN (3, 4)
+            AND NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0) <> 1 THEN 1
+           ELSE p.PROYECTOESTADO
+         END`
     return this.dataSource.query(
       `SELECT p.PROYECTOID               AS "proyectoId",
               TRIM(p.PROYECTONOMBRE)     AS "nombre",
-              p.PROYECTOESTADO          AS "estado",
+              ${estadoExpr}              AS "estado",
               p.PROYECTOFECHAREGISTRO   AS "fechaRegistro",
               p.PROYECTOFECHARADICACION AS "fechaRadicacion",
               TRIM(cv.CONVOCATORIANOMBRE) AS "convocatoria",
@@ -81,20 +92,22 @@ export class ProyectosService {
 
   // ── Detalle de un proyecto ────────────────────────────────────────────────
 
-  async getDetalle(proyectoId: number) {
+  async getDetalle(proyectoId: number, perfilId?: number) {
     const rows = await this.dataSource.query(
-      `SELECT p.PROYECTOID               AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)     AS "nombre",
-              p.CONVOCATORIAID           AS "convocatoriaId",
-              p.MODALIDADID             AS "modalidadId",
-              TRIM(cv.CONVOCATORIANOMBRE) AS "convocatoria",
-              TRIM(m.MODALIDADNOMBRE)    AS "modalidad",
-              p.PROYECTOOBJETIVO        AS "objetivo",
-              p.PROYECTOESTADO          AS "estado",
-              p.PROYECTOFECHAREGISTRO   AS "fechaRegistro",
-              p.PROYECTOFECHARADICACION AS "fechaRadicacion",
-              p.EMPRESAID               AS "empresaId",
-              cv.CONVOCATORIAESTADO     AS "convocatoriaEstado"
+      `SELECT p.PROYECTOID                                       AS "proyectoId",
+              TRIM(p.PROYECTONOMBRE)                             AS "nombre",
+              p.CONVOCATORIAID                                   AS "convocatoriaId",
+              p.MODALIDADID                                      AS "modalidadId",
+              TRIM(cv.CONVOCATORIANOMBRE)                        AS "convocatoria",
+              TRIM(m.MODALIDADNOMBRE)                            AS "modalidad",
+              p.PROYECTOOBJETIVO                                 AS "objetivo",
+              p.PROYECTOESTADO                                   AS "estado",
+              p.PROYECTOFECHAREGISTRO                            AS "fechaRegistro",
+              p.PROYECTOFECHARADICACION                          AS "fechaRadicacion",
+              p.EMPRESAID                                        AS "empresaId",
+              cv.CONVOCATORIAESTADO                              AS "convocatoriaEstado",
+              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)        AS "resultadosPublicados",
+              DBMS_LOB.SUBSTR(p.PROYECTOMOTIVORECHAZO, 2000, 1)  AS "motivoRechazo"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m      ON m.MODALIDADID    = p.MODALIDADID
@@ -102,7 +115,28 @@ export class ProyectosService {
       [proyectoId],
     )
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
-    return rows[0]
+    const proy = rows[0]
+    // Si el proponente entra y los resultados aún no están publicados, lo
+    // mostramos como "Confirmado" (estado 1) sin motivo de rechazo. El admin
+    // siempre ve el estado real para poder gestionar la evaluación.
+    if (this.debeOcultarResultados(perfilId, Number(proy.estado), Number(proy.resultadosPublicados))) {
+      proy.estado = 1
+      proy.motivoRechazo = null
+    }
+    return proy
+  }
+
+  /** Regla central: ¿debemos ocultar los resultados de evaluación al usuario?
+   *  Sí, cuando NO es administrador, el proyecto está aprobado/rechazado en BD
+   *  (estado 3 o 4) pero la convocatoria a la que pertenece todavía no está
+   *  publicada. Así el proponente sigue viendo el proyecto como "Confirmado"
+   *  hasta que SENA libere oficialmente toda la convocatoria de un solo
+   *  movimiento (la publicación es por convocatoria, no por proyecto). */
+  private debeOcultarResultados(perfilId: number | undefined, estadoReal: number, publicadosConvocatoria: number): boolean {
+    const ADMIN = 1
+    if (perfilId === ADMIN) return false
+    if (estadoReal !== 3 && estadoReal !== 4) return false
+    return Number(publicadosConvocatoria) !== 1
   }
 
   // ── Actualizar generalidades + objetivo ───────────────────────────────────
@@ -1392,7 +1426,13 @@ export class ProyectosService {
   /** Aprueba el proyecto (rol admin SENA): restaura las tablas vivas desde
    *  la versión FINAL, registra el hash en PROYECTOAPROBADO y pasa el
    *  estado a 3 (Aprobado). */
-  async aprobarProyecto(proyectoId: number, email: string, comentario?: string | null) {
+  async aprobarProyecto(
+    proyectoId: number,
+    email: string,
+    comentario?: string | null,
+    afsRechazadas?: Array<{ afId: number; motivo: string }>,
+    conceptosAprobadas?: Array<{ afId: number; concepto: string }>,
+  ) {
     // 1) Verificar que el proyecto está confirmado y tiene FINAL
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
@@ -1418,7 +1458,41 @@ export class ProyectosService {
     // 2) Restaurar tablas vivas desde el snapshot FINAL
     await this.restaurarLiveDesdeSnapshot(proyectoId, Number(versionFinal.versionId))
 
-    // 3) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
+    // 3) Marcar AFs aprobadas/rechazadas. Por defecto TODAS aprobadas; las
+    // que el admin pasó en `afsRechazadas` quedan con ESTADO=0 + motivo. La
+    // columna ACCIONFORMACIONMOTIVORECHAZO almacena ambos casos (motivo de
+    // rechazo cuando ESTADO=0, concepto/observación cuando ESTADO=1) — el
+    // semantismo se decide por el estado.
+    await this.dataSource.query(
+      `UPDATE ACCIONFORMACION
+          SET ACCIONFORMACIONESTADOAPROBACION = 1,
+              ACCIONFORMACIONMOTIVORECHAZO   = NULL
+        WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    // Conceptos opcionales sobre AFs aprobadas: el admin puede dejar una
+    // observación al proponente aun cuando aprueba la AF.
+    const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
+    for (const c of conceptos) {
+      await this.dataSource.query(
+        `UPDATE ACCIONFORMACION
+            SET ACCIONFORMACIONMOTIVORECHAZO = :1
+          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+        [c.concepto.trim(), Number(c.afId), proyectoId],
+      )
+    }
+    const rechazadas = (afsRechazadas ?? []).filter(r => Number(r.afId) > 0 && (r.motivo ?? '').trim())
+    for (const r of rechazadas) {
+      await this.dataSource.query(
+        `UPDATE ACCIONFORMACION
+            SET ACCIONFORMACIONESTADOAPROBACION = 0,
+                ACCIONFORMACIONMOTIVORECHAZO   = :1
+          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+        [r.motivo.trim(), Number(r.afId), proyectoId],
+      )
+    }
+
+    // 4) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
     await this.dataSource.query(
       `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
     )
@@ -1431,19 +1505,352 @@ export class ProyectosService {
        versionFinal.hash, email, comentario?.trim() || null],
     )
 
-    // 4) Cambiar estado a 3 (Aprobado)
+    // 5) Cambiar estado a 3 (Aprobado) y limpiar motivo previo. La
+    //    publicación de resultados al proponente NO se decide aquí: es por
+    //    convocatoria y la maneja el admin desde "Publicar resultados de la
+    //    convocatoria" cuando termina de evaluar todos los proyectos.
     await this.dataSource.query(
-      `UPDATE PROYECTO SET PROYECTOESTADO = 3 WHERE PROYECTOID = :1`,
+      `UPDATE PROYECTO
+          SET PROYECTOESTADO        = 3,
+              PROYECTOMOTIVORECHAZO = NULL
+        WHERE PROYECTOID = :1`,
       [proyectoId],
     )
 
     return {
-      message: 'Proyecto aprobado correctamente. Las tablas vivas fueron restauradas desde la versión FINAL.',
+      message: rechazadas.length > 0
+        ? `Proyecto aprobado con ${rechazadas.length} AF(s) rechazada(s). Los resultados se publicarán al proponente cuando se libere la convocatoria.`
+        : 'Proyecto aprobado correctamente. Las tablas vivas fueron restauradas desde la versión FINAL. Los resultados se publicarán al proponente cuando se libere la convocatoria.',
       versionAprobada: {
         versionId: Number(versionFinal.versionId),
         codigo: versionFinal.codigo,
         hash: versionFinal.hash,
       },
+      afsRechazadas: rechazadas.length,
+    }
+  }
+
+  /** Rechaza el proyecto completo (estado 4) con un motivo a nivel del proyecto.
+   *  Aun cuando el proyecto queda rechazado, el admin puede dar concepto
+   *  individual a cada AF: por defecto todas quedan rechazadas con el motivo
+   *  general, pero el admin puede pasar `afsAprobadas` (las que quiere marcar
+   *  con concepto positivo) y/o `afsRechazadas` (con motivo específico por AF).
+   *  Solo aplica si el proyecto está en estado 1 (Confirmado). */
+  async rechazarProyecto(
+    proyectoId: number,
+    _email: string,
+    motivo: string,
+    afsAprobadas?: Array<{ afId: number; concepto?: string }>,
+    afsRechazadas?: Array<{ afId: number; motivo: string }>,
+  ) {
+    const motivoTrim = (motivo ?? '').trim()
+    if (!motivoTrim) {
+      throw new BadRequestException('El motivo de rechazo del proyecto es obligatorio.')
+    }
+    const [proy] = await this.dataSource.query(
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    if (Number(proy.estado) !== 1) {
+      throw new BadRequestException('Solo se pueden rechazar proyectos en estado Confirmado.')
+    }
+
+    // 1) Por defecto todas las AFs quedan rechazadas con el motivo general.
+    //    Es el comportamiento histórico: si el admin no especifica nada por AF,
+    //    interpretamos que el rechazo es total y uniforme.
+    await this.dataSource.query(
+      `UPDATE ACCIONFORMACION
+          SET ACCIONFORMACIONESTADOAPROBACION = 0,
+              ACCIONFORMACIONMOTIVORECHAZO   = :1
+        WHERE PROYECTOID = :2`,
+      [motivoTrim, proyectoId],
+    )
+
+    // 2) AFs que el admin marcó con concepto POSITIVO aun cuando el proyecto
+    //    fue rechazado. El concepto/observación es opcional; si viene vacío
+    //    queda NULL en la columna.
+    const aprobadas = (afsAprobadas ?? []).filter(a => Number(a.afId) > 0)
+    for (const a of aprobadas) {
+      const concepto = (a.concepto ?? '').trim() || null
+      await this.dataSource.query(
+        `UPDATE ACCIONFORMACION
+            SET ACCIONFORMACIONESTADOAPROBACION = 1,
+                ACCIONFORMACIONMOTIVORECHAZO   = :1
+          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+        [concepto, Number(a.afId), proyectoId],
+      )
+    }
+
+    // 3) AFs con motivo de rechazo específico (sobrescribe el motivo general).
+    const rechazadasIndiv = (afsRechazadas ?? []).filter(r => Number(r.afId) > 0 && (r.motivo ?? '').trim())
+    for (const r of rechazadasIndiv) {
+      await this.dataSource.query(
+        `UPDATE ACCIONFORMACION
+            SET ACCIONFORMACIONESTADOAPROBACION = 0,
+                ACCIONFORMACIONMOTIVORECHAZO   = :1
+          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+        [r.motivo.trim(), Number(r.afId), proyectoId],
+      )
+    }
+
+    // 4) Estado del proyecto y motivo. La publicación al proponente la
+    //    controla el admin a nivel de convocatoria (no por proyecto).
+    await this.dataSource.query(
+      `UPDATE PROYECTO
+          SET PROYECTOESTADO        = 4,
+              PROYECTOMOTIVORECHAZO = :1
+        WHERE PROYECTOID = :2`,
+      [motivoTrim, proyectoId],
+    )
+    return {
+      message: 'Proyecto rechazado. Los resultados se publicarán al proponente cuando se libere la convocatoria.',
+      estado: 4,
+      afsAprobadas: aprobadas.length,
+      afsConMotivoIndividual: rechazadasIndiv.length,
+    }
+  }
+
+  /** Publica (1) o despublica (0) los resultados de evaluación de TODA la
+   *  convocatoria a la que pertenece el proyecto. La publicación es un acto
+   *  conjunto: en cuanto se publica, todos los proponentes con proyectos en
+   *  esa convocatoria ven simultáneamente el resultado de su proyecto y los
+   *  conceptos individuales por AF. Mientras esté despublicado, ningún
+   *  proponente ve nada del proceso de evaluación. */
+  async publicarResultados(proyectoId: number, publicar: boolean) {
+    const [proy] = await this.dataSource.query(
+      `SELECT CONVOCATORIAID AS "convocatoriaId" FROM PROYECTO WHERE PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    return this.publicarResultadosConvocatoria(Number(proy.convocatoriaId), publicar)
+  }
+
+  // ── Gestión de convocatorias (admin) ─────────────────────────────────────
+
+  /** Listado completo de convocatorias con estadísticas para el módulo admin
+   *  de "Gestión de Convocatorias". Incluye conteo de proyectos por estado
+   *  para que el admin sepa cuántos quedan por evaluar antes de publicar. */
+  async listarConvocatoriasAdmin() {
+    return this.dataSource.query(
+      `SELECT cv.CONVOCATORIAID                                  AS "id",
+              TRIM(cv.CONVOCATORIANOMBRE)                         AS "nombre",
+              cv.CONVOCATORIAANIO                                 AS "anio",
+              cv.CONVOCATORIAFECHAINICIO                          AS "fechaInicio",
+              cv.CONVOCATORIAFECHACIERRE                          AS "fechaCierre",
+              cv.CONVOCATORIAFECHAREGISTRO                        AS "fechaRegistro",
+              cv.CONVOCATORIAPRESUPUESTOTOTAL                     AS "presupuestoTotal",
+              cv.CONVOCATORIAPRESUPUESTOMAXIMO                    AS "presupuestoMaximo",
+              cv.CONVOCATORIAMESESPROYECTO                        AS "mesesProyecto",
+              TRIM(cv.CONVOCATORIATIPOFINANCIACION)               AS "tipoFinanciacion",
+              TRIM(cv.CONVOCATORIAESTADOCONVOCATORIA)             AS "estadoEtiqueta",
+              cv.CONVOCATORIAESTADO                               AS "estado",
+              NVL(cv.CONVOCATORIAOCULTAR, 0)                      AS "ocultar",
+              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
+              cv.PROGRAMAID                                       AS "programaId",
+              (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
+                 WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID)      AS "totalProyectos",
+              (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
+                 WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID
+                   AND p.PROYECTOESTADO = 0)                      AS "sinConfirmar",
+              (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
+                 WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID
+                   AND p.PROYECTOESTADO = 1)                      AS "confirmados",
+              (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
+                 WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID
+                   AND p.PROYECTOESTADO = 3)                      AS "aprobados",
+              (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
+                 WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID
+                   AND p.PROYECTOESTADO = 4)                      AS "rechazados"
+         FROM CONVOCATORIA cv
+        ORDER BY cv.CONVOCATORIAANIO DESC, cv.CONVOCATORIAID DESC`,
+    )
+  }
+
+  /** Crea una nueva convocatoria con los campos NOT NULL del DDL.
+   *  El ID se asigna como NVL(MAX, 0)+1 (mismo patrón usado en el resto de
+   *  inserts del proyecto). */
+  async crearConvocatoria(dto: {
+    nombre: string
+    anio: number
+    presupuestoTotal: number
+    presupuestoMaximo: number
+    mesesProyecto: number
+    tipoFinanciacion: string
+    fechaInicio?: string | null
+    fechaCierre?: string | null
+    programaId?: number
+  }) {
+    const nombre = (dto.nombre ?? '').trim()
+    if (!nombre) throw new BadRequestException('El nombre de la convocatoria es obligatorio.')
+    if (!dto.anio || dto.anio < 2000 || dto.anio > 2100) {
+      throw new BadRequestException('El año de la convocatoria es obligatorio (entre 2000 y 2100).')
+    }
+    const tipo = (dto.tipoFinanciacion ?? '').trim().toUpperCase()
+    if (tipo !== 'ABIERTO' && tipo !== 'COFINANCIACIÓN' && tipo !== 'COFINANCIACION') {
+      throw new BadRequestException('Tipo de financiación inválido. Debe ser ABIERTO o COFINANCIACIÓN.')
+    }
+    const tipoNorm = tipo === 'COFINANCIACION' ? 'COFINANCIACIÓN' : tipo
+    if (!(dto.presupuestoTotal > 0))    throw new BadRequestException('El presupuesto total debe ser mayor que 0.')
+    if (!(dto.presupuestoMaximo > 0))   throw new BadRequestException('El presupuesto máximo debe ser mayor que 0.')
+    if (!(dto.mesesProyecto > 0))       throw new BadRequestException('Los meses del proyecto deben ser mayores que 0.')
+
+    const programaId = Number(dto.programaId) > 0 ? Number(dto.programaId) : 21
+
+    const [{ nid }] = await this.dataSource.query(
+      `SELECT NVL(MAX(CONVOCATORIAID), 0) + 1 AS "nid" FROM CONVOCATORIA`,
+    )
+    await this.dataSource.query(
+      `INSERT INTO CONVOCATORIA
+         (CONVOCATORIAID, CONVOCATORIANOMBRE, CONVOCATORIAANIO,
+          CONVOCATORIAFECHAINICIO, CONVOCATORIAFECHACIERRE,
+          CONVOCATORIAPRESUPUESTOTOTAL, CONVOCATORIAPRESUPUESTOMAXIMO,
+          CONVOCATORIAMESESPROYECTO, CONVOCATORIATIPOFINANCIACION,
+          CONVOCATORIAESTADOCONVOCATORIA, CONVOCATORIAFECHAREGISTRO,
+          CONVOCATORIAESTADO, CONVOCATORIAOCULTAR, CONVOCATORIASUBSANACION,
+          PROGRAMAID, CONVOCATORIARESULTADOSPUBLICADOS)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE, 1, 0, 0, :11, 0)`,
+      [
+        Number(nid), nombre, Number(dto.anio),
+        dto.fechaInicio ? new Date(dto.fechaInicio) : null,
+        dto.fechaCierre ? new Date(dto.fechaCierre) : null,
+        Number(dto.presupuestoTotal), Number(dto.presupuestoMaximo),
+        Number(dto.mesesProyecto), tipoNorm, 'ABIERTA',
+        programaId,
+      ],
+    )
+    return { message: 'Convocatoria creada correctamente.', id: Number(nid) }
+  }
+
+  async actualizarConvocatoria(id: number, dto: {
+    nombre?: string
+    anio?: number
+    presupuestoTotal?: number
+    presupuestoMaximo?: number
+    mesesProyecto?: number
+    tipoFinanciacion?: string
+    fechaInicio?: string | null
+    fechaCierre?: string | null
+  }) {
+    const [cv] = await this.dataSource.query(
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      [id],
+    )
+    if (!cv) throw new NotFoundException('Convocatoria no encontrada')
+    const sets: string[] = []
+    const params: any[] = []
+    let i = 1
+    if (dto.nombre !== undefined) {
+      const n = String(dto.nombre).trim()
+      if (!n) throw new BadRequestException('El nombre no puede quedar vacío.')
+      sets.push(`CONVOCATORIANOMBRE = :${i++}`); params.push(n)
+    }
+    if (dto.anio !== undefined) {
+      sets.push(`CONVOCATORIAANIO = :${i++}`); params.push(Number(dto.anio))
+    }
+    if (dto.presupuestoTotal !== undefined) {
+      sets.push(`CONVOCATORIAPRESUPUESTOTOTAL = :${i++}`); params.push(Number(dto.presupuestoTotal))
+    }
+    if (dto.presupuestoMaximo !== undefined) {
+      sets.push(`CONVOCATORIAPRESUPUESTOMAXIMO = :${i++}`); params.push(Number(dto.presupuestoMaximo))
+    }
+    if (dto.mesesProyecto !== undefined) {
+      sets.push(`CONVOCATORIAMESESPROYECTO = :${i++}`); params.push(Number(dto.mesesProyecto))
+    }
+    if (dto.tipoFinanciacion !== undefined) {
+      const t = String(dto.tipoFinanciacion).trim().toUpperCase()
+      const norm = t === 'COFINANCIACION' ? 'COFINANCIACIÓN' : t
+      if (norm !== 'ABIERTO' && norm !== 'COFINANCIACIÓN') {
+        throw new BadRequestException('Tipo de financiación inválido.')
+      }
+      sets.push(`CONVOCATORIATIPOFINANCIACION = :${i++}`); params.push(norm)
+    }
+    if (dto.fechaInicio !== undefined) {
+      sets.push(`CONVOCATORIAFECHAINICIO = :${i++}`); params.push(dto.fechaInicio ? new Date(dto.fechaInicio) : null)
+    }
+    if (dto.fechaCierre !== undefined) {
+      sets.push(`CONVOCATORIAFECHACIERRE = :${i++}`); params.push(dto.fechaCierre ? new Date(dto.fechaCierre) : null)
+    }
+    if (sets.length === 0) {
+      return { message: 'Sin cambios.' }
+    }
+    params.push(id)
+    await this.dataSource.query(
+      `UPDATE CONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${i}`,
+      params,
+    )
+    return { message: 'Convocatoria actualizada correctamente.' }
+  }
+
+  /** Cierra (estado=0, etiqueta='CERRADA') o abre (estado=1, etiqueta='ABIERTA')
+   *  la convocatoria. Esto bloquea la creación/edición de proyectos por parte
+   *  de proponentes en esa convocatoria. */
+  async toggleEstadoConvocatoria(id: number, abrir: boolean) {
+    const [cv] = await this.dataSource.query(
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      [id],
+    )
+    if (!cv) throw new NotFoundException('Convocatoria no encontrada')
+    await this.dataSource.query(
+      `UPDATE CONVOCATORIA
+          SET CONVOCATORIAESTADO = :1,
+              CONVOCATORIAESTADOCONVOCATORIA = :2
+        WHERE CONVOCATORIAID = :3`,
+      [abrir ? 1 : 0, abrir ? 'ABIERTA' : 'CERRADA', id],
+    )
+    return {
+      message: abrir
+        ? 'Convocatoria abierta. Los proponentes pueden volver a editar y crear proyectos.'
+        : 'Convocatoria cerrada. Los proponentes ya no pueden editar ni crear proyectos.',
+      estado: abrir ? 1 : 0,
+    }
+  }
+
+  /** Oculta (CONVOCATORIAOCULTAR=1) o muestra la convocatoria en el dropdown
+   *  de selección de convocatoria al crear un proyecto. */
+  async toggleOcultarConvocatoria(id: number, ocultar: boolean) {
+    const [cv] = await this.dataSource.query(
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      [id],
+    )
+    if (!cv) throw new NotFoundException('Convocatoria no encontrada')
+    await this.dataSource.query(
+      `UPDATE CONVOCATORIA SET CONVOCATORIAOCULTAR = :1 WHERE CONVOCATORIAID = :2`,
+      [ocultar ? 1 : 0, id],
+    )
+    return {
+      message: ocultar
+        ? 'Convocatoria ocultada. Ya no aparece en el selector al crear proyectos.'
+        : 'Convocatoria visible nuevamente en el selector.',
+      ocultar: ocultar ? 1 : 0,
+    }
+  }
+
+  /** Variante directa por convocatoriaId. */
+  async publicarResultadosConvocatoria(convocatoriaId: number, publicar: boolean) {
+    const [cv] = await this.dataSource.query(
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      [convocatoriaId],
+    )
+    if (!cv) throw new NotFoundException('Convocatoria no encontrada')
+    const flag = publicar ? 1 : 0
+    await this.dataSource.query(
+      `UPDATE CONVOCATORIA SET CONVOCATORIARESULTADOSPUBLICADOS = :1 WHERE CONVOCATORIAID = :2`,
+      [flag, convocatoriaId],
+    )
+    // Cuántos proyectos quedan visibles ahora.
+    const [{ total }] = await this.dataSource.query(
+      `SELECT COUNT(PROYECTOID) AS "total"
+         FROM PROYECTO WHERE CONVOCATORIAID = :1 AND PROYECTOESTADO IN (3, 4)`,
+      [convocatoriaId],
+    )
+    return {
+      message: publicar
+        ? `Resultados de la convocatoria publicados a los proponentes (${Number(total)} proyecto(s) evaluado(s) ahora visibles).`
+        : 'Resultados de la convocatoria despublicados (vuelven a quedar como borrador interno).',
+      convocatoriaId,
+      resultadosPublicados: flag,
+      proyectosVisibles: Number(total),
     }
   }
 
@@ -1628,14 +2035,16 @@ export class ProyectosService {
 
   // ── Acciones de Formación ─────────────────────────────────────────────────
 
-  async listarAFs(proyectoId: number) {
-    return this.dataSource.query(
-      `SELECT af.ACCIONFORMACIONID           AS "afId",
-              af.ACCIONFORMACIONNUMERO       AS "numero",
-              TRIM(af.ACCIONFORMACIONNOMBRE) AS "nombre",
-              af.ACCIONFORMACIONNUMBENEF     AS "numBenef",
-              TRIM(te.TIPOEVENTONOMBRE)      AS "tipoEvento",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE) AS "modalidad"
+  async listarAFs(proyectoId: number, perfilId?: number) {
+    const afs = await this.dataSource.query(
+      `SELECT af.ACCIONFORMACIONID                          AS "afId",
+              af.ACCIONFORMACIONNUMERO                      AS "numero",
+              TRIM(af.ACCIONFORMACIONNOMBRE)                AS "nombre",
+              af.ACCIONFORMACIONNUMBENEF                    AS "numBenef",
+              TRIM(te.TIPOEVENTONOMBRE)                     AS "tipoEvento",
+              TRIM(mf.MODALIDADFORMACIONNOMBRE)             AS "modalidad",
+              af.ACCIONFORMACIONESTADOAPROBACION            AS "estadoAprobacion",
+              DBMS_LOB.SUBSTR(af.ACCIONFORMACIONMOTIVORECHAZO, 2000, 1) AS "motivoRechazo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te         ON te.TIPOEVENTOID         = af.TIPOEVENTOID
          LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
@@ -1643,6 +2052,23 @@ export class ProyectosService {
         ORDER BY af.ACCIONFORMACIONNUMERO ASC`,
       [proyectoId],
     )
+    // Para el proponente, si la convocatoria aún no publicó resultados,
+    // ocultamos el concepto y motivo individual de cada AF.
+    const [proy] = await this.dataSource.query(
+      `SELECT p.PROYECTOESTADO                                AS "estado",
+              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
+         FROM PROYECTO p
+         LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (proy && this.debeOcultarResultados(perfilId, Number(proy.estado), Number(proy.publicados))) {
+      for (const af of afs) {
+        af.estadoAprobacion = null
+        af.motivoRechazo = null
+      }
+    }
+    return afs
   }
 
   async getTiposEvento() {
@@ -3588,7 +4014,35 @@ export class ProyectosService {
   /** Devuelve el resumen presupuestal completo del proyecto: lista de AFs con
    *  totales por rubro, GO por AF, Transferencia por AF, totales generales y
    *  estado de guardado. */
-  async getPresupuestoProyecto(proyectoId: number) {
+  async getPresupuestoProyecto(proyectoId: number, perfilId?: number) {
+    // Filtro de AFs: si el proyecto está aprobado/rechazado (estados 3 o 4),
+    // las AFs marcadas como rechazadas (ESTADOAPROBACION = 0) NO suman al
+    // presupuesto — los totales se recalculan automáticamente.
+    // Para los demás estados (0/1/2) todas las AFs suman como antes.
+    //
+    // Excepción: cuando el proponente está consultando un proyecto cuyos
+    // resultados aún no han sido publicados, NO aplicamos el filtro. El
+    // proponente debe ver el presupuesto exactamente igual a como lo dejó
+    // al confirmar; el ajuste por AFs rechazadas solo aparece cuando el
+    // SENA libera oficialmente la evaluación.
+    const [proyHeader] = await this.dataSource.query(
+      `SELECT p.PROYECTOESTADO                                AS "estado",
+              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
+         FROM PROYECTO p
+         LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
+        WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    const ocultar = proyHeader && this.debeOcultarResultados(perfilId, Number(proyHeader.estado), Number(proyHeader.publicados))
+    const filtroAfsAprobadas = ocultar
+      ? '' // proponente con resultados sin publicar: todas las AFs cuentan
+      : `
+      AND NOT (
+        EXISTS (SELECT 1 FROM PROYECTO p2 WHERE p2.PROYECTOID = af.PROYECTOID
+                  AND p2.PROYECTOESTADO IN (3, 4))
+        AND NVL(af.ACCIONFORMACIONESTADOAPROBACION, 1) = 0
+      )`
+
     // 1. AFs con sus totales de rubros (excluyendo R09 y R015)
     const afs = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID                                            AS "afId",
@@ -3612,6 +4066,7 @@ export class ProyectosService {
                GROUP BY ar.ACCIONFORMACIONID
          ) t ON t.ACCIONFORMACIONID = af.ACCIONFORMACIONID
         WHERE af.PROYECTOID = :1
+        ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -3630,6 +4085,7 @@ export class ProyectosService {
               ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
              AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R09')
         WHERE af.PROYECTOID = :1
+        ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -3646,6 +4102,7 @@ export class ProyectosService {
               ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
              AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R015')
         WHERE af.PROYECTOID = :1
+        ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -3919,19 +4376,22 @@ export class ProyectosService {
    *  proyecto, empresa, contactos, análisis, sectores, AFs con detalle,
    *  diagnósticos asociados (uno por cada necesidad distinta vinculada a las
    *  AFs) y presupuesto general. */
-  async getReporteProyecto(proyectoId: number) {
+  async getReporteProyecto(proyectoId: number, perfilId?: number) {
     // 1. Datos del proyecto + convocatoria + modalidad + empresaId
     const [proy] = await this.dataSource.query(
-      `SELECT p.PROYECTOID                AS "proyectoId",
-              p.PROYECTONOMBRE            AS "nombre",
-              p.PROYECTOOBJETIVO          AS "objetivo",
-              p.PROYECTOFECHAREGISTRO     AS "fechaRegistro",
-              p.PROYECTOFECHARADICACION   AS "fechaRadicacion",
-              p.PROYECTOESTADO            AS "estado",
-              p.EMPRESAID                 AS "empresaId",
-              c.CONVOCATORIANOMBRE        AS "convocatoria",
-              m.MODALIDADNOMBRE           AS "modalidad",
-              m.MODALIDADID               AS "modalidadId"
+      `SELECT p.PROYECTOID                                       AS "proyectoId",
+              p.PROYECTONOMBRE                                   AS "nombre",
+              p.PROYECTOOBJETIVO                                 AS "objetivo",
+              p.PROYECTOFECHAREGISTRO                            AS "fechaRegistro",
+              p.PROYECTOFECHARADICACION                          AS "fechaRadicacion",
+              p.PROYECTOESTADO                                   AS "estado",
+              p.EMPRESAID                                        AS "empresaId",
+              p.CONVOCATORIAID                                   AS "convocatoriaId",
+              NVL(c.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
+              c.CONVOCATORIANOMBRE                               AS "convocatoria",
+              m.MODALIDADNOMBRE                                  AS "modalidad",
+              m.MODALIDADID                                      AS "modalidadId",
+              DBMS_LOB.SUBSTR(p.PROYECTOMOTIVORECHAZO, 2000, 1)  AS "motivoRechazo"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m    ON m.MODALIDADID    = p.MODALIDADID
@@ -3939,6 +4399,7 @@ export class ProyectosService {
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
+    const ocultarResult = this.debeOcultarResultados(perfilId, Number(proy.estado), Number(proy.resultadosPublicados))
     const empresaId: number = proy.empresaId
 
     // 2. Empresa: datos básicos + análisis + cadena productiva
@@ -4066,7 +4527,9 @@ export class ProyectosService {
               ma.METODOLOGIAAPRENDIZAJENOMBRE       AS "metodologia",
               nf.NECESIDADFORMACIONNOMBRE           AS "necesidadFormacionNombre",
               nf.NECESIDADFORMACIONNUMERO           AS "necesidadFormacionNumero",
-              nf.NECESIDADID                        AS "necesidadId"
+              nf.NECESIDADID                        AS "necesidadId",
+              af.ACCIONFORMACIONESTADOAPROBACION    AS "estadoAprobacion",
+              DBMS_LOB.SUBSTR(af.ACCIONFORMACIONMOTIVORECHAZO, 2000, 1) AS "motivoRechazo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te                ON te.TIPOEVENTOID                = af.TIPOEVENTOID
          LEFT JOIN MODALIDADFORMACION mf        ON mf.MODALIDADFORMACIONID        = af.MODALIDADFORMACIONID
@@ -4088,13 +4551,24 @@ export class ProyectosService {
       }),
     )
 
-    // 8. Presupuesto general (reusa el método existente)
+    // 8. Presupuesto general (reusa el método existente — perfilId propaga
+    //    el filtrado de AFs rechazadas según corresponda)
     let presupuesto: unknown = null
-    try { presupuesto = await this.getPresupuestoProyecto(proyectoId) }
+    try { presupuesto = await this.getPresupuestoProyecto(proyectoId, perfilId) }
     catch { /* si falla, deja null y el frontend lo maneja */ }
 
     // 9. Versión actual (si existe)
     const versionActual = await this.getUltimaVersion(proyectoId).catch(() => null)
+
+    // Si los resultados aún no están publicados al proponente, enmascaramos
+    // estado, motivos y conceptos por AF para que vea el proyecto como
+    // "Confirmado", igual a como lo dejó al crear la versión FINAL.
+    if (ocultarResult) {
+      for (const a of acciones) {
+        a.estadoAprobacion = null
+        a.motivoRechazo = null
+      }
+    }
 
     return {
       proyecto: {
@@ -4103,11 +4577,14 @@ export class ProyectosService {
         nombre: proy.nombre,
         objetivo: proy.objetivo,
         convocatoria: proy.convocatoria,
+        convocatoriaId: Number(proy.convocatoriaId) || 0,
         modalidad: proy.modalidad,
         modalidadId: Number(proy.modalidadId) || 0,
-        estado: Number(proy.estado) || 0,
+        estado: ocultarResult ? 1 : (Number(proy.estado) || 0),
         fechaRegistro: proy.fechaRegistro,
         fechaRadicacion: proy.fechaRadicacion,
+        motivoRechazo: ocultarResult ? null : (proy.motivoRechazo ?? null),
+        resultadosPublicados: Number(proy.resultadosPublicados) === 1 ? 1 : 0,
       },
       empresa,
       mesasSectoriales: mesasSectoriales.map((m: any) => m.nombre),

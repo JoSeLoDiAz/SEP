@@ -9,7 +9,7 @@ import {
   Activity, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2,
   ClipboardList, Compass, FileText, FolderKanban, History as HistoryIcon, Info,
   Layers, Loader2, MapPin, Notebook, Package, Printer, Receipt, Repeat, RotateCcw, Search,
-  ShieldCheck, Target, TrendingUp, UserCheck, Users, Users2, Wallet,
+  ShieldCheck, Target, TrendingUp, UserCheck, Users, Users2, Wallet, XCircle,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import Link from 'next/link'
@@ -39,6 +39,8 @@ interface AfReporte {
   necesidadFormacionId: number | null; necesidadId: number | null
   necesidadFormacionNumero: number | null; necesidadFormacionNombre: string | null
   tipoEvento: string | null; modalidad: string | null; metodologia: string | null
+  estadoAprobacion?: number | null
+  motivoRechazo?: string | null
 }
 interface DiagnosticoReporte {
   necesidadId: number
@@ -90,6 +92,8 @@ interface Reporte {
     id: number; codigo: string | null; nombre: string; objetivo: string | null
     convocatoria: string | null; modalidad: string | null; modalidadId: number; estado: number
     fechaRegistro: string | null; fechaRadicacion: string | null
+    motivoRechazo?: string | null
+    resultadosPublicados?: number
   }
   empresa: Empresa
   mesasSectoriales: string[]
@@ -458,22 +462,64 @@ export default function ReporteProyectoPage() {
   const [aprobarOpen, setAprobarOpen] = useState(false)
   const [aprobando, setAprobando] = useState(false)
   const [comentarioAprobacion, setComentarioAprobacion] = useState('')
+  // Estado de aprobación de cada AF: aprobada (default) o rechazada con motivo
+  const [afsAprobacion, setAfsAprobacion] = useState<Record<number, { aprobada: boolean; motivo: string }>>({})
   // Modal/estado para reversar a Subsanación (solo admin)
   const [reversarOpen, setReversarOpen] = useState(false)
   const [reversando, setReversando] = useState(false)
   const [comentarioReversar, setComentarioReversar] = useState('')
+  // Modal/estado para rechazo total del proyecto (solo admin)
+  const [rechazarOpen, setRechazarOpen] = useState(false)
+  const [rechazando, setRechazando] = useState(false)
+  const [motivoRechazoProy, setMotivoRechazoProy] = useState('')
+  // Concepto individual por AF dentro del rechazo total. Por defecto todas
+  // quedan como rechazadas (igual al comportamiento histórico), pero el admin
+  // puede marcar algunas como aprobadas o asignarles un motivo específico.
+  const [afsConceptoRech, setAfsConceptoRech] = useState<Record<number, { aprobada: boolean; motivo: string }>>({})
+  // Publicar/despublicar resultados de la CONVOCATORIA (no del proyecto)
+  const [publicarOpen, setPublicarOpen] = useState(false)
+  const [publicarAccion, setPublicarAccion] = useState<'publicar' | 'despublicar'>('publicar')
+  const [publicandoFlag, setPublicandoFlag] = useState(false)
   const esAdmin = esAdminEarly
 
+  // Inicializa el estado de aprobación de las AFs (todas aprobadas por
+  // defecto) cada vez que abrimos el modal.
+  function abrirModalAprobar() {
+    const ini: Record<number, { aprobada: boolean; motivo: string }> = {}
+    for (const af of data?.acciones ?? []) {
+      ini[af.afId] = { aprobada: true, motivo: '' }
+    }
+    setAfsAprobacion(ini)
+    setAprobarOpen(true)
+  }
+
   async function handleAprobar() {
+    // Validar que toda AF rechazada tenga motivo
+    const afsRechazadas = Object.entries(afsAprobacion)
+      .filter(([, v]) => !v.aprobada)
+      .map(([afId, v]) => ({ afId: Number(afId), motivo: v.motivo.trim() }))
+    const sinMotivo = afsRechazadas.find(r => !r.motivo)
+    if (sinMotivo) {
+      showToast('error', 'Falta motivo de rechazo', 'Todas las AFs marcadas como rechazadas deben tener un motivo escrito.')
+      return
+    }
+    // Conceptos opcionales sobre AFs aprobadas (campo `motivo` reutilizado en el state)
+    const conceptosAprobadas = Object.entries(afsAprobacion)
+      .filter(([, v]) => v.aprobada && v.motivo.trim())
+      .map(([afId, v]) => ({ afId: Number(afId), concepto: v.motivo.trim() }))
     setAprobando(true)
     try {
       // La restauración recorre muchas tablas; subimos el timeout a 2 min para
       // evitar falsos errores cuando la operación es lenta pero exitosa.
       await api.post(`/proyectos/${id}/aprobar`, {
         comentario: comentarioAprobacion.trim() || undefined,
+        afsRechazadas: afsRechazadas.length > 0 ? afsRechazadas : undefined,
+        conceptosAprobadas: conceptosAprobadas.length > 0 ? conceptosAprobadas : undefined,
       }, { timeout: 120_000 })
-      showToast('success', '¡Proyecto aprobado!',
-        'Las tablas vivas fueron restauradas desde la versión FINAL. El proyecto ya está en estado Aprobado.')
+      const detalle = afsRechazadas.length > 0
+        ? `Proyecto aprobado con ${afsRechazadas.length} AF(s) rechazada(s). Los resultados se mostrarán al proponente cuando publiques los resultados de la convocatoria.`
+        : 'Las tablas vivas fueron restauradas desde la versión FINAL. El proyecto ya está en estado Aprobado. Los resultados se mostrarán al proponente cuando publiques los resultados de la convocatoria.'
+      showToast('success', '¡Proyecto aprobado!', detalle)
       setAprobarOpen(false)
       setComentarioAprobacion('')
       const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
@@ -481,6 +527,73 @@ export default function ReporteProyectoPage() {
     } catch (e: any) {
       showToast('error', 'No se pudo aprobar', e?.response?.data?.message ?? 'Error inesperado.')
     } finally { setAprobando(false) }
+  }
+
+  function abrirModalRechazar() {
+    const ini: Record<number, { aprobada: boolean; motivo: string }> = {}
+    for (const af of data?.acciones ?? []) {
+      ini[af.afId] = { aprobada: false, motivo: '' }
+    }
+    setAfsConceptoRech(ini)
+    setMotivoRechazoProy('')
+    setRechazarOpen(true)
+  }
+
+  async function handleRechazarTotal() {
+    const motivo = motivoRechazoProy.trim()
+    if (!motivo) {
+      showToast('error', 'Motivo obligatorio', 'Debes registrar el motivo general del rechazo del proyecto.')
+      return
+    }
+    // AFs marcadas con concepto positivo aun cuando el proyecto se rechaza,
+    // con concepto/observación opcional.
+    const afsAprobadas = Object.entries(afsConceptoRech)
+      .filter(([, v]) => v.aprobada)
+      .map(([afId, v]) => {
+        const concepto = v.motivo.trim()
+        return concepto ? { afId: Number(afId), concepto } : { afId: Number(afId) }
+      })
+    // AFs con motivo individual (sobrescribe el motivo general por AF)
+    const afsConMotivoIndiv = Object.entries(afsConceptoRech)
+      .filter(([, v]) => !v.aprobada && v.motivo.trim())
+      .map(([afId, v]) => ({ afId: Number(afId), motivo: v.motivo.trim() }))
+    setRechazando(true)
+    try {
+      await api.post(`/proyectos/${id}/rechazar`, {
+        motivo,
+        afsAprobadas: afsAprobadas.length > 0 ? afsAprobadas : undefined,
+        afsRechazadas: afsConMotivoIndiv.length > 0 ? afsConMotivoIndiv : undefined,
+      })
+      const detalle = `Proyecto rechazado.${afsAprobadas.length > 0 ? ` ${afsAprobadas.length} AF(s) quedaron con concepto positivo.` : ''} Los resultados se mostrarán al proponente cuando publiques los resultados de la convocatoria.`
+      showToast('success', 'Proyecto rechazado', detalle)
+      setRechazarOpen(false)
+      setMotivoRechazoProy('')
+      window.location.reload()
+    } catch (e: any) {
+      showToast('error', 'No se pudo rechazar', e?.response?.data?.message ?? 'Error inesperado.')
+    } finally { setRechazando(false) }
+  }
+
+  function abrirPublicarModal(accion: 'publicar' | 'despublicar') {
+    setPublicarAccion(accion)
+    setPublicarOpen(true)
+  }
+
+  async function handleConfirmarPublicar() {
+    const publicar = publicarAccion === 'publicar'
+    setPublicandoFlag(true)
+    try {
+      const resp = await api.post<{ message: string; proyectosVisibles: number }>(
+        `/proyectos/${id}/publicar-resultados`, { publicar })
+      showToast('success',
+        publicar ? 'Resultados de la convocatoria publicados' : 'Resultados de la convocatoria despublicados',
+        resp.data?.message ?? '')
+      setPublicarOpen(false)
+      const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
+      setData(r.data)
+    } catch (e: any) {
+      showToast('error', 'No se pudo cambiar la publicación', e?.response?.data?.message ?? 'Error inesperado.')
+    } finally { setPublicandoFlag(false) }
   }
 
   async function handleReversar() {
@@ -697,6 +810,40 @@ export default function ReporteProyectoPage() {
             <p className="text-[11px] text-emerald-700 mt-1">
               Esto es <strong>exactamente lo que aprobarías</strong>. Si el proponente sigue editando el proyecto, esos cambios no se reflejan aquí.
               Para revisar otras versiones del histórico ve a <Link href={`/panel/proyectos/${id}/versiones`} className="underline font-semibold">Versiones</Link>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Banner: Proyecto rechazado por SENA */}
+      {rechazado && proyecto.motivoRechazo && (
+        <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-4 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-red-700 text-white flex items-center justify-center shrink-0">
+            <XCircle size={20} strokeWidth={2.4} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-red-900">
+              Proyecto rechazado por SENA
+            </p>
+            <p className="text-[11px] text-red-700/80 mt-0.5 uppercase tracking-wide font-semibold">Motivo del rechazo</p>
+            <p className="text-sm text-neutral-800 whitespace-pre-wrap mt-1">{proyecto.motivoRechazo}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Banner: Proyecto aprobado con AF rechazadas */}
+      {aprobado && acciones.some(a => a.estadoAprobacion === 0) && (
+        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">
+            <CheckCircle2 size={20} strokeWidth={2.4} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-emerald-900">
+              Proyecto aprobado por SENA
+            </p>
+            <p className="text-xs text-emerald-800 mt-1">
+              Algunas Acciones de Formación fueron <strong>rechazadas</strong> y no formarán parte del proyecto ejecutado.
+              El presupuesto y el plan operativo ya excluyen las AF rechazadas. Revisa cada AF más abajo para ver su estado y, si aplica, el motivo del rechazo.
             </p>
           </div>
         </div>
@@ -1107,29 +1254,57 @@ export default function ReporteProyectoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {acciones.map((a, i) => (
-                    <tr key={a.afId} className={i % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
-                      <td className="px-3 py-3 text-center font-semibold" style={{ color: TITLE_COLOR }}>{a.numero}</td>
-                      <td className="px-3 py-3 text-neutral-700 font-medium">
-                        {a.nombre}
-                        {a.necesidadFormacionNumero != null && (
-                          <span className="block text-[10px] text-neutral-400 mt-0.5">
-                            Vinculada a la necesidad #{a.necesidadFormacionNumero}
-                            {a.necesidadFormacionNombre ? ` — ${a.necesidadFormacionNombre}` : ''}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <a
-                          href={`#af-${a.afId}`}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-neutral-200 hover:bg-neutral-100 transition"
-                          title={`Ver detalle de la AF ${a.numero}`}
-                          style={{ color: TITLE_COLOR }}>
-                          <Search size={14} />
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
+                  {acciones.map((a, i) => {
+                    const rech = a.estadoAprobacion === 0
+                    const apro = a.estadoAprobacion === 1
+                    return (
+                      <tr key={a.afId} className={
+                        rech ? 'bg-red-50' : (i % 2 === 0 ? 'bg-white' : 'bg-neutral-50')
+                      }>
+                        <td className="px-3 py-3 text-center font-semibold" style={{ color: rech ? '#7f1d1d' : TITLE_COLOR }}>{a.numero}</td>
+                        <td className="px-3 py-3 text-neutral-700 font-medium">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={rech ? 'line-through text-neutral-500' : ''}>{a.nombre}</span>
+                            {rech && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                                ✗ Rechazada
+                              </span>
+                            )}
+                            {apro && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                ✓ Aprobada
+                              </span>
+                            )}
+                          </div>
+                          {a.necesidadFormacionNumero != null && (
+                            <span className="block text-[10px] text-neutral-400 mt-0.5">
+                              Vinculada a la necesidad #{a.necesidadFormacionNumero}
+                              {a.necesidadFormacionNombre ? ` — ${a.necesidadFormacionNombre}` : ''}
+                            </span>
+                          )}
+                          {rech && a.motivoRechazo && (
+                            <span className="block text-[11px] text-red-700 mt-1 italic">
+                              Motivo: {a.motivoRechazo}
+                            </span>
+                          )}
+                          {apro && a.motivoRechazo && (
+                            <span className="block text-[11px] text-emerald-700 mt-1 italic">
+                              Concepto: {a.motivoRechazo}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <a
+                            href={`#af-${a.afId}`}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-neutral-200 hover:bg-neutral-100 transition"
+                            title={`Ver detalle de la AF ${a.numero}`}
+                            style={{ color: TITLE_COLOR }}>
+                            <Search size={14} />
+                          </a>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1246,11 +1421,12 @@ export default function ReporteProyectoPage() {
       </button>
     )}
 
-    {/* Botones admin: Aprobar y Reversar a Subsanación. Solo visibles cuando
-        hay versión FINAL marcada y no estamos viendo una versión histórica. */}
+    {/* Botones admin: Aprobar, Reversar a Subsanación y Rechazar.
+        Solo visibles cuando hay versión FINAL marcada y no estamos viendo
+        una versión histórica. */}
     {esAdmin && tieneFinal && !esVersionHistorica && (
       <>
-        <button onClick={() => setAprobarOpen(true)}
+        <button onClick={abrirModalAprobar}
           className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-emerald-600 hover:bg-emerald-700 text-white">
           <CheckCircle2 size={16} />
           Aprobar Proyecto
@@ -1260,38 +1436,138 @@ export default function ReporteProyectoPage() {
           <RotateCcw size={16} />
           Enviar a Subsanación
         </button>
+        <button onClick={abrirModalRechazar}
+          className="fixed bottom-6 right-[28rem] z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-red-600 hover:bg-red-700 text-white">
+          <XCircle size={16} />
+          Rechazar Proyecto
+        </button>
       </>
     )}
 
+    {/* Publicar/Despublicar resultados de la CONVOCATORIA — solo admin,
+        cuando este proyecto ya fue aprobado o rechazado. La publicación es
+        por convocatoria: en cuanto se libera, TODOS los proponentes con
+        proyectos en esa convocatoria ven simultáneamente el resultado de
+        su evaluación. */}
+    {esAdmin && !esVersionHistorica && data && (aprobado || rechazado) && (
+      data.proyecto.resultadosPublicados === 1 ? (
+        <button onClick={() => abrirPublicarModal('despublicar')} disabled={publicandoFlag}
+          className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white">
+          {publicandoFlag ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={16} />}
+          Despublicar convocatoria
+        </button>
+      ) : (
+        <button onClick={() => abrirPublicarModal('publicar')} disabled={publicandoFlag}
+          className="fixed bottom-6 right-24 z-40 inline-flex items-center gap-2 px-5 py-3 text-xs font-semibold rounded-2xl shadow-lg transition no-print bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white">
+          {publicandoFlag ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={16} />}
+          Publicar convocatoria
+        </button>
+      )
+    )}
+
     {/* Modal de aprobación */}
-    <Modal open={aprobarOpen} onClose={() => !aprobando && setAprobarOpen(false)} maxWidth="max-w-lg">
-      <div className="p-6 flex flex-col gap-5">
+    <Modal open={aprobarOpen} onClose={() => !aprobando && setAprobarOpen(false)} maxWidth="max-w-3xl">
+      <div className="p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto">
         <h3 className="text-base font-bold text-neutral-800">Aprobar Proyecto</h3>
         <p className="text-sm text-neutral-600">
-          Vas a aprobar oficialmente este proyecto en nombre del SENA. Esta acción:
+          Marca las AFs que se aprueban y desmarca las que se rechazan. Las AFs rechazadas
+          deben llevar motivo y no sumarán al presupuesto del proyecto aprobado.
         </p>
-        <ul className="text-xs text-neutral-700 list-disc list-inside flex flex-col gap-1 pl-1">
-          <li>Restaura todas las tablas vivas del proyecto desde el snapshot de la versión <strong>FINAL</strong>.</li>
-          <li>Registra la aprobación con su hash SHA-256 en <code className="font-mono text-[10px]">PROYECTOAPROBADO</code>.</li>
-          <li>Cambia el estado del proyecto a <strong>Aprobado</strong> (irreversible mediante este flujo).</li>
-          <li>El proyecto pasa a fase de ejecución; las tablas vivas quedan disponibles para ajustes administrativos.</li>
-        </ul>
+
+        {/* Lista de AFs con checkbox + motivo de rechazo */}
+        <div className="flex flex-col gap-2.5 border border-neutral-200 rounded-2xl p-3 bg-neutral-50/50">
+          {(data?.acciones ?? []).length === 0 && (
+            <p className="text-xs text-neutral-400 text-center py-4">No hay acciones de formación.</p>
+          )}
+          {(data?.acciones ?? []).map(af => {
+            const af_st = afsAprobacion[af.afId] ?? { aprobada: true, motivo: '' }
+            return (
+              <div key={af.afId}
+                className={`rounded-xl border p-3.5 transition ${af_st.aprobada
+                  ? 'bg-white border-neutral-200'
+                  : 'bg-red-50 border-red-200'}`}>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={af_st.aprobada}
+                    onChange={e => setAfsAprobacion(prev => ({
+                      ...prev,
+                      [af.afId]: { aprobada: e.target.checked, motivo: '' },
+                    }))}
+                    className="mt-1 w-5 h-5 accent-emerald-600 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#00304D]/70">AF {af.numero}</span>
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${af_st.aprobada
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-red-100 text-red-700'}`}>
+                        {af_st.aprobada ? '✓ Aprobada' : '✗ Rechazada'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold text-neutral-800 mt-1 leading-snug break-words">{af.nombre}</p>
+                  </div>
+                </label>
+                {af_st.aprobada ? (
+                  <div className="mt-3 ml-8">
+                    <label className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">
+                      Concepto / observación <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional — déjalo vacío si no hay observación)</span>
+                    </label>
+                    <textarea
+                      value={af_st.motivo}
+                      onChange={e => setAfsAprobacion(prev => ({
+                        ...prev,
+                        [af.afId]: { ...prev[af.afId], aprobada: true, motivo: e.target.value },
+                      }))}
+                      maxLength={2000}
+                      rows={2}
+                      placeholder="Si quieres dejar una observación al proponente sobre esta AF aprobada, escríbela aquí..."
+                      className="mt-1 w-full text-sm px-3 py-2 border border-emerald-200 rounded-xl outline-none focus:border-emerald-500 resize-y bg-white" />
+                  </div>
+                ) : (
+                  <div className="mt-3 ml-8">
+                    <label className="text-[10px] font-semibold text-red-700 uppercase tracking-wide">
+                      Motivo del rechazo *
+                    </label>
+                    <textarea
+                      value={af_st.motivo}
+                      onChange={e => setAfsAprobacion(prev => ({
+                        ...prev,
+                        [af.afId]: { ...prev[af.afId], aprobada: false, motivo: e.target.value },
+                      }))}
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="Explica por qué se rechaza esta AF..."
+                      className="mt-1 w-full text-sm px-3 py-2 border border-red-200 rounded-xl outline-none focus:border-red-500 resize-y bg-white" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-          ⚠️ Si el proponente había hecho cambios después de marcar FINAL (en versiones más recientes no marcadas), <strong>esos cambios se perderán de las tablas vivas</strong> — pero los snapshots históricos en PROYECTOVERSION se conservan.
+          ⚠️ Las AFs rechazadas seguirán visibles para el proponente con su motivo, pero <strong>NO sumarán al presupuesto</strong>. Los totales del proyecto se recalcularán automáticamente.
         </div>
 
         <div className="flex flex-col gap-1.5">
           <label className="text-[11px] font-semibold text-neutral-600 uppercase tracking-wide">
-            Comentario de aprobación <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional)</span>
+            Comentario general de aprobación <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional)</span>
           </label>
           <textarea
             value={comentarioAprobacion}
             onChange={e => setComentarioAprobacion(e.target.value)}
             maxLength={1000}
-            rows={3}
+            rows={2}
             placeholder="Ej.: Proyecto aprobado en comité del 30/04/2026"
             className="w-full text-xs px-3 py-2 border border-neutral-200 rounded-xl outline-none focus:border-[#00304D] resize-none" />
           <p className="text-[10px] text-neutral-400 text-right">{comentarioAprobacion.length}/1000</p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 leading-relaxed">
+          ℹ️ El resultado de esta aprobación <strong>no se mostrará al proponente</strong> hasta que se publiquen
+          los resultados de toda la convocatoria. Cuando termines de evaluar todos los proyectos de la convocatoria,
+          usa el botón <strong>“Publicar convocatoria”</strong>.
         </div>
 
         <div className="flex gap-3 justify-end">
@@ -1304,6 +1580,131 @@ export default function ReporteProyectoPage() {
             {aprobando
               ? <Loader2 size={14} className="animate-spin inline-block" />
               : 'Sí, aprobar proyecto'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+
+    {/* Modal de rechazo total del proyecto */}
+    <Modal open={rechazarOpen} onClose={() => !rechazando && setRechazarOpen(false)} maxWidth="max-w-3xl">
+      <div className="p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto">
+        <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
+          <XCircle size={18} className="text-red-600" />
+          Rechazar Proyecto Completo
+        </h3>
+        <p className="text-sm text-neutral-600">
+          Vas a rechazar oficialmente todo el proyecto. Aun cuando el proyecto queda rechazado, puedes
+          dejar concepto individual por cada AF (algunas pueden quedar con concepto positivo) y registrar
+          motivos específicos por AF si aplica.
+        </p>
+
+        {/* Lista de AFs con concepto individual */}
+        <div className="flex flex-col gap-2.5 border border-neutral-200 rounded-2xl p-3 bg-neutral-50/50">
+          {(data?.acciones ?? []).length === 0 && (
+            <p className="text-xs text-neutral-400 text-center py-4">No hay acciones de formación.</p>
+          )}
+          {(data?.acciones ?? []).map(af => {
+            const af_st = afsConceptoRech[af.afId] ?? { aprobada: false, motivo: '' }
+            return (
+              <div key={af.afId}
+                className={`rounded-xl border p-3.5 transition ${af_st.aprobada
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : 'bg-red-50 border-red-200'}`}>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={af_st.aprobada}
+                    onChange={e => setAfsConceptoRech(prev => ({
+                      ...prev,
+                      [af.afId]: { aprobada: e.target.checked, motivo: '' },
+                    }))}
+                    className="mt-1 w-5 h-5 accent-emerald-600 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#00304D]/70">AF {af.numero}</span>
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${af_st.aprobada
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-red-100 text-red-700'}`}>
+                        {af_st.aprobada ? '✓ Concepto positivo' : '✗ Rechazada'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold text-neutral-800 mt-1 leading-snug break-words">{af.nombre}</p>
+                  </div>
+                </label>
+                {af_st.aprobada ? (
+                  <div className="mt-3 ml-8">
+                    <label className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">
+                      Concepto / observación <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional — déjalo vacío si no hay observación)</span>
+                    </label>
+                    <textarea
+                      value={af_st.motivo}
+                      onChange={e => setAfsConceptoRech(prev => ({
+                        ...prev,
+                        [af.afId]: { ...prev[af.afId], aprobada: true, motivo: e.target.value },
+                      }))}
+                      maxLength={2000}
+                      rows={2}
+                      placeholder="Si quieres dejar una observación al proponente sobre esta AF aprobada, escríbela aquí..."
+                      className="mt-1 w-full text-sm px-3 py-2 border border-emerald-200 rounded-xl outline-none focus:border-emerald-500 resize-y bg-white" />
+                  </div>
+                ) : (
+                  <div className="mt-3 ml-8">
+                    <label className="text-[10px] font-semibold text-red-700 uppercase tracking-wide">
+                      Motivo específico de esta AF <span className="font-normal text-neutral-400 normal-case tracking-normal">(opcional, si lo dejas vacío hereda el motivo general del proyecto)</span>
+                    </label>
+                    <textarea
+                      value={af_st.motivo}
+                      onChange={e => setAfsConceptoRech(prev => ({
+                        ...prev,
+                        [af.afId]: { ...prev[af.afId], aprobada: false, motivo: e.target.value },
+                      }))}
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="Si esta AF tiene un motivo de rechazo distinto al general, escríbelo aquí..."
+                      className="mt-1 w-full text-sm px-3 py-2 border border-red-200 rounded-xl outline-none focus:border-red-500 resize-y bg-white" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800">
+          ⚠️ El proyecto queda en estado <strong>Rechazado</strong> y bloqueado para edición. El proponente
+          verá el motivo general que registres abajo y los motivos específicos por AF (si los registraste).
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] font-semibold text-neutral-600 uppercase tracking-wide">
+            Motivo general del rechazo del proyecto *
+          </label>
+          <textarea
+            value={motivoRechazoProy}
+            onChange={e => setMotivoRechazoProy(e.target.value)}
+            maxLength={2000}
+            rows={4}
+            placeholder="Explica claramente por qué se rechaza este proyecto..."
+            className="w-full text-xs px-3 py-2 border border-neutral-200 rounded-xl outline-none focus:border-red-500 resize-none" />
+          <p className="text-[10px] text-neutral-400 text-right">{motivoRechazoProy.length}/2000</p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 leading-relaxed">
+          ℹ️ El resultado de este rechazo <strong>no se mostrará al proponente</strong> hasta que se publiquen
+          los resultados de toda la convocatoria. Cuando termines de evaluar todos los proyectos de la convocatoria,
+          usa el botón <strong>“Publicar convocatoria”</strong>.
+        </div>
+
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setRechazarOpen(false)} disabled={rechazando}
+            className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
+            Cancelar
+          </button>
+          <button onClick={handleRechazarTotal} disabled={rechazando || !motivoRechazoProy.trim()}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 bg-red-600 hover:bg-red-700">
+            {rechazando
+              ? <Loader2 size={14} className="animate-spin inline-block" />
+              : 'Sí, rechazar proyecto'}
           </button>
         </div>
       </div>
@@ -1352,6 +1753,77 @@ export default function ReporteProyectoPage() {
             {reversando
               ? <Loader2 size={14} className="animate-spin inline-block" />
               : 'Sí, enviar a subsanación'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+
+    {/* Modal de publicar/despublicar resultados de la CONVOCATORIA. La acción
+        afecta a todos los proyectos de la misma convocatoria, no solo a este. */}
+    <Modal open={publicarOpen} onClose={() => !publicandoFlag && setPublicarOpen(false)} maxWidth="max-w-lg">
+      <div className="p-6 flex flex-col gap-5">
+        <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
+          <ShieldCheck size={18} className={publicarAccion === 'publicar' ? 'text-emerald-600' : 'text-amber-600'} />
+          {publicarAccion === 'publicar' ? 'Publicar resultados de la convocatoria' : 'Despublicar resultados de la convocatoria'}
+        </h3>
+        <p className="text-sm text-neutral-700 leading-relaxed">
+          {publicarAccion === 'publicar' ? (
+            <>
+              Vas a publicar los resultados de la convocatoria{' '}
+              {data?.proyecto?.convocatoria && <strong>“{data.proyecto.convocatoria}”</strong>}.
+              Esto afecta a <strong>TODOS los proyectos</strong> de esa convocatoria, no solo a este.
+            </>
+          ) : (
+            <>
+              Vas a despublicar los resultados de la convocatoria{' '}
+              {data?.proyecto?.convocatoria && <strong>“{data.proyecto.convocatoria}”</strong>}.
+              Esto oculta a los proponentes el resultado de TODOS los proyectos de esa convocatoria.
+            </>
+          )}
+        </p>
+        <ul className="text-xs text-neutral-700 list-disc list-inside flex flex-col gap-1 pl-1">
+          {publicarAccion === 'publicar' ? (
+            <>
+              <li>Cada proponente verá el estado final de su proyecto (Aprobado o Rechazado).</li>
+              <li>Cada AF mostrará su concepto individual y el motivo (si fue rechazada).</li>
+              <li>El presupuesto del proyecto se ajustará automáticamente excluyendo las AF rechazadas.</li>
+              <li>Los proyectos pendientes de evaluar siguen apareciendo a sus proponentes como “Confirmado”.</li>
+            </>
+          ) : (
+            <>
+              <li>Los proyectos aprobados/rechazados volverán a aparecer al proponente como “Confirmado”.</li>
+              <li>El concepto y motivo por AF dejarán de ser visibles para los proponentes.</li>
+              <li>El presupuesto volverá a mostrarse con todas las AF incluidas (vista del proponente).</li>
+              <li>El admin sigue viendo el estado real y puede volver a publicar después.</li>
+            </>
+          )}
+        </ul>
+        <div className={`rounded-xl p-3 text-xs leading-relaxed ${
+          publicarAccion === 'publicar'
+            ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+            : 'bg-amber-50 border border-amber-200 text-amber-900'
+        }`}>
+          {publicarAccion === 'publicar'
+            ? '✅ Asegúrate de haber terminado de evaluar todos los proyectos de la convocatoria antes de publicar.'
+            : '⚠️ Esta acción es reversible: puedes volver a publicar después con el botón “Publicar convocatoria”.'}
+        </div>
+
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setPublicarOpen(false)} disabled={publicandoFlag}
+            className="px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-300 rounded-xl hover:bg-neutral-50 transition disabled:opacity-50">
+            Cancelar
+          </button>
+          <button onClick={handleConfirmarPublicar} disabled={publicandoFlag}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl transition disabled:opacity-50 ${
+              publicarAccion === 'publicar'
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : 'bg-amber-500 hover:bg-amber-600'
+            }`}>
+            {publicandoFlag
+              ? <Loader2 size={14} className="animate-spin inline-block" />
+              : (publicarAccion === 'publicar'
+                  ? 'Sí, publicar convocatoria'
+                  : 'Sí, despublicar')}
           </button>
         </div>
       </div>
@@ -1513,20 +1985,48 @@ function AfDetalleSection({
     ? materialesForm.find(m => m.id === detalle.material!.materialFormacionId)?.nombre ?? null
     : null
 
+  const afRechazada = af.estadoAprobacion === 0
+  const afAprobada  = af.estadoAprobacion === 1
+
   return (
-    <section id={`af-${af.afId}`} className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden scroll-mt-20">
-      <div className="px-4 sm:px-5 py-3 rounded-t-2xl flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: TITLE_COLOR }}>
-        <div className="flex items-center gap-3 min-w-0">
+    <section id={`af-${af.afId}`} className={`bg-white rounded-2xl border shadow-sm overflow-hidden scroll-mt-20 ${
+      afRechazada ? 'border-red-300' : 'border-neutral-200'
+    }`}>
+      <div className="px-4 sm:px-5 py-3 rounded-t-2xl flex items-center justify-between gap-3 flex-wrap"
+        style={{ backgroundColor: afRechazada ? '#7f1d1d' : TITLE_COLOR }}>
+        <div className="flex items-center gap-3 min-w-0 flex-wrap">
           <div className="w-7 h-7 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
             <BookOpen size={14} className="text-white" strokeWidth={2.2} />
           </div>
           <h2 className="text-white font-bold text-xs sm:text-sm tracking-wide uppercase truncate">AF {af.numero} — {af.nombre}</h2>
+          {afRechazada && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white text-red-700">
+              ✗ Rechazada
+            </span>
+          )}
+          {afAprobada && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-300 text-emerald-900">
+              ✓ Aprobada
+            </span>
+          )}
         </div>
         <a href="#lista-acciones"
           className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/90 hover:text-white bg-white/10 hover:bg-white/20 transition rounded-full px-3 py-1 no-print whitespace-nowrap">
           ← Volver al listado de AF
         </a>
       </div>
+      {afRechazada && af.motivoRechazo && (
+        <div className="bg-red-50 border-b border-red-200 px-5 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-red-700">Motivo del rechazo</p>
+          <p className="text-sm text-neutral-800 whitespace-pre-wrap mt-1">{af.motivoRechazo}</p>
+        </div>
+      )}
+      {afAprobada && af.motivoRechazo && (
+        <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Concepto / observación</p>
+          <p className="text-sm text-neutral-800 whitespace-pre-wrap mt-1">{af.motivoRechazo}</p>
+        </div>
+      )}
       <div className="p-5 flex flex-col gap-6">
 
         {/* 1. Información de la Acción de Formación */}

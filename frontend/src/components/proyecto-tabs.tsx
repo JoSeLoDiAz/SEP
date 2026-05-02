@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { CheckCircle2, FolderKanban, Layers, PiggyBank } from 'lucide-react'
+import { GuiaProponenteBoton } from '@/components/guia-proponente'
 
 export type ProyectoTab = 'generalidades' | 'acciones' | 'presupuesto' | 'confirmar'
 
@@ -35,12 +36,15 @@ export function ProyectoTabs({ proyectoId, active, hideConfirmar, extraTabs }: P
     return <Link href={href} className={cls}><Icon size={13} /> {label}</Link>
   }
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {tab('generalidades', `/panel/proyectos/${proyectoId}`,             'Generalidades',         FolderKanban)}
       {tab('acciones',      `/panel/proyectos/${proyectoId}/acciones`,    'Acciones de Formación', Layers)}
       {tab('presupuesto',   `/panel/proyectos/${proyectoId}/presupuesto`, 'Presupuesto del Proyecto', PiggyBank)}
       {!hideConfirmar && tab('confirmar', `/panel/proyectos/${proyectoId}/reporte`, 'Reporte / Confirmación del Proyecto', CheckCircle2)}
       {extraTabs}
+      <div className="ml-auto">
+        <GuiaProponenteBoton />
+      </div>
     </div>
   )
 }

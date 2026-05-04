@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   BookOpen, ChevronDown, ChevronRight, ChevronUp,
@@ -144,6 +145,8 @@ export default function UnidadesPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [utForm, setUtForm] = useState<UTFormState>(emptyForm())
   const [saving, setSaving] = useState(false)
+  const [confirmEliminarUtId, setConfirmEliminarUtId] = useState<number | null>(null)
+  const [eliminandoUt, setEliminandoUt] = useState(false)
 
   const [actSelId, setActSelId]   = useState<Record<number, string>>({})
   const [actOtro, setActOtro]     = useState<Record<number, string>>({})
@@ -286,17 +289,22 @@ export default function UnidadesPage() {
     }
   }
 
-  const eliminarUT = async (utId: number) => {
-    if (!confirm('¿Eliminar esta unidad temática? Se perderán sus actividades y perfiles.')) return
+  const confirmarEliminarUT = async () => {
+    const utId = confirmEliminarUtId
+    if (utId == null) return
+    setEliminandoUt(true)
     try {
       await api.delete(`/proyectos/${proyectoId}/acciones/${afId}/unidades/${utId}`)
       showToast('Unidad temática eliminada')
       if (expandedId === utId) setExpandedId(null)
       setDetalle(prev => { const n = { ...prev }; delete n[utId]; return n })
+      setConfirmEliminarUtId(null)
       await cargar()
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al eliminar'
       showToast(msg, 'error')
+    } finally {
+      setEliminandoUt(false)
     }
   }
 
@@ -495,7 +503,7 @@ export default function UnidadesPage() {
                     <button onClick={() => toggleExpand(ut.utId)} className={btnO}>
                       {isExpanded ? <><ChevronUp size={13} /> Cerrar</> : <><ChevronDown size={13} /> Ver detalle</>}
                     </button>
-                    <button onClick={() => eliminarUT(ut.utId)}
+                    <button onClick={() => setConfirmEliminarUtId(ut.utId)}
                       className="inline-flex items-center p-2 rounded-xl border border-red-200 text-red-500 hover:bg-red-600 hover:text-white transition">
                       <Trash2 size={13} />
                     </button>
@@ -596,6 +604,22 @@ export default function UnidadesPage() {
           </div>
         )
       })}
+
+      <ConfirmModal
+        open={confirmEliminarUtId != null}
+        onClose={() => setConfirmEliminarUtId(null)}
+        onConfirm={confirmarEliminarUT}
+        tipo="delete"
+        titulo="Eliminar unidad temática"
+        mensaje={
+          <>
+            ¿Seguro que quieres eliminar esta unidad temática? Se perderán también
+            sus actividades y perfiles asociados. Esta acción no se puede deshacer.
+          </>
+        }
+        textoConfirmar="Eliminar"
+        cargando={eliminandoUt}
+      />
     </div>
   )
 }

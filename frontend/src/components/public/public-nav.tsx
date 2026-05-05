@@ -53,7 +53,7 @@ export function PublicNav() {
           className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white/90 hover:text-white hover:bg-white/10 rounded transition-colors"
         >
           <LogIn size={16} />
-          <span className="hidden xs:inline">Iniciar Sesión</span>
+          <span className="hidden sm:inline">Iniciar Sesión</span>
         </Link>
       </div>
 

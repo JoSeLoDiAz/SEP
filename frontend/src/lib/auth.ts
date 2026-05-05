@@ -2,6 +2,7 @@ export interface SepUsuario {
   email: string
   nombre: string
   perfilId: number
+  usuarioPerfilId?: number
 }
 
 export function getSepUsuario(): SepUsuario | null {

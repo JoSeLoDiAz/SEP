@@ -614,4 +614,78 @@ export class EmpresaService {
       return { message: 'Subsector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
+
+  /** Resumen para los badges del home del proponente: cuenta registros y
+   *  estado de cada módulo (datos básicos, contactos, análisis, necesidades,
+   *  proyectos por estado, convenios activos). */
+  async getResumenPanel(email: string) {
+    const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
+    if (!empresa) throw new NotFoundException('Empresa no encontrada')
+    const empresaId = empresa.empresaId
+
+    const [datos] = await this.dataSource.query(
+      `SELECT TRIM(EMPRESARAZONSOCIAL) AS "rs",
+              TRIM(EMPRESADIRECCION)   AS "dir",
+              TRIM(EMPRESACELULAR)     AS "cel",
+              DEPARTAMENTOEMPRESAID    AS "depto",
+              CIUDADEMPRESAID          AS "ciu",
+              COBERTURAEMPRESAID       AS "cob",
+              CIIUID                   AS "ciiu",
+              TIPOEMPRESAID            AS "tipoEmp",
+              TAMANOEMPRESAID          AS "tamEmp",
+              DBMS_LOB.GETLENGTH(EMPRESAOBJETO)    AS "lObj",
+              DBMS_LOB.GETLENGTH(EMPRESAPRODUCTOS) AS "lProd",
+              DBMS_LOB.GETLENGTH(EMPRESASITUACION) AS "lSit",
+              DBMS_LOB.GETLENGTH(EMPRESARETOS)     AS "lRet"
+         FROM EMPRESA WHERE EMPRESAID = :1`,
+      [empresaId],
+    )
+    const datosCompleto = !!(datos?.rs && datos?.dir && datos?.cel
+                          && datos?.depto && datos?.ciu && datos?.cob
+                          && datos?.ciiu && datos?.tipoEmp && datos?.tamEmp)
+    const analisisCompleto = !!(Number(datos?.lObj) > 0 && Number(datos?.lProd) > 0
+                             && Number(datos?.lSit) > 0 && Number(datos?.lRet) > 0)
+
+    const [contactos] = await this.dataSource.query(
+      `SELECT COUNT(*) AS "C" FROM CONTACTOEMPRESA WHERE EMPRESAIDCONTACTO = :1`,
+      [empresaId],
+    )
+
+    const [necesidades] = await this.dataSource.query(
+      `SELECT COUNT(*) AS "C" FROM NECESIDAD WHERE EMPRESANECESIDADID = :1`,
+      [empresaId],
+    )
+
+    const proyEstados: any[] = await this.dataSource.query(
+      `SELECT NVL(PROYECTOESTADO, 0) AS "estado", COUNT(*) AS "C"
+         FROM PROYECTO WHERE EMPRESAID = :1
+        GROUP BY PROYECTOESTADO`,
+      [empresaId],
+    )
+    const proyectos = { borrador: 0, confirmado: 0, aprobado: 0, rechazado: 0, total: 0 }
+    for (const r of proyEstados) {
+      const c = Number(r.C)
+      proyectos.total += c
+      if (Number(r.estado) === 0 || Number(r.estado) === 2) proyectos.borrador += c
+      else if (Number(r.estado) === 1) proyectos.confirmado += c
+      else if (Number(r.estado) === 3) proyectos.aprobado += c
+      else if (Number(r.estado) === 4) proyectos.rechazado += c
+    }
+
+    const [convenios] = await this.dataSource.query(
+      `SELECT COUNT(*) AS "C"
+         FROM CONVENIOS c JOIN PROYECTO p ON p.PROYECTOID = c.PROYECTOID
+        WHERE p.EMPRESAID = :1 AND c.CONVENIOSESTADO = 1`,
+      [empresaId],
+    )
+
+    return {
+      datos: { completo: datosCompleto },
+      contactos: { total: Number(contactos?.C ?? 0) },
+      analisis: { completo: analisisCompleto },
+      necesidades: { total: Number(necesidades?.C ?? 0) },
+      proyectos,
+      convenios: { activos: Number(convenios?.C ?? 0) },
+    }
+  }
 }

@@ -3,30 +3,30 @@
 import api from '@/lib/api'
 import { getSepUsuario, isEmpresa } from '@/lib/auth'
 import {
-  BellRing,
-  BookUser,
-  BarChart2,
-  Building2,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardList,
-  Database,
-  FileBarChart,
-  FileSpreadsheet,
-  FolderKanban,
-  GraduationCap,
-  Handshake,
-  Loader2,
-  Megaphone,
-  Receipt,
-  ScrollText,
-  Settings as SettingsIcon,
-  ShieldAlert,
-  ShieldCheck,
-  TrendingUp,
-  Users,
-  XCircle,
-  type LucideIcon,
+    BarChart2,
+    BellRing,
+    BookUser,
+    Building2,
+    CalendarDays,
+    CheckCircle2,
+    ClipboardList,
+    Database,
+    FileBarChart,
+    FileSpreadsheet,
+    FolderKanban,
+    GraduationCap,
+    Handshake,
+    Loader2,
+    Megaphone,
+    Receipt,
+    ScrollText,
+    Settings as SettingsIcon,
+    ShieldAlert,
+    ShieldCheck,
+    TrendingUp,
+    Users,
+    XCircle,
+    type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -40,9 +40,7 @@ const EMPRESA_CARDS = [
     icon: Building2,
     color: '#00304D',
     href: '/panel/datos',
-    objetivo: 'Diligenciar la información básica de la empresa o gremio.',
-    descripcion: 'Permite gestionar la información empresarial o gremial, ubicación, datos económicos y representante legal.',
-    accion: '¿Cómo hacerlo? Seleccionar "Datos Básicos" en el menú y completar la información solicitada.',
+    descripcion: 'Información empresarial o gremial, ubicación, datos económicos y representante legal.',
     btnLabel: 'Ir a Datos Básicos',
   },
   {
@@ -51,56 +49,55 @@ const EMPRESA_CARDS = [
     icon: BookUser,
     color: '#0070C0',
     href: '/panel/contactos',
-    objetivo: 'Registrar las personas de contacto de la empresa o gremio.',
-    descripcion: 'Permite gestionar los contactos asociados a la organización y vincularlos a un proyecto específico.',
-    accion: '¿Cómo hacerlo? Seleccionar "Contactos" en el menú y agregar o editar los contactos.',
+    descripcion: 'Personas de contacto de la organización vinculadas a los proyectos.',
     btnLabel: 'Ir a Contactos',
   },
   {
     id: 'analisis',
-    title: 'Análisis Empresarial',
+    title: 'Análisis Organizacional',
     icon: BarChart2,
     color: '#00304D',
     href: '/panel/analisis',
-    objetivo: 'Describir el análisis empresarial o gremial del proponente.',
-    descripcion: 'Permite registrar el objeto social, productos, situación actual, retos estratégicos, cadena productiva e interacciones.',
-    accion: '¿Cómo hacerlo? Seleccionar "Análisis" en el menú y completar cada sección del formulario.',
+    descripcion: 'Objeto social, productos, situación actual, retos estratégicos, cadena productiva e interacciones.',
     btnLabel: 'Ir a Análisis',
   },
   {
     id: 'necesidades',
-    title: 'Mis Necesidades',
+    title: 'Necesidades',
     icon: ClipboardList,
     color: '#39A900',
     href: '/panel/necesidades',
-    objetivo: 'Registrar las necesidades de formación identificadas.',
-    descripcion: 'Permite gestionar el diagnóstico de necesidades a partir del cual se priorizan las acciones de formación del proyecto.',
-    accion: '¿Cómo hacerlo? Una vez diligenciados los Datos Básicos, ir al menú "Mis Necesidades".',
-    btnLabel: 'Ir a Mis Necesidades',
+    descripcion: 'Diagnóstico de necesidades de formación que priorizan las acciones del proyecto.',
+    btnLabel: 'Ir a Necesidades',
   },
   {
     id: 'proyectos',
-    title: 'Mis Proyectos',
+    title: 'Proyectos',
     icon: FolderKanban,
     color: '#C47900',
     href: '/panel/proyectos',
-    objetivo: 'Registrar el proyecto de formación diseñado a la medida de sus necesidades.',
-    descripcion: 'Permite gestionar la información del proyecto y las acciones de formación que lo conforman.',
-    accion: '¿Cómo hacerlo? Luego de "Mis Necesidades", seleccionar "Mis Proyectos" en el menú.',
-    btnLabel: 'Ir a Mis Proyectos',
+    descripcion: 'Proyectos de formación diseñados a la medida de sus necesidades.',
+    btnLabel: 'Ir a Proyectos',
   },
   {
     id: 'convenios',
-    title: 'Mis Convenios',
+    title: 'Convenios',
     icon: ScrollText,
     color: '#C4003D',
     href: '/panel/convenios',
-    objetivo: 'Registrar la información relacionada al Convenio una vez gestionada la suscripción.',
-    descripcion: 'Permite gestionar la ejecución del convenio (proyecto de formación y acciones de formación).',
-    accion: '¿Cómo hacerlo? Una vez suscrito el convenio, la información será cargada en esta sección.',
-    btnLabel: 'Ir a Mis Convenios',
+    descripcion: 'Ejecución del convenio una vez gestionada la suscripción.',
+    btnLabel: 'Ir a Convenios',
   },
 ]
+
+interface ResumenPanel {
+  datos: { completo: boolean }
+  contactos: { total: number }
+  analisis: { completo: boolean }
+  necesidades: { total: number }
+  proyectos: { borrador: number; confirmado: number; aprobado: number; rechazado: number; total: number }
+  convenios: { activos: number }
+}
 
 // ── Admin home ────────────────────────────────────────────────────────────────
 
@@ -285,6 +282,48 @@ export default function PanelHome() {
 // ── Empresa home view ─────────────────────────────────────────────────────────
 
 function EmpresaHome({ nombre }: { nombre: string }) {
+  const [resumen, setResumen] = useState<ResumenPanel | null>(null)
+
+  useEffect(() => {
+    api.get<ResumenPanel>('/empresa/resumen-panel')
+      .then(r => setResumen(r.data))
+      .catch(() => setResumen(null))
+  }, [])
+
+  function getBadge(cardId: string): { label: string; tipo: 'ok' | 'pendiente' | 'count' | 'loading' } | null {
+    if (!resumen) return { label: '…', tipo: 'loading' }
+    switch (cardId) {
+      case 'datos':
+        return resumen.datos.completo
+          ? { label: 'Configurado', tipo: 'ok' }
+          : { label: 'Pendiente', tipo: 'pendiente' }
+      case 'contactos':
+        return { label: `${resumen.contactos.total} ${resumen.contactos.total === 1 ? 'contacto' : 'contactos'}`, tipo: 'count' }
+      case 'analisis':
+        return resumen.analisis.completo
+          ? { label: 'Configurado', tipo: 'ok' }
+          : { label: 'Pendiente', tipo: 'pendiente' }
+      case 'necesidades':
+        return { label: `${resumen.necesidades.total} ${resumen.necesidades.total === 1 ? 'registrada' : 'registradas'}`, tipo: 'count' }
+      case 'proyectos': {
+        const t = resumen.proyectos.total
+        return { label: `${t} ${t === 1 ? 'proyecto' : 'proyectos'}`, tipo: 'count' }
+      }
+      case 'convenios': {
+        const a = resumen.convenios.activos
+        return { label: `${a} ${a === 1 ? 'activo' : 'activos'}`, tipo: 'count' }
+      }
+      default: return null
+    }
+  }
+
+  function badgeClasses(tipo: 'ok' | 'pendiente' | 'count' | 'loading') {
+    if (tipo === 'ok') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    if (tipo === 'pendiente') return 'bg-amber-50 text-amber-800 border-amber-200'
+    if (tipo === 'loading') return 'bg-neutral-100 text-neutral-400 border-neutral-200 animate-pulse'
+    return 'bg-neutral-50 text-neutral-600 border-neutral-200'
+  }
+
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
       {/* Welcome banner */}
@@ -312,55 +351,58 @@ function EmpresaHome({ nombre }: { nombre: string }) {
 
       {/* Cards grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-        {EMPRESA_CARDS.map((card) => (
-          <div
-            key={card.id}
-            className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
-          >
-            {/* Barra de color superior */}
-            <div className="h-1.5" style={{ backgroundColor: card.color }} />
-
-            {/* Ícono */}
-            <div className="px-5 pt-6 pb-3 flex justify-center">
-              <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                style={{ backgroundColor: `${card.color}12` }}
-              >
-                <card.icon size={30} style={{ color: card.color }} />
-              </div>
-            </div>
-
-            {/* Título */}
+        {EMPRESA_CARDS.map((card) => {
+          const badge = getBadge(card.id)
+          return (
             <div
-              className="mx-4 rounded-xl px-3 py-2.5 text-center text-sm font-bold text-white mb-4"
-              style={{ backgroundColor: card.color }}
+              key={card.id}
+              className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
             >
-              {card.title}
-            </div>
+              {/* Barra de color superior */}
+              <div className="h-1.5" style={{ backgroundColor: card.color }} />
 
-            {/* Contenido */}
-            <div className="px-5 pb-5 flex flex-col gap-2.5 flex-1">
-              <p className="text-xs text-neutral-700 leading-relaxed">
-                <strong style={{ color: card.color }}>Objetivo:</strong>{' '}
-                {card.objetivo}
-              </p>
-              <p className="text-xs text-neutral-500 leading-relaxed">
-                {card.descripcion}
-              </p>
-              <p className="text-xs text-neutral-400 italic leading-relaxed">
-                {card.accion}
-              </p>
+              {/* Ícono + badge */}
+              <div className="px-5 pt-6 pb-3 flex justify-center relative">
+                <div
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{ backgroundColor: `${card.color}12` }}
+                >
+                  <card.icon size={30} style={{ color: card.color }} />
+                </div>
+                {badge && (
+                  <span
+                    className={`absolute top-4 right-4 text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeClasses(badge.tipo)}`}
+                  >
+                    {badge.label}
+                  </span>
+                )}
+              </div>
 
-              <Link
-                href={card.href}
-                className="mt-auto block text-center text-xs font-semibold text-white py-2.5 px-4 rounded-xl transition-opacity hover:opacity-90 active:scale-95"
+              {/* Título */}
+              <div
+                className="mx-4 rounded-xl px-3 py-2.5 text-center text-sm font-bold text-white mb-4"
                 style={{ backgroundColor: card.color }}
               >
-                {card.btnLabel} →
-              </Link>
+                {card.title}
+              </div>
+
+              {/* Contenido */}
+              <div className="px-5 pb-5 flex flex-col gap-2.5 flex-1">
+                <p className="text-xs text-neutral-600 leading-relaxed">
+                  {card.descripcion}
+                </p>
+
+                <Link
+                  href={card.href}
+                  className="mt-auto block text-center text-xs font-semibold text-white py-2.5 px-4 rounded-xl transition-opacity hover:opacity-90 active:scale-95"
+                  style={{ backgroundColor: card.color }}
+                >
+                  {card.btnLabel} →
+                </Link>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

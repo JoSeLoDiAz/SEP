@@ -2,6 +2,7 @@
 
 import api from '@/lib/api'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
+import { GuiaAFBoton } from '@/components/guia-af'
 import {
   AlertCircle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, ChevronUp,
   ClipboardList, FolderKanban, Layers, Loader2, LogOut, Plus, Save, Search, Trash2, Users, X,
@@ -1608,6 +1609,7 @@ export default function AFDetallePage() {
           </div>
           <h1 className="text-white font-bold text-sm">Acción de Formación N° {af.numero}</h1>
         </div>
+        <GuiaAFBoton />
       </div>
 
       {/* Menú */}

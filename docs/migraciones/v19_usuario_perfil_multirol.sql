@@ -1,0 +1,69 @@
+-- v19_usuario_perfil_multirol.sql
+-- ──────────────────────────────────────────────────────────────────────────
+-- Multirol: un USUARIO puede tener varios PERFIL a la vez.
+--
+-- Hoy USUARIO.PERFILID es 1:1. Esta migración crea la tabla pivote
+-- USUARIOPERFIL para soportar N:M entre USUARIO y PERFIL, sin romper el
+-- código existente:
+--
+--   - Por cada USUARIO con PERFILID NOT NULL se inserta una fila en
+--     USUARIOPERFIL con PREDETERMINADO=1 y ESTADO=1.
+--   - USUARIO.PERFILID se conserva como fallback durante la transición.
+--   - El nuevo flujo de auth lee de USUARIOPERFIL para detectar multirol y
+--     ofrecer selector de perfil al iniciar sesión.
+--
+-- FECHAULTIMOACCESO se actualiza cuando el usuario entra (o cambia) a un
+-- perfil específico, para ordenar el selector y dejar trazabilidad.
+-- ──────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE USUARIOPERFIL (
+  USUARIOPERFILID    NUMBER         NOT NULL,
+  USUARIOID          NUMBER         NOT NULL,
+  PERFILID           NUMBER         NOT NULL,
+  PREDETERMINADO     NUMBER(1)      DEFAULT 0       NOT NULL,
+  ESTADO             NUMBER(1)      DEFAULT 1       NOT NULL,
+  FECHAULTIMOACCESO  TIMESTAMP      NULL,
+  FECHACREACION      TIMESTAMP      DEFAULT SYSDATE NOT NULL,
+  CONSTRAINT PK_USUARIOPERFIL PRIMARY KEY (USUARIOPERFILID),
+  CONSTRAINT FK_USUARIOPERFIL_USUARIO
+    FOREIGN KEY (USUARIOID) REFERENCES USUARIO(USUARIOID),
+  CONSTRAINT FK_USUARIOPERFIL_PERFIL
+    FOREIGN KEY (PERFILID) REFERENCES PERFIL(PERFILID),
+  CONSTRAINT UQ_USUARIOPERFIL_UP UNIQUE (USUARIOID, PERFILID)
+);
+
+CREATE INDEX IX_USUARIOPERFIL_USU ON USUARIOPERFIL (USUARIOID, ESTADO);
+
+CREATE SEQUENCE USUARIOPERFIL_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
+
+-- ── Migración de los perfiles actuales ─────────────────────────────────────
+-- Cada USUARIO con PERFILID NOT NULL pasa a tener su perfil predeterminado.
+INSERT INTO USUARIOPERFIL (
+  USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION
+)
+SELECT USUARIOPERFIL_SEQ.NEXTVAL, USUARIOID, PERFILID, 1, 1, SYSDATE
+  FROM USUARIO
+ WHERE PERFILID IS NOT NULL;
+
+-- ── Validación post-migración ──────────────────────────────────────────────
+-- Ambos counts deben coincidir. Correr manualmente después de la migración:
+--
+--   SELECT (SELECT COUNT(*) FROM USUARIO WHERE PERFILID IS NOT NULL) AS USUARIOS_CON_PERFIL,
+--          (SELECT COUNT(*) FROM USUARIOPERFIL)                       AS USUARIOPERFIL_FILAS,
+--          (SELECT COUNT(*) FROM USUARIOPERFIL WHERE PREDETERMINADO=1) AS PREDETERMINADOS,
+--          (SELECT COUNT(*) FROM USUARIOPERFIL WHERE ESTADO=1)         AS ACTIVOS
+--     FROM DUAL;
+--
+-- USUARIOS_CON_PERFIL == USUARIOPERFIL_FILAS == PREDETERMINADOS == ACTIVOS
+
+-- ── GRANTS y SINÓNIMOS para SEP_APP (CRUD) y SEP_LECTOR (SELECT) ───────────
+GRANT SELECT, INSERT, UPDATE, DELETE ON USUARIOPERFIL     TO SEP_APP;
+GRANT SELECT                         ON USUARIOPERFIL     TO SEP_LECTOR;
+GRANT SELECT                         ON USUARIOPERFIL_SEQ TO SEP_APP;
+
+CREATE OR REPLACE SYNONYM SEP_APP.USUARIOPERFIL        FOR SEPLOCAL.USUARIOPERFIL;
+CREATE OR REPLACE SYNONYM SEP_APP.USUARIOPERFIL_SEQ    FOR SEPLOCAL.USUARIOPERFIL_SEQ;
+CREATE OR REPLACE SYNONYM SEP_LECTOR.USUARIOPERFIL     FOR SEPLOCAL.USUARIOPERFIL;
+CREATE OR REPLACE SYNONYM SEP_LECTOR.USUARIOPERFIL_SEQ FOR SEPLOCAL.USUARIOPERFIL_SEQ;
+
+COMMIT;

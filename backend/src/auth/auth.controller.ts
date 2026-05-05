@@ -20,9 +20,34 @@ export class AuthController {
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Iniciar sesión en el SEP' })
+  @ApiOperation({ summary: 'Iniciar sesión en el SEP (multirol-aware)' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto)
+  }
+
+  @Post('seleccionar-perfil')
+  @ApiOperation({ summary: 'Paso 2 del login multirol: elegir perfil con preauthToken' })
+  seleccionarPerfil(@Body() dto: { preauthToken: string; perfilId: number }) {
+    return this.authService.seleccionarPerfil(dto.preauthToken, dto.perfilId)
+  }
+
+  @Post('cambiar-perfil')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cambiar el perfil activo sin cerrar sesión' })
+  cambiarPerfil(
+    @CurrentUser() user: { usuarioId: number },
+    @Body() dto: { perfilId: number },
+  ) {
+    return this.authService.cambiarPerfil(user.usuarioId, dto.perfilId)
+  }
+
+  @Get('mis-perfiles')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lista de perfiles activos del usuario autenticado' })
+  misPerfiles(@CurrentUser() user: { usuarioId: number }) {
+    return this.authService.perfilesDelUsuario(user.usuarioId)
   }
 
   @Post('registrar-empresa')

@@ -23,6 +23,12 @@ export class EmpresaController {
     return this.empresaService.getDatos(user.email)
   }
 
+  @Get('resumen-panel')
+  @ApiOperation({ summary: 'Conteos para los badges del home del proponente' })
+  getResumenPanel(@CurrentUser() user: JwtUser) {
+    return this.empresaService.getResumenPanel(user.email)
+  }
+
   // ── Lookups ───────────────────────────────────────────────────────────────
 
   @Get('departamentos')

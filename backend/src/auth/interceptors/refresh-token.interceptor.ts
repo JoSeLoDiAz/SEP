@@ -10,6 +10,7 @@ interface AuthedUser {
   email: string
   perfilId: number
   rol: string
+  usuarioPerfilId?: number
 }
 
 /**
@@ -34,6 +35,8 @@ export class RefreshTokenInterceptor implements NestInterceptor {
           email: req.user.email,
           perfilId: req.user.perfilId,
           rol: req.user.rol,
+          usuarioPerfilId: req.user.usuarioPerfilId,
+          scope: 'auth',
         }
         const newToken = this.jwtService.sign(payload)
         res.setHeader('X-New-Token', newToken)

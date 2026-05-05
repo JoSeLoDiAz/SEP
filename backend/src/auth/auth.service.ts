@@ -15,6 +15,7 @@ import { Usuario } from './entities/usuario.entity'
 import { Empresa } from './entities/empresa.entity'
 import { Persona } from './entities/persona.entity'
 import { TipoDocumentoIdentidad } from './entities/tipo-documento.entity'
+import { UsuarioPerfil } from './entities/usuario-perfil.entity'
 import { LoginDto } from './dto/login.dto'
 import { RegistrarEmpresaDto } from './dto/registrar-empresa.dto'
 import { RegistrarPersonaDto } from './dto/registrar-persona.dto'
@@ -92,10 +93,68 @@ export class AuthService {
     private readonly personaRepo: Repository<Persona>,
     @InjectRepository(TipoDocumentoIdentidad)
     private readonly tipoDocRepo: Repository<TipoDocumentoIdentidad>,
+    @InjectRepository(UsuarioPerfil)
+    private readonly usuarioPerfilRepo: Repository<UsuarioPerfil>,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
     private readonly mailService: MailService,
   ) {}
+
+  private async resolverNombreUsuario(email: string, perfilId: number): Promise<string> {
+    try {
+      if (perfilId === 7) {
+        const rows: Array<{ razon: string }> = await this.dataSource.query(
+          `SELECT TRIM(EMPRESARAZONSOCIAL) AS "razon"
+             FROM EMPRESA WHERE EMPRESAEMAIL = :1 AND ROWNUM = 1`,
+          [email],
+        )
+        if (rows[0]?.razon) return rows[0].razon
+      } else {
+        const rows: Array<{ nombres: string; apellido: string }> = await this.dataSource.query(
+          `SELECT TRIM(PERSONANOMBRES) AS "nombres",
+                  TRIM(PERSONAPRIMERAPELLIDO) AS "apellido"
+             FROM PERSONA WHERE PERSONAEMAIL = :1 AND ROWNUM = 1`,
+          [email],
+        )
+        if (rows[0]?.nombres) return `${rows[0].nombres} ${rows[0].apellido}`.trim()
+      }
+    } catch { /* fallback al email */ }
+    return email
+  }
+
+  /** Lista los perfiles activos del usuario con nombre y último acceso. */
+  private async listarPerfilesActivos(usuarioId: number) {
+    const rows: Array<{
+      usuarioPerfilId: number
+      perfilId: number
+      perfilNombre: string
+      predeterminado: number
+      fechaUltimoAcceso: Date | null
+    }> = await this.dataSource.query(
+      `SELECT up.USUARIOPERFILID         AS "usuarioPerfilId",
+              up.PERFILID                AS "perfilId",
+              TRIM(p.PERFILNOMBRE)       AS "perfilNombre",
+              up.PREDETERMINADO          AS "predeterminado",
+              up.FECHAULTIMOACCESO       AS "fechaUltimoAcceso"
+         FROM USUARIOPERFIL up
+         JOIN PERFIL p ON p.PERFILID = up.PERFILID
+        WHERE up.USUARIOID = :1
+          AND up.ESTADO = 1
+        ORDER BY up.PREDETERMINADO DESC, up.FECHAULTIMOACCESO DESC NULLS LAST, p.PERFILNOMBRE ASC`,
+      [usuarioId],
+    )
+    return rows.map(r => ({
+      ...r,
+      predeterminado: Number(r.predeterminado) === 1,
+    }))
+  }
+
+  private async marcarUltimoAcceso(usuarioPerfilId: number) {
+    await this.dataSource.query(
+      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = SYSTIMESTAMP WHERE USUARIOPERFILID = :1`,
+      [usuarioPerfilId],
+    )
+  }
 
   /**
    * Verifica un token de Cloudflare Turnstile contra la API de Cloudflare.
@@ -180,45 +239,67 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas')
     }
 
-    const rol = PERFIL_ROLES[usuario.perfilId] ?? 'usuario'
+    const perfiles = await this.listarPerfilesActivos(usuario.usuarioId)
+
+    // Si el usuario aún no tiene filas en USUARIOPERFIL (caso borde anterior a
+    // la migración), usamos USUARIO.PERFILID como fallback.
+    if (perfiles.length === 0) {
+      return this.emitirTokenFinal(usuario, usuario.perfilId, undefined)
+    }
+
+    // Multirol: 2+ perfiles activos → emitimos preauthToken y dejamos al
+    // frontend pedir la selección.
+    if (perfiles.length > 1) {
+      const preauthToken = this.jwtService.sign(
+        {
+          sub: usuario.usuarioId,
+          email: usuario.usuarioEmail,
+          scope: 'preauth',
+        },
+        { expiresIn: '5m' },
+      )
+      const nombre = await this.resolverNombreUsuario(usuario.usuarioEmail, perfiles[0].perfilId)
+      return {
+        multirol: true,
+        preauthToken,
+        usuario: {
+          usuarioId: usuario.usuarioId,
+          email: usuario.usuarioEmail,
+          nombre,
+        },
+        perfiles,
+      }
+    }
+
+    // Un solo perfil → JWT directo (flujo idéntico al anterior).
+    const unico = perfiles[0]
+    return this.emitirTokenFinal(usuario, unico.perfilId, unico.usuarioPerfilId)
+  }
+
+  /** Genera el JWT final y arma la respuesta de login con el perfil ya elegido. */
+  private async emitirTokenFinal(
+    usuario: Usuario,
+    perfilId: number,
+    usuarioPerfilId: number | undefined,
+  ) {
+    const rol = PERFIL_ROLES[perfilId] ?? 'usuario'
 
     const payload = {
       sub: usuario.usuarioId,
       email: usuario.usuarioEmail,
-      perfilId: usuario.perfilId,
+      perfilId,
       rol,
+      usuarioPerfilId,
+      scope: 'auth' as const,
     }
 
     const token = this.jwtService.sign(payload)
 
-    // Buscar nombre según perfil: perfilId=7 → EMPRESA, cualquier otro → PERSONA
-    let nombre = usuario.usuarioEmail
-    try {
-      if (usuario.perfilId === 7) {
-        const rows: Array<{ razon: string }> = await this.dataSource.query(
-          `SELECT TRIM(EMPRESARAZONSOCIAL) AS "razon"
-             FROM EMPRESA
-            WHERE EMPRESAEMAIL = :1
-              AND ROWNUM = 1`,
-          [usuario.usuarioEmail],
-        )
-        if (rows[0]?.razon) nombre = rows[0].razon
-      } else {
-        const rows: Array<{ nombres: string; apellido: string }> = await this.dataSource.query(
-          `SELECT TRIM(PERSONANOMBRES) AS "nombres",
-                  TRIM(PERSONAPRIMERAPELLIDO) AS "apellido"
-             FROM PERSONA
-            WHERE PERSONAEMAIL = :1
-              AND ROWNUM = 1`,
-          [usuario.usuarioEmail],
-        )
-        if (rows[0]?.nombres) {
-          nombre = `${rows[0].nombres} ${rows[0].apellido}`.trim()
-        }
-      }
-    } catch {
-      // Si falla la búsqueda del nombre, usamos el email como fallback
+    if (usuarioPerfilId) {
+      await this.marcarUltimoAcceso(usuarioPerfilId).catch(() => {})
     }
+
+    const nombre = await this.resolverNombreUsuario(usuario.usuarioEmail, perfilId)
 
     return {
       accessToken: token,
@@ -226,10 +307,65 @@ export class AuthService {
         usuarioId: usuario.usuarioId,
         email: usuario.usuarioEmail,
         nombre,
-        perfilId: usuario.perfilId,
+        perfilId,
         rol,
+        usuarioPerfilId,
       },
     }
+  }
+
+  /** Paso 2 del login multirol: el usuario elige con qué perfil entra. */
+  async seleccionarPerfil(preauthToken: string, perfilId: number) {
+    if (!preauthToken) throw new BadRequestException('Falta el token de pre-autenticación')
+    if (!perfilId)     throw new BadRequestException('Debe seleccionar un perfil')
+
+    let payload: { sub: number; email: string; scope?: string }
+    try {
+      payload = this.jwtService.verify(preauthToken)
+    } catch {
+      throw new UnauthorizedException('Token inválido o expirado. Inicia sesión nuevamente.')
+    }
+    if (payload.scope !== 'preauth') {
+      throw new UnauthorizedException('Token inválido para esta operación')
+    }
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioId: payload.sub } })
+    if (!usuario || usuario.usuarioEstado === 0) {
+      throw new UnauthorizedException('Usuario no disponible')
+    }
+
+    const fila = await this.usuarioPerfilRepo.findOne({
+      where: { usuarioId: usuario.usuarioId, perfilId, estado: 1 },
+    })
+    if (!fila) {
+      throw new UnauthorizedException('El perfil seleccionado no está disponible para este usuario')
+    }
+
+    return this.emitirTokenFinal(usuario, perfilId, fila.usuarioPerfilId)
+  }
+
+  /** Cambio de perfil en caliente para usuarios ya autenticados. */
+  async cambiarPerfil(usuarioId: number, perfilId: number) {
+    if (!perfilId) throw new BadRequestException('Debe indicar el perfil destino')
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioId } })
+    if (!usuario || usuario.usuarioEstado === 0) {
+      throw new UnauthorizedException('Usuario no disponible')
+    }
+
+    const fila = await this.usuarioPerfilRepo.findOne({
+      where: { usuarioId, perfilId, estado: 1 },
+    })
+    if (!fila) {
+      throw new UnauthorizedException('No tiene asignado ese perfil')
+    }
+
+    return this.emitirTokenFinal(usuario, perfilId, fila.usuarioPerfilId)
+  }
+
+  /** Lista los perfiles activos del usuario autenticado (para topbar). */
+  async perfilesDelUsuario(usuarioId: number) {
+    return this.listarPerfilesActivos(usuarioId)
   }
 
   async registrarEmpresa(dto: RegistrarEmpresaDto) {
@@ -283,6 +419,15 @@ export class AuthService {
       usuario.usuarioLlaveEncriptacion = llaveEncriptacion
 
       const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
+
+      // Multirol: registrar el perfil 7 (empresa) en USUARIOPERFIL como
+      // predeterminado y activo. PERFILID en USUARIO se conserva como fallback.
+      await queryRunner.query(
+        `INSERT INTO USUARIOPERFIL
+           (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, SYSDATE)`,
+        [usuarioGuardado.usuarioId],
+      )
 
       const seqEmpresa = await queryRunner.query('SELECT EMPRESAID.NEXTVAL FROM dual')
       const nextEmpresaId: number = seqEmpresa[0]['NEXTVAL']
@@ -383,6 +528,15 @@ export class AuthService {
       usuario.usuarioLlaveEncriptacion = llaveEncriptacion
 
       const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
+
+      // Multirol: registrar el perfil 8 (persona/usuario) en USUARIOPERFIL como
+      // predeterminado y activo. PERFILID en USUARIO se conserva como fallback.
+      await queryRunner.query(
+        `INSERT INTO USUARIOPERFIL
+           (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 8, 1, 1, SYSDATE)`,
+        [usuarioGuardado.usuarioId],
+      )
 
       const seqPersona = await queryRunner.query('SELECT PERSONAID.NEXTVAL FROM dual')
       const nextPersonaId: number = seqPersona[0]['NEXTVAL']

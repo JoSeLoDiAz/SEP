@@ -13,10 +13,12 @@ import { Usuario } from './entities/usuario.entity'
 import { Empresa } from './entities/empresa.entity'
 import { Persona } from './entities/persona.entity'
 import { TipoDocumentoIdentidad } from './entities/tipo-documento.entity'
+import { Perfil } from './entities/perfil.entity'
+import { UsuarioPerfil } from './entities/usuario-perfil.entity'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Usuario, Empresa, Persona, TipoDocumentoIdentidad]),
+    TypeOrmModule.forFeature([Usuario, Empresa, Persona, TipoDocumentoIdentidad, Perfil, UsuarioPerfil]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

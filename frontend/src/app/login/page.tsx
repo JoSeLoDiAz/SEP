@@ -57,18 +57,40 @@ export default function LoginPage() {
 
     setLoading(true)
     try {
-      const res = await api.post<{
-        accessToken: string
-        usuario: { perfilId: number; email: string; nombre: string }
-      }>('/auth/login', { email, clave, captchaToken })
+      const res = await api.post<
+        | {
+            multirol: true
+            preauthToken: string
+            usuario: { email: string; nombre: string; usuarioId: number }
+            perfiles: Array<{ usuarioPerfilId: number; perfilId: number; perfilNombre: string; predeterminado: boolean }>
+          }
+        | {
+            accessToken: string
+            usuario: { perfilId: number; email: string; nombre: string; usuarioPerfilId?: number }
+          }
+      >('/auth/login', { email, clave, captchaToken })
 
-      localStorage.setItem('sep_token', res.data.accessToken)
+      // Multirol: pasar a la pantalla de selección de perfil
+      if ('multirol' in res.data && res.data.multirol) {
+        sessionStorage.setItem('sep_preauth', JSON.stringify({
+          preauthToken: res.data.preauthToken,
+          usuario: res.data.usuario,
+          perfiles: res.data.perfiles,
+        }))
+        router.push('/login/seleccionar-perfil')
+        return
+      }
+
+      // Flujo de un único perfil — idéntico al anterior
+      const ok = res.data as { accessToken: string; usuario: { perfilId: number; email: string; nombre: string; usuarioPerfilId?: number } }
+      localStorage.setItem('sep_token', ok.accessToken)
       localStorage.setItem('sep_usuario', JSON.stringify({
-        email: res.data.usuario.email,
-        nombre: res.data.usuario.nombre,
-        perfilId: res.data.usuario.perfilId,
+        email: ok.usuario.email,
+        nombre: ok.usuario.nombre,
+        perfilId: ok.usuario.perfilId,
+        usuarioPerfilId: ok.usuario.usuarioPerfilId,
       }))
-      setToastNombre(res.data.usuario.nombre)
+      setToastNombre(ok.usuario.nombre)
       setToast(true)
       setTimeout(() => router.push('/panel'), 1800)
     } catch (err: unknown) {

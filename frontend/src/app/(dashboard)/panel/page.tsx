@@ -184,10 +184,10 @@ const ADMIN_CARDS: AdminCard[] = [
     icon: Users,
     color: '#C47900',
     links: [
-      { label: 'Crear usuario',                disabled: true },
-      { label: 'Asignar perfil de usuario',    disabled: true },
-      { label: 'Cambiar contraseña Persona',   disabled: true },
-      { label: 'Cambiar contraseña Empresa',   disabled: true },
+      { label: 'Crear usuario',                href: '/panel/admin/usuarios/nuevo' },
+      { label: 'Asignar perfil de usuario',    href: '/panel/admin/usuarios' },
+      { label: 'Cambiar contraseña Persona',   href: '/panel/admin/cambiar-clave' },
+      { label: 'Cambiar contraseña Empresa',   href: '/panel/admin/cambiar-clave' },
     ],
   },
   {

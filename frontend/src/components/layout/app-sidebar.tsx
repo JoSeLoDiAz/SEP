@@ -3,6 +3,7 @@
 import { clearSepAuth, type SepUsuario } from '@/lib/auth'
 import api from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useTieneConvenios } from '@/lib/use-tiene-convenios'
 import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
@@ -93,6 +94,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const { tieneConvenios } = useTieneConvenios()
 
   const LABEL_OVERRIDE: Record<string, string> = {
     'Mis Proyectos': 'Proyectos',
@@ -203,7 +205,9 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
               {usuario?.nombre ?? usuario?.email ?? '—'}
             </span>
             <span className="text-white/50 text-[10px] truncate">
-              {usuario?.perfilId === 7 ? 'Gremio / Empresa / Asociación' : 'Usuario interno'}
+              {usuario?.perfilId === 7
+                ? (tieneConvenios ? 'Conviniente' : 'Proponente')
+                : 'Usuario interno'}
             </span>
           </div>
         )}

@@ -147,6 +147,7 @@ export class ProyectosService {
     dto: { nombre: string; convocatoriaId: number; modalidadId: number; objetivo?: string },
   ) {
     const empresaId = await this.getEmpresaId(email)
+    await this.validarEdicionPermitida(proyectoId)
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTONOMBRE   = :1,
@@ -158,6 +159,65 @@ export class ProyectosService {
       [dto.nombre.trim(), dto.convocatoriaId, dto.modalidadId, dto.objetivo ?? null, proyectoId, empresaId],
     )
     return { message: 'Proyecto actualizado correctamente' }
+  }
+
+  /** Valida que el proyecto pueda editarse: rechaza si está aprobado/rechazado
+   *  (estado 3 o 4) o si tiene una versión marcada como FINAL no anulada. */
+  private async validarEdicionPermitida(proyectoId: number): Promise<void> {
+    const [r] = await this.dataSource.query(
+      `SELECT p.PROYECTOESTADO AS "estado",
+              (SELECT COUNT(*) FROM PROYECTOVERSION
+                WHERE PROYECTOID = p.PROYECTOID
+                  AND VERSIONESFINAL = 1
+                  AND VERSIONANULADA = 0) AS "tieneFinal"
+         FROM PROYECTO p WHERE p.PROYECTOID = :1`,
+      [proyectoId],
+    )
+    if (!r) throw new NotFoundException('Proyecto no encontrado.')
+    const estado = Number(r.estado)
+    if (estado === 3 || estado === 4) {
+      throw new BadRequestException(
+        'No se puede editar el proyecto porque ya está aprobado o rechazado.',
+      )
+    }
+    if (Number(r.tieneFinal) > 0) {
+      throw new BadRequestException(
+        'No se puede editar mientras haya una versión marcada como FINAL. Desmárquela primero.',
+      )
+    }
+  }
+
+  /** Variante: valida con un afId, resolviendo primero el proyectoId. */
+  private async validarEdicionPermitidaPorAf(afId: number): Promise<void> {
+    const [r] = await this.dataSource.query(
+      `SELECT PROYECTOID AS "id" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+      [afId],
+    )
+    if (!r) throw new NotFoundException('Acción de formación no encontrada.')
+    await this.validarEdicionPermitida(Number(r.id))
+  }
+
+  /** Variante: valida con un grupoId. */
+  private async validarEdicionPermitidaPorGrupo(grupoId: number): Promise<void> {
+    const [r] = await this.dataSource.query(
+      `SELECT af.PROYECTOID AS "id"
+         FROM AFGRUPO g
+         JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
+        WHERE g.AFGRUPOID = :1`,
+      [grupoId],
+    )
+    if (!r) throw new NotFoundException('Grupo no encontrado.')
+    await this.validarEdicionPermitida(Number(r.id))
+  }
+
+  /** Variante: valida con un utId. */
+  private async validarEdicionPermitidaPorUt(utId: number): Promise<void> {
+    const [r] = await this.dataSource.query(
+      `SELECT PROYECTOIDUT AS "id" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`,
+      [utId],
+    )
+    if (!r) throw new NotFoundException('Unidad temática no encontrada.')
+    await this.validarEdicionPermitida(Number(r.id))
   }
 
   // ── Validación de completitud (antes de confirmar) ────────────────────────
@@ -1455,78 +1515,96 @@ export class ProyectosService {
       throw new BadRequestException('No hay versión marcada como FINAL en este proyecto.')
     }
 
-    // 2) Restaurar tablas vivas desde el snapshot FINAL
+    // 2) Restaurar tablas vivas desde el snapshot FINAL.
+    //    Tiene su propia transacción interna; si falla, no avanza.
     await this.restaurarLiveDesdeSnapshot(proyectoId, Number(versionFinal.versionId))
 
-    // 3) Marcar AFs aprobadas/rechazadas. Por defecto TODAS aprobadas; las
-    // que el admin pasó en `afsRechazadas` quedan con ESTADO=0 + motivo. La
-    // columna ACCIONFORMACIONMOTIVORECHAZO almacena ambos casos (motivo de
-    // rechazo cuando ESTADO=0, concepto/observación cuando ESTADO=1) — el
-    // semantismo se decide por el estado.
-    await this.dataSource.query(
-      `UPDATE ACCIONFORMACION
-          SET ACCIONFORMACIONESTADOAPROBACION = 1,
-              ACCIONFORMACIONMOTIVORECHAZO   = NULL
-        WHERE PROYECTOID = :1`,
-      [proyectoId],
-    )
-    // Conceptos opcionales sobre AFs aprobadas: el admin puede dejar una
-    // observación al proponente aun cuando aprueba la AF.
-    const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
-    for (const c of conceptos) {
-      await this.dataSource.query(
+    // 3-5) Pasos siguientes en UNA transacción atómica.
+    //    Si falla alguno entre marcar AFs / insertar PROYECTOAPROBADO / cambiar
+    //    estado, se revierten juntos. La restauración del paso 2 ya quedó
+    //    commiteada, pero los reintentos son idempotentes (DELETE+INSERT en
+    //    PROYECTOAPROBADO y UPDATE de estado se pueden volver a aplicar).
+    const qr = this.dataSource.createQueryRunner()
+    await qr.connect()
+    await qr.startTransaction()
+    try {
+      // 3) Marcar AFs aprobadas/rechazadas. Por defecto TODAS aprobadas; las
+      // que el admin pasó en `afsRechazadas` quedan con ESTADO=0 + motivo. La
+      // columna ACCIONFORMACIONMOTIVORECHAZO almacena ambos casos (motivo de
+      // rechazo cuando ESTADO=0, concepto/observación cuando ESTADO=1) — el
+      // semantismo se decide por el estado.
+      await qr.query(
         `UPDATE ACCIONFORMACION
-            SET ACCIONFORMACIONMOTIVORECHAZO = :1
-          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
-        [c.concepto.trim(), Number(c.afId), proyectoId],
+            SET ACCIONFORMACIONESTADOAPROBACION = 1,
+                ACCIONFORMACIONMOTIVORECHAZO   = NULL
+          WHERE PROYECTOID = :1`,
+        [proyectoId],
       )
-    }
-    const rechazadas = (afsRechazadas ?? []).filter(r => Number(r.afId) > 0 && (r.motivo ?? '').trim())
-    for (const r of rechazadas) {
-      await this.dataSource.query(
-        `UPDATE ACCIONFORMACION
-            SET ACCIONFORMACIONESTADOAPROBACION = 0,
-                ACCIONFORMACIONMOTIVORECHAZO   = :1
-          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
-        [r.motivo.trim(), Number(r.afId), proyectoId],
+      // Conceptos opcionales sobre AFs aprobadas: el admin puede dejar una
+      // observación al proponente aun cuando aprueba la AF.
+      const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
+      for (const c of conceptos) {
+        await qr.query(
+          `UPDATE ACCIONFORMACION
+              SET ACCIONFORMACIONMOTIVORECHAZO = :1
+            WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+          [c.concepto.trim(), Number(c.afId), proyectoId],
+        )
+      }
+      const rechazadas = (afsRechazadas ?? []).filter(r => Number(r.afId) > 0 && (r.motivo ?? '').trim())
+      for (const r of rechazadas) {
+        await qr.query(
+          `UPDATE ACCIONFORMACION
+              SET ACCIONFORMACIONESTADOAPROBACION = 0,
+                  ACCIONFORMACIONMOTIVORECHAZO   = :1
+            WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+          [r.motivo.trim(), Number(r.afId), proyectoId],
+        )
+      }
+
+      // 4) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
+      await qr.query(
+        `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
       )
-    }
+      await qr.query(
+        `INSERT INTO PROYECTOAPROBADO
+           (PROYECTOID, PROYECTOVERSIONID, VERSIONCODIGO, VERSIONHASH,
+            FECHAAPROBACION, USUARIOAPROBO, COMENTARIOAPROBACION)
+         VALUES (:1, :2, :3, :4, SYSDATE, :5, :6)`,
+        [proyectoId, Number(versionFinal.versionId), versionFinal.codigo,
+         versionFinal.hash, email, comentario?.trim() || null],
+      )
 
-    // 4) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
-    await this.dataSource.query(
-      `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
-    )
-    await this.dataSource.query(
-      `INSERT INTO PROYECTOAPROBADO
-         (PROYECTOID, PROYECTOVERSIONID, VERSIONCODIGO, VERSIONHASH,
-          FECHAAPROBACION, USUARIOAPROBO, COMENTARIOAPROBACION)
-       VALUES (:1, :2, :3, :4, SYSDATE, :5, :6)`,
-      [proyectoId, Number(versionFinal.versionId), versionFinal.codigo,
-       versionFinal.hash, email, comentario?.trim() || null],
-    )
+      // 5) Cambiar estado a 3 (Aprobado) y limpiar motivo previo. La
+      //    publicación de resultados al proponente NO se decide aquí: es por
+      //    convocatoria y la maneja el admin desde "Publicar resultados de la
+      //    convocatoria" cuando termina de evaluar todos los proyectos.
+      await qr.query(
+        `UPDATE PROYECTO
+            SET PROYECTOESTADO        = 3,
+                PROYECTOMOTIVORECHAZO = NULL
+          WHERE PROYECTOID = :1`,
+        [proyectoId],
+      )
 
-    // 5) Cambiar estado a 3 (Aprobado) y limpiar motivo previo. La
-    //    publicación de resultados al proponente NO se decide aquí: es por
-    //    convocatoria y la maneja el admin desde "Publicar resultados de la
-    //    convocatoria" cuando termina de evaluar todos los proyectos.
-    await this.dataSource.query(
-      `UPDATE PROYECTO
-          SET PROYECTOESTADO        = 3,
-              PROYECTOMOTIVORECHAZO = NULL
-        WHERE PROYECTOID = :1`,
-      [proyectoId],
-    )
+      await qr.commitTransaction()
 
-    return {
-      message: rechazadas.length > 0
-        ? `Proyecto aprobado con ${rechazadas.length} AF(s) rechazada(s). Los resultados se publicarán al proponente cuando se libere la convocatoria.`
-        : 'Proyecto aprobado correctamente. Las tablas vivas fueron restauradas desde la versión FINAL. Los resultados se publicarán al proponente cuando se libere la convocatoria.',
-      versionAprobada: {
-        versionId: Number(versionFinal.versionId),
-        codigo: versionFinal.codigo,
-        hash: versionFinal.hash,
-      },
-      afsRechazadas: rechazadas.length,
+      return {
+        message: rechazadas.length > 0
+          ? `Proyecto aprobado con ${rechazadas.length} AF(s) rechazada(s). Los resultados se publicarán al proponente cuando se libere la convocatoria.`
+          : 'Proyecto aprobado correctamente. Las tablas vivas fueron restauradas desde la versión FINAL. Los resultados se publicarán al proponente cuando se libere la convocatoria.',
+        versionAprobada: {
+          versionId: Number(versionFinal.versionId),
+          codigo: versionFinal.codigo,
+          hash: versionFinal.hash,
+        },
+        afsRechazadas: rechazadas.length,
+      }
+    } catch (e) {
+      await qr.rollbackTransaction()
+      throw e
+    } finally {
+      await qr.release()
     }
   }
 
@@ -2092,6 +2170,7 @@ export class ProyectosService {
   }
 
   async crearAF(proyectoId: number, dto: AfDto) {
+    await this.validarEdicionPermitida(proyectoId)
     await this.dataSource.query(
       `INSERT INTO ACCIONFORMACION
          (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
@@ -2146,6 +2225,7 @@ export class ProyectosService {
   }
 
   async actualizarAF(afId: number, dto: ActualizarAfDto) {
+    await this.validarEdicionPermitidaPorAf(afId)
     // Obtener estado actual para detectar cambios
     const [actual] = await this.dataSource.query(
       `SELECT TIPOEVENTOID AS "tipoEventoId", MODALIDADFORMACIONID AS "modalidadFormacionId",
@@ -2710,6 +2790,7 @@ export class ProyectosService {
   }
 
   async eliminarAF(afId: number) {
+    await this.validarEdicionPermitidaPorAf(afId)
     // Solo bloquear si tiene rubros registrados
     const [{ totalRubros }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
@@ -2904,6 +2985,7 @@ export class ProyectosService {
     articulacionTerritorialId?: number | null
     horasTransversal?: number | null
   }) {
+    await this.validarEdicionPermitida(proyectoId)
     const modalidad = await this.getModalidadAF(afId)
     const h = this.horasParaColumnas(dto.horasPrac ?? null, dto.horasTeor ?? null, modalidad)
 
@@ -3047,6 +3129,7 @@ export class ProyectosService {
     articulacionTerritorialId?: number | null
     horasTransversal?: number | null
   }) {
+    await this.validarEdicionPermitidaPorUt(utId)
     const [utRow] = await this.dataSource.query(
       `SELECT ACCIONFORMACIONID AS "afId" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`, [utId],
     )
@@ -3090,6 +3173,7 @@ export class ProyectosService {
   }
 
   async eliminarUT(utId: number) {
+    await this.validarEdicionPermitidaPorUt(utId)
     await this.dataSource.query(`DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID = :1`, [utId])
     await this.dataSource.query(`DELETE FROM PERFILUT WHERE UNIDADTEMATICAID = :1`, [utId])
     await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`, [utId])
@@ -3277,6 +3361,7 @@ export class ProyectosService {
   }
 
   async crearGrupo(afId: number) {
+    await this.validarEdicionPermitidaPorAf(afId)
     const [{ nid }] = await this.dataSource.query(
       `SELECT NVL(MAX(AFGRUPOID), 0) + 1 AS "nid" FROM AFGRUPO`,
     )
@@ -3292,6 +3377,7 @@ export class ProyectosService {
   }
 
   async eliminarGrupo(grupoId: number) {
+    await this.validarEdicionPermitidaPorGrupo(grupoId)
     await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1`, [grupoId])
     await this.dataSource.query(`DELETE FROM AFGRUPO WHERE AFGRUPOID = :1`, [grupoId])
     return { message: 'Grupo eliminado' }
@@ -3327,6 +3413,7 @@ export class ProyectosService {
   async guardarCoberturaGrupo(grupoId: number, afId: number, coberturas: {
     deptoId: number; ciudadId?: number | null; benef: number; modal: string; rural?: number
   }[]) {
+    await this.validarEdicionPermitidaPorAf(afId)
     // QA #5 — La suma de beneficiarios de todas las coberturas de un grupo
     // debe coincidir exactamente con los beneficiarios esperados por grupo
     // de la AF (ni más, ni menos). Los beneficiarios esperados dependen de
@@ -3756,6 +3843,7 @@ export class ProyectosService {
     totalRubro: number; cofSena: number; contraEspecie: number; contraDinero: number
     valorMaximo: number; valorBenef: number; paquete: string
   }) {
+    await this.validarEdicionPermitida(proyectoId)
     await this.validarPrerequisitosRubros(afId)
 
     const { rubroId, justificacion, numHoras, beneficiarios, dias,
@@ -3901,6 +3989,7 @@ export class ProyectosService {
   }
 
   async eliminarRubroAF(afId: number, afrubroid: number) {
+    await this.validarEdicionPermitidaPorAf(afId)
     await this.dataSource.query(`DELETE FROM AFRUBRO WHERE AFRUBROID = :1`, [afrubroid])
     // Limpiar GO y Transferencia al modificar rubros
     await this.dataSource.query(
@@ -3937,6 +4026,7 @@ export class ProyectosService {
   }
 
   async guardarGastosOperacion(proyectoId: number, afId: number, dto: { cofSena: number; especie: number; dinero: number }) {
+    await this.validarEdicionPermitida(proyectoId)
     await this.validarPrerequisitosRubros(afId)
     const rubro = await this.getRubroConvByCode(afId, 'R09')
     if (!rubro) throw new BadRequestException('Rubro GO no encontrado para esta convocatoria')
@@ -3983,6 +4073,7 @@ export class ProyectosService {
   }
 
   async guardarTransferencia(proyectoId: number, afId: number, dto: { beneficiarios: number; valor: number }) {
+    await this.validarEdicionPermitida(proyectoId)
     await this.validarPrerequisitosRubros(afId)
     const rubro = await this.getRubroConvByCode(afId, 'R015')
     if (!rubro) throw new BadRequestException('Rubro Transferencia no encontrado para esta convocatoria')
@@ -4257,6 +4348,7 @@ export class ProyectosService {
   /** Valida y persiste el presupuesto del proyecto. Si alguna validación falla,
    *  lanza BadRequestException con la lista de errores y NO guarda nada. */
   async guardarPresupuestoProyecto(proyectoId: number) {
+    await this.validarEdicionPermitida(proyectoId)
     const r = await this.getPresupuestoProyecto(proyectoId)
     const errores: string[] = []
 

@@ -162,7 +162,10 @@ export default function SeleccionarPerfilPage() {
                     </p>
                     <p className="text-[11px] text-neutral-500">
                       {p.fechaUltimoAcceso
-                        ? `Último ingreso: ${new Date(p.fechaUltimoAcceso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                        ? `Último ingreso: ${new Date(p.fechaUltimoAcceso).toLocaleString('es-CO', {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                          })}`
                         : 'Aún no has ingresado con este perfil'}
                     </p>
                     {activo && (

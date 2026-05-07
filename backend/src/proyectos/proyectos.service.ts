@@ -2018,6 +2018,12 @@ export class ProyectosService {
   async crear(email: string, dto: { convocatoriaId: number; modalidadId: number; nombre: string }) {
     const empresaId = await this.getEmpresaId(email)
 
+    const nombre = (dto.nombre ?? '').trim()
+    if (!nombre) throw new BadRequestException('El nombre del proyecto es obligatorio')
+    if (nombre.length > 100) {
+      throw new BadRequestException(`El nombre del proyecto no puede superar 100 caracteres (tiene ${nombre.length}). Acórtalo e intenta de nuevo.`)
+    }
+
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total" FROM PROYECTO
         WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2`,
@@ -2033,7 +2039,7 @@ export class ProyectosService {
          (PROYECTOID, EMPRESAID, PROYECTONOMBRE, CONVOCATORIAID, MODALIDADID,
           PROYECTOCODSEGURIDAD, PROYECTOFECHAREGISTRO, PROYECTOESTADO)
        VALUES (PROYECTOID.NEXTVAL, :1, :2, :3, :4, :5, SYSDATE, 0)`,
-      [empresaId, dto.nombre.trim(), dto.convocatoriaId, dto.modalidadId, codSeguridad],
+      [empresaId, nombre, dto.convocatoriaId, dto.modalidadId, codSeguridad],
     )
 
     const [{ id }] = await this.dataSource.query(

@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { getSepUsuario, isAdmin } from '@/lib/auth'
 import { useFotoEvaluador } from '@/lib/use-foto-evaluador'
 import { ArrowLeft, GraduationCap, ImageOff, Loader2, Plus, Search, Settings2, ShieldAlert, ShieldCheck, UserPlus, Users } from 'lucide-react'
 import Link from 'next/link'
@@ -35,6 +36,9 @@ export default function EvaluadoresDashboardPage() {
   const [data, setData] = useState<RespListado | null>(null)
   const [loading, setLoading] = useState(false)
   const [errMsg, setErrMsg] = useState('')
+  const [esAdmin, setEsAdmin] = useState(false)
+
+  useEffect(() => { setEsAdmin(isAdmin(getSepUsuario()?.perfilId ?? 0)) }, [])
 
   useEffect(() => { cargar(busqueda, page) /* eslint-disable-next-line */ }, [page])
 
@@ -74,7 +78,7 @@ export default function EvaluadoresDashboardPage() {
             <ShieldCheck size={32} className="text-white" strokeWidth={1.8} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/70">Administración GGPC</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/70">Gestión GGPC</p>
             <h1 className="text-white font-bold text-2xl sm:text-3xl mt-1 leading-tight">Banco de Evaluadores</h1>
             <p className="text-white/80 text-sm mt-2 max-w-2xl">
               Hoja de vida, experiencia, formación TIC y participación en procesos de evaluación. Registra y consulta el banco que apoya las convocatorias del SENA.
@@ -100,10 +104,12 @@ export default function EvaluadoresDashboardPage() {
         </div>
       </div>
 
-      <Link href="/panel" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
-        <ArrowLeft size={13} />
-        Volver al panel de administración
-      </Link>
+      {esAdmin && (
+        <Link href="/panel" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
+          <ArrowLeft size={13} />
+          Volver al panel de administración
+        </Link>
+      )}
 
       {/* Métricas */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

@@ -275,10 +275,12 @@ export default function ProyectosPage() {
                     type="text"
                     value={nombre}
                     onChange={e => setNombre(e.target.value)}
+                    maxLength={100}
                     placeholder="Ingrese el nombre del proyecto..."
                     className="w-full border border-neutral-200 rounded-xl px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D]"
                     onKeyDown={e => e.key === 'Enter' && handleCrear()}
                   />
+                  <p className="text-[11px] text-neutral-500">El nombre del proyecto tiene un máximo de 100 caracteres.</p>
                 </div>
 
                 {errModal && (

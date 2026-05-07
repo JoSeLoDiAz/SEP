@@ -2,6 +2,7 @@
 
 import api from '@/lib/api'
 import { getSepUsuario, isEmpresa } from '@/lib/auth'
+import { useRouter } from 'next/navigation'
 import {
     BarChart2,
     BellRing,
@@ -225,6 +226,17 @@ const ADMIN_CARDS: AdminCard[] = [
     ],
   },
   {
+    id: 'evaluadores',
+    title: 'Banco de Evaluadores',
+    icon: ShieldCheck,
+    color: '#39a900',
+    links: [
+      { label: 'Ver banco de evaluadores',   href: '/panel/evaluadores' },
+      { label: 'Registrar nuevo evaluador',  href: '/panel/evaluadores/nuevo' },
+      { label: 'Catálogos del banco',        href: '/panel/evaluadores/catalogos' },
+    ],
+  },
+  {
     id: 'eventos',
     title: 'Eventos',
     icon: CalendarDays,
@@ -261,16 +273,38 @@ const ADMIN_CARDS: AdminCard[] = [
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// Perfiles que tienen una landing dedicada y se redirigen automáticamente.
+const PERFIL_REDIRECT: Record<number, string> = {
+  15: '/panel/evaluadores', // GESTOR EVALUADORES
+}
+
 export default function PanelHome() {
+  const router = useRouter()
   const [usuario, setUsuario] = useState<ReturnType<typeof getSepUsuario>>(null)
+  const [redirigiendo, setRedirigiendo] = useState(false)
 
   useEffect(() => { document.title = 'Inicio | SEP' }, [])
 
   useEffect(() => {
-    setUsuario(getSepUsuario())
-  }, [])
+    const u = getSepUsuario()
+    setUsuario(u)
+    const dest = u ? PERFIL_REDIRECT[u.perfilId] : undefined
+    if (dest) {
+      setRedirigiendo(true)
+      router.replace(dest)
+    }
+  }, [router])
 
   const perfilId = usuario?.perfilId ?? 0
+
+  if (redirigiendo) {
+    return (
+      <div className="p-10 flex items-center gap-2 text-neutral-500 text-sm">
+        <Loader2 size={14} className="animate-spin" />
+        Redirigiendo a tu panel...
+      </div>
+    )
+  }
 
   if (isEmpresa(perfilId)) {
     return <EmpresaHome nombre={usuario?.nombre ?? ''} />

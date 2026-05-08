@@ -1295,6 +1295,20 @@ export class ImportarProyectoService {
         nombre ? this.matchModalidad(nombre, tiposEvento)?.id ?? null : null
       const findModalidad = (nombre: string | null) =>
         nombre ? this.matchModalidadFormacion(nombre, modsForm)?.id ?? null : null
+
+      // Para AREAFUNCIONAL y UTACTIVIDADES, cuando el valor del Excel no
+      // existe en el catalogo principal, el formulador lo registra como
+      // "Otra"/"Otro" y deja el nombre real en una columna OTRO. Localizamos
+      // el id del registro "Otra"/"Otro" para usarlo como fallback.
+      const findOtroId = (cat: Map<string, number>, candidatos: string[]): number | null => {
+        for (const c of candidatos) {
+          const id = cat.get(c)
+          if (id !== undefined) return id
+        }
+        return null
+      }
+      const areaOtraId = findOtroId(areasCat, ['OTRA', 'OTRO', 'OTRAS', 'OTROS'])
+      const utActOtraId = findOtroId(utActCat, ['OTRA', 'OTRO', 'OTRAS', 'OTROS'])
       const findRubro = (codigo: string, nombre?: string | null): number | null => {
         const c = norm(codigo)
         const byCode = rubrosConv.find(r => r.codigo === c)
@@ -1454,16 +1468,28 @@ export class ImportarProyectoService {
         afsCreadas++
 
         // ── Áreas funcionales ──
+        // Cuando el Excel trae un area que no existe en el catalogo,
+        // se inserta como "Otra" con el nombre original en AFAREAFUNCIONALOTRO,
+        // tal como lo hace el formulador GeneXus.
         for (const a of af.areas) {
-          const aid = findInMap(areasCat, a)
-          if (!aid) { noResueltos.areas.add(a); continue }
+          let aid = findInMap(areasCat, a)
+          let textoOtro: string | null = null
+          if (!aid) {
+            if (areaOtraId) {
+              aid = areaOtraId
+              textoOtro = a.trim().slice(0, 200)
+            } else {
+              noResueltos.areas.add(a)
+              continue
+            }
+          }
           const [{ nid }] = await qr.query(
             `SELECT NVL(MAX(AFAREAFUNCIONALID), 0) + 1 AS "nid" FROM AFAREAFUNCIONAL`,
           )
           await qr.query(
-            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, aid],
+            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
+             VALUES (:1, :2, :3, :4)`,
+            [Number(nid), afId, aid, textoOtro],
           )
           areasCreadas++
         }
@@ -1657,7 +1683,14 @@ export class ImportarProyectoService {
             }
           }
 
-          // Cobertura virtual / PAT / híbrida (lista de departamentos)
+          // Cobertura "secundaria" (lista de departamentos sin ciudad).
+          // Codigo de modalidad por AFGRUPOCOBERTURAMOD:
+          //   - Virtual (modal 4)         -> 'V'
+          //   - PAT (2) y Hibrida (3)     -> 'S' (Sincronicos: dep sin ciudad)
+          //   - Presencial (1)            -> no deberia llegar aqui, pero
+          //                                  caemos a 'S' como fallback seguro.
+          // modFormId es el id resuelto del MODALIDADFORMACION de esta AF.
+          const modSecundario = modFormId === 4 ? 'V' : 'S'
           for (const d of cov.departamentos) {
             const did = findInMap(departamentosCat, d.departamento)
             if (!did) { noResueltos.departamentos.add(d.departamento); continue }
@@ -1668,8 +1701,8 @@ export class ImportarProyectoService {
               `INSERT INTO AFGRUPOCOBERTURA
                  (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
                   AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-               VALUES (:1, :2, :3, NULL, :4, :5, 'V', 0)`,
-              [Number(cobId), Number(grupoId), did, d.beneficiarios, afId],
+               VALUES (:1, :2, :3, NULL, :4, :5, :6, 0)`,
+              [Number(cobId), Number(grupoId), did, d.beneficiarios, afId, modSecundario],
             )
             coberturasCreadas++
           }
@@ -1722,17 +1755,28 @@ export class ImportarProyectoService {
           )
           utsCreadas++
 
-          // Actividades de la UT (lookup por nombre en UTACTIVIDADES).
+          // Actividades de la UT (lookup por nombre en UTACTIVIDADES). Si la
+          // actividad no existe en el catalogo, se inserta como "Otra" con el
+          // nombre original en ACTIVIDADUTOTRO (mismo patron que en GeneXus).
           for (const a of ut.actividades) {
-            const aid = findInMap(utActCat, a)
-            if (!aid) { noResueltos.utActividades.add(a); continue }
+            let aid = findInMap(utActCat, a)
+            let textoOtro: string | null = null
+            if (!aid) {
+              if (utActOtraId) {
+                aid = utActOtraId
+                textoOtro = a.trim().slice(0, 200)
+              } else {
+                noResueltos.utActividades.add(a)
+                continue
+              }
+            }
             const [{ nid }] = await qr.query(
               `SELECT NVL(MAX(ACTIVIDADUTID), 0) + 1 AS "nid" FROM ACTIVIDADUT`,
             )
             await qr.query(
-              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), Number(utId), aid],
+              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
+               VALUES (:1, :2, :3, :4)`,
+              [Number(nid), Number(utId), aid, textoOtro],
             )
             actividadesCreadas++
           }

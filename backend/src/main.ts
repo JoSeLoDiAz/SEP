@@ -5,6 +5,14 @@
 // como UTC, y la serialización JSON queda con `Z` correcto.
 process.env.TZ = 'UTC'
 
+// Devolver los CLOB como string completos (sin Lob objects). Sin esto,
+// para extraer el contenido hay que envolver con DBMS_LOB.SUBSTR(col, 4000, 1)
+// que revienta con ORA-06502 cuando el texto tiene caracteres multibyte
+// (tildes, ñ) que exceden 4000 bytes en el buffer VARCHAR2.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const oracledb = require('oracledb') as { fetchAsString: number[]; CLOB: number }
+oracledb.fetchAsString = [oracledb.CLOB]
+
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'

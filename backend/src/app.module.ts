@@ -8,6 +8,7 @@ import { NecesidadesModule } from './necesidades/necesidades.module'
 import { ContactosModule } from './contactos/contactos.module'
 import { ProyectosModule } from './proyectos/proyectos.module'
 import { EvaluadoresModule } from './evaluadores/evaluadores.module'
+import { ImportarProyectoModule } from './importar-proyecto/importar-proyecto.module'
 import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
 
 @Module({
@@ -36,6 +37,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ContactosModule,
     ProyectosModule,
     EvaluadoresModule,
+    ImportarProyectoModule,
     UsuariosAdminModule,
   ],
 })

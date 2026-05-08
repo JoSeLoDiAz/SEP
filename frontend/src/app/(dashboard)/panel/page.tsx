@@ -251,6 +251,7 @@ const ADMIN_CARDS: AdminCard[] = [
     icon: FileSpreadsheet,
     color: '#0891B2',
     links: [
+      { label: 'Importar proyecto desde Excel formulador', href: '/panel/admin/importar-proyecto' },
       { label: 'Importar catálogos desde CSV',  disabled: true },
       { label: 'Exportar catálogos a CSV',      disabled: true },
       { label: 'Importar rubros de convocatoria', disabled: true },

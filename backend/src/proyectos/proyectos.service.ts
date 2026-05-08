@@ -3346,16 +3346,24 @@ export class ProyectosService {
   // ── Grupos de cobertura ──────────────────────────────────────────────────────
 
   async getGruposCobertura(afId: number) {
+    // GROUP BY no funciona sobre CLOBs en Oracle, asi que separamos el
+    // SUM/COUNT en una subquery y traemos AFGRUPOJUSTIFICACION (CLOB)
+    // directamente. oracledb.fetchAsString lo entrega como string completo.
     const grupos = await this.dataSource.query(
       `SELECT g.AFGRUPOID AS "grupoId",
               g.AFGRUPONUMERO AS "grupoNumero",
-              DBMS_LOB.SUBSTR(g.AFGRUPOJUSTIFICACION, 4000, 1) AS "justificacion",
-              NVL(SUM(c.AFGRUPOCOBERTURABENEF), 0) AS "totalBenef",
-              COUNT(c.AFGRUPOCOBERTURAID) AS "numCoberturas"
+              g.AFGRUPOJUSTIFICACION AS "justificacion",
+              NVL(t.totalBenef, 0)    AS "totalBenef",
+              NVL(t.numCoberturas, 0) AS "numCoberturas"
          FROM AFGRUPO g
-         LEFT JOIN AFGRUPOCOBERTURA c ON c.AFGRUPOID = g.AFGRUPOID
+         LEFT JOIN (
+           SELECT AFGRUPOID,
+                  SUM(AFGRUPOCOBERTURABENEF) AS totalBenef,
+                  COUNT(AFGRUPOCOBERTURAID)  AS numCoberturas
+             FROM AFGRUPOCOBERTURA
+            GROUP BY AFGRUPOID
+         ) t ON t.AFGRUPOID = g.AFGRUPOID
         WHERE g.ACCIONFORMACIONID = :1
-        GROUP BY g.AFGRUPOID, g.AFGRUPONUMERO, DBMS_LOB.SUBSTR(g.AFGRUPOJUSTIFICACION, 4000, 1)
         ORDER BY g.AFGRUPONUMERO`,
       [afId],
     )
@@ -3521,11 +3529,13 @@ export class ProyectosService {
   }
 
   async getMaterialAF(afId: number) {
+    // CLOBs se devuelven directo como string gracias a oracledb.fetchAsString
+    // configurado en main.ts.
     const [af] = await this.dataSource.query(
       `SELECT TIPOAMBIENTEID AS "tipoAmbienteId",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTMAT, 4000, 1) AS "justMat",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONINSUMO, 4000, 1) AS "insumo",
-              DBMS_LOB.SUBSTR(ACCIONFORMACIONJUSTINSUMO, 4000, 1) AS "justInsumo"
+              ACCIONFORMACIONJUSTMAT  AS "justMat",
+              ACCIONFORMACIONINSUMO   AS "insumo",
+              ACCIONFORMACIONJUSTINSUMO AS "justInsumo"
          FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
       [afId],
     )

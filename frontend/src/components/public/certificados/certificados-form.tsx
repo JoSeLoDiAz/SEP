@@ -138,7 +138,10 @@ export function CertificadosForm() {
   }
 
   function descargar(row: CertificadoRow) {
-    const url = `/api/certificados/${row.afGrupoBeneficiarioId}/pdf?personaId=${row.personaId}`
+    // Reutilizamos la baseURL de axios: en dev apunta a http://localhost:4000
+    // (sin /api), en prod queda en /api proxied por nginx.
+    const base = api.defaults.baseURL ?? ''
+    const url = `${base}/certificados/${row.afGrupoBeneficiarioId}/pdf?personaId=${row.personaId}`
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 

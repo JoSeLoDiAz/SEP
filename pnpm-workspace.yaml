@@ -1,6 +1,9 @@
 packages:
   - 'frontend'
   - 'backend'
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - sharp
 allowBuilds:
   '@nestjs/core': false
   '@scarf/scarf': false

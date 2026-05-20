@@ -213,7 +213,7 @@ return <AdminHome />
 | Mis Datos | #00304D (azul oscuro) | /panel/datos | Información básica empresa/gremio |
 | Mis Necesidades | #39A900 (verde SENA) | /panel/necesidades | Diagnóstico de necesidades de formación |
 | Mis Proyectos | #6C29B3 (púrpura) | /panel/proyectos | Proyecto de formación diseñado |
-| Mis Convenios | #0070C0 (azul) | /panel/convenios | Ejecución del convenio |
+| Convenios | #0070C0 (azul) | /panel/convenios | Ejecución del convenio |
 
 Cada tarjeta contiene: barra de color, ícono en contenedor con color suave, título en recuadro coloreado, texto de objetivo, descripción, instrucción de uso, botón de acción.
 
@@ -261,7 +261,7 @@ getMenu(@CurrentUser() user: JwtUser) {
   { "desc": "Datos Básicos", "url": "DatosBasicosEmpresa.aspx", "icono": "nav-icon fas fa-address-card" },
   { "desc": "Mis Necesidades","url": "Necesidades.aspx",        "icono": "nav-icon fas fa-list" },
   { "desc": "Mis Proyectos", "url": "Proyectos.aspx",           "icono": "nav-icon fas fa-folder" },
-  { "desc": "Mis Convenios", "url": "WPConvenios.aspx",         "icono": "nav-icon fas fa-handshake" }
+  { "desc": "Convenios", "url": "WPConvenios.aspx",         "icono": "nav-icon fas fa-handshake" }
 ]
 ```
 

@@ -410,7 +410,7 @@ export class ExcelReportService {
     this.appendSheet(wb, 'Datos_Contacto',       this.buildContacto(snap))
     this.appendSheet(wb, 'Datos_Basicos',        await this.buildBasicosAsync(snap))
 
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true })
   }
 
   /** Wrapper que enriquece la hoja Datos_Basicos con campos no presentes en

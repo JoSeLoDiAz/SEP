@@ -2,7 +2,7 @@
 
 Plataforma empresarial de gestión de proyectos para el **GGPC — SENA / DSNFT**, construida sobre un stack moderno y desplegada en producción en `https://sep.ggpcsena.com`.
 
-> **Última actualización:** 26 abril 2026
+> **Última actualización:** 19 mayo 2026
 
 ---
 
@@ -93,7 +93,18 @@ SEPLocal/
 │   │   ├── contactos/                # contactos de empresa
 │   │   ├── necesidades/              # necesidades de formación
 │   │   ├── proyectos/                # módulo central — proyectos, AFs, rubros, UTs
+│   │   ├── importar-proyecto/        # importación desde Excel del formulador
+│   │   ├── convenios/                # listado, beneficiarios, director del convenio
+│   │   ├── personas/                 # registro/actualización de personas (HV)
+│   │   ├── capacitadores/            # capacitadores naturales y jurídicos
+│   │   ├── cronograma/               # cronograma presencial/virtual + radicado
+│   │   ├── grupos/                   # AF·grupos, cobertura, asociar beneficiarios
+│   │   ├── certificacion/            # UTHoras, certificación, reporte asistencia
+│   │   ├── modificaciones/           # otrosíes/ajustes/prórrogas (lado conveniente)
+│   │   ├── plataformas-virtuales/    # accesos a plataformas del convenio
 │   │   ├── certificados/             # generación de PDFs (PDFKit)
+│   │   ├── usuarios-admin/           # gestión de usuarios y multirol
+│   │   ├── evaluadores/              # banco de evaluadores (en construcción)
 │   │   └── main.ts
 │   ├── package.json
 │   └── .env                          # NO commitear — cada dev lo crea
@@ -104,21 +115,28 @@ SEPLocal/
 │       │   ├── (dashboard)/          # rutas con login + sidebar
 │       │   │   └── panel/
 │       │   │       ├── proyectos/[id]/
-│       │   │       │   ├── acciones/
-│       │   │       │   │   └── [afId]/
-│       │   │       │   │       ├── beneficiarios/
-│       │   │       │   │       ├── unidades/
-│       │   │       │   │       └── rubros/        # ← nuevo
+│       │   │       │   ├── acciones/[afId]/{beneficiarios,unidades,rubros}/
+│       │   │       │   └── ...
+│       │   │       ├── convenios/[id]/                # ← módulo de ejecución
+│       │   │       │   ├── directores/
+│       │   │       │   ├── capacitadores/
+│       │   │       │   ├── cronograma/
+│       │   │       │   ├── beneficiarios/
+│       │   │       │   ├── grupos/[afGrupoId]/{certificar,asistencia}/
+│       │   │       │   ├── modificaciones/
+│       │   │       │   └── plataformas/
 │       │   │       ├── necesidades/
 │       │   │       ├── datos/
 │       │   │       └── ...
 │       │   ├── login/
 │       │   └── layout.tsx
 │       ├── components/
-│       │   ├── layout/               # AppSidebar, PanelTopbar
+│       │   ├── layout/               # AppSidebar, PanelTopbar, ConvenioNav
+│       │   ├── convenios/            # modales: asociar, grupos, modificación, plataforma…
+│       │   ├── cronograma/           # calendario de sesiones
 │       │   ├── public/               # registro empresa, eventos, login
-│       │   └── ui/                   # NumberInput, NoScrollNumbers, ToastBetowa…
-│       └── lib/                      # api.ts (axios), auth.ts
+│       │   └── ui/                   # NumberInput, NoScrollNumbers, ToastBetowa, ConfirmModal…
+│       └── lib/                      # api.ts (axios), auth.ts, descargar-archivo.ts
 ├── docker/
 │   └── nginx/default.conf            # reverse proxy
 ├── docs/
@@ -309,6 +327,7 @@ Toda la documentación funcional está en [`docs/informes/`](docs/informes/):
 
 ## Funcionalidades implementadas (highlights recientes)
 
+### Formulación (etapa propuesta)
 - ✅ Multi-tenant: empresas, contactos, datos básicos
 - ✅ Inscripción pública a eventos + certificados PDF
 - ✅ Necesidades de formación
@@ -318,9 +337,27 @@ Toda la documentación funcional está en [`docs/informes/`](docs/informes/):
 - ✅ **Rubros AF** con prereqs (grupos, UTs, horas), GO, Transferencia
 - ✅ Validaciones por campo (presencial / híbrida / virtual)
 - ✅ Eliminación en cascada de AF (sectores, UTs, grupos, coberturas)
+- ✅ Importación masiva de proyectos desde el Excel del formulador (carga completa a BD)
+
+### Convenios — ejecución (nuevo)
+- ✅ Listado de convenios con estados y panel principal por convenio
+- ✅ **Directores** del proyecto: registro, validación interventoría, historial
+- ✅ **Capacitadores** naturales y jurídicos con sus HVs y empresas capacitadoras
+- ✅ **Cronograma** presencial/virtual con calendario visual, modalidades 1/2/3 (presencial) y 4 (virtual), radicación por cortes
+- ✅ **Beneficiarios**: registro (HabeasData), empresa beneficiaria inline, asociación rápida a grupos, control activos/inactivos, validación 5% repetidos por AF
+- ✅ **AF·Grupos**: cupos vs registrados vs certificados, cobertura geográfica, reglas de 1-grupo-por-AF
+- ✅ **Certificación** por UT: tabla beneficiario × sesión, certificación masiva, regla CERTIFICA = SI si ≥ 80% horas
+- ✅ **Reporte de Asistencia** Excel con formato legacy F2.x/F3.1 (fill azul corporativo `#00304D`)
+- ✅ **Modificaciones** del convenio (otrosíes, ajustes, prórrogas) — lado conveniente con bloqueo cuando interventoría/SENA ya respondieron
+- ✅ **Plataformas Virtuales**: accesos a plataformas con clave oculta + copiar al portapapeles
+- ✅ Validación transversal "convenio en ejecución" (CONVENIOSESTADO = 1) aplicada a todas las acciones de escritura
+- ✅ Exportes Excel con compresión (ExcelJS / SheetJS) y respaldo NCHAR para Oracle
+
+### Plataforma y arquitectura
 - ✅ NumberInput con separadores de miles y bloqueo de scroll
 - ✅ Recarga parcial de secciones (no resetea formulario)
 - ✅ Setup multi-dev con DB centralizada y permisos diferenciados
+- ✅ Toast `ToastBetowa` y `ConfirmModal` reutilizables para feedback consistente
 
 ---
 

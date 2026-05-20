@@ -136,7 +136,7 @@ El entorno cuenta con salida web desde la máquina local, lo que permite pruebas
 | Datos Básicos Empresa | Privado (perfilId=7) | ✅ Implementado |
 | Mis Necesidades | Privado | 🔄 En desarrollo |
 | Mis Proyectos | Privado | 🔄 En desarrollo |
-| Mis Convenios | Privado | 🔄 En desarrollo |
+| Convenios | Privado | 🔄 En desarrollo |
 | Panel Administrador | Privado | 📋 Planeado |
 | Beneficiarios | Privado | 📋 Planeado |
 | Desembolsos | Privado | 📋 Planeado |

@@ -10,7 +10,10 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY frontend/package.json ./frontend/
 COPY backend/package.json  ./backend/
-RUN pnpm install --frozen-lockfile --filter frontend
+# --ignore-scripts evita que pnpm 10 falle por scripts de postinstall sin aprobar
+# (sharp 0.33+ trae binarios prebuilt via optional deps; @parcel/watcher solo
+# se usa para file-watching en modo dev, irrelevante en el build de produccion)
+RUN pnpm install --frozen-lockfile --filter frontend --ignore-scripts
 
 # Copiar fuentes y compilar
 COPY frontend/ ./frontend/

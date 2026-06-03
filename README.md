@@ -309,6 +309,24 @@ Toda la documentación funcional está en [`docs/informes/`](docs/informes/):
 | [`09-registro-usuario-persona.md`](docs/informes/09-registro-usuario-persona.md) | Registro de persona |
 | [`10-setup-desarrolladores.md`](docs/informes/10-setup-desarrolladores.md) | **Guía completa para devs nuevos** |
 | [`11-setup-server-multi-dev.md`](docs/informes/11-setup-server-multi-dev.md) | **Guía del lado server (admin)** |
+| [`12-contactos.md`](docs/informes/12-contactos.md) | Contactos de empresa |
+| [`13-analisis-empresarial.md`](docs/informes/13-analisis-empresarial.md) | Análisis empresarial |
+| [`14-diagnostico-necesidades.md`](docs/informes/14-diagnostico-necesidades.md) | Diagnóstico de necesidades |
+| [`15-listado-proyectos.md`](docs/informes/15-listado-proyectos.md) | Listado de proyectos |
+| [`16-crear-proyecto.md`](docs/informes/16-crear-proyecto.md) | Creación de proyecto |
+| [`17-gestionar-proyecto.md`](docs/informes/17-gestionar-proyecto.md) | Gestión del proyecto |
+| [`18-acciones-formacion.md`](docs/informes/18-acciones-formacion.md) | Acciones de formación |
+| [`19-formular-accion-formacion.md`](docs/informes/19-formular-accion-formacion.md) | Formular acción de formación |
+| [`20-rubros-accion-formacion.md`](docs/informes/20-rubros-accion-formacion.md) | Rubros por AF |
+| [`21-versiones-proyecto.md`](docs/informes/21-versiones-proyecto.md) | Versiones del proyecto |
+| [`22-descargar-proyecto.md`](docs/informes/22-descargar-proyecto.md) | Descargar proyecto |
+| [`23-aprobacion-proyectos.md`](docs/informes/23-aprobacion-proyectos.md) | Aprobación y publicación de resultados |
+| [`24-convenios-vista-general.md`](docs/informes/24-convenios-vista-general.md) | **Convenios — vista general y panel del convenio** |
+| [`25-directores-capacitadores-convenio.md`](docs/informes/25-directores-capacitadores-convenio.md) | **Directores y capacitadores del convenio** |
+| [`26-cronograma-convenio.md`](docs/informes/26-cronograma-convenio.md) | **Cronograma del convenio** |
+| [`27-beneficiarios-convenio.md`](docs/informes/27-beneficiarios-convenio.md) | **Beneficiarios del convenio** |
+| [`28-grupos-certificacion-asistencia.md`](docs/informes/28-grupos-certificacion-asistencia.md) | **AF·Grupos, certificación y reporte de asistencia** |
+| [`29-modificaciones-plataformas-virtuales.md`](docs/informes/29-modificaciones-plataformas-virtuales.md) | **Modificaciones y plataformas virtuales del convenio** |
 
 ---
 

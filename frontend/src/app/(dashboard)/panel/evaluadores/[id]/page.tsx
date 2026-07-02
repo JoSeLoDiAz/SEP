@@ -1,7 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
-import { abrirArchivo, descargarArchivo } from '@/lib/descargar-archivo'
+import { abrirArchivo, descargarArchivo, descargarArchivoConNombreDelServidor } from '@/lib/descargar-archivo'
 import { useFotoEvaluador } from '@/lib/use-foto-evaluador'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
@@ -443,12 +443,12 @@ function SeccionFoto({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: 
         </div>
         <div className="flex-1 flex flex-col gap-3">
           <p className="text-sm text-neutral-700">
-            Sube una foto de tipo carné. Formatos JPG o PNG. Máximo 4 MB.
+            Sube una foto de tipo carné. Formatos JPG, PNG o WebP. Máximo 8 MB.
           </p>
           <input
             ref={inputRef}
             type="file"
-            accept="image/jpeg,image/png"
+            accept="image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) subir(f) }}
           />
@@ -462,6 +462,19 @@ function SeccionFoto({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: 
               {subiendo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               {ficha.tieneFoto ? 'Cambiar foto' : 'Subir foto'}
             </button>
+            {ficha.tieneFoto && (
+              <button
+                onClick={() => descargarArchivoConNombreDelServidor(
+                  `/evaluadores/${ficha.evaluadorId}/foto/descargar`,
+                  `evaluador_${ficha.evaluadorId}_foto.jpg`,
+                ).catch(() => {
+                  setToast({ tipo: 'error', msg: 'No se pudo descargar la foto' })
+                })}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-sm font-semibold rounded-lg transition"
+              >
+                <Download size={14} /> Descargar
+              </button>
+            )}
             {ficha.tieneFoto && (
               <button
                 onClick={eliminar}

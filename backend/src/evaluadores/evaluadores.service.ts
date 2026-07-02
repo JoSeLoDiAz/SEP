@@ -466,29 +466,44 @@ export class EvaluadoresService {
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
+    // Nombre original del archivo (limitado a 255 chars por el schema).
+    const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
     await this.dataSource.query(
-      `UPDATE EVALUADOR SET EVALUADORFOTO = :1, EVALUADORFOTOMIME = :2 WHERE EVALUADORID = :3`,
-      [file.buffer, file.mimetype, evaluadorId],
+      `UPDATE EVALUADOR
+          SET EVALUADORFOTO = :1,
+              EVALUADORFOTOMIME = :2,
+              EVALUADORFOTONOMBRE = :3
+        WHERE EVALUADORID = :4`,
+      [file.buffer, file.mimetype, nombre, evaluadorId],
     )
-    return { message: 'Foto actualizada', size: file.size, mime: file.mimetype }
+    return { message: 'Foto actualizada', size: file.size, mime: file.mimetype, nombre }
   }
 
-  async getFoto(evaluadorId: number): Promise<{ buffer: Buffer; mime: string }> {
-    const rows: Array<{ foto: NodeJS.ReadableStream | Buffer | null; mime: string | null }> =
-      await this.dataSource.query(
-        `SELECT EVALUADORFOTO AS "foto", TRIM(EVALUADORFOTOMIME) AS "mime"
-           FROM EVALUADOR WHERE EVALUADORID = :1`,
-        [evaluadorId],
-      )
+  async getFoto(evaluadorId: number): Promise<{ buffer: Buffer; mime: string; nombre: string | null }> {
+    const rows: Array<{
+      foto: NodeJS.ReadableStream | Buffer | null;
+      mime: string | null;
+      nombre: string | null;
+    }> = await this.dataSource.query(
+      `SELECT EVALUADORFOTO           AS "foto",
+              TRIM(EVALUADORFOTOMIME) AS "mime",
+              EVALUADORFOTONOMBRE     AS "nombre"
+         FROM EVALUADOR WHERE EVALUADORID = :1`,
+      [evaluadorId],
+    )
     const r = rows[0]
     if (!r || !r.foto) throw new NotFoundException('Foto no encontrada')
     const buffer = await this.lobToBuffer(r.foto)
-    return { buffer, mime: r.mime || 'image/jpeg' }
+    return { buffer, mime: r.mime || 'image/jpeg', nombre: r.nombre ?? null }
   }
 
   async borrarFoto(evaluadorId: number) {
     await this.dataSource.query(
-      `UPDATE EVALUADOR SET EVALUADORFOTO = NULL, EVALUADORFOTOMIME = NULL WHERE EVALUADORID = :1`,
+      `UPDATE EVALUADOR
+          SET EVALUADORFOTO = NULL,
+              EVALUADORFOTOMIME = NULL,
+              EVALUADORFOTONOMBRE = NULL
+        WHERE EVALUADORID = :1`,
       [evaluadorId],
     )
     return { message: 'Foto eliminada' }

@@ -22,7 +22,7 @@ const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
-const MAX_FOTO_BYTES = 4 * 1024 * 1024 // 4 MB
+const MAX_FOTO_BYTES = 8 * 1024 * 1024 // 8 MB
 
 @ApiTags('evaluadores')
 @Controller('evaluadores')
@@ -207,10 +207,37 @@ export class EvaluadoresController {
     @Res() res: Response,
   ) {
     this.exigirGestion(user)
-    const { buffer, mime } = await this.service.getFoto(id)
+    const { buffer, mime, nombre } = await this.service.getFoto(id)
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'private, max-age=300')
+    // Expone el nombre para que el frontend lo pueda leer via CORS.
+    if (nombre) {
+      res.setHeader('X-Filename', encodeURIComponent(nombre))
+      res.setHeader('Access-Control-Expose-Headers', 'X-Filename')
+    }
+    res.end(buffer)
+  }
+
+  @Get(':id/foto/descargar')
+  async descargarFoto(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, mime, nombre } = await this.service.getFoto(id)
+    // Nombre por defecto si el registro no tiene el original (p. ej. filas antiguas).
+    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'
+    const fallback = `evaluador_${id}_foto.${ext}`
+    const nombreFinal = nombre?.trim() || fallback
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Length', String(buffer.length))
+    // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+    )
     res.end(buffer)
   }
 

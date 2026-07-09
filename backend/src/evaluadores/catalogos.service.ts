@@ -193,4 +193,93 @@ export class CatalogosEvaluadorService {
     )
     return { message: 'Tipo actualizado' }
   }
+
+  // ── TIPODOCUMENTOEVAL ────────────────────────────────────────────────────
+
+  async listarTiposDocumentoEvaluador(soloActivos = true) {
+    const where = soloActivos ? `WHERE ACTIVO = 1` : ''
+    const rows: Array<{
+      id: number; codigo: string; nombre: string; admiteMultiple: number; orden: number; activo: number
+    }> = await this.dataSource.query(
+      `SELECT TIPODOCUMENTOEVALID AS "id",
+              TRIM(CODIGO)        AS "codigo",
+              TRIM(NOMBRE)        AS "nombre",
+              ADMITEMULTIPLE      AS "admiteMultiple",
+              ORDEN               AS "orden",
+              ACTIVO              AS "activo"
+         FROM TIPODOCUMENTOEVAL ${where}
+        ORDER BY ORDEN ASC, NOMBRE ASC`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      codigo: r.codigo,
+      nombre: r.nombre,
+      admiteMultiple: Number(r.admiteMultiple) === 1,
+      orden: Number(r.orden),
+      activo: Number(r.activo) === 1,
+    }))
+  }
+
+  async crearTipoDocumentoEvaluador(cambios: {
+    codigo: string; nombre: string; admiteMultiple?: boolean; orden?: number;
+  }) {
+    const codigo = (cambios.codigo ?? '').trim().toUpperCase()
+    const nombre = (cambios.nombre ?? '').trim()
+    if (!codigo) throw new BadRequestException('El código es obligatorio')
+    if (!nombre) throw new BadRequestException('El nombre es obligatorio')
+
+    const dup = await this.dataSource.query(
+      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE UPPER(CODIGO) = :1`, [codigo],
+    )
+    if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
+
+    // ID por MAX+1 (la tabla es pequeña y no hay secuencia asociada — sigue el
+    // mismo patrón que EVALUADORDOCUMENTO).
+    const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
+      `SELECT NVL(MAX(TIPODOCUMENTOEVALID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOEVAL`,
+    )
+    const id = Number(seq[0].NUEVO)
+    await this.dataSource.query(
+      `INSERT INTO TIPODOCUMENTOEVAL
+         (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIPLE, ORDEN, ACTIVO)
+       VALUES (:1, :2, :3, :4, :5, 1)`,
+      [id, codigo, nombre, cambios.admiteMultiple === false ? 0 : 1, cambios.orden ?? 100],
+    )
+    return { id, codigo, nombre }
+  }
+
+  async actualizarTipoDocumentoEvaluador(id: number, cambios: {
+    nombre?: string; admiteMultiple?: boolean; orden?: number; activo?: boolean;
+  }) {
+    const filas = await this.dataSource.query(
+      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE TIPODOCUMENTOEVALID = :1`, [id],
+    )
+    if (!filas[0]) throw new NotFoundException('Tipo de documento no encontrado')
+
+    const sets: string[] = []
+    const params: unknown[] = []
+    if (cambios.nombre !== undefined) {
+      params.push(cambios.nombre.trim())
+      sets.push(`NOMBRE = :${params.length}`)
+    }
+    if (cambios.admiteMultiple !== undefined) {
+      params.push(cambios.admiteMultiple ? 1 : 0)
+      sets.push(`ADMITEMULTIPLE = :${params.length}`)
+    }
+    if (cambios.orden !== undefined) {
+      params.push(Number(cambios.orden))
+      sets.push(`ORDEN = :${params.length}`)
+    }
+    if (cambios.activo !== undefined) {
+      params.push(cambios.activo ? 1 : 0)
+      sets.push(`ACTIVO = :${params.length}`)
+    }
+    if (sets.length === 0) return { message: 'Sin cambios' }
+    params.push(id)
+    await this.dataSource.query(
+      `UPDATE TIPODOCUMENTOEVAL SET ${sets.join(', ')} WHERE TIPODOCUMENTOEVALID = :${params.length}`,
+      params,
+    )
+    return { message: 'Tipo de documento actualizado' }
+  }
 }

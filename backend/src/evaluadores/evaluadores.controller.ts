@@ -118,6 +118,32 @@ export class EvaluadoresController {
     return this.catalogos.actualizarTipoEstudio(id, dto)
   }
 
+  @Get('catalogos/tipos-documento-evaluador')
+  @ApiOperation({ summary: 'Catálogo de tipos de documento del evaluador (cédula, autorización, ...)' })
+  tiposDocEvalCat(@CurrentUser() user: JwtUser, @Query('soloActivos') soloActivos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarTiposDocumentoEvaluador(soloActivos !== '0')
+  }
+
+  @Post('catalogos/tipos-documento-evaluador')
+  crearTipoDocEval(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: { codigo: string; nombre: string; admiteMultiple?: boolean; orden?: number },
+  ) {
+    this.exigirAdmin(user)
+    return this.catalogos.crearTipoDocumentoEvaluador(dto)
+  }
+
+  @Put('catalogos/tipos-documento-evaluador/:id')
+  actualizarTipoDocEval(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { nombre?: string; admiteMultiple?: boolean; orden?: number; activo?: boolean },
+  ) {
+    this.exigirAdmin(user)
+    return this.catalogos.actualizarTipoDocumentoEvaluador(id, dto)
+  }
+
   // ── Búsqueda previa (al crear) ─────────────────────────────────────────
 
   @Get('buscar-persona')
@@ -501,5 +527,93 @@ export class EvaluadoresController {
   eliminarPrueba(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
     this.exigirGestion(user)
     return this.service.eliminarPrueba(pid)
+  }
+
+  // ── Documentos genéricos (cédula en Fase 1) ────────────────────────────
+
+  @Get(':id/cedula')
+  @ApiOperation({ summary: 'Shortcut — indica si el evaluador ya tiene cédula cargada' })
+  getCedula(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
+    this.exigirGestion(user)
+    return this.service.getCedula(id)
+  }
+
+  @Get(':id/documentos')
+  @ApiOperation({ summary: 'Listado de documentos del evaluador (filtrable por código de tipo)' })
+  listarDocumentos(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Query('tipo') tipo?: string,
+  ) {
+    this.exigirGestion(user)
+    return this.service.listarDocumentos(id, tipo)
+  }
+
+  @Post(':id/documentos')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_PDF_BYTES },
+    fileFilter: (_r, f, cb) => {
+      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
+      cb(null, true)
+    },
+  }))
+  subirDocumento(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: MulterFile,
+    @Body() body: { tipoDocumentoEvalId?: string; descripcion?: string; anioReferencia?: string },
+  ) {
+    this.exigirGestion(user)
+    const tipoId = Number(body.tipoDocumentoEvalId)
+    if (!Number.isFinite(tipoId) || tipoId <= 0) {
+      throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
+    }
+    const anio = body.anioReferencia ? Number(body.anioReferencia) : undefined
+    return this.service.subirDocumento(id, tipoId, file, {
+      descripcion: body.descripcion,
+      anioReferencia: Number.isFinite(anio) ? anio : undefined,
+    })
+  }
+
+  @Get('documentos/:docId/archivo')
+  async getDocumentoArchivo(
+    @CurrentUser() user: JwtUser,
+    @Param('docId', ParseIntPipe) docId: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombre)}"`)
+    res.setHeader('Content-Length', String(buffer.length))
+    res.end(buffer)
+  }
+
+  @Get('documentos/:docId/descargar')
+  async descargarDocumento(
+    @CurrentUser() user: JwtUser,
+    @Param('docId', ParseIntPipe) docId: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
+    const nombreFinal = nombre?.trim() || `documento_${docId}.pdf`
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Length', String(buffer.length))
+    // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+    )
+    res.end(buffer)
+  }
+
+  @Delete('documentos/:docId')
+  eliminarDocumento(
+    @CurrentUser() user: JwtUser,
+    @Param('docId', ParseIntPipe) docId: number,
+  ) {
+    this.exigirGestion(user)
+    return this.service.eliminarDocumento(docId)
   }
 }

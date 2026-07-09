@@ -3,11 +3,12 @@
 import api from '@/lib/api'
 import { abrirArchivo, descargarArchivo, descargarArchivoConNombreDelServidor } from '@/lib/descargar-archivo'
 import { useFotoEvaluador } from '@/lib/use-foto-evaluador'
+import { aTitleCase } from '@/lib/title-case'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
-  ArrowLeft, Award, Briefcase, Camera, ChevronRight, ClipboardList, Download, Eye, FileText,
-  GraduationCap, Loader2, Pencil, PowerOff, Save, Settings2, ShieldCheck,
+  ArrowLeft, Award, Briefcase, ChevronRight, ClipboardList, Download, Eye, FileText,
+  GraduationCap, IdCard, Loader2, Pencil, PowerOff, Save, Settings2, ShieldCheck,
   Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -196,7 +197,10 @@ export default function FichaEvaluadorPage() {
       {tab === 'datos' && (
         <>
           <SeccionDatos ficha={ficha} onChanged={cargar} setToast={setToast} />
-          <SeccionFoto  ficha={ficha} onChanged={cargar} setToast={setToast} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SeccionFoto   ficha={ficha} onChanged={cargar} setToast={setToast} />
+            <SeccionCedula evaluadorId={evaluadorId}       setToast={setToast} />
+          </div>
         </>
       )}
       {tab === 'estudios' && (
@@ -343,9 +347,9 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos personales</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><label className={label}>Nombres *</label><input value={nombres} onChange={e => setNombres(e.target.value)} className={input} /></div>
-            <div><label className={label}>Primer apellido *</label><input value={primerApellido} onChange={e => setPrimerAp(e.target.value)} className={input} /></div>
-            <div><label className={label}>Segundo apellido</label><input value={segundoApellido} onChange={e => setSegundoAp(e.target.value)} className={input} /></div>
+            <div><label className={label}>Nombres *</label><input value={nombres} onChange={e => setNombres(e.target.value)} onBlur={() => setNombres(v => aTitleCase(v) ?? '')} className={input} /></div>
+            <div><label className={label}>Primer apellido *</label><input value={primerApellido} onChange={e => setPrimerAp(e.target.value)} onBlur={() => setPrimerAp(v => aTitleCase(v) ?? '')} className={input} /></div>
+            <div><label className={label}>Segundo apellido</label><input value={segundoApellido} onChange={e => setSegundoAp(e.target.value)} onBlur={() => setSegundoAp(v => aTitleCase(v) ?? '')} className={input} /></div>
             <div>
               <label className={label}>Identificación</label>
               <input value={ficha.identificacion} disabled className={`${input} bg-neutral-50 text-neutral-500 cursor-not-allowed`} />
@@ -488,6 +492,186 @@ function SeccionFoto({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: 
           </div>
         </div>
       </div>
+    </Section>
+  )
+}
+
+// ── Sección CÉDULA ─────────────────────────────────────────────────────────────
+
+interface DocEvaluador {
+  documentoId: number
+  archivoNombre: string | null
+  fechaCargue: string
+}
+
+interface TipoDocEval {
+  id: number
+  codigo: string
+  nombre: string
+}
+
+function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
+  const [doc, setDoc] = useState<DocEvaluador | null>(null)
+  const [tipoCedulaId, setTipoCedulaId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [subiendo, setSubiendo] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  async function cargar() {
+    setLoading(true)
+    try {
+      const [rDoc, rTipos] = await Promise.all([
+        api.get<DocEvaluador | null>(`/evaluadores/${evaluadorId}/cedula`),
+        api.get<TipoDocEval[]>(`/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
+      ])
+      setDoc(rDoc.data ?? null)
+      const cedula = (rTipos.data ?? []).find(t => t.codigo === 'CEDULA')
+      setTipoCedulaId(cedula?.id ?? null)
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo cargar la cédula') })
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
+
+  async function subir(file: File) {
+    if (!tipoCedulaId) {
+      setToast({ tipo: 'error', msg: 'No se encontró el tipo de documento "CEDULA" en el catálogo' })
+      return
+    }
+    setSubiendo(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', file)
+      fd.append('tipoDocumentoEvalId', String(tipoCedulaId))
+      await api.post(`/evaluadores/${evaluadorId}/documentos`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setToast({ tipo: 'success', msg: doc ? 'Cédula reemplazada' : 'Cédula cargada' })
+      await cargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo subir la cédula') })
+    } finally {
+      setSubiendo(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  async function eliminar() {
+    if (!doc) return
+    setEliminando(true)
+    try {
+      await api.delete(`/evaluadores/documentos/${doc.documentoId}`)
+      setToast({ tipo: 'success', msg: 'Cédula eliminada' })
+      setConfirmDel(false)
+      await cargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar la cédula') })
+    } finally {
+      setEliminando(false)
+    }
+  }
+
+  return (
+    <Section titulo="Cédula de ciudadanía">
+      <div className="px-5 py-5 flex flex-col sm:flex-row gap-5 items-start">
+        <div className="w-44 h-44 rounded-2xl bg-[#00304D]/5 border border-[#00304D]/10 flex items-center justify-center shrink-0">
+          <IdCard size={64} className={doc ? 'text-[#00304D]' : 'text-neutral-300'} />
+        </div>
+        <div className="flex-1 flex flex-col gap-3 min-w-0">
+          {loading ? (
+            <p className="text-sm text-neutral-500 flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              Cargando...
+            </p>
+          ) : doc ? (
+            <>
+              <p className="text-sm font-bold text-neutral-800 truncate">
+                {doc.archivoNombre ?? 'cedula.pdf'}
+              </p>
+              <p className="text-[11px] text-neutral-500">
+                Cargada el {new Date(doc.fechaCargue).toLocaleString('es-CO', {
+                  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                })}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-neutral-700">No se ha subido la cédula</p>
+              <p className="text-[11px] text-neutral-500">Formato PDF. Máximo 8 MB.</p>
+            </>
+          )}
+
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) subir(f) }}
+          />
+
+          <div className="flex flex-wrap gap-2">
+            {doc ? (
+              <>
+                <button
+                  onClick={() => descargarArchivoConNombreDelServidor(
+                    `/evaluadores/documentos/${doc.documentoId}/descargar`,
+                    doc.archivoNombre ?? 'cedula.pdf',
+                  ).catch(() => {
+                    setToast({ tipo: 'error', msg: 'No se pudo descargar la cédula' })
+                  })}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-sm font-semibold rounded-lg transition"
+                >
+                  <Download size={14} />
+                  Descargar
+                </button>
+                <button
+                  onClick={() => inputRef.current?.click()}
+                  disabled={subiendo}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
+                  style={{ backgroundColor: INSTITUTIONAL }}
+                >
+                  {subiendo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  Reemplazar
+                </button>
+                <button
+                  onClick={() => setConfirmDel(true)}
+                  disabled={eliminando}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-700 text-sm font-semibold rounded-lg disabled:opacity-50 transition"
+                >
+                  {eliminando ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  Eliminar
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => inputRef.current?.click()}
+                disabled={subiendo || !tipoCedulaId}
+                title={!tipoCedulaId ? 'Catálogo de tipos de documento no disponible' : undefined}
+                className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
+                style={{ backgroundColor: INSTITUTIONAL }}
+              >
+                {subiendo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                Subir cédula
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <ConfirmModal
+        open={confirmDel}
+        onClose={() => setConfirmDel(false)}
+        onConfirm={eliminar}
+        tipo="delete"
+        titulo="Eliminar cédula"
+        mensaje={<>¿Seguro que deseas eliminar la cédula de este evaluador? Esta acción no se puede deshacer.</>}
+        textoConfirmar="Eliminar"
+        cargando={eliminando}
+      />
     </Section>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ArrowLeft, ChevronRight, Loader2, Search, ShieldCheck, UserPlus } from 'lucide-react'
 import Link from 'next/link'
@@ -248,15 +249,35 @@ export default function NuevoEvaluadorPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={label}>Nombres *</label>
-              <input value={nombres} onChange={(e) => setNombres(e.target.value)} className={input} required disabled={bloqueado} />
+              <input
+                value={nombres}
+                onChange={(e) => setNombres(e.target.value)}
+                onBlur={() => setNombres(v => aTitleCase(v) ?? '')}
+                className={input}
+                required
+                disabled={bloqueado}
+              />
             </div>
             <div>
               <label className={label}>Primer apellido *</label>
-              <input value={primerApellido} onChange={(e) => setPrimerApellido(e.target.value)} className={input} required disabled={bloqueado} />
+              <input
+                value={primerApellido}
+                onChange={(e) => setPrimerApellido(e.target.value)}
+                onBlur={() => setPrimerApellido(v => aTitleCase(v) ?? '')}
+                className={input}
+                required
+                disabled={bloqueado}
+              />
             </div>
             <div>
               <label className={label}>Segundo apellido</label>
-              <input value={segundoApellido} onChange={(e) => setSegundoApellido(e.target.value)} className={input} disabled={bloqueado} />
+              <input
+                value={segundoApellido}
+                onChange={(e) => setSegundoApellido(e.target.value)}
+                onBlur={() => setSegundoApellido(v => aTitleCase(v) ?? '')}
+                className={input}
+                disabled={bloqueado}
+              />
             </div>
             <div>
               <label className={label}>Correo personal *</label>

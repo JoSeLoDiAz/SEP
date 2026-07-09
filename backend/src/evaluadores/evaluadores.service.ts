@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { aTitleCase } from '../common/text/title-case'
 
 export interface EvaluadorCrearDto {
   // PERSONA
@@ -313,6 +314,11 @@ export class EvaluadoresService {
       } else {
         const seq: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
         personaId = Number(seq[0].NEXTVAL)
+        // Normalizar a Title Case para uniformar el banco (afecta solo nombres y apellidos —
+        // emails, identificación, celular y ciudad NO se tocan).
+        const nombres = aTitleCase(dto.nombres) ?? ''
+        const primerApellido = aTitleCase(dto.primerApellido) ?? ''
+        const segundoApellido = aTitleCase(dto.segundoApellido) ?? ''
         await qr.query(
           `INSERT INTO PERSONA
              (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
@@ -322,9 +328,9 @@ export class EvaluadoresService {
           [
             personaId,
             dto.tipoDocumentoIdentidadId,
-            dto.nombres.trim(),
-            dto.primerApellido.trim(),
-            (dto.segundoApellido ?? '').trim(),
+            nombres,
+            primerApellido,
+            segundoApellido,
             ident,
             dto.email.trim().toLowerCase(),
             (dto.emailInstitucional ?? '').trim() || null,
@@ -404,6 +410,10 @@ export class EvaluadoresService {
       }
 
       // ── PERSONA ──────────────────────────────────────────────────────────
+      // Los campos de nombre pasan por Title Case; los demás quedan tal cual (trim).
+      const CAMPOS_NOMBRE: ReadonlySet<keyof EvaluadorActualizarDto> = new Set([
+        'nombres', 'primerApellido', 'segundoApellido',
+      ])
       const setsPer: string[] = []
       const paramsPer: unknown[] = []
       const mapPer: Array<[keyof EvaluadorActualizarDto, string]> = [
@@ -417,7 +427,13 @@ export class EvaluadoresService {
       for (const [k, col] of mapPer) {
         if (dto[k] !== undefined) {
           const val = dto[k]
-          paramsPer.push(typeof val === 'string' ? (val.trim() || null) : val)
+          let bind: unknown
+          if (CAMPOS_NOMBRE.has(k)) {
+            bind = aTitleCase(val as string | null | undefined)
+          } else {
+            bind = typeof val === 'string' ? (val.trim() || null) : val
+          }
+          paramsPer.push(bind)
           setsPer.push(`${col} = :${paramsPer.length}`)
         }
       }
@@ -1041,5 +1057,219 @@ export class EvaluadoresService {
   async eliminarPrueba(pruebaId: number) {
     await this.dataSource.query(`DELETE FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
     return { message: 'Prueba eliminada' }
+  }
+
+  // ╔══════════════════════════════════════════════════════════════════════╗
+  // ║ Documentos genéricos (cédula, autorización, confidencialidad, …)      ║
+  // ║ En Fase 1 solo se usa CEDULA — el modelo ya soporta el resto.         ║
+  // ╚══════════════════════════════════════════════════════════════════════╝
+
+  private tipoCedulaCache: number | null = null
+
+  /** Cachea el id del tipo CEDULA para no golpear TIPODOCUMENTOEVAL en cada request. */
+  private async idTipoCedula(): Promise<number> {
+    if (this.tipoCedulaCache != null) return this.tipoCedulaCache
+    const rows: Array<{ id: number }> = await this.dataSource.query(
+      `SELECT TIPODOCUMENTOEVALID AS "id"
+         FROM TIPODOCUMENTOEVAL
+        WHERE UPPER(TRIM(CODIGO)) = 'CEDULA' AND ROWNUM = 1`,
+    )
+    if (!rows[0]) {
+      throw new BadRequestException('El tipo "CEDULA" no existe en TIPODOCUMENTOEVAL (ejecutar migración v22)')
+    }
+    this.tipoCedulaCache = Number(rows[0].id)
+    return this.tipoCedulaCache
+  }
+
+  async listarDocumentos(evaluadorId: number, filtroTipo?: string) {
+    const conds: string[] = [`d.EVALUADORID = :1`]
+    const params: unknown[] = [evaluadorId]
+    if (filtroTipo && filtroTipo.trim()) {
+      params.push(filtroTipo.trim().toUpperCase())
+      conds.push(`UPPER(TRIM(t.CODIGO)) = :${params.length}`)
+    }
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT d.DOCUMENTOID           AS "documentoId",
+              d.EVALUADORID           AS "evaluadorId",
+              d.TIPODOCUMENTOEVALID   AS "tipoDocumentoEvalId",
+              TRIM(t.CODIGO)          AS "tipoCodigo",
+              TRIM(t.NOMBRE)          AS "tipoNombre",
+              TRIM(d.DOCUMENTODESCRIPCION) AS "descripcion",
+              d.ANIOREFERENCIA        AS "anioReferencia",
+              TRIM(d.ARCHIVONOMBRE)   AS "archivoNombre",
+              TRIM(d.ARCHIVOMIME)     AS "mime",
+              d.FECHACARGUE           AS "fechaCargue"
+         FROM EVALUADORDOCUMENTO d
+         JOIN TIPODOCUMENTOEVAL  t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
+        WHERE ${conds.join(' AND ')}
+        ORDER BY t.ORDEN ASC, d.FECHACARGUE DESC, d.DOCUMENTOID DESC`,
+      params,
+    )
+    return rows.map(r => ({
+      ...r,
+      documentoId: Number(r.documentoId),
+      evaluadorId: Number(r.evaluadorId),
+      tipoDocumentoEvalId: Number(r.tipoDocumentoEvalId),
+      anioReferencia: r.anioReferencia != null ? Number(r.anioReferencia) : null,
+    }))
+  }
+
+  async subirDocumento(
+    evaluadorId: number,
+    tipoId: number,
+    file: MulterFile,
+    opts: { descripcion?: string; anioReferencia?: number } = {},
+  ): Promise<{ mensaje: string; documentoId: number }> {
+    if (!file?.buffer) throw new BadRequestException('Adjunta el PDF en el campo "archivo"')
+    if (file.mimetype !== 'application/pdf') {
+      throw new BadRequestException('Solo se permiten archivos PDF')
+    }
+    if (!tipoId) throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
+
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
+
+    const tipo: Array<{ admiteMultiple: number }> = await this.dataSource.query(
+      `SELECT ADMITEMULTIPLE AS "admiteMultiple"
+         FROM TIPODOCUMENTOEVAL
+        WHERE TIPODOCUMENTOEVALID = :1 AND ACTIVO = 1`,
+      [tipoId],
+    )
+    if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
+    const admiteMultiple = Number(tipo[0].admiteMultiple) === 1
+
+    const qr = this.dataSource.createQueryRunner()
+    await qr.connect()
+    await qr.startTransaction()
+    try {
+      // Si el tipo es de instancia única, borrar previos antes de insertar.
+      if (!admiteMultiple) {
+        await qr.query(
+          `DELETE FROM EVALUADORDOCUMENTO
+            WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2`,
+          [evaluadorId, tipoId],
+        )
+      }
+
+      // ID por MAX+1 (no hay secuencia dedicada — la tabla es pequeña y los ids no
+      // se reciclan entre bases, así que el patrón es aceptable).
+      const seq: Array<{ NUEVO: number }> = await qr.query(
+        `SELECT NVL(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM EVALUADORDOCUMENTO`,
+      )
+      const documentoId = Number(seq[0].NUEVO)
+
+      const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
+      await qr.query(
+        `INSERT INTO EVALUADORDOCUMENTO
+           (DOCUMENTOID, EVALUADORID, TIPODOCUMENTOEVALID, DOCUMENTODESCRIPCION,
+            ANIOREFERENCIA, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, SYSDATE)`,
+        [
+          documentoId,
+          evaluadorId,
+          tipoId,
+          opts.descripcion?.trim() || null,
+          opts.anioReferencia ?? null,
+          file.buffer,
+          file.mimetype,
+          nombre,
+        ],
+      )
+
+      await qr.commitTransaction()
+      return { mensaje: admiteMultiple ? 'Documento agregado' : 'Documento actualizado', documentoId }
+    } catch (err) {
+      await qr.rollbackTransaction()
+      throw err
+    } finally {
+      await qr.release()
+    }
+  }
+
+  async getDocumentoMeta(docId: number): Promise<{
+    evaluadorId: number;
+    tipoCodigo: string;
+    archivoNombre: string | null;
+    mime: string;
+  }> {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT d.EVALUADORID          AS "evaluadorId",
+              TRIM(t.CODIGO)         AS "tipoCodigo",
+              TRIM(d.ARCHIVONOMBRE)  AS "archivoNombre",
+              TRIM(d.ARCHIVOMIME)    AS "mime"
+         FROM EVALUADORDOCUMENTO d
+         JOIN TIPODOCUMENTOEVAL  t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
+        WHERE d.DOCUMENTOID = :1`,
+      [docId],
+    )
+    if (!rows[0]) throw new NotFoundException('Documento no encontrado')
+    const r = rows[0]
+    return {
+      evaluadorId: Number(r.evaluadorId),
+      tipoCodigo: String(r.tipoCodigo ?? ''),
+      archivoNombre: (r.archivoNombre as string | null) ?? null,
+      mime: (r.mime as string | null) || 'application/pdf',
+    }
+  }
+
+  async getDocumentoArchivo(docId: number): Promise<{ buffer: Buffer; mime: string; nombre: string }> {
+    const rows: Array<{
+      pdf: NodeJS.ReadableStream | Buffer | null;
+      mime: string | null;
+      nombre: string | null;
+    }> = await this.dataSource.query(
+      `SELECT ARCHIVOPDF          AS "pdf",
+              TRIM(ARCHIVOMIME)   AS "mime",
+              TRIM(ARCHIVONOMBRE) AS "nombre"
+         FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`,
+      [docId],
+    )
+    const r = rows[0]
+    if (!r?.pdf) throw new NotFoundException('Archivo no encontrado')
+    return {
+      buffer: await this.lobToBuffer(r.pdf),
+      mime: r.mime || 'application/pdf',
+      nombre: r.nombre || `documento-${docId}.pdf`,
+    }
+  }
+
+  async eliminarDocumento(docId: number): Promise<{ mensaje: string }> {
+    const ok = await this.dataSource.query(
+      `SELECT 1 FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`, [docId],
+    )
+    if (!ok[0]) throw new NotFoundException('Documento no encontrado')
+    await this.dataSource.query(`DELETE FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`, [docId])
+    return { mensaje: 'Documento eliminado' }
+  }
+
+  /**
+   * Shortcut de conveniencia: devuelve el documento CEDULA del evaluador si existe,
+   * o `null` si no. El front lo usa para decidir si mostrar "subir" o "ver".
+   */
+  async getCedula(evaluadorId: number): Promise<{
+    documentoId: number;
+    archivoNombre: string | null;
+    fechaCargue: Date;
+  } | null> {
+    const tipoId = await this.idTipoCedula()
+    // ROWNUM se aplica antes del ORDER BY en Oracle, por lo que hay que anidar
+    // el ORDER BY dentro de una subquery para quedarse con la fila más reciente.
+    const rows: Array<{ id: number; nombre: string | null; fecha: Date }> = await this.dataSource.query(
+      `SELECT * FROM (
+         SELECT DOCUMENTOID          AS "id",
+                TRIM(ARCHIVONOMBRE)  AS "nombre",
+                FECHACARGUE          AS "fecha"
+           FROM EVALUADORDOCUMENTO
+          WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2
+          ORDER BY DOCUMENTOID DESC
+       ) WHERE ROWNUM = 1`,
+      [evaluadorId, tipoId],
+    )
+    if (!rows[0]) return null
+    return {
+      documentoId: Number(rows[0].id),
+      archivoNombre: rows[0].nombre ?? null,
+      fechaCargue: rows[0].fecha,
+    }
   }
 }

@@ -5,187 +5,17 @@ import { Modal } from '@/components/ui/modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   AlertTriangle, ArrowLeft, Building2, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
-  FileSpreadsheet, Info, Loader2, RefreshCcw, ShieldAlert, Upload, UserCircle2, X,
+  FileSpreadsheet, FileText, Info, Loader2, RefreshCcw, ShieldAlert, Upload, UserCircle2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ReportePreview } from '@/components/importar/reporte-preview'
+import type { ContactoSimple, ExcelAFConDetalle, PreviewImportacion } from '@/lib/types/importar-proyecto'
 
 const PRIMARY = '#00304D'
 
 interface Convocatoria { id: number; nombre: string; estado: number }
-
-interface PreviewEmpresa {
-  estado: 'nueva' | 'existente'
-  nit: string
-  razonSocial: string
-  empresaIdExistente?: number
-  diferenciasDatos?: Array<{ campo: string; actual: string | null; nuevo: string | null }>
-}
-interface PreviewUsuario {
-  email: string
-  estado: 'nuevo' | 'existente'
-  usuarioIdExistente?: number
-}
-interface PreviewConvocatoria {
-  convocatoriaId: number; nombre: string; estado: number; abierta: boolean
-}
-interface PreviewValidacion { nivel: 'error' | 'warning' | 'info'; campo?: string; mensaje: string }
-
-interface ContactoSimple { id: string; tipo: string; nombre: string; email: string; telefono: string }
-interface ExcelContacto { representanteLegal: ContactoSimple; contacto1: ContactoSimple; contactoSustenta: ContactoSimple }
-
-interface ExcelDiagnostico {
-  numero: number
-  herramientas: Array<{ nombre: string; muestra: string }>
-  fecha: string | null
-  herramientaPropia: string | null
-  otraHerramienta: string | null
-  planCapacitacion: string | null
-  descripcion: string | null
-  resumen: string | null
-}
-interface ExcelNecesidad { numeroDiagnostico: number; numeroNecesidad: number; necesidad: string; numeroBeneficiarios: number }
-
-interface ExcelPresupuesto {
-  numeroAFs: number; beneficiarios: number; valorAFs: number
-  gastosOperacion: number; valorTransferencia: number; beneficiariosTransferencia: number
-  poliza: number; valorTotal: number
-  cofinanciacionSena: number; contrapartidaEspecie: number; contrapartidaDinero: number
-  gastosOpCofinSena: number; gastosOpContraEspecie: number; gastosOpContraDinero: number
-}
-
-interface ExcelAFConDetalle {
-  consecutivo: number
-  nombre: string
-  // Identificación
-  eventoFormacion: string | null
-  modalidadFormacion: string | null
-  metodologia: string | null
-  enfoque: string | null
-  horasPorGrupo: number | null
-  numeroGrupos: number | null
-  beneficiariosPresenciales: number | null
-  beneficiariosSincronicos: number | null
-  // Necesidad y problema
-  diagnostico: string | null
-  causasEfectos: string | null
-  efectos: string | null
-  objetivos: string | null
-  justificacion: string | null
-  codigoNecesidad: number | null
-  codigoDiagnostico: number | null
-  // Perfil beneficiarios
-  areas: string[]
-  justificacionAreas: string | null
-  niveles: string[]
-  justificacionNiveles: string | null
-  ocupacionesCuoc: string[]
-  trabajadoresMujeres: number | null
-  trabajadoresCampesinos: number | null
-  trabajadoresCampesinosTexto: string | null
-  trabajadoresPopular: number | null
-  trabajadoresPopularTexto: string | null
-  trabajadoresDiscapacidad: number | null
-  empresasBic: number | null
-  mipymesEmpresas: number | null
-  mipymesTrabajadores: number | null
-  justificacionMipymes: string | null
-  cadenaEmpresas: number | null
-  cadenaTrabajadores: number | null
-  justificacionCadena: string | null
-  // Sectores
-  sectoresPertenecen: string[]
-  subsectoresPertenecen: string[]
-  sectoresBeneficia: string[]
-  subsectoresBeneficia: string[]
-  justificacionSectores: string | null
-  // Alineación e impactos
-  componenteAlineacion: string | null
-  descripcionAlineacion: string | null
-  justificacionAlineacion: string | null
-  justificacionEspecializada: string | null
-  impactosTrabajador: string[]
-  impactosProductividad: string[]
-  // Ambiente y recursos
-  ambiente: string | null
-  material: string | null
-  justificacionSiAplica: string | null
-  recursosDidacticos: string | null
-  insumos: string | null
-  justificacionInsumo: string | null
-  gestionConocimiento: string | null
-  // Hijos
-  uts: Array<{
-    numeroUT: number
-    nombre: string
-    horasPracticas: number | null
-    horasTeoricas: number | null
-    contenido: string | null
-    competencia: string | null
-    actividades: string[]
-    descripcionActividad: string | null
-    perfiles: Array<{ perfil: string; horas: number | null }>
-    articulacionTerritorial: string | null
-    esArticulacionTerritorial: boolean
-  }>
-  rubros: Array<{
-    idRubro: string
-    nombreRubro: string | null
-    descripcion: string | null
-    justificacion: string | null
-    numHoras: number | null
-    numPaginasUnidades: number | null
-    numBeneficiarios: number | null
-    numDias: number | null
-    totalRubro: number | null
-    cofinanciacionSena: number | null
-    contrapartidaEspecie: number | null
-    contrapartidaDinero: number | null
-  }>
-  cobertura: Array<{
-    numeroGrupo: number
-    departamentoPresencial: string | null
-    ciudadPresencial: string | null
-    beneficiariosPresencial: number | null
-    departamentos: Array<{ departamento: string; beneficiarios: number }>
-    justificacion: string | null
-  }>
-}
-
-interface PreviewImportacion {
-  empresa: PreviewEmpresa
-  usuario: PreviewUsuario
-  convocatoria: PreviewConvocatoria
-  proyecto: {
-    nombre: string
-    modalidadProyectoId: number | null
-    modalidadProyectoNombre: string | null
-    presupuesto: ExcelPresupuesto
-    totalAFs: number; totalUTs: number; totalRubros: number; totalCoberturas: number
-  }
-  contactos: ExcelContacto
-  diagnosticos: ExcelDiagnostico[]
-  necesidades: ExcelNecesidad[]
-  basicos: { nit: string; razonSocial: string; sigla: string | null; email: string; celular: string | null; direccionDomicilio: string | null; departamentoDomicilio: string | null; ciudadDomicilio: string | null; tipoOrganizacion: string | null; tamanoEmpresa: string | null; modalidadParticipacion: string | null }
-  generalidades: {
-    objetoSocial: string | null
-    productosServicios: string | null
-    situacionActual: string | null
-    papelSector: string | null
-    retos: string | null
-    experienciaFormativa: string | null
-    objetivoProyecto: string | null
-    sectorPertenece: string | null
-    subsectorPertenece: string | null
-    sectoresRepresenta: string[]
-    subsectoresRepresenta: string[]
-    cadenaProductiva: string | null
-    interacciones: string | null
-  }
-  afs: ExcelAFConDetalle[]
-  validaciones: PreviewValidacion[]
-}
 
 function fmtCop(v: number): string {
   return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
@@ -218,6 +48,9 @@ export default function ImportarProyectoPage() {
   const [clave, setClave] = useState(generarClave())
   const [actualizarEmpresa, setActualizarEmpresa] = useState(false)
   const [importando, setImportando] = useState(false)
+
+  // Reporte de vista previa (pantalla completa, sin importar).
+  const [reporteAbierto, setReporteAbierto] = useState(false)
 
   useEffect(() => {
     api.get<Convocatoria[]>('/proyectos/admin/convocatorias')
@@ -311,6 +144,11 @@ export default function ImportarProyectoPage() {
     }
   }
 
+  // Reporte a pantalla completa: reemplaza el preview mientras esté abierto.
+  if (reporteAbierto && preview) {
+    return <ReportePreview preview={preview} onVolver={() => setReporteAbierto(false)} />
+  }
+
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
       {toast && (
@@ -381,7 +219,16 @@ export default function ImportarProyectoPage() {
       {/* Paso 2 — Preview */}
       {preview && (
         <>
-          <p className="text-xs font-bold uppercase tracking-wide text-[#00304D] -mb-2">2. Revisar antes de importar</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 -mb-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-[#00304D]">2. Revisar antes de importar</p>
+            <button
+              type="button"
+              onClick={() => setReporteAbierto(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#00304D] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#013a5c]"
+            >
+              <FileText size={16} /> Ver reporte completo
+            </button>
+          </div>
 
           {preview.validaciones.length > 0 && (
             <section className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">

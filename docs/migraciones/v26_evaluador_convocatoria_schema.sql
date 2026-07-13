@@ -1,0 +1,139 @@
+-- v26_evaluador_convocatoria_schema.sql
+-- ──────────────────────────────────────────────────────────────────────────
+-- Convocatorias del banco de evaluadores.
+--
+-- Diseño:
+--   - EVALUADORCONVOCATORIA  — cabecera (año, periodo, nombre, modalidad).
+--   - TIPODOCUMENTOCONV      — catálogo de tipos de documento adjuntables
+--                              a una convocatoria (invitación, ratificación,
+--                              listados de asistencia, excel de selección).
+--   - CONVOCATORIADOCUMENTO  — 1:N con el archivo en BLOB (PDF, XLSX, MSG,
+--                              etc.). Cada convocatoria puede tener múltiples
+--                              documentos por tipo (p. ej. varias listas de
+--                              asistencia por jornadas distintas).
+--
+-- Idempotente: q-strings + EXCEPTION para ORA-00955 (ya existe), ORA-01408
+-- (columna ya indexada), ORA-02264/02275 (constraint ya existe).
+-- Ejecutar como SEPLOCAL en SQL Developer.
+-- ──────────────────────────────────────────────────────────────────────────
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 1. EVALUADORCONVOCATORIA — cabecera                                      ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORCONVOCATORIA (
+    CONVOCATORIAID   NUMBER(10)      NOT NULL,
+    ANIO             NUMBER(4)       NOT NULL,
+    PERIODO          NVARCHAR2(4),
+    NOMBRE           NVARCHAR2(200)  NOT NULL,
+    MODALIDADPART    NVARCHAR2(30),
+    FECHAINICIO      DATE,
+    FECHAFIN         DATE,
+    OBSERVACIONES    NVARCHAR2(1000),
+    ACTIVO           NUMBER(1)       DEFAULT 1 NOT NULL,
+    FECHACREACION    DATE            DEFAULT SYSDATE NOT NULL,
+    CONSTRAINT PK_EVALUADORCONVOCATORIA PRIMARY KEY (CONVOCATORIAID)
+  )]';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 2. TIPODOCUMENTOCONV — catálogo de tipos de documento                    ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE q'[CREATE TABLE TIPODOCUMENTOCONV (
+    TIPODOCUMENTOCONVID    NUMBER(10)      NOT NULL,
+    CODIGO                 NVARCHAR2(40)   NOT NULL,
+    NOMBRE                 NVARCHAR2(120)  NOT NULL,
+    EXTENSIONESPERMITIDAS  NVARCHAR2(120)  DEFAULT N'pdf' NOT NULL,
+    ORDEN                  NUMBER(3)       DEFAULT 100 NOT NULL,
+    ACTIVO                 NUMBER(1)       DEFAULT 1   NOT NULL,
+    CONSTRAINT PK_TIPODOCCONV PRIMARY KEY (TIPODOCUMENTOCONVID),
+    CONSTRAINT UQ_TIPODOCCONV_CODIGO UNIQUE (CODIGO)
+  )]';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 3. CONVOCATORIADOCUMENTO — archivos adjuntos a la convocatoria           ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE q'[CREATE TABLE CONVOCATORIADOCUMENTO (
+    DOCUMENTOID            NUMBER(10)      NOT NULL,
+    CONVOCATORIAID         NUMBER(10)      NOT NULL,
+    TIPODOCUMENTOCONVID    NUMBER(10)      NOT NULL,
+    DOCUMENTODESCRIPCION   NVARCHAR2(300),
+    ARCHIVOBLOB            BLOB            NOT NULL,
+    ARCHIVOMIME            NVARCHAR2(120)  NOT NULL,
+    ARCHIVONOMBRE          NVARCHAR2(255),
+    FECHACARGUE            DATE            DEFAULT SYSDATE NOT NULL,
+    CONSTRAINT PK_CONVOCATORIADOCUMENTO PRIMARY KEY (DOCUMENTOID),
+    CONSTRAINT FK_CONVDOC_CONV FOREIGN KEY (CONVOCATORIAID)
+      REFERENCES EVALUADORCONVOCATORIA(CONVOCATORIAID),
+    CONSTRAINT FK_CONVDOC_TIPO FOREIGN KEY (TIPODOCUMENTOCONVID)
+      REFERENCES TIPODOCUMENTOCONV(TIPODOCUMENTOCONVID)
+  )]';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 4. Índices                                                               ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE INDEX IX_CONV_ANIO ON EVALUADORCONVOCATORIA (ANIO)';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE INDEX IX_CONVDOC_CONV ON CONVOCATORIADOCUMENTO (CONVOCATORIAID)';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE INDEX IX_CONVDOC_TIPO ON CONVOCATORIADOCUMENTO (TIPODOCUMENTOCONVID)';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 5. GRANTS y SINÓNIMOS                                                    ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORCONVOCATORIA TO SEP_APP;
+GRANT SELECT                         ON EVALUADORCONVOCATORIA TO SEP_LECTOR;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON TIPODOCUMENTOCONV     TO SEP_APP;
+GRANT SELECT                         ON TIPODOCUMENTOCONV     TO SEP_LECTOR;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON CONVOCATORIADOCUMENTO TO SEP_APP;
+GRANT SELECT                         ON CONVOCATORIADOCUMENTO TO SEP_LECTOR;
+
+CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORCONVOCATORIA    FOR SEPLOCAL.EVALUADORCONVOCATORIA;
+CREATE OR REPLACE SYNONYM SEP_APP.TIPODOCUMENTOCONV        FOR SEPLOCAL.TIPODOCUMENTOCONV;
+CREATE OR REPLACE SYNONYM SEP_APP.CONVOCATORIADOCUMENTO    FOR SEPLOCAL.CONVOCATORIADOCUMENTO;
+
+CREATE OR REPLACE SYNONYM SEP_LECTOR.EVALUADORCONVOCATORIA FOR SEPLOCAL.EVALUADORCONVOCATORIA;
+CREATE OR REPLACE SYNONYM SEP_LECTOR.TIPODOCUMENTOCONV     FOR SEPLOCAL.TIPODOCUMENTOCONV;
+CREATE OR REPLACE SYNONYM SEP_LECTOR.CONVOCATORIADOCUMENTO FOR SEPLOCAL.CONVOCATORIADOCUMENTO;
+
+COMMIT;

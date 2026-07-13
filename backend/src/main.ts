@@ -19,6 +19,7 @@ import { ConfigService } from '@nestjs/config'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
 import type { NestExpressApplication } from '@nestjs/platform-express'
+import { UploadErrorFilter } from './common/filters/upload-error.filter'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
@@ -34,6 +35,9 @@ async function bootstrap() {
       transform: true,
     }),
   )
+
+  // Traduce a español errores de multer (uploads que exceden límites).
+  app.useGlobalFilters(new UploadErrorFilter())
 
   app.enableCors({
     origin: [

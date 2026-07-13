@@ -8,7 +8,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   ArrowLeft, Award, Briefcase, ChevronRight, ClipboardList, Download, Eye, FileText,
-  GraduationCap, IdCard, Loader2, Pencil, PowerOff, Save, Settings2, ShieldCheck,
+  GraduationCap, IdCard, Loader2, Paperclip, Pencil, PowerOff, Save, Settings2, ShieldCheck,
   Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -22,12 +22,20 @@ interface Ficha {
   evaluadorId: number
   personaId: number
   centroId: number | null
+  centroNombre?: string | null
   regionalId: number | null
+  regionalNombre?: string | null
+  municipioId?: number | null
+  municipioNombre?: string | null
+  municipioDeptoNombre?: string | null
   cargo: string | null
   profesion: string | null
   posgrado: string | null
   otrosEstudios: string | null
   jefeDirecto: string | null
+  jefeNombre?: string | null
+  jefeEmail?: string | null
+  jefeCargo?: string | null
   quienAprueba: string | null
   activo: number
   tieneFoto: boolean
@@ -40,7 +48,11 @@ interface Ficha {
   celular: string | null
 }
 
-type TabId = 'datos' | 'estudios' | 'tic' | 'experiencia' | 'pruebas' | 'participaciones'
+interface RegionalCat { id: number; nombre: string }
+interface CentroCat { id: number; nombre: string }
+interface CiudadCat { id: number; ciudad: string; depto: string }
+
+type TabId = 'datos' | 'estudios' | 'tic' | 'experiencia' | 'documentos' | 'pruebas' | 'participaciones'
 
 interface Tab { id: TabId; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
 const TABS: Tab[] = [
@@ -48,6 +60,7 @@ const TABS: Tab[] = [
   { id: 'estudios',        label: 'Hoja de vida y estudios', icon: GraduationCap },
   { id: 'tic',             label: 'Certificaciones TIC',    icon: Award },
   { id: 'experiencia',     label: 'Experiencia',            icon: Briefcase },
+  { id: 'documentos',      label: 'Documentos',             icon: Paperclip },
   { id: 'pruebas',         label: 'Pruebas',                icon: ClipboardList },
   { id: 'participaciones', label: 'Participaciones',        icon: ShieldCheck },
 ]
@@ -211,6 +224,7 @@ export default function FichaEvaluadorPage() {
       )}
       {tab === 'tic'             && <SeccionTic             evaluadorId={evaluadorId} setToast={setToast} />}
       {tab === 'experiencia'     && <SeccionExperiencia     evaluadorId={evaluadorId} setToast={setToast} />}
+      {tab === 'documentos'      && <SeccionDocumentos      evaluadorId={evaluadorId} setToast={setToast} />}
       {tab === 'pruebas'         && <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} />}
       {tab === 'participaciones' && <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} />}
 
@@ -255,13 +269,16 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
   const [editando, setEditando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   // EVALUADOR
-  const [centroId, setCentroId] = useState(ficha.centroId?.toString() ?? '')
-  const [regionalId, setRegionalId] = useState(ficha.regionalId?.toString() ?? '')
+  const [centroId, setCentroId] = useState<number | null>(ficha.centroId ?? null)
+  const [regionalId, setRegionalId] = useState<number | null>(ficha.regionalId ?? null)
+  const [municipioId, setMunicipioId] = useState<number | null>(ficha.municipioId ?? null)
   const [cargo, setCargo] = useState(ficha.cargo ?? '')
   const [profesion, setProfesion] = useState(ficha.profesion ?? '')
   const [posgrado, setPosgrado] = useState(ficha.posgrado ?? '')
   const [otrosEstudios, setOtros] = useState(ficha.otrosEstudios ?? '')
-  const [jefeDirecto, setJefe] = useState(ficha.jefeDirecto ?? '')
+  const [jefeNombre, setJefeNombre] = useState(ficha.jefeNombre ?? '')
+  const [jefeEmail, setJefeEmail] = useState(ficha.jefeEmail ?? '')
+  const [jefeCargo, setJefeCargo] = useState(ficha.jefeCargo ?? '')
   const [quienAprueba, setAprueba] = useState(ficha.quienAprueba ?? '')
   // PERSONA
   const [nombres, setNombres] = useState(ficha.nombres ?? '')
@@ -270,6 +287,33 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
   const [email, setEmail] = useState(ficha.email ?? '')
   const [emailInst, setEmailInst] = useState(ficha.emailInstitucional ?? '')
   const [celular, setCelular] = useState(ficha.celular ?? '')
+
+  // Catálogos Regional / Centro
+  const [regionales, setRegionales] = useState<RegionalCat[]>([])
+  const [centros, setCentros] = useState<CentroCat[]>([])
+  const [cargandoCentros, setCargandoCentros] = useState(false)
+
+  useEffect(() => {
+    if (!editando) return
+    api.get<RegionalCat[]>('/evaluadores/catalogos/regionales')
+      .then(r => setRegionales(r.data ?? []))
+      .catch(() => setRegionales([]))
+  }, [editando])
+
+  useEffect(() => {
+    if (!editando) return
+    if (regionalId == null) {
+      setCentros([])
+      return
+    }
+    setCargandoCentros(true)
+    const ctrl = new AbortController()
+    api.get<CentroCat[]>('/evaluadores/catalogos/centros', { params: { regionalId }, signal: ctrl.signal })
+      .then(r => setCentros(r.data ?? []))
+      .catch(err => { if (err?.name !== 'CanceledError') setCentros([]) })
+      .finally(() => setCargandoCentros(false))
+    return () => ctrl.abort()
+  }, [editando, regionalId])
 
   async function guardar() {
     if (!nombres.trim() || !primerApellido.trim()) {
@@ -283,13 +327,16 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
     setGuardando(true)
     try {
       await api.put(`/evaluadores/${ficha.evaluadorId}`, {
-        centroId: centroId.trim() ? Number(centroId) : null,
-        regionalId: regionalId.trim() ? Number(regionalId) : null,
+        centroId: centroId,
+        regionalId: regionalId,
+        municipioId: municipioId,
         cargo: cargo.trim() || null,
         profesion: profesion.trim() || null,
         posgrado: posgrado.trim() || null,
         otrosEstudios: otrosEstudios.trim() || null,
-        jefeDirecto: jefeDirecto.trim() || null,
+        jefeNombre: jefeNombre.trim() || null,
+        jefeEmail: jefeEmail.trim().toLowerCase() || null,
+        jefeCargo: jefeCargo.trim() || null,
         quienAprueba: quienAprueba.trim() || null,
         nombres: nombres.trim(),
         primerApellido: primerApellido.trim(),
@@ -329,8 +376,32 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
           <Dato label="Cargo" valor={ficha.cargo} />
           <Dato label="Profesión (pregrado)" valor={ficha.profesion} />
           <Dato label="Posgrado" valor={ficha.posgrado} />
-          <Dato label="Regional / Centro" valor={[ficha.regionalId, ficha.centroId].filter(Boolean).join(' / ') || '—'} />
-          <Dato label="Jefe directo" valor={ficha.jefeDirecto} />
+          <Dato label="Regional" valor={ficha.regionalNombre} />
+          <Dato label="Centro de formación" valor={ficha.centroNombre} />
+          <Dato
+            label="Municipio"
+            valor={
+              ficha.municipioNombre
+                ? `${aTitleCase(ficha.municipioNombre) ?? ficha.municipioNombre}${
+                    ficha.municipioDeptoNombre
+                      ? `, ${aTitleCase(ficha.municipioDeptoNombre) ?? ficha.municipioDeptoNombre}`
+                      : ''
+                  }`
+                : null
+            }
+          />
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">Jefe directo</p>
+            {ficha.jefeNombre || ficha.jefeEmail || ficha.jefeCargo ? (
+              <div className="text-sm text-neutral-800 space-y-0.5">
+                <p className="truncate">{ficha.jefeNombre || '—'}</p>
+                <p className="text-xs text-neutral-600 truncate">{ficha.jefeEmail || '—'}</p>
+                <p className="text-xs text-neutral-600 truncate">{ficha.jefeCargo || '—'}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-neutral-800">—</p>
+            )}
+          </div>
           <Dato label="Quién aprueba" valor={ficha.quienAprueba} />
           <div className="sm:col-span-2">
             <Dato label="Otros estudios" valor={ficha.otrosEstudios} multiline />
@@ -367,12 +438,77 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label className={label}>Cargo</label><input value={cargo} onChange={e => setCargo(e.target.value)} className={input} /></div>
             <div><label className={label}>Profesión</label><input value={profesion} onChange={e => setProfesion(e.target.value)} className={input} /></div>
-            <div><label className={label}>Regional (ID)</label><input value={regionalId} onChange={e => setRegionalId(e.target.value)} className={input} /></div>
-            <div><label className={label}>Centro (ID)</label><input value={centroId} onChange={e => setCentroId(e.target.value)} className={input} /></div>
+            <div>
+              <label className={label}>Regional</label>
+              <select
+                value={regionalId ?? ''}
+                onChange={e => {
+                  const v = e.target.value ? Number(e.target.value) : null
+                  setRegionalId(v)
+                  setCentroId(null)
+                }}
+                className={input}
+              >
+                <option value="">— Seleccionar —</option>
+                {regionales.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Centro de formación</label>
+              <select
+                value={centroId ?? ''}
+                onChange={e => setCentroId(e.target.value ? Number(e.target.value) : null)}
+                disabled={regionalId == null || cargandoCentros}
+                className={input}
+              >
+                <option value="">
+                  {regionalId == null ? 'Selecciona una regional primero' : (cargandoCentros ? 'Cargando…' : '— Seleccionar —')}
+                </option>
+                {centros.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className={label}>Municipio</label>
+              <MunicipioAutocomplete
+                value={municipioId}
+                initialLabel={
+                  ficha.municipioNombre
+                    ? `${aTitleCase(ficha.municipioNombre) ?? ficha.municipioNombre}${
+                        ficha.municipioDeptoNombre
+                          ? `, ${aTitleCase(ficha.municipioDeptoNombre) ?? ficha.municipioDeptoNombre}`
+                          : ''
+                      }`
+                    : ''
+                }
+                onChange={setMunicipioId}
+                inputClass={input}
+              />
+            </div>
             <div className="sm:col-span-2"><label className={label}>Posgrado</label><input value={posgrado} onChange={e => setPosgrado(e.target.value)} className={input} /></div>
             <div className="sm:col-span-2"><label className={label}>Otros estudios</label><textarea value={otrosEstudios} onChange={e => setOtros(e.target.value)} rows={3} className={`${input} resize-y`} /></div>
-            <div><label className={label}>Jefe directo</label><input value={jefeDirecto} onChange={e => setJefe(e.target.value)} className={input} /></div>
-            <div><label className={label}>Quién aprueba</label><input value={quienAprueba} onChange={e => setAprueba(e.target.value)} className={input} /></div>
+            <div className="sm:col-span-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-2">Jefe directo</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={label}>Nombre</label>
+                  <input
+                    value={jefeNombre}
+                    onChange={e => setJefeNombre(e.target.value)}
+                    onBlur={() => setJefeNombre(v => aTitleCase(v) ?? '')}
+                    className={input}
+                  />
+                </div>
+                <div>
+                  <label className={label}>Correo institucional</label>
+                  <input type="email" value={jefeEmail} onChange={e => setJefeEmail(e.target.value)} className={input} />
+                </div>
+                <div>
+                  <label className={label}>Cargo</label>
+                  <input value={jefeCargo} onChange={e => setJefeCargo(e.target.value)} className={input} />
+                </div>
+              </div>
+            </div>
+            <div className="sm:col-span-2"><label className={label}>Quién aprueba</label><input value={quienAprueba} onChange={e => setAprueba(e.target.value)} className={input} /></div>
           </div>
         </div>
       </div>
@@ -393,6 +529,137 @@ function Dato({ label, valor, mono, multiline }: { label: string; valor: string 
     <div>
       <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">{label}</p>
       <p className={`text-sm ${mono ? 'font-mono' : ''} text-neutral-800 ${multiline ? 'whitespace-pre-line' : 'truncate'}`}>{v}</p>
+    </div>
+  )
+}
+
+// ── MunicipioAutocomplete ──────────────────────────────────────────────────────
+
+function MunicipioAutocomplete({
+  value,
+  initialLabel,
+  onChange,
+  inputClass,
+}: {
+  value: number | null
+  initialLabel: string
+  onChange: (id: number | null) => void
+  inputClass: string
+}) {
+  const [texto, setTexto] = useState(initialLabel)
+  const [resultados, setResultados] = useState<CiudadCat[]>([])
+  const [buscando, setBuscando] = useState(false)
+  const [abierto, setAbierto] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  // Cierra el desplegable al hacer click fuera
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setAbierto(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  // Debounce búsqueda + AbortController (evita race conditions con respuestas obsoletas)
+  useEffect(() => {
+    const q = texto.trim()
+    if (q.length < 2) {
+      setResultados([])
+      setBuscando(false)
+      return
+    }
+    // No relanzar la búsqueda si el texto coincide con el ítem ya seleccionado
+    if (value != null && q === initialLabel.trim()) {
+      setResultados([])
+      return
+    }
+    setBuscando(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => {
+      api.get<CiudadCat[]>('/evaluadores/catalogos/ciudades/buscar', {
+        params: { q, limite: 20 },
+        signal: ctrl.signal,
+      })
+        .then(r => setResultados(r.data ?? []))
+        .catch(err => { if (err?.name !== 'CanceledError') setResultados([]) })
+        .finally(() => setBuscando(false))
+    }, 280)
+    return () => {
+      clearTimeout(timer)
+      ctrl.abort()
+    }
+  }, [texto, value, initialLabel])
+
+  function elegir(c: CiudadCat) {
+    onChange(c.id)
+    const ciudadTC = aTitleCase(c.ciudad) ?? c.ciudad
+    const deptoTC = aTitleCase(c.depto) ?? c.depto
+    setTexto(deptoTC ? `${ciudadTC}, ${deptoTC}` : ciudadTC)
+    setAbierto(false)
+    setResultados([])
+  }
+
+  function limpiar() {
+    onChange(null)
+    setTexto('')
+    setResultados([])
+    setAbierto(false)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="relative">
+        <input
+          value={texto}
+          onChange={e => {
+            setTexto(e.target.value)
+            setAbierto(true)
+            // Si el usuario edita el texto, invalidamos el municipioId hasta que elija uno
+            if (value != null) onChange(null)
+          }}
+          onFocus={() => setAbierto(true)}
+          placeholder="Escribe 2+ letras (ej: Bogotá)"
+          className={`${inputClass} pr-8`}
+          autoComplete="off"
+        />
+        {(texto || value != null) && (
+          <button
+            type="button"
+            onClick={limpiar}
+            aria-label="Limpiar municipio"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 text-lg leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {abierto && texto.trim().length >= 2 && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-neutral-200 rounded-lg shadow-lg max-h-64 overflow-auto">
+          {buscando ? (
+            <p className="px-3 py-2 text-xs text-neutral-500 flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              Buscando…
+            </p>
+          ) : resultados.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-neutral-500">Sin resultados</p>
+          ) : (
+            resultados.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => elegir(c)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-neutral-100 border-b border-neutral-50 last:border-b-0"
+              >
+                <span className="font-medium text-neutral-800">{aTitleCase(c.ciudad) ?? c.ciudad}</span>
+                {c.depto && <span className="text-neutral-500"> — {aTitleCase(c.depto) ?? c.depto}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -524,7 +791,7 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
     try {
       const [rDoc, rTipos] = await Promise.all([
         api.get<DocEvaluador | null>(`/evaluadores/${evaluadorId}/cedula`),
-        api.get<TipoDocEval[]>(`/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
+        api.get<TipoDocEval[]>(`/evaluadores/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
       ])
       setDoc(rDoc.data ?? null)
       const cedula = (rTipos.data ?? []).find(t => t.codigo === 'CEDULA')
@@ -616,6 +883,16 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
           <div className="flex flex-wrap gap-2">
             {doc ? (
               <>
+                <button
+                  onClick={() => abrirArchivo(`/evaluadores/documentos/${doc.documentoId}/archivo`).catch(() => {
+                    setToast({ tipo: 'error', msg: 'No se pudo abrir la cédula' })
+                  })}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg transition hover:opacity-90"
+                  style={{ backgroundColor: PRIMARY }}
+                >
+                  <Eye size={14} />
+                  Ver
+                </button>
                 <button
                   onClick={() => descargarArchivoConNombreDelServidor(
                     `/evaluadores/documentos/${doc.documentoId}/descargar`,
@@ -1521,6 +1798,391 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
           ))}
         </ul>
       )}
+    </Section>
+  )
+}
+
+// ── Sección DOCUMENTOS ─────────────────────────────────────────────────────────
+
+interface DocumentoItem {
+  documentoId: number
+  evaluadorId: number
+  tipoDocumentoEvalId: number
+  tipoCodigo: string
+  tipoNombre: string
+  descripcion: string | null
+  anioReferencia: number | null
+  archivoNombre: string | null
+  mime: string | null
+  fechaCargue: string
+}
+
+interface TipoDocEvalCat {
+  id: number
+  codigo: string
+  nombre: string
+  admiteMultiple?: boolean
+  orden?: number
+  activo?: boolean
+}
+
+// Tailwind JIT necesita las clases literales presentes en el source; por eso
+// declaramos aquí también la variante hover para que se compile en el CSS final.
+const DOC_CHIP_COLORS: Record<string, { bg: string; text: string; border: string; hoverBg: string }> = {
+  AUTORIZACION:             { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',   hoverBg: 'hover:bg-blue-100'   },
+  CONFIDENCIALIDAD:         { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', hoverBg: 'hover:bg-purple-100' },
+  EXPERIENCIA_PROFESIONAL:  { bg: 'bg-cyan-50',   text: 'text-cyan-700',   border: 'border-cyan-200',   hoverBg: 'hover:bg-cyan-100'   },
+  EXPERIENCIA_PROYECTOS:    { bg: 'bg-teal-50',   text: 'text-teal-700',   border: 'border-teal-200',   hoverBg: 'hover:bg-teal-100'   },
+  CERTIFICADO_PARTICIPACION:{ bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200',  hoverBg: 'hover:bg-amber-100'  },
+}
+const DOC_CHIP_FALLBACK = { bg: 'bg-neutral-100', text: 'text-neutral-700', border: 'border-neutral-200', hoverBg: 'hover:bg-neutral-200' }
+
+function chipColor(codigo: string) {
+  return DOC_CHIP_COLORS[codigo] ?? DOC_CHIP_FALLBACK
+}
+
+function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
+  const [items, setItems] = useState<DocumentoItem[]>([])
+  const [tipos, setTipos] = useState<TipoDocEvalCat[]>([])
+  const [loading, setLoading] = useState(true)
+  const [subiendo, setSubiendo] = useState(false)
+  const [eliminandoId, setEliminandoId] = useState<number | null>(null)
+  const [confirmDelId, setConfirmDelId] = useState<number | null>(null)
+  const [formAbierto, setFormAbierto] = useState(false)
+  const [filtroCodigo, setFiltroCodigo] = useState<string>('__TODOS__')
+
+  // form state
+  const [tipoSel, setTipoSel] = useState<string>('')
+  const [descripcion, setDescripcion] = useState('')
+  const [anio, setAnio] = useState<string>(new Date().getFullYear().toString())
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+
+  async function cargar() {
+    setLoading(true)
+    try {
+      const [rDocs, rTipos] = await Promise.all([
+        api.get<DocumentoItem[]>(`/evaluadores/${evaluadorId}/documentos`),
+        api.get<TipoDocEvalCat[]>(`/evaluadores/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
+      ])
+      setItems((rDocs.data ?? []).filter(d => d.tipoCodigo !== 'CEDULA'))
+      setTipos((rTipos.data ?? []).filter(t => t.codigo !== 'CEDULA'))
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudieron cargar los documentos') })
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
+
+  const tipoSeleccionado = tipos.find(t => String(t.id) === tipoSel)
+  const requiereAnio = tipoSeleccionado?.codigo === 'CERTIFICADO_PARTICIPACION'
+  const maxAnio = new Date().getFullYear() + 1
+
+  function resetForm() {
+    setTipoSel('')
+    setDescripcion('')
+    setAnio(new Date().getFullYear().toString())
+    setArchivo(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  function cerrarForm() {
+    setFormAbierto(false)
+    resetForm()
+  }
+
+  async function subir() {
+    if (!tipoSel) {
+      setToast({ tipo: 'error', msg: 'Selecciona el tipo de documento' })
+      return
+    }
+    if (!archivo) {
+      setToast({ tipo: 'error', msg: 'Adjunta un archivo PDF' })
+      return
+    }
+    if (archivo.size > 8 * 1024 * 1024) {
+      setToast({ tipo: 'error', msg: 'El archivo supera los 8 MB' })
+      return
+    }
+    if (requiereAnio) {
+      const n = Number(anio)
+      if (!Number.isFinite(n) || n < 2000 || n > maxAnio) {
+        setToast({ tipo: 'error', msg: `Año inválido (2000 - ${maxAnio})` })
+        return
+      }
+    }
+    setSubiendo(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      fd.append('tipoDocumentoEvalId', tipoSel)
+      if (descripcion.trim()) fd.append('descripcion', descripcion.trim().slice(0, 300))
+      if (requiereAnio) fd.append('anioReferencia', String(Number(anio)))
+      await api.post(`/evaluadores/${evaluadorId}/documentos`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setToast({ tipo: 'success', msg: 'Documento subido' })
+      cerrarForm()
+      await cargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo subir el documento') })
+    } finally {
+      setSubiendo(false)
+    }
+  }
+
+  async function eliminar(docId: number) {
+    setEliminandoId(docId)
+    try {
+      await api.delete(`/evaluadores/documentos/${docId}`)
+      setToast({ tipo: 'success', msg: 'Documento eliminado' })
+      setConfirmDelId(null)
+      await cargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar el documento') })
+    } finally {
+      setEliminandoId(null)
+    }
+  }
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  const conteoPorTipo: Record<string, number> = {}
+  items.forEach(d => { conteoPorTipo[d.tipoCodigo] = (conteoPorTipo[d.tipoCodigo] ?? 0) + 1 })
+
+  const itemsFiltrados = filtroCodigo === '__TODOS__'
+    ? items
+    : items.filter(d => d.tipoCodigo === filtroCodigo)
+
+  const docAEliminar = confirmDelId != null ? items.find(d => d.documentoId === confirmDelId) : null
+
+  return (
+    <Section
+      titulo={`Documentos personales (${items.length})`}
+      accion={
+        <button
+          onClick={() => { if (formAbierto) cerrarForm(); else setFormAbierto(true) }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90"
+          style={{ backgroundColor: PRIMARY }}
+        >
+          <Upload size={12} />
+          {formAbierto ? 'Cerrar' : '+ Agregar'}
+        </button>
+      }
+    >
+      {/* Chips de filtro */}
+      <div className="px-5 py-3 border-b border-neutral-100 flex flex-wrap gap-1.5 bg-neutral-50/40">
+        <button
+          onClick={() => setFiltroCodigo('__TODOS__')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition border ${
+            filtroCodigo === '__TODOS__'
+              ? 'text-white border-transparent'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100'
+          }`}
+          style={filtroCodigo === '__TODOS__' ? { backgroundColor: PRIMARY } : undefined}
+        >
+          Todos
+          <span className={`px-1.5 py-px rounded-full text-[10px] ${filtroCodigo === '__TODOS__' ? 'bg-white/25' : 'bg-neutral-100'}`}>
+            {items.length}
+          </span>
+        </button>
+        {tipos.map(t => {
+          const activo = filtroCodigo === t.codigo
+          const c = chipColor(t.codigo)
+          return (
+            <button
+              key={t.id}
+              onClick={() => setFiltroCodigo(t.codigo)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition border ${
+                activo
+                  ? 'text-white border-transparent'
+                  : `bg-white text-neutral-600 border-neutral-200 ${c.hoverBg}`
+              }`}
+              style={activo ? { backgroundColor: PRIMARY } : undefined}
+              title={t.nombre}
+            >
+              {t.nombre}
+              <span className={`px-1.5 py-px rounded-full text-[10px] ${activo ? 'bg-white/25' : 'bg-neutral-100'}`}>
+                {conteoPorTipo[t.codigo] ?? 0}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Formulario colapsable */}
+      {formAbierto && (
+        <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className={requiereAnio ? '' : 'sm:col-span-2'}>
+            <label className={label}>Tipo de documento *</label>
+            <select
+              value={tipoSel}
+              onChange={e => setTipoSel(e.target.value)}
+              className={input}
+            >
+              <option value="">— Selecciona un tipo —</option>
+              {tipos.map(t => (
+                <option key={t.id} value={String(t.id)}>{t.nombre}</option>
+              ))}
+            </select>
+          </div>
+          {requiereAnio && (
+            <div>
+              <label className={label}>Año de referencia *</label>
+              <input
+                type="number"
+                min={2000}
+                max={maxAnio}
+                value={anio}
+                onChange={e => setAnio(e.target.value)}
+                className={input}
+              />
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <label className={label}>Descripción (opcional)</label>
+            <input
+              type="text"
+              maxLength={300}
+              value={descripcion}
+              onChange={e => setDescripcion(e.target.value)}
+              placeholder="Contexto o notas del documento"
+              className={input}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>Archivo PDF * (máximo 8 MB)</label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf"
+              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              className="block w-full text-xs text-neutral-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-neutral-100 file:text-neutral-700 hover:file:bg-neutral-200"
+            />
+            {archivo && (
+              <p className="mt-1 text-[11px] text-neutral-500 truncate">
+                {archivo.name} · {(archivo.size / (1024 * 1024)).toFixed(2)} MB
+              </p>
+            )}
+          </div>
+          <div className="sm:col-span-2 flex items-center justify-end gap-2 pt-1">
+            <button
+              onClick={cerrarForm}
+              disabled={subiendo}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold rounded-lg disabled:opacity-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={subir}
+              disabled={subiendo}
+              className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
+              style={{ backgroundColor: INSTITUTIONAL }}
+            >
+              {subiendo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              Subir documento
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Listado */}
+      {loading ? (
+        <p className="px-5 py-6 text-sm text-neutral-500 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" />
+          Cargando documentos...
+        </p>
+      ) : items.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-neutral-400">No hay documentos aún</p>
+      ) : itemsFiltrados.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-neutral-400">
+          No hay documentos de este tipo
+        </p>
+      ) : (
+        <ul className="divide-y divide-neutral-100">
+          {itemsFiltrados.map(d => {
+            const c = chipColor(d.tipoCodigo)
+            return (
+              <li key={d.documentoId} className="px-5 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[#00304D]/5 text-[#00304D] flex items-center justify-center shrink-0">
+                  <FileText size={18} />
+                </div>
+                <div className="flex-1 min-w-0 w-full">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${c.bg} ${c.text} ${c.border}`}>
+                      {d.tipoNombre}
+                    </span>
+                    {d.anioReferencia != null && (
+                      <span className="text-[10px] font-semibold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
+                        Año {d.anioReferencia}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-neutral-500">
+                      {new Date(d.fechaCargue).toLocaleDateString('es-CO')}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-800 mt-1 truncate">
+                    {d.archivoNombre ?? 'documento.pdf'}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5 truncate">
+                    {d.descripcion ?? '—'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5 shrink-0">
+                  <button
+                    onClick={() => abrirArchivo(`/evaluadores/documentos/${d.documentoId}/archivo`).catch(() => {
+                      setToast({ tipo: 'error', msg: 'No se pudo abrir el documento' })
+                    })}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90"
+                    style={{ backgroundColor: PRIMARY }}
+                  >
+                    <Eye size={13} />
+                    Ver
+                  </button>
+                  <button
+                    onClick={() => descargarArchivoConNombreDelServidor(
+                      `/evaluadores/documentos/${d.documentoId}/descargar`,
+                      d.archivoNombre ?? `documento_${d.documentoId}.pdf`,
+                    ).catch(() => {
+                      setToast({ tipo: 'error', msg: 'No se pudo descargar el documento' })
+                    })}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold rounded-lg transition"
+                  >
+                    <Download size={13} />
+                    Descargar
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelId(d.documentoId)}
+                    disabled={eliminandoId === d.documentoId}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-700 text-xs font-semibold rounded-lg disabled:opacity-50 transition"
+                  >
+                    {eliminandoId === d.documentoId ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    Eliminar
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <ConfirmModal
+        open={confirmDelId != null}
+        onClose={() => setConfirmDelId(null)}
+        onConfirm={() => confirmDelId != null && eliminar(confirmDelId)}
+        tipo="delete"
+        titulo="Eliminar documento"
+        mensaje={
+          <>
+            ¿Seguro que deseas eliminar el documento{' '}
+            <strong>{docAEliminar?.archivoNombre ?? ''}</strong>? Esta acción no se puede deshacer.
+          </>
+        }
+        textoConfirmar="Eliminar"
+        cargando={eliminandoId != null}
+      />
     </Section>
   )
 }

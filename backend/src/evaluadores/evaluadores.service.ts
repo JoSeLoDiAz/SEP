@@ -21,8 +21,13 @@ export interface EvaluadorCrearDto {
   profesion?: string
   posgrado?: string
   otrosEstudios?: string
-  jefeDirecto?: string
-  quienAprueba?: string
+  jefeDirecto?: string    // legacy — texto libre; se conserva por compatibilidad
+  quienAprueba?: string   // reservado para Fase 4 (flujo de aprobación)
+  // Jefe directo estructurado (Fase 3) y municipio de residencia
+  jefeNombre?: string
+  jefeEmail?: string
+  jefeCargo?: string
+  municipioId?: number
 }
 
 export interface EvaluadorActualizarDto {
@@ -35,6 +40,11 @@ export interface EvaluadorActualizarDto {
   otrosEstudios?: string | null
   jefeDirecto?: string | null
   quienAprueba?: string | null
+  // Jefe directo estructurado y municipio de residencia
+  jefeNombre?: string | null
+  jefeEmail?: string | null
+  jefeCargo?: string | null
+  municipioId?: number | null
   // PERSONA (opcional — si vienen, se actualizan en la fila PERSONA asociada)
   nombres?: string
   primerApellido?: string
@@ -235,6 +245,10 @@ export class EvaluadoresService {
               e.EVALUADOROTROSEST             AS "otrosEstudios",
               TRIM(e.EVALUADORJEFEDIR)        AS "jefeDirecto",
               TRIM(e.EVALUADORQUIENAPRUEBA)   AS "quienAprueba",
+              TRIM(e.EVALUADORJEFENOMBRE)     AS "jefeNombre",
+              TRIM(e.EVALUADORJEFEEMAIL)      AS "jefeEmail",
+              TRIM(e.EVALUADORJEFECARGO)      AS "jefeCargo",
+              e.EVALUADORMUNICIPIOID          AS "municipioId",
               e.EVALUADORACTIVO               AS "activo",
               CASE WHEN e.EVALUADORFOTO IS NULL THEN 0 ELSE 1 END AS "tieneFoto",
               TRIM(p.PERSONAIDENTIFICACION)   AS "identificacion",
@@ -245,9 +259,17 @@ export class EvaluadoresService {
               TRIM(p.PERSONAEMAIL)            AS "email",
               TRIM(p.PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
               TRIM(p.PERSONACELULAR)          AS "celular",
-              p.CIUDADID                      AS "ciudadId"
+              p.CIUDADID                      AS "ciudadId",
+              TRIM(r.REGIONALNOMBRE)          AS "regionalNombre",
+              TRIM(cf.CENTRONOMBRE)           AS "centroNombre",
+              TRIM(mu.CIUDADNOMBRE)           AS "municipioNombre",
+              TRIM(dmu.DEPARTAMENTONOMBRE)    AS "municipioDeptoNombre"
          FROM EVALUADOR e
-         JOIN PERSONA   p ON p.PERSONAID = e.PERSONAID
+         JOIN      PERSONA         p   ON p.PERSONAID   = e.PERSONAID
+         LEFT JOIN REGIONAL        r   ON r.REGIONALID  = e.REGIONALID
+         LEFT JOIN CENTROFORMACION cf  ON cf.CENTROID   = e.CENTROID
+         LEFT JOIN CIUDAD          mu  ON mu.CIUDADID   = e.EVALUADORMUNICIPIOID
+         LEFT JOIN DEPARTAMENTO    dmu ON dmu.DEPARTAMENTOID = mu.DEPARTAMENTOID
         WHERE e.EVALUADORID = :1`,
       [evaluadorId],
     )
@@ -342,12 +364,17 @@ export class EvaluadoresService {
 
       const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL FROM dual`)
       const evaluadorId = Number(seqE[0].NEXTVAL)
+      // EVALUADORJEFEDIR queda como columna heredada — a partir de Fase 3 se
+      // usan EVALUADORJEFENOMBRE / EVALUADORJEFEEMAIL / EVALUADORJEFECARGO y
+      // el municipio del evaluador se guarda en EVALUADORMUNICIPIOID.
+      // EVALUADORQUIENAPRUEBA se sigue escribiendo (queda para Fase 4).
       await qr.query(
         `INSERT INTO EVALUADOR
            (EVALUADORID, PERSONAID, CENTROID, REGIONALID, EVALUADORCARGO, EVALUADORPROFESION,
-            EVALUADORPOSGRADO, EVALUADOROTROSEST, EVALUADORJEFEDIR, EVALUADORQUIENAPRUEBA,
+            EVALUADORPOSGRADO, EVALUADOROTROSEST, EVALUADORQUIENAPRUEBA,
+            EVALUADORJEFENOMBRE, EVALUADORJEFEEMAIL, EVALUADORJEFECARGO, EVALUADORMUNICIPIOID,
             EVALUADORACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, 1, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, 1, SYSDATE)`,
         [
           evaluadorId, personaId,
           dto.centroId ?? null, dto.regionalId ?? null,
@@ -355,8 +382,11 @@ export class EvaluadoresService {
           (dto.profesion ?? '').trim() || null,
           (dto.posgrado ?? '').trim() || null,
           (dto.otrosEstudios ?? '').trim() || null,
-          (dto.jefeDirecto ?? '').trim() || null,
           (dto.quienAprueba ?? '').trim() || null,
+          aTitleCase(dto.jefeNombre) || null,
+          (dto.jefeEmail ?? '').trim().toLowerCase() || null,
+          (dto.jefeCargo ?? '').trim() || null,
+          dto.municipioId ?? null,
         ],
       )
 
@@ -382,6 +412,9 @@ export class EvaluadoresService {
     await qr.startTransaction()
     try {
       // ── EVALUADOR ────────────────────────────────────────────────────────
+      // jefeNombre pasa por Title Case y jefeEmail por lowercase+trim.
+      // EVALUADORJEFEDIR queda como columna heredada — se actualiza sólo si el
+      // caller sigue enviando el campo antiguo `jefeDirecto`.
       const setsEval: string[] = []
       const paramsEval: unknown[] = []
       const mapEval: Array<[keyof EvaluadorActualizarDto, string]> = [
@@ -393,11 +426,32 @@ export class EvaluadoresService {
         ['otrosEstudios', 'EVALUADOROTROSEST'],
         ['jefeDirecto',   'EVALUADORJEFEDIR'],
         ['quienAprueba',  'EVALUADORQUIENAPRUEBA'],
+        ['jefeNombre',    'EVALUADORJEFENOMBRE'],
+        ['jefeEmail',     'EVALUADORJEFEEMAIL'],
+        ['jefeCargo',     'EVALUADORJEFECARGO'],
+        ['municipioId',   'EVALUADORMUNICIPIOID'],
       ]
+      const CAMPOS_ID_NUMERICOS = new Set<keyof EvaluadorActualizarDto>([
+        'centroId', 'regionalId', 'municipioId',
+      ])
       for (const [k, col] of mapEval) {
         if (dto[k] !== undefined) {
           const val = dto[k]
-          paramsEval.push(typeof val === 'string' ? (val.trim() || null) : val)
+          let bind: unknown
+          if (k === 'jefeNombre') {
+            bind = aTitleCase(val as string | null | undefined)
+          } else if (k === 'jefeEmail') {
+            bind = typeof val === 'string' ? (val.trim().toLowerCase() || null) : val
+          } else if (CAMPOS_ID_NUMERICOS.has(k)) {
+            // Coerción explícita: acepta number, "123" numérico o null.
+            bind = val == null || val === '' ? null : Number(val)
+            if (bind !== null && !Number.isFinite(bind as number)) {
+              throw new BadRequestException(`${k} debe ser numérico`)
+            }
+          } else {
+            bind = typeof val === 'string' ? (val.trim() || null) : val
+          }
+          paramsEval.push(bind)
           setsEval.push(`${col} = :${paramsEval.length}`)
         }
       }
@@ -1081,12 +1135,29 @@ export class EvaluadoresService {
     return this.tipoCedulaCache
   }
 
-  async listarDocumentos(evaluadorId: number, filtroTipo?: string) {
+  /**
+   * Lista los documentos genéricos de un evaluador.
+   *
+   * @param opciones.tipoCodigo   Filtra por código de tipo (CEDULA, AUTORIZACION, …).
+   *                              Si viene, incluye ese tipo aunque `incluirCedula` sea false.
+   * @param opciones.incluirCedula Si es false (default), excluye el tipo CEDULA
+   *                               del listado — el frontend lo muestra en su propio card.
+   *                               Ignorado cuando `tipoCodigo` viene explícito.
+   */
+  async listarDocumentos(
+    evaluadorId: number,
+    opciones: { tipoCodigo?: string; incluirCedula?: boolean } = {},
+  ) {
+    const { tipoCodigo, incluirCedula = false } = opciones
     const conds: string[] = [`d.EVALUADORID = :1`]
     const params: unknown[] = [evaluadorId]
-    if (filtroTipo && filtroTipo.trim()) {
-      params.push(filtroTipo.trim().toUpperCase())
+    const filtroTipo = tipoCodigo?.trim()
+    if (filtroTipo) {
+      params.push(filtroTipo.toUpperCase())
       conds.push(`UPPER(TRIM(t.CODIGO)) = :${params.length}`)
+    } else if (!incluirCedula) {
+      // Sin filtro y sin flag explícito: escondemos la cédula, que vive en su propio card.
+      conds.push(`UPPER(TRIM(t.CODIGO)) <> 'CEDULA'`)
     }
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT d.DOCUMENTOID           AS "documentoId",

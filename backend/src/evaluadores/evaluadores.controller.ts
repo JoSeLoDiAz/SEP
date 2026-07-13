@@ -144,6 +144,67 @@ export class EvaluadoresController {
     return this.catalogos.actualizarTipoDocumentoEvaluador(id, dto)
   }
 
+  // Catálogo de tipos de documento para convocatorias (Fase 5).
+
+  @Get('catalogos/tipos-documento-convocatoria')
+  @ApiOperation({ summary: 'Catálogo de tipos de documento aplicables a una convocatoria' })
+  tiposDocConvCat(@CurrentUser() user: JwtUser, @Query('soloActivos') soloActivos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarTiposDocumentoConvocatoria(soloActivos !== '0')
+  }
+
+  @Post('catalogos/tipos-documento-convocatoria')
+  crearTipoDocConv(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: { codigo: string; nombre: string; extensionesPermitidas?: string; orden?: number },
+  ) {
+    this.exigirAdmin(user)
+    return this.catalogos.crearTipoDocumentoConvocatoria(dto)
+  }
+
+  @Put('catalogos/tipos-documento-convocatoria/:id')
+  actualizarTipoDocConv(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { nombre?: string; extensionesPermitidas?: string; orden?: number; activo?: boolean },
+  ) {
+    this.exigirAdmin(user)
+    return this.catalogos.actualizarTipoDocumentoConvocatoria(id, dto)
+  }
+
+  // Catálogos para Fase 3 (regional / centro de formación / municipio)
+
+  @Get('catalogos/regionales')
+  @ApiOperation({ summary: 'Regionales del SENA (dropdown asignación del evaluador)' })
+  regionalesCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarRegionales(todos !== '1')
+  }
+
+  @Get('catalogos/centros')
+  @ApiOperation({ summary: 'Centros de formación (opcionalmente filtrados por regional)' })
+  centrosCat(
+    @CurrentUser() user: JwtUser,
+    @Query('regionalId') regionalId?: string,
+    @Query('todos') todos?: string,
+  ) {
+    this.exigirGestion(user)
+    const rid = regionalId != null && regionalId !== '' ? Number(regionalId) : undefined
+    return this.catalogos.listarCentros(rid, todos !== '1')
+  }
+
+  @Get('catalogos/ciudades/buscar')
+  @ApiOperation({ summary: 'Autocomplete de municipios — devuelve "Ciudad, Departamento"' })
+  buscarCiudadesCat(
+    @CurrentUser() user: JwtUser,
+    @Query('q') q?: string,
+    @Query('limite') limite?: string,
+  ) {
+    this.exigirGestion(user)
+    const lim = limite ? Number(limite) : 20
+    return this.catalogos.buscarCiudades(q ?? '', Number.isFinite(lim) ? lim : 20)
+  }
+
   // ── Búsqueda previa (al crear) ─────────────────────────────────────────
 
   @Get('buscar-persona')
@@ -539,14 +600,22 @@ export class EvaluadoresController {
   }
 
   @Get(':id/documentos')
-  @ApiOperation({ summary: 'Listado de documentos del evaluador (filtrable por código de tipo)' })
+  @ApiOperation({
+    summary:
+      'Listado de documentos del evaluador (filtrable por código de tipo). ' +
+      'Por defecto excluye la CÉDULA (usar ?incluirCedula=1 para incluirla).',
+  })
   listarDocumentos(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
     @Query('tipo') tipo?: string,
+    @Query('incluirCedula') incluirCedula?: string,
   ) {
     this.exigirGestion(user)
-    return this.service.listarDocumentos(id, tipo)
+    return this.service.listarDocumentos(id, {
+      tipoCodigo: tipo,
+      incluirCedula: incluirCedula === '1',
+    })
   }
 
   @Post(':id/documentos')

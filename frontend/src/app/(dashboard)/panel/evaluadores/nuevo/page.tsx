@@ -5,11 +5,14 @@ import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ArrowLeft, ChevronRight, Loader2, Search, ShieldCheck, UserPlus } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface TipoDoc { id: number; nombre: string }
 interface RespCrear { evaluadorId: number; personaId: number }
+interface RegionalCat { id: number; nombre: string }
+interface CentroCat { id: number; nombre: string }
+interface CiudadCat { id: number; ciudad: string; depto: string }
 
 interface RespBuscar {
   encontrado: boolean
@@ -45,14 +48,22 @@ export default function NuevoEvaluadorPage() {
   const [celular, setCelular] = useState('')
 
   // Datos del banco
-  const [centroId, setCentroId] = useState('')
-  const [regionalId, setRegionalId] = useState('')
+  const [centroId, setCentroId] = useState<number | null>(null)
+  const [regionalId, setRegionalId] = useState<number | null>(null)
+  const [municipioId, setMunicipioId] = useState<number | null>(null)
   const [cargo, setCargo] = useState('')
   const [profesion, setProfesion] = useState('')
   const [posgrado, setPosgrado] = useState('')
   const [otrosEstudios, setOtrosEstudios] = useState('')
-  const [jefeDirecto, setJefeDirecto] = useState('')
+  const [jefeNombre, setJefeNombre] = useState('')
+  const [jefeEmail, setJefeEmail] = useState('')
+  const [jefeCargo, setJefeCargo] = useState('')
   const [quienAprueba, setQuienAprueba] = useState('')
+
+  // Catálogos Regional / Centro
+  const [regionales, setRegionales] = useState<RegionalCat[]>([])
+  const [centros, setCentros] = useState<CentroCat[]>([])
+  const [cargandoCentros, setCargandoCentros] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [buscando, setBuscando] = useState(false)
@@ -64,7 +75,25 @@ export default function NuevoEvaluadorPage() {
     api.get<TipoDoc[]>('/auth/tipos-documento', { params: { para: 'persona' } })
       .then(r => setTiposDoc(r.data ?? []))
       .catch(() => setTiposDoc([]))
+    api.get<RegionalCat[]>('/evaluadores/catalogos/regionales')
+      .then(r => setRegionales(r.data ?? []))
+      .catch(() => setRegionales([]))
   }, [])
+
+  useEffect(() => {
+    if (regionalId == null) {
+      setCentros([])
+      setCentroId(null)   // R8: al limpiar regional, resetear el centro elegido
+      return
+    }
+    setCargandoCentros(true)
+    const ctrl = new AbortController()
+    api.get<CentroCat[]>('/evaluadores/catalogos/centros', { params: { regionalId }, signal: ctrl.signal })
+      .then(r => setCentros(r.data ?? []))
+      .catch(err => { if (err?.name !== 'CanceledError') setCentros([]) })
+      .finally(() => setCargandoCentros(false))
+    return () => ctrl.abort()
+  }, [regionalId])
 
   async function buscarPersona() {
     if (!tipoDocumentoIdentidadId || !identificacion.trim()) {
@@ -133,13 +162,16 @@ export default function NuevoEvaluadorPage() {
         email: email.trim().toLowerCase(),
         emailInstitucional: emailInstitucional.trim().toLowerCase(),
         celular: celular.trim() || undefined,
-        centroId: centroId.trim() ? Number(centroId) : undefined,
-        regionalId: regionalId.trim() ? Number(regionalId) : undefined,
+        centroId: centroId ?? undefined,
+        regionalId: regionalId ?? undefined,
+        municipioId: municipioId ?? undefined,
         cargo: cargo.trim() || undefined,
         profesion: profesion.trim() || undefined,
         posgrado: posgrado.trim() || undefined,
         otrosEstudios: otrosEstudios.trim() || undefined,
-        jefeDirecto: jefeDirecto.trim() || undefined,
+        jefeNombre: jefeNombre.trim() || undefined,
+        jefeEmail: jefeEmail.trim().toLowerCase() || undefined,
+        jefeCargo: jefeCargo.trim() || undefined,
         quienAprueba: quienAprueba.trim() || undefined,
       })
       setToast({ tipo: 'success', msg: 'Evaluador creado' })
@@ -299,12 +331,44 @@ export default function NuevoEvaluadorPage() {
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos del banco de evaluadores</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className={label}>Regional <span className="text-neutral-400 font-normal normal-case">(ID, opcional)</span></label>
-              <input value={regionalId} onChange={(e) => setRegionalId(e.target.value)} placeholder="Ej: 17 (Caldas)" className={input} disabled={bloqueado} />
+              <label className={label}>Regional</label>
+              <select
+                value={regionalId ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value ? Number(e.target.value) : null
+                  setRegionalId(v)
+                  setCentroId(null)
+                }}
+                className={input}
+                disabled={bloqueado}
+              >
+                <option value="">— Seleccionar —</option>
+                {regionales.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              </select>
             </div>
             <div>
-              <label className={label}>Centro de formación <span className="text-neutral-400 font-normal normal-case">(ID, opcional)</span></label>
-              <input value={centroId} onChange={(e) => setCentroId(e.target.value)} placeholder="ID del centro" className={input} disabled={bloqueado} />
+              <label className={label}>Centro de formación</label>
+              <select
+                value={centroId ?? ''}
+                onChange={(e) => setCentroId(e.target.value ? Number(e.target.value) : null)}
+                disabled={bloqueado || regionalId == null || cargandoCentros}
+                className={input}
+              >
+                <option value="">
+                  {regionalId == null ? 'Selecciona una regional primero' : (cargandoCentros ? 'Cargando…' : '— Seleccionar —')}
+                </option>
+                {centros.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className={label}>Municipio</label>
+              <MunicipioAutocomplete
+                value={municipioId}
+                initialLabel=""
+                onChange={setMunicipioId}
+                inputClass={input}
+                disabled={bloqueado}
+              />
             </div>
             <div>
               <label className={label}>Cargo</label>
@@ -322,11 +386,30 @@ export default function NuevoEvaluadorPage() {
               <label className={label}>Otros estudios</label>
               <textarea value={otrosEstudios} onChange={(e) => setOtrosEstudios(e.target.value)} rows={3} className={textarea} disabled={bloqueado} />
             </div>
-            <div>
-              <label className={label}>Jefe directo</label>
-              <input value={jefeDirecto} onChange={(e) => setJefeDirecto(e.target.value)} className={input} disabled={bloqueado} />
+            <div className="sm:col-span-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-2">Jefe directo</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={label}>Nombre</label>
+                  <input
+                    value={jefeNombre}
+                    onChange={(e) => setJefeNombre(e.target.value)}
+                    onBlur={() => setJefeNombre(v => aTitleCase(v) ?? '')}
+                    className={input}
+                    disabled={bloqueado}
+                  />
+                </div>
+                <div>
+                  <label className={label}>Correo institucional</label>
+                  <input type="email" value={jefeEmail} onChange={(e) => setJefeEmail(e.target.value)} className={input} disabled={bloqueado} />
+                </div>
+                <div>
+                  <label className={label}>Cargo</label>
+                  <input value={jefeCargo} onChange={(e) => setJefeCargo(e.target.value)} className={input} disabled={bloqueado} />
+                </div>
+              </div>
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className={label}>Quién aprueba participación</label>
               <input value={quienAprueba} onChange={(e) => setQuienAprueba(e.target.value)} className={input} disabled={bloqueado} />
             </div>
@@ -354,6 +437,136 @@ export default function NuevoEvaluadorPage() {
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+// ── MunicipioAutocomplete ──────────────────────────────────────────────────────
+
+function MunicipioAutocomplete({
+  value,
+  initialLabel,
+  onChange,
+  inputClass,
+  disabled,
+}: {
+  value: number | null
+  initialLabel: string
+  onChange: (id: number | null) => void
+  inputClass: string
+  disabled?: boolean
+}) {
+  const [texto, setTexto] = useState(initialLabel)
+  const [resultados, setResultados] = useState<CiudadCat[]>([])
+  const [buscando, setBuscando] = useState(false)
+  const [abierto, setAbierto] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setAbierto(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  useEffect(() => {
+    const q = texto.trim()
+    if (q.length < 2) {
+      setResultados([])
+      setBuscando(false)
+      return
+    }
+    if (value != null && q === initialLabel.trim()) {
+      setResultados([])
+      return
+    }
+    setBuscando(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => {
+      api.get<CiudadCat[]>('/evaluadores/catalogos/ciudades/buscar', {
+        params: { q, limite: 20 },
+        signal: ctrl.signal,
+      })
+        .then(r => setResultados(r.data ?? []))
+        .catch(err => { if (err?.name !== 'CanceledError') setResultados([]) })
+        .finally(() => setBuscando(false))
+    }, 280)
+    return () => {
+      clearTimeout(timer)
+      ctrl.abort()
+    }
+  }, [texto, value, initialLabel])
+
+  function elegir(c: CiudadCat) {
+    onChange(c.id)
+    const ciudadTC = aTitleCase(c.ciudad) ?? c.ciudad
+    const deptoTC = aTitleCase(c.depto) ?? c.depto
+    setTexto(deptoTC ? `${ciudadTC}, ${deptoTC}` : ciudadTC)
+    setAbierto(false)
+    setResultados([])
+  }
+
+  function limpiar() {
+    onChange(null)
+    setTexto('')
+    setResultados([])
+    setAbierto(false)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="relative">
+        <input
+          value={texto}
+          onChange={(e) => {
+            setTexto(e.target.value)
+            setAbierto(true)
+            if (value != null) onChange(null)
+          }}
+          onFocus={() => setAbierto(true)}
+          placeholder="Escribe 2+ letras (ej: Bogotá)"
+          className={`${inputClass} pr-8`}
+          autoComplete="off"
+          disabled={disabled}
+        />
+        {(texto || value != null) && !disabled && (
+          <button
+            type="button"
+            onClick={limpiar}
+            aria-label="Limpiar municipio"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 text-lg leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {abierto && texto.trim().length >= 2 && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-neutral-200 rounded-lg shadow-lg max-h-64 overflow-auto">
+          {buscando ? (
+            <p className="px-3 py-2 text-xs text-neutral-500 flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              Buscando…
+            </p>
+          ) : resultados.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-neutral-500">Sin resultados</p>
+          ) : (
+            resultados.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => elegir(c)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-neutral-100 border-b border-neutral-50 last:border-b-0"
+              >
+                <span className="font-medium text-neutral-800">{aTitleCase(c.ciudad) ?? c.ciudad}</span>
+                {c.depto && <span className="text-neutral-500"> — {aTitleCase(c.depto) ?? c.depto}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }

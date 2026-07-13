@@ -282,4 +282,193 @@ export class CatalogosEvaluadorService {
     )
     return { message: 'Tipo de documento actualizado' }
   }
+
+  // ── TIPODOCUMENTOCONV (catálogo de tipos de documento de convocatoria) ──
+
+  async listarTiposDocumentoConvocatoria(soloActivos = true) {
+    const where = soloActivos ? `WHERE ACTIVO = 1` : ''
+    const rows: Array<{
+      id: number; codigo: string; nombre: string;
+      extensionesPermitidas: string; orden: number; activo: number
+    }> = await this.dataSource.query(
+      `SELECT TIPODOCUMENTOCONVID     AS "id",
+              TRIM(CODIGO)            AS "codigo",
+              TRIM(NOMBRE)            AS "nombre",
+              TRIM(EXTENSIONESPERMITIDAS) AS "extensionesPermitidas",
+              ORDEN                   AS "orden",
+              ACTIVO                  AS "activo"
+         FROM TIPODOCUMENTOCONV ${where}
+        ORDER BY ORDEN ASC, NOMBRE ASC`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      codigo: r.codigo,
+      nombre: r.nombre,
+      // Devolvemos como array para el frontend; el CSV crudo queda para admin.
+      extensiones: this.parseExtensiones(r.extensionesPermitidas),
+      extensionesPermitidas: r.extensionesPermitidas ?? '',
+      orden: Number(r.orden),
+      activo: Number(r.activo) === 1,
+    }))
+  }
+
+  /** CSV → array normalizado (lower, sin puntos ni espacios, sin duplicados). */
+  private parseExtensiones(csv: string | undefined | null): string[] {
+    if (!csv) return []
+    return Array.from(new Set(
+      csv.split(',')
+        .map(x => x.trim().toLowerCase().replace(/^\./, ''))
+        .filter(Boolean),
+    ))
+  }
+
+  async crearTipoDocumentoConvocatoria(cambios: {
+    codigo: string; nombre: string; extensionesPermitidas?: string; orden?: number;
+  }) {
+    const codigo = (cambios.codigo ?? '').trim().toUpperCase()
+    const nombre = (cambios.nombre ?? '').trim()
+    if (!codigo) throw new BadRequestException('El código es obligatorio')
+    if (!nombre) throw new BadRequestException('El nombre es obligatorio')
+
+    const dup = await this.dataSource.query(
+      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE UPPER(CODIGO) = :1`, [codigo],
+    )
+    if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
+
+    // ID por MAX+1 — la tabla es un catálogo pequeño sin secuencia dedicada.
+    const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
+      `SELECT NVL(MAX(TIPODOCUMENTOCONVID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOCONV`,
+    )
+    const id = Number(seq[0].NUEVO)
+    // Normaliza las extensiones a minúsculas, sin espacios y sin duplicados.
+    const extensiones = this.normalizarExtensiones(cambios.extensionesPermitidas) || 'pdf'
+    await this.dataSource.query(
+      `INSERT INTO TIPODOCUMENTOCONV
+         (TIPODOCUMENTOCONVID, CODIGO, NOMBRE, EXTENSIONESPERMITIDAS, ORDEN, ACTIVO)
+       VALUES (:1, :2, :3, :4, :5, 1)`,
+      [id, codigo, nombre, extensiones, cambios.orden ?? 100],
+    )
+    return { id, codigo, nombre, extensionesPermitidas: extensiones }
+  }
+
+  async actualizarTipoDocumentoConvocatoria(id: number, cambios: {
+    nombre?: string; extensionesPermitidas?: string; orden?: number; activo?: boolean;
+  }) {
+    const filas = await this.dataSource.query(
+      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE TIPODOCUMENTOCONVID = :1`, [id],
+    )
+    if (!filas[0]) throw new NotFoundException('Tipo de documento no encontrado')
+
+    const sets: string[] = []
+    const params: unknown[] = []
+    if (cambios.nombre !== undefined) {
+      params.push(cambios.nombre.trim())
+      sets.push(`NOMBRE = :${params.length}`)
+    }
+    if (cambios.extensionesPermitidas !== undefined) {
+      const norm = this.normalizarExtensiones(cambios.extensionesPermitidas)
+      params.push(norm || 'pdf')
+      sets.push(`EXTENSIONESPERMITIDAS = :${params.length}`)
+    }
+    if (cambios.orden !== undefined) {
+      params.push(Number(cambios.orden))
+      sets.push(`ORDEN = :${params.length}`)
+    }
+    if (cambios.activo !== undefined) {
+      params.push(cambios.activo ? 1 : 0)
+      sets.push(`ACTIVO = :${params.length}`)
+    }
+    if (sets.length === 0) return { message: 'Sin cambios' }
+    params.push(id)
+    await this.dataSource.query(
+      `UPDATE TIPODOCUMENTOCONV SET ${sets.join(', ')} WHERE TIPODOCUMENTOCONVID = :${params.length}`,
+      params,
+    )
+    return { message: 'Tipo de documento actualizado' }
+  }
+
+  /**
+   * Normaliza una lista csv de extensiones: minúsculas, trim, sin puntos,
+   * sin vacíos, sin duplicados. Devuelve la cadena csv resultante o ''.
+   */
+  private normalizarExtensiones(csv: string | undefined): string {
+    if (!csv) return ''
+    const arr = csv.split(',')
+      .map(s => s.trim().toLowerCase().replace(/^\./, ''))
+      .filter(Boolean)
+    return Array.from(new Set(arr)).join(',')
+  }
+
+  // ── REGIONAL / CENTROFORMACION / CIUDAD (para dropdowns del banco) ───────
+
+  /** Lista de regionales del SENA para el dropdown de asignación del evaluador. */
+  async listarRegionales(soloActivas = true) {
+    const where = soloActivas ? `WHERE REGIONALACTIVO = 1` : ''
+    const rows: Array<{ id: number; nombre: string }> = await this.dataSource.query(
+      `SELECT REGIONALID           AS "id",
+              TRIM(REGIONALNOMBRE) AS "nombre"
+         FROM REGIONAL ${where}
+        ORDER BY REGIONALNOMBRE`,
+    )
+    return rows.map(r => ({ id: Number(r.id), nombre: r.nombre }))
+  }
+
+  /**
+   * Centros de formación. Si viene `regionalId` filtra por esa regional; útil
+   * para el cascading regional → centro en el formulario del evaluador.
+   */
+  async listarCentros(regionalId?: number, soloActivos = true) {
+    const conds: string[] = []
+    const params: unknown[] = []
+    if (regionalId != null && Number.isFinite(Number(regionalId))) {
+      params.push(Number(regionalId))
+      conds.push(`REGIONALID = :${params.length}`)
+    }
+    if (soloActivos) conds.push(`CENTROACTIVO = 1`)
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+    const rows: Array<{ id: number; regionalId: number; nombre: string }> = await this.dataSource.query(
+      `SELECT CENTROID          AS "id",
+              REGIONALID        AS "regionalId",
+              TRIM(CENTRONOMBRE) AS "nombre"
+         FROM CENTROFORMACION ${where}
+        ORDER BY CENTRONOMBRE`,
+      params,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      regionalId: Number(r.regionalId),
+      nombre: r.nombre,
+    }))
+  }
+
+  /**
+   * Búsqueda por nombre parcial de ciudad para el autocomplete del municipio.
+   * Devuelve ciudad y departamento en campos separados; el frontend decide
+   * cómo mostrarlos y qué guardar en el input.
+   */
+  async buscarCiudades(query: string, limite = 20) {
+    const q = (query ?? '').trim()
+    if (!q) return []
+    const lim = Math.min(50, Math.max(1, Number(limite) || 20))
+    // Escapar comodines LIKE (% y _) para evitar wildcards accidentales.
+    const escapado = q.toUpperCase().replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+    const like = `%${escapado}%`
+    const rows: Array<{ id: number; ciudad: string; depto: string }> = await this.dataSource.query(
+      `SELECT * FROM (
+         SELECT c.CIUDADID                AS "id",
+                TRIM(c.CIUDADNOMBRE)      AS "ciudad",
+                TRIM(d.DEPARTAMENTONOMBRE) AS "depto"
+           FROM CIUDAD       c
+           JOIN DEPARTAMENTO d ON d.DEPARTAMENTOID = c.DEPARTAMENTOID
+          WHERE UPPER(TRIM(c.CIUDADNOMBRE)) LIKE :1 ESCAPE '\\'
+          ORDER BY c.CIUDADNOMBRE ASC
+       ) WHERE ROWNUM <= :2`,
+      [like, lim],
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      ciudad: r.ciudad,
+      depto: r.depto ?? '',
+    }))
+  }
 }

@@ -231,14 +231,14 @@ function BucketTable({ concepto, rows, minW = 720 }: { concepto: string; rows: B
   return (
     <TableWrap minW={minW}>
       <colgroup>
-        <col style={{ width: '41%' }} />
+        <col style={{ width: '38%' }} />
         <col style={{ width: '11%' }} />
-        <col style={{ width: '4%' }} />
+        <col style={{ width: '5%' }} />
+        <col style={{ width: '10%' }} />
+        <col style={{ width: '5%' }} />
         <col style={{ width: '11%' }} />
-        <col style={{ width: '4%' }} />
-        <col style={{ width: '11%' }} />
-        <col style={{ width: '4%' }} />
-        <col style={{ width: '14%' }} />
+        <col style={{ width: '5%' }} />
+        <col style={{ width: '15%' }} />
       </colgroup>
       <thead>
         <tr>
@@ -311,16 +311,17 @@ function MoneyMini({ label, value, tone = 'neutral' }: { label: string; value: n
   )
 }
 
-// Botón "volver / ir a…" que hace scroll suave (no se imprime).
+// Enlace "volver / ir a…". Es un <a href="#id"> real para que funcione también en
+// el PDF (Chrome lo convierte en enlace interno clicable); en pantalla hace scroll suave.
 function NavBtn({ targetId, children }: { targetId: string; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={() => scrollToId(targetId)}
-      className="no-print inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/90 transition-colors hover:bg-white/20"
+    <a
+      href={`#${targetId}`}
+      onClick={(e) => { e.preventDefault(); scrollToId(targetId) }}
+      className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/90 transition-colors hover:bg-white/20"
     >
       <ArrowUp size={12} /> {children}
-    </button>
+    </a>
   )
 }
 
@@ -596,17 +597,17 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
             : <div className="wide-table -mx-1 overflow-x-auto rounded-xl border border-neutral-200">
                 <table className="w-full min-w-[1040px] border-collapse text-[12.5px]">
                   <colgroup>
-                    <col style={{ width: '17%' }} />
-                    <col style={{ width: '30%' }} />
-                    <col style={{ width: '4%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '26%' }} />
+                    <col style={{ width: '3%' }} />
                     <col style={{ width: '7%' }} />
                     <col style={{ width: '8%' }} />
-                    <col style={{ width: '3%' }} />
-                    <col style={{ width: '6.5%' }} />
-                    <col style={{ width: '3%' }} />
+                    <col style={{ width: '5%' }} />
+                    <col style={{ width: '6%' }} />
+                    <col style={{ width: '5%' }} />
                     <col style={{ width: '8%' }} />
-                    <col style={{ width: '3%' }} />
-                    <col style={{ width: '10.5%' }} />
+                    <col style={{ width: '5%' }} />
+                    <col style={{ width: '11%' }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -1032,7 +1033,7 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
               <tbody>
                 {plan.map(({ af, f }) => (
                   <tr key={af.consecutivo}>
-                    <td className={`${tdCls} text-center font-bold`}><button type="button" onClick={() => scrollToId(`af-${af.consecutivo}`)} className="text-green-600 hover:underline">{af.consecutivo}</button></td>
+                    <td className={`${tdCls} text-center font-bold`}><a href={`#af-${af.consecutivo}`} onClick={(e) => { e.preventDefault(); scrollToId(`af-${af.consecutivo}`) }} className="text-green-600 hover:underline">{af.consecutivo}</a></td>
                     <td className={`${tdCls} min-w-[180px] font-medium`}>{txt(af.nombre) ?? '—'}</td>
                     <td className={tdCls}>{txt(af.modalidadFormacion) ?? '—'}</td>
                     <td className={tdCls}>{txt(af.eventoFormacion) ?? '—'}</td>
@@ -1082,15 +1083,15 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
               {afsFiltradas.length === 0
                 ? <p className="text-xs italic text-neutral-400">No hay acciones de formación que coincidan con la búsqueda.</p>
                 : afsFiltradas.map(af => (
-                    <button
+                    <a
                       key={af.consecutivo}
-                      type="button"
-                      onClick={() => scrollToId(`af-${af.consecutivo}`)}
+                      href={`#af-${af.consecutivo}`}
+                      onClick={(e) => { e.preventDefault(); scrollToId(`af-${af.consecutivo}`) }}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-neutral-700 transition-colors hover:border-green-500 hover:bg-green-50"
                     >
                       <span className="grid h-5 w-5 flex-shrink-0 place-items-center rounded-md bg-neutral-100 text-[10px] font-bold text-neutral-600">{af.consecutivo}</span>
                       <span className="max-w-[220px] truncate">{txt(af.nombre) ?? 'Acción de formación'}</span>
-                    </button>
+                    </a>
                   ))}
             </div>
           </div>
@@ -1159,13 +1160,13 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
 
           {/* Ir al inicio del proyecto */}
           <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              onClick={() => scrollToId('inicio-proyecto')}
-              className="no-print inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-5 py-2.5 text-sm font-semibold text-neutral-700 shadow-sm transition-colors hover:border-green-500 hover:bg-green-50"
+            <a
+              href="#inicio-proyecto"
+              onClick={(e) => { e.preventDefault(); scrollToId('inicio-proyecto') }}
+              className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-5 py-2.5 text-sm font-semibold text-neutral-700 shadow-sm transition-colors hover:border-green-500 hover:bg-green-50"
             >
               <ArrowUp size={16} /> Ir al inicio del proyecto
-            </button>
+            </a>
           </div>
         </Section>
 
@@ -1206,7 +1207,7 @@ function PrintStyles() {
   return (
     <style>{`
       @media print {
-        @page { size: letter; margin: 9mm; }
+        @page { size: letter; margin: 8mm; }
         aside, header, nav, .no-print { display: none !important; }
         /* El layout del panel encierra el contenido en un contenedor con alto fijo
            (h-screen) y overflow, lo que recorta la impresión a una sola página.
@@ -1241,8 +1242,10 @@ function PrintStyles() {
         tr, td, th { break-inside: auto !important; page-break-inside: auto !important; }
         /* Las tablas anchas deben caber COMPLETAS en la hoja (sin recortes a la derecha). */
         .table-wrap, .wide-table { overflow: visible !important; border: 0 !important; }
-        .table-wrap table, .wide-table table { min-width: 0 !important; width: 100% !important; table-layout: fixed !important; font-size: 7pt !important; }
+        .table-wrap table, .wide-table table { min-width: 0 !important; width: 100% !important; table-layout: fixed !important; font-size: 6pt !important; }
         .table-wrap th, .table-wrap td, .wide-table th, .wide-table td { overflow-wrap: anywhere !important; word-break: break-word !important; white-space: normal !important; padding: 1.5px 4px !important; vertical-align: top; }
+        /* Las CIFRAS (dinero) y los % nunca se parten: van en un solo renglón. */
+        .table-wrap tbody .text-right, .wide-table tbody .text-right { white-space: nowrap !important; word-break: keep-all !important; overflow-wrap: normal !important; }
         section { box-shadow: none !important; }
       }
     `}</style>

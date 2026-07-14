@@ -19,6 +19,7 @@ type Rubro = AF['rubros'][number]
 
 const n0 = (x: unknown) => Number(x) || 0
 const s = (x: unknown) => (x == null ? '' : String(x)).trim()
+const arr = (a?: unknown[]) => (a ?? []).map(s).filter(Boolean).join(', ')
 const code = (r: Rubro) => s(r.idRubro)
 const name = (r: Rubro) => s(r.nombreRubro)
 const esGO = (r: Rubro) => /^R0?9(\D|$)/i.test(code(r)) || /GASTOS\s+DE\s+OPERACI/i.test(name(r))
@@ -125,12 +126,13 @@ export class ConvocatoriaProyectosService {
     )
     const id = Number(idRow[0].id)
 
-    // El CLOB se inserta por trozos (TO_CLOB(:n) || …) para no chocar con el
-    // límite de bind de ~32 KB de los VARCHAR2; cada trozo va holgado en bytes.
-    const CHUNK = 6000
+    // El CLOB se inserta por trozos (TO_CLOB(:n) || …) porque node-oracledb liga los
+    // strings como VARCHAR2. Para ser portable incluso en BD con MAX_STRING_SIZE=STANDARD
+    // (límite 4000 bytes) usamos trozos de 900 chars (≤ 3600 bytes aun en UTF-8 multibyte).
+    const CHUNK = 900
     const chunks: string[] = []
     for (let i = 0; i < json.length; i += CHUNK) chunks.push(json.slice(i, i + CHUNK))
-    if (chunks.length === 0) chunks.push('')
+    if (chunks.length === 0) chunks.push('{}')
     const clobExpr = chunks.map((_, i) => `TO_CLOB(:${12 + i})`).join(' || ')
 
     await this.dataSource.query(
@@ -292,7 +294,7 @@ export class ConvocatoriaProyectosService {
   // Totales + desgloses (por evento, modalidad y proponente) del set filtrado.
   private agregados(filtrados: Array<{ p: PreviewImportacion; afs: AF[] }>) {
     const tot = {
-      proyectos: 0, afs: 0, beneficiarios: 0, valorTotal: 0, cofinSena: 0,
+      proyectos: 0, afs: 0, unidades: 0, grupos: 0, beneficiarios: 0, valorTotal: 0, cofinSena: 0,
       especie: 0, dinero: 0, gastosOperacion: 0, transferencia: 0,
     }
     const byEvento = new Map<string, AnaliticaGrupo>()
@@ -309,6 +311,8 @@ export class ConvocatoriaProyectosService {
       for (const af of afs) {
         const fin = finanzasAF(af)
         tot.afs++
+        tot.unidades += (af.uts ?? []).length
+        tot.grupos += fin.grupos
         tot.beneficiarios += fin.totalBenef
         tot.valorTotal += fin.tot.total
         tot.cofinSena += fin.tot.cofSena
@@ -327,11 +331,69 @@ export class ConvocatoriaProyectosService {
     return { totales: tot, porEvento: arr(byEvento), porModalidad: arr(byModalidad), porProponente: arr(byProponente) }
   }
 
+  // Presupuesto DECLARADO (Datos_Presupuesto de cada proyecto) + cobertura territorial.
+  // Se calcula por proyecto (no por rubro) porque los topes, la transferencia y los
+  // beneficiarios de transferencia son conceptos a nivel de presupuesto del proyecto.
+  private enriquecido(filtrados: Array<{ p: PreviewImportacion; afs: AF[] }>) {
+    const pres = {
+      valorAFs: 0, gastosOperacion: 0, valorTransferencia: 0, beneficiariosTransferencia: 0,
+      cofinanciacionSena: 0, contrapartidaEspecie: 0, contrapartidaDinero: 0, valorTotal: 0, beneficiarios: 0,
+    }
+    type Cob = { clave: string; beneficiarios: number; afs: number }
+    const byDepto = new Map<string, Cob>()
+    const byCiudad = new Map<string, Cob>()
+    const bumpCob = (m: Map<string, Cob>, clave: string, benef: number) => {
+      const g = m.get(clave) ?? { clave, beneficiarios: 0, afs: 0 }
+      g.beneficiarios += benef; g.afs++; m.set(clave, g)
+    }
+    for (const { p, afs } of filtrados) {
+      const pr = p.proyecto?.presupuesto
+      if (pr) {
+        pres.valorAFs += n0(pr.valorAFs)
+        pres.gastosOperacion += n0(pr.gastosOperacion)
+        pres.valorTransferencia += n0(pr.valorTransferencia)
+        pres.beneficiariosTransferencia += n0(pr.beneficiariosTransferencia)
+        pres.cofinanciacionSena += n0(pr.cofinanciacionSena)
+        pres.contrapartidaEspecie += n0(pr.contrapartidaEspecie)
+        pres.contrapartidaDinero += n0(pr.contrapartidaDinero)
+        pres.valorTotal += n0(pr.valorTotal)
+        pres.beneficiarios += n0(pr.beneficiarios)
+      }
+      for (const af of afs) {
+        const cob = (af as unknown as {
+          cobertura?: Array<{ departamentoPresencial?: string; ciudadPresencial?: string; beneficiariosPresencial?: number; departamentos?: Array<{ departamento?: string; beneficiarios?: number }> }>
+        }).cobertura ?? []
+        for (const c of cob) {
+          const dp = s(c.departamentoPresencial)
+          if (dp) bumpCob(byDepto, dp, n0(c.beneficiariosPresencial))
+          const cd = s(c.ciudadPresencial)
+          if (cd) bumpCob(byCiudad, dp ? `${cd} (${dp})` : cd, n0(c.beneficiariosPresencial))
+          for (const d of c.departamentos ?? []) {
+            const dd = s(d.departamento)
+            if (dd) bumpCob(byDepto, dd, n0(d.beneficiarios))
+          }
+        }
+      }
+    }
+    const pctGO = pres.valorAFs > 0 ? (pres.gastosOperacion / pres.valorAFs) * 100 : 0
+    const topeGO = pres.valorAFs > 200_000_000 ? 10 : 16
+    const baseTransf = pres.valorAFs + pres.gastosOperacion
+    const pctTransfValor = baseTransf > 0 ? (pres.valorTransferencia / baseTransf) * 100 : 0
+    const pctTransfBenef = pres.beneficiarios > 0 ? (pres.beneficiariosTransferencia / pres.beneficiarios) * 100 : 0
+    const arr = (m: Map<string, Cob>) => [...m.values()].sort((a, b) => b.beneficiarios - a.beneficiarios)
+    return {
+      presupuesto: { ...pres, pctGO, topeGO, pctTransfValor, pctTransfBenef },
+      porDepartamento: arr(byDepto),
+      porCiudad: arr(byCiudad),
+    }
+  }
+
   // ── Analítica filtrable: "cuánto de cofinanciación solicitan", con filtros por
   // proponente/evento/modalidad/sector y desglose (ranking de quién solicita más).
+  // Incluye presupuesto declarado (topes, transferencia) y cobertura territorial.
   async analitica(f: AnaliticaFiltros) {
     const filtrados = this.aplicarFiltros(await this.cargarProyectos(f.convocatoriaId), f)
-    return this.agregados(filtrados)
+    return { ...this.agregados(filtrados), ...this.enriquecido(filtrados) }
   }
 
   // ── Listado plano de TODAS las acciones de formación (con su proyecto) ──────
@@ -400,13 +462,23 @@ export class ConvocatoriaProyectosService {
     const afsSheet: Record<string, unknown>[] = []
     const utsSheet: Record<string, unknown>[] = []
     const actsSheet: Record<string, unknown>[] = []
+    const perfilesSheet: Record<string, unknown>[] = []
+    const validacionSheet: Record<string, unknown>[] = []
     const rubrosSheet: Record<string, unknown>[] = []
 
     for (const { p, afs: afsMatch } of filtrados) {
-      const pres = p.proyecto?.presupuesto
       const nit = s(p.empresa?.nit)
       const proyecto = s(p.proyecto?.nombre)
       const razon = s(p.basicos?.razonSocial)
+      const pr = p.proyecto?.presupuesto
+      // Totales del proyecto CALCULADOS desde sus AF filtradas (así concilian con las
+      // hojas Resumen/Por-* y respetan el filtro). El presupuesto declarado va aparte.
+      let cBenef = 0, cCof = 0, cEsp = 0, cDin = 0, cGO = 0, cTr = 0, cTot = 0
+      for (const af of afsMatch) {
+        const fin = finanzasAF(af)
+        cBenef += fin.totalBenef; cCof += fin.tot.cofSena; cEsp += fin.tot.especie
+        cDin += fin.tot.dinero; cGO += fin.go.total; cTr += fin.tr.total; cTot += fin.tot.total
+      }
 
       proyectos.push({
         'Convocatoria': s(p.convocatoria?.nombre),
@@ -416,13 +488,16 @@ export class ConvocatoriaProyectosService {
         'Proyecto': proyecto,
         'Modalidad': s(p.basicos?.modalidadParticipacion),
         'N.º AF': afsMatch.length,
-        'Beneficiarios': n0(pres?.beneficiarios),
-        'Valor total': n0(pres?.valorTotal),
-        'Cofinanciación SENA': n0(pres?.cofinanciacionSena),
-        'Contrapartida especie': n0(pres?.contrapartidaEspecie),
-        'Contrapartida dinero': n0(pres?.contrapartidaDinero),
-        'Gastos de operación': n0(pres?.gastosOperacion),
-        'Transferencia': n0(pres?.valorTransferencia),
+        'Beneficiarios': cBenef,
+        'Valor total': cTot,
+        'Cofinanciación SENA': cCof,
+        'Contrapartida especie': cEsp,
+        'Contrapartida dinero': cDin,
+        'Gastos de operación': cGO,
+        'Transferencia': cTr,
+        'Valor total (declarado)': n0(pr?.valorTotal),
+        'Cofinanciación SENA (declarado)': n0(pr?.cofinanciacionSena),
+        'Beneficiarios (declarado)': n0(pr?.beneficiarios),
       })
 
       for (const af of afsMatch) {
@@ -430,13 +505,20 @@ export class ConvocatoriaProyectosService {
         afsSheet.push({
           'NIT': nit,
           'Proyecto': proyecto,
+          'Entidad': razon,
           'AF N.º': n0(af.consecutivo),
           'Acción de formación': s(af.nombre),
+          'Cantidad UT': (af.uts ?? []).length,
+          'Horas acción de formación': n0(af.horasPorGrupo),
+          'Modalidad de formación': s(af.modalidadFormacion),
           'Evento': s(af.eventoFormacion),
-          'Modalidad': s(af.modalidadFormacion),
           'Metodología': s(af.metodologia),
+          'Nivel ocupacional': arr(af.niveles),
+          'Justificación nivel ocupacional': s(af.justificacionNiveles),
+          'Área funcional': arr(af.areas),
+          'Perfil del beneficiario': s(af.justificacionAreas),
+          'Ocupaciones CUOC': arr(af.ocupacionesCuoc),
           'Grupos': f.grupos,
-          'Horas por grupo': n0(af.horasPorGrupo),
           'Benef. presenciales/grupo': n0(af.beneficiariosPresenciales),
           'Benef. sincrónicos/grupo': n0(af.beneficiariosSincronicos),
           'Total beneficiarios': f.totalBenef,
@@ -448,6 +530,8 @@ export class ConvocatoriaProyectosService {
           'Cofin. SENA': f.tot.cofSena,
           'Contrapartida especie': f.tot.especie,
           'Contrapartida dinero': f.tot.dinero,
+          '¿La ofrece el SENA? (SI/NO)': '',
+          'Observaciones del revisor': '',
         })
 
         for (const u of af.uts ?? []) {
@@ -465,6 +549,28 @@ export class ConvocatoriaProyectosService {
             'Articulación territorial': u.esArticulacionTerritorial ? 'SI' : 'NO',
             'Competencia': s(u.competencia),
             'Contenido': s(u.contenido),
+            'Actividades de aprendizaje': arr(u.actividades),
+            'Perfil(es) del capacitador': (u.perfiles ?? []).map(pf => s(pf.perfil)).filter(Boolean).join(' | '),
+            'Horas del capacitador': (u.perfiles ?? []).reduce((a, pf) => a + n0(pf.horas), 0),
+          })
+          validacionSheet.push({
+            'Proyecto': proyecto,
+            'Entidad': razon,
+            'AF N.º': n0(af.consecutivo),
+            'Acción de formación': s(af.nombre),
+            'Modalidad de formación': s(af.modalidadFormacion),
+            'Evento': s(af.eventoFormacion),
+            'Horas AF': n0(af.horasPorGrupo),
+            'UT N.º': n0(u.numeroUT),
+            'Unidad temática': s(u.nombre),
+            'Competencia': s(u.competencia),
+            'Contenido': s(u.contenido),
+            'Horas UT': hp + ht,
+            'Perfil del capacitador': (u.perfiles ?? []).map(pf => s(pf.perfil)).filter(Boolean).join(' | '),
+            'Horas capacitador': (u.perfiles ?? []).reduce((a, pf) => a + n0(pf.horas), 0),
+            '¿La ofrece el SENA? (SI/NO)': '',
+            'Programa / diseño curricular del catálogo': '',
+            'Observaciones del revisor': '',
           })
           for (const act of u.actividades ?? []) {
             if (!s(act)) continue
@@ -475,6 +581,18 @@ export class ConvocatoriaProyectosService {
               'UT N.º': n0(u.numeroUT),
               'Unidad temática': s(u.nombre),
               'Actividad de aprendizaje': s(act),
+            })
+          }
+          for (const pf of u.perfiles ?? []) {
+            perfilesSheet.push({
+              'NIT': nit,
+              'Proyecto': proyecto,
+              'AF N.º': n0(af.consecutivo),
+              'Acción de formación': s(af.nombre),
+              'UT N.º': n0(u.numeroUT),
+              'Unidad temática': s(u.nombre),
+              'Perfil / rubro del capacitador': s(pf.perfil),
+              'Horas a impartir': n0(pf.horas),
             })
           }
         }
@@ -505,10 +623,12 @@ export class ConvocatoriaProyectosService {
     add(porEventoSheet, 'Por evento')
     add(porModalidadSheet, 'Por modalidad')
     add(porProponenteSheet, 'Por proponente')
+    add(validacionSheet, 'Validacion SENA')
     add(proyectos, 'Proyectos')
     add(afsSheet, 'Acciones de formacion')
     add(utsSheet, 'Unidades tematicas')
     add(actsSheet, 'Actividades')
+    add(perfilesSheet, 'Perfiles capacitador')
     add(rubrosSheet, 'Rubros')
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer

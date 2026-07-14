@@ -7,6 +7,7 @@ import { CertificacionModule } from './certificacion/certificacion.module'
 import { CertificadosModule } from './certificados/certificados.module'
 import { ContactosModule } from './contactos/contactos.module'
 import { ConveniosModule } from './convenios/convenios.module'
+import { ConvocatoriaProyectosModule } from './convocatoria-proyectos/convocatoria-proyectos.module'
 import { CronogramaModule } from './cronograma/cronograma.module'
 import { EmpresaModule } from './empresa/empresa.module'
 import { EvaluadoresModule } from './evaluadores/evaluadores.module'
@@ -59,6 +60,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     PlataformasVirtualesModule,
     EvaluadoresModule,
     ImportarProyectoModule,
+    ConvocatoriaProyectosModule,
     UsuariosAdminModule,
   ],
 })

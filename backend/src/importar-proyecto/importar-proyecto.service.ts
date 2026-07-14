@@ -785,7 +785,12 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'error', campo: 'NIT', mensaje: 'El Excel no trae NIT' })
     }
     let empresa: PreviewEmpresa = { estado: 'nueva', nit, razonSocial: data.basicos.razonSocial }
-    if (nit) {
+    // EMPRESAIDENTIFICACION es NUMBER en Oracle. El NIT del Excel puede traer puntos,
+    // guiones o el dígito de verificación (p. ej. "890.982.432-0"); Number() sobre eso
+    // daría NaN y rompe el bind (NJS-105). Lo dejamos en solo dígitos y únicamente
+    // consultamos cuando queda un entero válido; si no, se trata como empresa nueva.
+    const nitNum = Number((nit ?? '').replace(/\D/g, ''))
+    if (nit && Number.isFinite(nitNum) && nitNum > 0) {
       const e = await this.dataSource.query(
         `SELECT EMPRESAID                  AS "id",
                 TRIM(EMPRESARAZONSOCIAL)   AS "rs",
@@ -796,7 +801,7 @@ export class ImportarProyectoService {
            FROM EMPRESA
           WHERE EMPRESAIDENTIFICACION = :1
             AND ROWNUM = 1`,
-        [Number(nit)],
+        [nitNum],
       )
       if (e[0]) {
         const diffs: PreviewEmpresa['diferenciasDatos'] = []
@@ -941,6 +946,14 @@ export class ImportarProyectoService {
     const email = data.basicos.email?.trim().toLowerCase()
     if (!nit)   throw new BadRequestException('El Excel no trae NIT')
     if (!email) throw new BadRequestException('El Excel no trae correo')
+    // EMPRESAIDENTIFICACION / EMPRESADIGITOVERIFICACION son NUMBER en Oracle. El NIT
+    // puede venir con puntos, guiones o el dígito de verificación ("890.982.432-0"),
+    // así que lo dejamos en solo dígitos antes de convertir para no romper el bind.
+    const nitNum = Number((nit ?? '').replace(/\D/g, ''))
+    if (!Number.isFinite(nitNum) || nitNum <= 0) {
+      throw new BadRequestException(`El NIT "${nit}" no es un número válido`)
+    }
+    const dvNum = Number(String(data.basicos.digitoVerificacion ?? '').replace(/\D/g, '') || '0')
 
     // Convocatoria — además del id, traemos el año para el nombre del proyecto
     const conv: Array<{ anio: number }> = await this.dataSource.query(
@@ -965,7 +978,7 @@ export class ImportarProyectoService {
       // ── 1. Empresa ────────────────────────────────────────────────────────
       const empresaExistente: Array<{ id: number }> = await qr.query(
         `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = :1 AND ROWNUM = 1`,
-        [Number(nit)],
+        [nitNum],
       )
       let empresaId: number
       if (empresaExistente[0]) {
@@ -1004,8 +1017,8 @@ export class ImportarProyectoService {
                    1, 1, 1, 1, 1, 1, 1, 1, 1)`,
           [
             empresaId,
-            Number(nit),
-            Number(data.basicos.digitoVerificacion ?? 0),
+            nitNum,
+            dvNum,
             data.basicos.razonSocial.trim(),
             (data.basicos.sigla ?? '').trim(),
             email,

@@ -5,7 +5,7 @@ import { Modal } from '@/components/ui/modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   AlertTriangle, ArrowLeft, Building2, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
-  FileSpreadsheet, FileText, Info, Loader2, RefreshCcw, ShieldAlert, Upload, UserCircle2, X,
+  Database, FileSpreadsheet, FileText, Info, Loader2, RefreshCcw, Save, ShieldAlert, Upload, UserCircle2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -51,6 +51,7 @@ export default function ImportarProyectoPage() {
 
   // Reporte de vista previa (pantalla completa, sin importar).
   const [reporteAbierto, setReporteAbierto] = useState(false)
+  const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     api.get<Convocatoria[]>('/proyectos/admin/convocatorias')
@@ -144,6 +145,26 @@ export default function ImportarProyectoPage() {
     }
   }
 
+  // Guardar el proyecto en la convocatoria SIN importarlo (re-sube el .xlsx; el
+  // backend lo re-parsea y persiste todo el JSON en CONVPROYGUARDADO).
+  async function handleGuardar() {
+    if (!preview || !archivo || !convocatoriaId) return
+    setGuardando(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      await api.post(`/admin/convocatoria-proyectos/guardar?convocatoriaId=${convocatoriaId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 90_000,
+      })
+      setToast({ tipo: 'success', msg: 'Proyecto guardado en la convocatoria', duration: 6000 })
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      setToast({ tipo: 'error', msg: msg ?? 'No se pudo guardar el proyecto' })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
   // Reporte a pantalla completa: reemplaza el preview mientras esté abierto.
   if (reporteAbierto && preview) {
     return <ReportePreview preview={preview} onVolver={() => setReporteAbierto(false)} />
@@ -161,6 +182,12 @@ export default function ImportarProyectoPage() {
           <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Administración</p>
           <h1 className="text-white font-bold text-base sm:text-lg">Importar proyecto desde Excel del formulador</h1>
         </div>
+        <Link
+          href="/panel/admin/convocatoria-proyectos"
+          className="inline-flex items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/20"
+        >
+          <Database size={16} /> Proyectos guardados
+        </Link>
       </div>
 
       <Link href="/panel" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
@@ -221,13 +248,23 @@ export default function ImportarProyectoPage() {
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 -mb-2">
             <p className="text-xs font-bold uppercase tracking-wide text-[#00304D]">2. Revisar antes de importar</p>
-            <button
-              type="button"
-              onClick={() => setReporteAbierto(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#00304D] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#013a5c]"
-            >
-              <FileText size={16} /> Ver reporte completo
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleGuardar}
+                disabled={guardando}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#39a900] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#2f8c00] disabled:opacity-50"
+              >
+                {guardando ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Guardar en convocatoria
+              </button>
+              <button
+                type="button"
+                onClick={() => setReporteAbierto(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#00304D] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#013a5c]"
+              >
+                <FileText size={16} /> Ver reporte completo
+              </button>
+            </div>
           </div>
 
           {preview.validaciones.length > 0 && (

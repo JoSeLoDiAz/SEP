@@ -20,6 +20,18 @@ type Rubro = AF['rubros'][number]
 const n0 = (x: unknown) => Number(x) || 0
 const s = (x: unknown) => (x == null ? '' : String(x)).trim()
 const arr = (a?: unknown[]) => (a ?? []).map(s).filter(Boolean).join(', ')
+const unidadesRubro = (r: Rubro) => n0(r.numHoras) || n0(r.numPaginasUnidades) || n0(r.numBeneficiarios) || n0(r.numDias) || 0
+const valorUnidadRubro = (r: Rubro): number => {
+  const total = n0(r.totalRubro), horas = n0(r.numHoras), benef = n0(r.numBeneficiarios), cant = n0(r.numPaginasUnidades), dias = n0(r.numDias)
+  if (horas > 0 && benef > 0) return total / (horas * benef)
+  if (horas > 0)              return total / horas
+  if (dias > 0 && benef > 0)  return total / (dias * benef)
+  if (dias > 0)               return total / dias
+  if (cant > 0)               return total / cant
+  if (benef > 0)              return total / benef
+  return 0
+}
+const pctRubro = (n: number, total: number) => (total > 0 ? +((n / total) * 100).toFixed(2) : 0)
 const code = (r: Rubro) => s(r.idRubro)
 const name = (r: Rubro) => s(r.nombreRubro)
 const esGO = (r: Rubro) => /^R0?9(\D|$)/i.test(code(r)) || /GASTOS\s+DE\s+OPERACI/i.test(name(r))
@@ -445,14 +457,6 @@ export class ConvocatoriaProyectosService {
       'Gastos de operación': ag.totales.gastosOperacion,
       'Transferencia': ag.totales.transferencia,
     }]
-    const porEventoSheet = ag.porEvento.map(g => ({
-      'Evento': g.clave, 'AF': g.afs, 'Beneficiarios': g.beneficiarios,
-      'Cofinanciación SENA': g.cofinSena, 'Valor total': g.valorTotal,
-    }))
-    const porModalidadSheet = ag.porModalidad.map(g => ({
-      'Modalidad': g.clave, 'AF': g.afs, 'Beneficiarios': g.beneficiarios,
-      'Cofinanciación SENA': g.cofinSena, 'Valor total': g.valorTotal,
-    }))
     const porProponenteSheet = ag.porProponente.map(g => ({
       'Proponente': g.clave, 'Proyectos': g.proyectos, 'AF': g.afs, 'Beneficiarios': g.beneficiarios,
       'Cofinanciación SENA': g.cofinSena, 'Valor total': g.valorTotal,
@@ -461,6 +465,8 @@ export class ConvocatoriaProyectosService {
     const proyectos: Record<string, unknown>[] = []
     const afsSheet: Record<string, unknown>[] = []
     const utsSheet: Record<string, unknown>[] = []
+    // Rubros con claves de orden (proponente → AF → id de rubro).
+    const rubrosRows: Array<{ prop: string; af: number; id: number; row: Record<string, unknown> }> = []
 
     for (const { p, afs: afsMatch } of filtrados) {
       const nit = s(p.empresa?.nit)
@@ -546,6 +552,13 @@ export class ConvocatoriaProyectosService {
           'Justificación de la acción de formación especializada': s(af.justificacionEspecializada),
           'Impacto en el desempeño del trabajador': (af.impactosTrabajador ?? []).map(s).filter(Boolean).join('\n'),
           'Impacto en la productividad y competitividad': (af.impactosProductividad ?? []).map(s).filter(Boolean).join('\n'),
+          'Ambiente de aprendizaje': s(af.ambiente),
+          'Material de formación seleccionado': s(af.material),
+          'Gestión del conocimiento': s(af.gestionConocimiento),
+          'Recursos didácticos': s(af.recursosDidacticos),
+          'Justificación del material de formación': s(af.justificacionSiAplica),
+          'Insumos': s(af.insumos),
+          'Justificación de los insumos': s(af.justificacionInsumo),
         })
 
         for (const u of af.uts ?? []) {
@@ -566,8 +579,36 @@ export class ConvocatoriaProyectosService {
             'Justificación de la actividad de aprendizaje': s(u.descripcionActividad),
           })
         }
+        for (const r of af.rubros ?? []) {
+          const t = n0(r.totalRubro)
+          const id = Number(r.idRubro)
+          rubrosRows.push({
+            prop: razon,
+            af: n0(af.consecutivo),
+            id: Number.isFinite(id) ? id : Number.MAX_SAFE_INTEGER,
+            row: {
+              'NIT': nit,
+              'Proponente': razon,
+              'N.º AF': n0(af.consecutivo),
+              'Rubro': s(r.nombreRubro),
+              'Justificación': s(r.justificacion),
+              'Unid.': unidadesRubro(r),
+              'Valor unidad': valorUnidadRubro(r),
+              'Cofin. SENA': n0(r.cofinanciacionSena),
+              '% Cofin. SENA': pctRubro(n0(r.cofinanciacionSena), t),
+              'Especie': n0(r.contrapartidaEspecie),
+              '% Especie': pctRubro(n0(r.contrapartidaEspecie), t),
+              'Dinero': n0(r.contrapartidaDinero),
+              '% Dinero': pctRubro(n0(r.contrapartidaDinero), t),
+              'Total': t,
+            },
+          })
+        }
       }
     }
+    // Orden final de los rubros: proponente → acción de formación → id de rubro.
+    rubrosRows.sort((a, b) => a.prop.localeCompare(b.prop) || (a.af - b.af) || (a.id - b.id))
+    const rubrosSheet = rubrosRows.map(x => x.row)
 
     const wb = XLSX.utils.book_new()
     const add = (data: Record<string, unknown>[], nombre: string) => {
@@ -575,12 +616,11 @@ export class ConvocatoriaProyectosService {
       XLSX.utils.book_append_sheet(wb, ws, nombre)
     }
     add(resumenSheet, 'Resumen')
-    add(porEventoSheet, 'Por evento')
-    add(porModalidadSheet, 'Por modalidad')
     add(porProponenteSheet, 'Por proponente')
     add(proyectos, 'Proyectos')
     add(afsSheet, 'Acciones de formacion')
     add(utsSheet, 'Unidades tematicas')
+    add(rubrosSheet, 'Rubros')
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
   }

@@ -461,10 +461,6 @@ export class ConvocatoriaProyectosService {
     const proyectos: Record<string, unknown>[] = []
     const afsSheet: Record<string, unknown>[] = []
     const utsSheet: Record<string, unknown>[] = []
-    const actsSheet: Record<string, unknown>[] = []
-    const perfilesSheet: Record<string, unknown>[] = []
-    const validacionSheet: Record<string, unknown>[] = []
-    const rubrosSheet: Record<string, unknown>[] = []
 
     for (const { p, afs: afsMatch } of filtrados) {
       const nit = s(p.empresa?.nit)
@@ -504,111 +500,70 @@ export class ConvocatoriaProyectosService {
         const f = finanzasAF(af)
         afsSheet.push({
           'NIT': nit,
-          'Proyecto': proyecto,
-          'Entidad': razon,
-          'AF N.º': n0(af.consecutivo),
-          'Acción de formación': s(af.nombre),
-          'Cantidad UT': (af.uts ?? []).length,
-          'Horas acción de formación': n0(af.horasPorGrupo),
-          'Modalidad de formación': s(af.modalidadFormacion),
-          'Evento': s(af.eventoFormacion),
+          'Proponente': razon,
+          'N.º AF': n0(af.consecutivo),
+          'Nombre de la AF': s(af.nombre),
+          'Problema o necesidad detectada': s(af.diagnostico),
+          'Justificación de la necesidad detectada': s(af.justificacion),
+          'Causas del problema o necesidad': s(af.causasEfectos),
+          'Efectos del problema o necesidad': s(af.efectos),
+          'Objetivo de la acción de formación': s(af.objetivos),
+          'Evento de formación': s(af.eventoFormacion),
+          'Modalidad': s(af.modalidadFormacion),
           'Metodología': s(af.metodologia),
-          'Nivel ocupacional': arr(af.niveles),
-          'Justificación nivel ocupacional': s(af.justificacionNiveles),
-          'Área funcional': arr(af.areas),
-          'Perfil del beneficiario': s(af.justificacionAreas),
+          'N.º de horas por grupo': n0(af.horasPorGrupo),
+          'N.º de grupos': n0(af.numeroGrupos),
+          'Beneficiarios presenciales / grupo': n0(af.beneficiariosPresenciales),
+          'Beneficiarios virtuales / grupo': n0(af.beneficiariosSincronicos),
+          'Total de horas de la AF': f.totalHoras,
+          'Total de beneficiarios de la AF': f.totalBenef,
+          'Áreas funcionales': arr(af.areas),
+          'Justificación de áreas funcionales': s(af.justificacionAreas),
+          'Niveles ocupacionales': arr(af.niveles),
+          'Justificación de niveles ocupacionales': s(af.justificacionNiveles),
           'Ocupaciones CUOC': arr(af.ocupacionesCuoc),
-          'Grupos': f.grupos,
-          'Benef. presenciales/grupo': n0(af.beneficiariosPresenciales),
-          'Benef. sincrónicos/grupo': n0(af.beneficiariosSincronicos),
-          'Total beneficiarios': f.totalBenef,
-          'Total horas': f.totalHoras,
-          'Valor AF (rubros)': f.afSub.total,
-          'Gastos de operación': f.go.total,
-          'Transferencia': f.tr.total,
-          'Valor total AF': f.tot.total,
-          'Cofin. SENA': f.tot.cofSena,
-          'Contrapartida especie': f.tot.especie,
-          'Contrapartida dinero': f.tot.dinero,
-          '¿La ofrece el SENA? (SI/NO)': '',
-          'Observaciones del revisor': '',
+          'Trabajadores mujeres': n0(af.trabajadoresMujeres),
+          'En condición de discapacidad': n0(af.trabajadoresDiscapacidad),
+          'Empresas con modelo BIC': n0(af.empresasBic),
+          'N.º empresas MIPYMES': n0(af.mipymesEmpresas),
+          'N.º trabajadores MIPYMES': n0(af.mipymesTrabajadores),
+          'Justificación MIPYMES': s(af.justificacionMipymes),
+          'N.º empresas cadena productiva': n0(af.cadenaEmpresas),
+          'N.º trabajadores cadena productiva': n0(af.cadenaTrabajadores),
+          'Justificación cadena productiva': s(af.justificacionCadena),
+          'N.º trabajadores economía campesina': n0(af.trabajadoresCampesinos),
+          'Justificación economía campesina': s(af.trabajadoresCampesinosTexto),
+          'N.º trabajadores economía popular': n0(af.trabajadoresPopular),
+          'Justificación economía popular': s(af.trabajadoresPopularTexto),
+          'Sector(es) al que pertenecen los beneficiarios': arr(af.sectoresPertenecen),
+          'Subsector(es) al que pertenecen los beneficiarios': arr(af.subsectoresPertenecen),
+          'Clasificación de la AF por sector(es)': arr(af.sectoresBeneficia),
+          'Clasificación de la AF por subsector(es)': arr(af.subsectoresBeneficia),
+          'Justificación de sectores y subsectores': s(af.justificacionSectores),
+          'Alineación · Reto nacional': s(af.componenteAlineacion),
+          'Alineación · Componente estratégico': s(af.descripcionAlineacion),
+          'Justificación de la alineación': s(af.justificacionAlineacion),
+          'Justificación de la acción de formación especializada': s(af.justificacionEspecializada),
+          'Impacto en el desempeño del trabajador': (af.impactosTrabajador ?? []).map(s).filter(Boolean).join('\n'),
+          'Impacto en la productividad y competitividad': (af.impactosProductividad ?? []).map(s).filter(Boolean).join('\n'),
         })
 
         for (const u of af.uts ?? []) {
           const hp = n0(u.horasPracticas), ht = n0(u.horasTeoricas)
           utsSheet.push({
             'NIT': nit,
-            'Proyecto': proyecto,
-            'AF N.º': n0(af.consecutivo),
-            'Acción de formación': s(af.nombre),
-            'UT N.º': n0(u.numeroUT),
-            'Unidad temática': s(u.nombre),
+            'Proponente': razon,
+            'N.º AF': n0(af.consecutivo),
+            'Nombre de la AF': s(af.nombre),
+            'N.º UT': n0(u.numeroUT),
+            'Nombre de la unidad temática': s(u.nombre),
             'Horas prácticas': hp,
             'Horas teóricas': ht,
-            'Total horas': hp + ht,
-            'Articulación territorial': u.esArticulacionTerritorial ? 'SI' : 'NO',
+            'Total de horas': hp + ht,
+            'Contenido de la unidad temática': s(u.contenido),
             'Competencia': s(u.competencia),
-            'Contenido': s(u.contenido),
-            'Actividades de aprendizaje': arr(u.actividades),
-            'Perfil(es) del capacitador': (u.perfiles ?? []).map(pf => s(pf.perfil)).filter(Boolean).join(' | '),
-            'Horas del capacitador': (u.perfiles ?? []).reduce((a, pf) => a + n0(pf.horas), 0),
-          })
-          validacionSheet.push({
-            'Proyecto': proyecto,
-            'Entidad': razon,
-            'AF N.º': n0(af.consecutivo),
-            'Acción de formación': s(af.nombre),
-            'Modalidad de formación': s(af.modalidadFormacion),
-            'Evento': s(af.eventoFormacion),
-            'Horas AF': n0(af.horasPorGrupo),
-            'UT N.º': n0(u.numeroUT),
-            'Unidad temática': s(u.nombre),
-            'Competencia': s(u.competencia),
-            'Contenido': s(u.contenido),
-            'Horas UT': hp + ht,
-            'Perfil del capacitador': (u.perfiles ?? []).map(pf => s(pf.perfil)).filter(Boolean).join(' | '),
-            'Horas capacitador': (u.perfiles ?? []).reduce((a, pf) => a + n0(pf.horas), 0),
-            '¿La ofrece el SENA? (SI/NO)': '',
-            'Programa / diseño curricular del catálogo': '',
-            'Observaciones del revisor': '',
-          })
-          for (const act of u.actividades ?? []) {
-            if (!s(act)) continue
-            actsSheet.push({
-              'NIT': nit,
-              'Proyecto': proyecto,
-              'AF N.º': n0(af.consecutivo),
-              'UT N.º': n0(u.numeroUT),
-              'Unidad temática': s(u.nombre),
-              'Actividad de aprendizaje': s(act),
-            })
-          }
-          for (const pf of u.perfiles ?? []) {
-            perfilesSheet.push({
-              'NIT': nit,
-              'Proyecto': proyecto,
-              'AF N.º': n0(af.consecutivo),
-              'Acción de formación': s(af.nombre),
-              'UT N.º': n0(u.numeroUT),
-              'Unidad temática': s(u.nombre),
-              'Perfil / rubro del capacitador': s(pf.perfil),
-              'Horas a impartir': n0(pf.horas),
-            })
-          }
-        }
-
-        for (const r of af.rubros ?? []) {
-          rubrosSheet.push({
-            'NIT': nit,
-            'Proyecto': proyecto,
-            'AF N.º': n0(af.consecutivo),
-            'Rubro': s(r.nombreRubro),
-            'Descripción': s(r.descripcion),
-            'Justificación': s(r.justificacion),
-            'Cofin. SENA': n0(r.cofinanciacionSena),
-            'Contrapartida especie': n0(r.contrapartidaEspecie),
-            'Contrapartida dinero': n0(r.contrapartidaDinero),
-            'Total rubro': n0(r.totalRubro),
+            'Actividades': arr(u.actividades),
+            'Justificación de la actividad de aprendizaje': s(u.descripcionActividad),
           })
         }
       }
@@ -623,13 +578,9 @@ export class ConvocatoriaProyectosService {
     add(porEventoSheet, 'Por evento')
     add(porModalidadSheet, 'Por modalidad')
     add(porProponenteSheet, 'Por proponente')
-    add(validacionSheet, 'Validacion SENA')
     add(proyectos, 'Proyectos')
     add(afsSheet, 'Acciones de formacion')
     add(utsSheet, 'Unidades tematicas')
-    add(actsSheet, 'Actividades')
-    add(perfilesSheet, 'Perfiles capacitador')
-    add(rubrosSheet, 'Rubros')
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
   }

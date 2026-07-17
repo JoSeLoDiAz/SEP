@@ -19,19 +19,23 @@ type Rubro = AF['rubros'][number]
 
 const n0 = (x: unknown) => Number(x) || 0
 const s = (x: unknown) => (x == null ? '' : String(x)).trim()
-const arr = (a?: unknown[]) => (a ?? []).map(s).filter(Boolean).join(', ')
-const unidadesRubro = (r: Rubro) => n0(r.numHoras) || n0(r.numPaginasUnidades) || n0(r.numBeneficiarios) || n0(r.numDias) || 0
-const valorUnidadRubro = (r: Rubro): number => {
-  const total = n0(r.totalRubro), horas = n0(r.numHoras), benef = n0(r.numBeneficiarios), cant = n0(r.numPaginasUnidades), dias = n0(r.numDias)
-  if (horas > 0 && benef > 0) return total / (horas * benef)
-  if (horas > 0)              return total / horas
-  if (dias > 0 && benef > 0)  return total / (dias * benef)
-  if (dias > 0)               return total / dias
-  if (cant > 0)               return total / cant
-  if (benef > 0)              return total / benef
-  return 0
+// Elemento i de un arreglo como texto (para expandir en columnas 1..N).
+const at = (a: unknown, i: number) => s(Array.isArray(a) ? a[i] : undefined)
+// Fecha serial de Excel → dd/mm/aaaa (si no es serial, devuelve el texto tal cual).
+const fmtFecha = (v: unknown): string => {
+  const str = s(v)
+  if (!str) return ''
+  const num = Number(str)
+  if (Number.isFinite(num) && num > 20000 && num < 80000) {
+    const d = new Date(Math.round((num - 25569) * 86400000))
+    if (!Number.isNaN(d.getTime())) {
+      const dd = String(d.getUTCDate()).padStart(2, '0')
+      const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+      return `${dd}/${mm}/${d.getUTCFullYear()}`
+    }
+  }
+  return str
 }
-const pctRubro = (n: number, total: number) => (total > 0 ? +((n / total) * 100).toFixed(2) : 0)
 const code = (r: Rubro) => s(r.idRubro)
 const name = (r: Rubro) => s(r.nombreRubro)
 const esGO = (r: Rubro) => /^R0?9(\D|$)/i.test(code(r)) || /GASTOS\s+DE\s+OPERACI/i.test(name(r))
@@ -268,11 +272,11 @@ export class ConvocatoriaProyectosService {
       `SELECT GUARDADOID AS "id", DATOSJSON AS "datos" FROM CONVPROYGUARDADO WHERE ${where} ORDER BY GUARDADOID`,
       params,
     )
-    const out: Array<{ id: number; p: PreviewImportacion }> = []
-    for (const r of rows) {
-      try { out.push({ id: Number(r.id), p: JSON.parse(await this.readClob(r.datos)) as PreviewImportacion }) } catch { /* JSON corrupto: se ignora */ }
-    }
-    return out
+    // Los CLOB se leen/parsean en paralelo para acelerar la descarga.
+    const out = await Promise.all((rows as Array<{ id: number; datos: unknown }>).map(async (r) => {
+      try { return { id: Number(r.id), p: JSON.parse(await this.readClob(r.datos)) as PreviewImportacion } } catch { return null }
+    }))
+    return out.filter((x): x is { id: number; p: PreviewImportacion } => x !== null)
   }
 
   // Aplica los filtros: proponente a nivel proyecto; evento/modalidad/sector a
@@ -441,7 +445,7 @@ export class ConvocatoriaProyectosService {
     return out
   }
 
-  // ── Sábana Excel multi-hoja (respeta los filtros de la analítica) ───────────
+  // ── Sábana Excel: hojas normalizadas tipo Datos_* del formulador ────────────
   async exportarExcel(f: AnaliticaFiltros = {}): Promise<Buffer> {
     const filtrados = this.aplicarFiltros(await this.cargarProyectos(f.convocatoriaId), f)
     const ag = this.agregados(filtrados)
@@ -449,6 +453,7 @@ export class ConvocatoriaProyectosService {
     const resumenSheet: Record<string, unknown>[] = [{
       'Proyectos': ag.totales.proyectos,
       'Acciones de formación': ag.totales.afs,
+      'Unidades temáticas': ag.totales.unidades,
       'Beneficiarios': ag.totales.beneficiarios,
       'Valor total': ag.totales.valorTotal,
       'Cofinanciación SENA': ag.totales.cofinSena,
@@ -462,125 +467,260 @@ export class ConvocatoriaProyectosService {
       'Cofinanciación SENA': g.cofinSena, 'Valor total': g.valorTotal,
     }))
 
-    const proyectos: Record<string, unknown>[] = []
-    const afsSheet: Record<string, unknown>[] = []
-    const utsSheet: Record<string, unknown>[] = []
+    const basicosSheet: Record<string, unknown>[] = []
+    const contactoSheet: Record<string, unknown>[] = []
+    const generalesSheet: Record<string, unknown>[] = []
+    const diagnosticoSheet: Record<string, unknown>[] = []
+    const necesidadesSheet: Record<string, unknown>[] = []
+    const afSheet: Record<string, unknown>[] = []
+    const utSheet: Record<string, unknown>[] = []
+    const coberturaSheet: Record<string, unknown>[] = []
+    const presupuestoSheet: Record<string, unknown>[] = []
     // Rubros con claves de orden (proponente → AF → id de rubro).
     const rubrosRows: Array<{ prop: string; af: number; id: number; row: Record<string, unknown> }> = []
 
     for (const { p, afs: afsMatch } of filtrados) {
-      const nit = s(p.empresa?.nit)
-      const proyecto = s(p.proyecto?.nombre)
-      const razon = s(p.basicos?.razonSocial)
-      const pr = p.proyecto?.presupuesto
-      // Totales del proyecto CALCULADOS desde sus AF filtradas (así concilian con las
-      // hojas Resumen/Por-* y respetan el filtro). El presupuesto declarado va aparte.
-      let cBenef = 0, cCof = 0, cEsp = 0, cDin = 0, cGO = 0, cTr = 0, cTot = 0
-      for (const af of afsMatch) {
-        const fin = finanzasAF(af)
-        cBenef += fin.totalBenef; cCof += fin.tot.cofSena; cEsp += fin.tot.especie
-        cDin += fin.tot.dinero; cGO += fin.go.total; cTr += fin.tr.total; cTot += fin.tot.total
-      }
+      const b = p.basicos, c = p.contactos, g = p.generalidades, pres = p.proyecto?.presupuesto
+      const nit = s(b?.nit)
+      const razon = s(b?.razonSocial)
 
-      proyectos.push({
-        'Convocatoria': s(p.convocatoria?.nombre),
-        'NIT': nit,
-        'Razón social': razon,
-        'Sigla': s(p.basicos?.sigla),
-        'Proyecto': proyecto,
-        'Modalidad': s(p.basicos?.modalidadParticipacion),
-        'N.º AF': afsMatch.length,
-        'Beneficiarios': cBenef,
-        'Valor total': cTot,
-        'Cofinanciación SENA': cCof,
-        'Contrapartida especie': cEsp,
-        'Contrapartida dinero': cDin,
-        'Gastos de operación': cGO,
-        'Transferencia': cTr,
-        'Valor total (declarado)': n0(pr?.valorTotal),
-        'Cofinanciación SENA (declarado)': n0(pr?.cofinanciacionSena),
-        'Beneficiarios (declarado)': n0(pr?.beneficiarios),
+      // ── Datos básicos ──
+      basicosSheet.push({
+        'NÚMERO DE IDENTIFICACIÓN': s(b?.nit),
+        'DÍGITO VERIFICACIÓN': s(b?.digitoVerificacion),
+        'NOMBRE DE LA ENTIDAD PROPONENTE': s(b?.razonSocial),
+        'SIGLA': s(b?.sigla),
+        'CORREO ELECTRÓNICO': s(b?.email),
+        'DEPARTAMENTO DE DOMICILIO': s(b?.departamentoDomicilio),
+        'CIUDAD/MUNICIPIO DE DOMICILIO': s(b?.ciudadDomicilio),
+        'DIRECCIÓN DE DOMICILIO': s(b?.direccionDomicilio),
+        'TELÉFONO': s(b?.telefono),
+        'PÁGINA WEB': s(b?.paginaWeb),
+        'ACTIVIDAD ECONÓMICA (RUT/CIIU)': s(b?.ciiu),
+        'TIPO DE ORGANIZACIÓN': s(b?.tipoOrganizacion),
+        'CERTIFICACIÓN DE COMPETENCIAS LABORALES': s(b?.certificacionCompetencias),
+        'VINCULÓ EXPERTOS TÉCNICOS': s(b?.vinculoExpertosTecnicos),
+        'COBERTURA': s(b?.cobertura),
+        'CÓDIGO INDICATIVO': s(b?.codigoIndicativo),
+        'TAMAÑO EMPRESA': s(b?.tamanoEmpresa),
+        'CELULAR': s(b?.celular),
+        'MESA SECTORIAL 1': s(b?.mesa1),
+        'MESA SECTORIAL 2': s(b?.mesa2),
+        'MESA SECTORIAL 3': s(b?.mesa3),
+        'MODALIDAD DE PARTICIPACIÓN': s(b?.modalidadParticipacion),
+        'TIPO DE IDENTIFICACIÓN': s(b?.tipoIdentificacion),
       })
 
-      for (const af of afsMatch) {
-        const f = finanzasAF(af)
-        afsSheet.push({
+      // ── Datos contacto ──
+      const rl = c?.representanteLegal, k1 = c?.contacto1, ks = c?.contactoSustenta
+      contactoSheet.push({
+        'NIT': nit,
+        'Proponente': razon,
+        'NÚMERO DE IDENTIFICACIÓN REPRESENTANTE LEGAL': s(rl?.id),
+        'TIPO REPRESENTANTE LEGAL': s(rl?.tipo),
+        'NOMBRE REPRESENTANTE LEGAL': s(rl?.nombre),
+        'EMAIL REPRESENTANTE LEGAL': s(rl?.email),
+        'TELÉFONO/CELULAR REPRESENTANTE LEGAL': s(rl?.telefono),
+        'NÚMERO DE IDENTIFICACIÓN PRIMER CONTACTO': s(k1?.id),
+        'TIPO IDENTIFICACIÓN PRIMER CONTACTO': s(k1?.tipo),
+        'NOMBRE COMPLETO PRIMER CONTACTO': s(k1?.nombre),
+        'EMAIL PRIMER CONTACTO': s(k1?.email),
+        'TELÉFONO/CELULAR PRIMER CONTACTO': s(k1?.telefono),
+        'TIPO IDENTIFICACIÓN PERSONA QUE SUSTENTA': s(ks?.tipo),
+        'NÚMERO IDENTIFICACIÓN CONTACTO 2': s(ks?.id),
+        'NOMBRE COMPLETO PERSONA QUE SUSTENTA': s(ks?.nombre),
+        'EMAIL PERSONA QUE SUSTENTA': s(ks?.email),
+        'TELÉFONO/CELULAR PERSONA QUE SUSTENTA': s(ks?.telefono),
+      })
+
+      // ── Datos generales ──
+      generalesSheet.push({
+        'NIT': nit,
+        'Proponente': razon,
+        'OBJETO SOCIAL DE LA EMPRESA / GREMIO': s(g?.objetoSocial),
+        'PRODUCTOS Y/O SERVICIOS OFRECIDOS Y MERCADO': s(g?.productosServicios),
+        'SITUACIÓN ACTUAL Y PROYECCIÓN': s(g?.situacionActual),
+        'PAPEL EN EL SECTOR(ES) Y/O REGIÓN': s(g?.papelSector),
+        'RETOS ESTRATÉGICOS VINCULADOS A LA FORMACIÓN': s(g?.retos),
+        'EXPERIENCIA EN ACTIVIDADES FORMATIVAS': s(g?.experienciaFormativa),
+        'OBJETIVO GENERAL DEL PROYECTO': s(g?.objetivoProyecto),
+        'SECTOR AL QUE PERTENECE': s(g?.sectorPertenece),
+        'SUBSECTOR AL QUE PERTENECE': s(g?.subsectorPertenece),
+        'SECTOR 1 AL QUE REPRESENTA': at(g?.sectoresRepresenta, 0),
+        'SECTOR 2 AL QUE REPRESENTA': at(g?.sectoresRepresenta, 1),
+        'SECTOR 3 AL QUE REPRESENTA': at(g?.sectoresRepresenta, 2),
+        'SUB-SECTOR 1 AL QUE REPRESENTA': at(g?.subsectoresRepresenta, 0),
+        'SUB-SECTOR 2 AL QUE REPRESENTA': at(g?.subsectoresRepresenta, 1),
+        'SUB-SECTOR 3 AL QUE REPRESENTA': at(g?.subsectoresRepresenta, 2),
+        'ESLABONES DE LA CADENA PRODUCTIVA': s(g?.cadenaProductiva),
+        'INTERACCIONES CON OTROS ACTORES': s(g?.interacciones),
+      })
+
+      // ── Diagnóstico ──
+      for (const d of p.diagnosticos ?? []) {
+        const h = d.herramientas ?? []
+        diagnosticoSheet.push({
           'NIT': nit,
           'Proponente': razon,
-          'N.º AF': n0(af.consecutivo),
-          'Nombre de la AF': s(af.nombre),
-          'Problema o necesidad detectada': s(af.diagnostico),
-          'Justificación de la necesidad detectada': s(af.justificacion),
-          'Causas del problema o necesidad': s(af.causasEfectos),
-          'Efectos del problema o necesidad': s(af.efectos),
-          'Objetivo de la acción de formación': s(af.objetivos),
-          'Evento de formación': s(af.eventoFormacion),
-          'Modalidad': s(af.modalidadFormacion),
-          'Metodología': s(af.metodologia),
-          'N.º de horas por grupo': n0(af.horasPorGrupo),
-          'N.º de grupos': n0(af.numeroGrupos),
-          'Beneficiarios presenciales / grupo': n0(af.beneficiariosPresenciales),
-          'Beneficiarios virtuales / grupo': n0(af.beneficiariosSincronicos),
-          'Total de horas de la AF': f.totalHoras,
-          'Total de beneficiarios de la AF': f.totalBenef,
-          'Áreas funcionales': arr(af.areas),
-          'Justificación de áreas funcionales': s(af.justificacionAreas),
-          'Niveles ocupacionales': arr(af.niveles),
-          'Justificación de niveles ocupacionales': s(af.justificacionNiveles),
-          'Ocupaciones CUOC': arr(af.ocupacionesCuoc),
-          'Trabajadores mujeres': n0(af.trabajadoresMujeres),
-          'En condición de discapacidad': n0(af.trabajadoresDiscapacidad),
-          'Empresas con modelo BIC': n0(af.empresasBic),
-          'N.º empresas MIPYMES': n0(af.mipymesEmpresas),
-          'N.º trabajadores MIPYMES': n0(af.mipymesTrabajadores),
-          'Justificación MIPYMES': s(af.justificacionMipymes),
-          'N.º empresas cadena productiva': n0(af.cadenaEmpresas),
-          'N.º trabajadores cadena productiva': n0(af.cadenaTrabajadores),
-          'Justificación cadena productiva': s(af.justificacionCadena),
-          'N.º trabajadores economía campesina': n0(af.trabajadoresCampesinos),
-          'Justificación economía campesina': s(af.trabajadoresCampesinosTexto),
-          'N.º trabajadores economía popular': n0(af.trabajadoresPopular),
-          'Justificación economía popular': s(af.trabajadoresPopularTexto),
-          'Sector(es) al que pertenecen los beneficiarios': arr(af.sectoresPertenecen),
-          'Subsector(es) al que pertenecen los beneficiarios': arr(af.subsectoresPertenecen),
-          'Clasificación de la AF por sector(es)': arr(af.sectoresBeneficia),
-          'Clasificación de la AF por subsector(es)': arr(af.subsectoresBeneficia),
-          'Justificación de sectores y subsectores': s(af.justificacionSectores),
-          'Alineación · Reto nacional': s(af.componenteAlineacion),
-          'Alineación · Componente estratégico': s(af.descripcionAlineacion),
-          'Justificación de la alineación': s(af.justificacionAlineacion),
-          'Justificación de la acción de formación especializada': s(af.justificacionEspecializada),
-          'Impacto en el desempeño del trabajador': (af.impactosTrabajador ?? []).map(s).filter(Boolean).join('\n'),
-          'Impacto en la productividad y competitividad': (af.impactosProductividad ?? []).map(s).filter(Boolean).join('\n'),
-          'Ambiente de aprendizaje': s(af.ambiente),
-          'Material de formación seleccionado': s(af.material),
-          'Gestión del conocimiento': s(af.gestionConocimiento),
-          'Recursos didácticos': s(af.recursosDidacticos),
-          'Justificación del material de formación': s(af.justificacionSiAplica),
-          'Insumos': s(af.insumos),
-          'Justificación de los insumos': s(af.justificacionInsumo),
+          'NÚMERO DIAGNÓSTICO': n0(d.numero),
+          'HERRAMIENTA 1': s(h[0]?.nombre), 'MUESTRA 1': s(h[0]?.muestra),
+          'HERRAMIENTA 2': s(h[1]?.nombre), 'MUESTRA 2': s(h[1]?.muestra),
+          'HERRAMIENTA 3': s(h[2]?.nombre), 'MUESTRA 3': s(h[2]?.muestra),
+          'HERRAMIENTA 4': s(h[3]?.nombre), 'MUESTRA 4': s(h[3]?.muestra),
+          'HERRAMIENTA 5': s(h[4]?.nombre), 'MUESTRA 5': s(h[4]?.muestra),
+          'FECHA DE DIAGNÓSTICO': fmtFecha(d.fecha),
+          '¿LA HERRAMIENTA ES DE CREACIÓN PROPIA?': s(d.herramientaPropia),
+          'OTRO TIPO DE HERRAMIENTA, ¿CUÁL?': s(d.otraHerramienta),
+          '¿CUENTA CON PLAN DE CAPACITACIÓN?': s(d.planCapacitacion),
+          'DESCRIPCIÓN DE LAS HERRAMIENTAS Y MUESTRA': s(d.descripcion),
+          'RESUMEN DE RESULTADOS DEL DIAGNÓSTICO': s(d.resumen),
+        })
+      }
+
+      // ── Necesidades ──
+      for (const ne of p.necesidades ?? []) {
+        necesidadesSheet.push({
+          'NIT': nit,
+          'Proponente': razon,
+          'NÚMERO DE NECESIDAD': n0(ne.numeroNecesidad),
+          'NÚMERO DIAGNÓSTICO': n0(ne.numeroDiagnostico),
+          'NECESIDAD': s(ne.necesidad),
+          'NÚMERO DE BENEFICIARIOS': n0(ne.numeroBeneficiarios),
+        })
+      }
+
+      for (const af of afsMatch) {
+        const fin = finanzasAF(af)
+        // ── Datos AF (columnas expandidas como el formulador) ──
+        afSheet.push({
+          'NIT': nit,
+          'Proponente': razon,
+          'CONSECUTIVO DE LA ACCIÓN DE FORMACIÓN': n0(af.consecutivo),
+          'NOMBRE DE LA ACCIÓN DE FORMACIÓN': s(af.nombre),
+          'DIAGNÓSTICO DE NECESIDADES': s(af.diagnostico),
+          'ANÁLISIS DE CAUSAS Y EFECTOS': s(af.causasEfectos),
+          'OBJETIVO(S) DE LA ACCIÓN DE FORMACIÓN': s(af.objetivos),
+          'ENFOQUE DE LA ACCIÓN DE FORMACIÓN': s(af.enfoque),
+          'EVENTO DE FORMACIÓN': s(af.eventoFormacion),
+          'MODALIDAD DE FORMACIÓN': s(af.modalidadFormacion),
+          'METODOLOGÍA DE FORMACIÓN': s(af.metodologia),
+          'NÚMERO DE HORAS POR GRUPO': n0(af.horasPorGrupo),
+          'NÚMERO DE GRUPOS': n0(af.numeroGrupos),
+          'BENEFICIARIOS PRESENCIALES POR GRUPO': n0(af.beneficiariosPresenciales),
+          'BENEFICIARIOS SINCRÓNICOS POR GRUPO': n0(af.beneficiariosSincronicos),
+          'TOTAL DE HORAS DE LA AF': fin.totalHoras,
+          'TOTAL DE BENEFICIARIOS DE LA AF': fin.totalBenef,
+          'AREA 1': at(af.areas, 0), 'AREA 2': at(af.areas, 1), 'AREA 3': at(af.areas, 2), 'AREA 4': at(af.areas, 3), 'AREA 5': at(af.areas, 4),
+          'JUSTIFICACIÓN ÁREAS FUNCIONALES': s(af.justificacionAreas),
+          'NIVEL 1': at(af.niveles, 0), 'NIVEL 2': at(af.niveles, 1), 'NIVEL 3': at(af.niveles, 2),
+          'JUSTIFICACIÓN NIVELES': s(af.justificacionNiveles),
+          'IMPACTO DESEMPEÑO TRABAJADOR 1': at(af.impactosTrabajador, 0), 'IMPACTO DESEMPEÑO TRABAJADOR 2': at(af.impactosTrabajador, 1),
+          'IMPACTO DESEMPEÑO TRABAJADOR 3': at(af.impactosTrabajador, 2), 'IMPACTO DESEMPEÑO TRABAJADOR 4': at(af.impactosTrabajador, 3),
+          'IMPACTO DESEMPEÑO TRABAJADOR 5': at(af.impactosTrabajador, 4),
+          'IMPACTO PRODUCTIVIDAD 1': at(af.impactosProductividad, 0), 'IMPACTO PRODUCTIVIDAD 2': at(af.impactosProductividad, 1),
+          'IMPACTO PRODUCTIVIDAD 3': at(af.impactosProductividad, 2), 'IMPACTO PRODUCTIVIDAD 4': at(af.impactosProductividad, 3),
+          'IMPACTO PRODUCTIVIDAD 5': at(af.impactosProductividad, 4),
+          'NÚMERO DE EMPRESAS MIPYMES A BENEFICIAR': n0(af.mipymesEmpresas),
+          'NÚMERO DE TRABAJADORES MIPYMES A BENEFICIAR': n0(af.mipymesTrabajadores),
+          'JUSTIFICACIÓN MIPYMES A BENEFICIAR': s(af.justificacionMipymes),
+          'NÚMERO DE EMPRESAS CADENA PRODUCTIVA A BENEFICIAR': n0(af.cadenaEmpresas),
+          'NÚMERO DE TRABAJADORES CADENA PRODUCTIVA A BENEFICIAR': n0(af.cadenaTrabajadores),
+          'JUSTIFICACIÓN CADENA PRODUCTIVA A BENEFICIAR': s(af.justificacionCadena),
+          'NÚMERO DE TRABAJADORES MUJERES': n0(af.trabajadoresMujeres),
+          'NÚMERO DE TRABAJADORES CAMPESINOS': n0(af.trabajadoresCampesinos),
+          'NÚMERO DE TRABAJADORES EN CONDICIÓN DE DISCAPACIDAD': n0(af.trabajadoresDiscapacidad),
+          'NÚMERO DE EMPRESAS BIC A BENEFICIAR': n0(af.empresasBic),
+          'SECTOR 1': at(af.sectoresPertenecen, 0), 'SECTOR 2': at(af.sectoresPertenecen, 1), 'SECTOR 3': at(af.sectoresPertenecen, 2),
+          'SECTOR 4': at(af.sectoresPertenecen, 3), 'SECTOR 5': at(af.sectoresPertenecen, 4),
+          'SUBSECTOR 1': at(af.subsectoresPertenecen, 0), 'SUBSECTOR 2': at(af.subsectoresPertenecen, 1), 'SUBSECTOR 3': at(af.subsectoresPertenecen, 2),
+          'SUBSECTOR 4': at(af.subsectoresPertenecen, 3), 'SUBSECTOR 5': at(af.subsectoresPertenecen, 4),
+          'CLASIFICACIÓN POR SECTOR 1': at(af.sectoresBeneficia, 0), 'CLASIFICACIÓN POR SECTOR 2': at(af.sectoresBeneficia, 1),
+          'CLASIFICACIÓN POR SECTOR 3': at(af.sectoresBeneficia, 2), 'CLASIFICACIÓN POR SECTOR 4': at(af.sectoresBeneficia, 3),
+          'CLASIFICACIÓN POR SECTOR 5': at(af.sectoresBeneficia, 4),
+          'CLASIFICACIÓN POR SUBSECTOR 1': at(af.subsectoresBeneficia, 0), 'CLASIFICACIÓN POR SUBSECTOR 2': at(af.subsectoresBeneficia, 1),
+          'CLASIFICACIÓN POR SUBSECTOR 3': at(af.subsectoresBeneficia, 2), 'CLASIFICACIÓN POR SUBSECTOR 4': at(af.subsectoresBeneficia, 3),
+          'CLASIFICACIÓN POR SUBSECTOR 5': at(af.subsectoresBeneficia, 4),
+          'COMPONENTE ALINEACIÓN': s(af.componenteAlineacion),
+          'DESCRIPCIÓN DE LA ALINEACIÓN': s(af.descripcionAlineacion),
+          'JUSTIFICACIÓN ALINEACIÓN': s(af.justificacionAlineacion),
+          'JUSTIFICACIÓN AF ESPECIALIZADA': s(af.justificacionEspecializada),
+          'AMBIENTE DE APRENDIZAJE': s(af.ambiente),
+          'MATERIAL DE FORMACIÓN': s(af.material),
+          'JUSTIFICACIÓN SI APLICA (MATERIAL)': s(af.justificacionSiAplica),
+          'GESTIÓN DEL CONOCIMIENTO': s(af.gestionConocimiento),
+          '¿INCLUIR ESTA AF EN LA FORMULACIÓN?': s(af.incluirEnFormulacion),
+          'INSUMOS': s(af.insumos),
+          'JUSTIFICACIÓN DEL INSUMO': s(af.justificacionInsumo),
+          'RECURSOS DIDÁCTICOS': s(af.recursosDidacticos),
+          'CÓDIGO DE LA NECESIDAD': af.codigoNecesidad == null ? '' : n0(af.codigoNecesidad),
+          'CÓDIGO DEL DIAGNÓSTICO': af.codigoDiagnostico == null ? '' : n0(af.codigoDiagnostico),
+          'OCUPACIÓN CUOC 1': at(af.ocupacionesCuoc, 0), 'OCUPACIÓN CUOC 2': at(af.ocupacionesCuoc, 1), 'OCUPACIÓN CUOC 3': at(af.ocupacionesCuoc, 2),
+          'OCUPACIÓN CUOC 4': at(af.ocupacionesCuoc, 3), 'OCUPACIÓN CUOC 5': at(af.ocupacionesCuoc, 4), 'OCUPACIÓN CUOC 6': at(af.ocupacionesCuoc, 5),
+          'OCUPACIÓN CUOC 7': at(af.ocupacionesCuoc, 6), 'OCUPACIÓN CUOC 8': at(af.ocupacionesCuoc, 7), 'OCUPACIÓN CUOC 9': at(af.ocupacionesCuoc, 8),
+          'OCUPACIÓN CUOC 10': at(af.ocupacionesCuoc, 9), 'OCUPACIÓN CUOC 11': at(af.ocupacionesCuoc, 10), 'OCUPACIÓN CUOC 12': at(af.ocupacionesCuoc, 11),
+          'OCUPACIÓN CUOC 13': at(af.ocupacionesCuoc, 12), 'OCUPACIÓN CUOC 14': at(af.ocupacionesCuoc, 13), 'OCUPACIÓN CUOC 15': at(af.ocupacionesCuoc, 14),
+          'OCUPACIÓN CUOC 16': at(af.ocupacionesCuoc, 15), 'OCUPACIÓN CUOC 17': at(af.ocupacionesCuoc, 16), 'OCUPACIÓN CUOC 18': at(af.ocupacionesCuoc, 17),
+          'OCUPACIÓN CUOC 19': at(af.ocupacionesCuoc, 18), 'OCUPACIÓN CUOC 20': at(af.ocupacionesCuoc, 19),
+          'VALIDACIÓN PRESUPUESTO AF': s(af.validacionPresupuesto),
+          'JUSTIFICACIÓN AF': s(af.justificacion),
+          'JUSTIFICACIÓN SECTORES Y SUB-SECTORES': s(af.justificacionSectores),
+          'JUSTIFICACIÓN TRABAJADORES ECONOMÍA CAMPESINA': s(af.trabajadoresCampesinosTexto),
+          'NÚMERO DE TRABAJADORES ECONOMÍA POPULAR': n0(af.trabajadoresPopular),
+          'JUSTIFICACIÓN TRABAJADORES ECONOMÍA POPULAR': s(af.trabajadoresPopularTexto),
+          'JUSTIFICACIÓN BENEFICIARIOS TALLER-PUESTO DE TRABAJO REAL': s(af.justificacionTallerPuesto),
+          'EFECTOS DEL PROBLEMA O NECESIDAD': s(af.efectos),
         })
 
+        // ── Datos UT ──
         for (const u of af.uts ?? []) {
-          const hp = n0(u.horasPracticas), ht = n0(u.horasTeoricas)
-          utsSheet.push({
+          const pf = u.perfiles ?? []
+          utSheet.push({
             'NIT': nit,
             'Proponente': razon,
-            'N.º AF': n0(af.consecutivo),
-            'Nombre de la AF': s(af.nombre),
-            'N.º UT': n0(u.numeroUT),
-            'Nombre de la unidad temática': s(u.nombre),
-            'Horas prácticas': hp,
-            'Horas teóricas': ht,
-            'Total de horas': hp + ht,
-            'Contenido de la unidad temática': s(u.contenido),
-            'Competencia': s(u.competencia),
-            'Actividades': arr(u.actividades),
-            'Justificación de la actividad de aprendizaje': s(u.descripcionActividad),
+            'NÚMERO AF': n0(af.consecutivo),
+            'NOMBRE AF': s(af.nombre),
+            'NÚMERO UT': n0(u.numeroUT),
+            'NOMBRE UT': s(u.nombre),
+            'HORAS PRÁCTICAS': n0(u.horasPracticas),
+            'HORAS TEÓRICAS': n0(u.horasTeoricas),
+            'TOTAL HORAS UT': n0(u.horasPracticas) + n0(u.horasTeoricas),
+            'CONTENIDO UT': s(u.contenido),
+            'COMPETENCIA UT': s(u.competencia),
+            'ACTIVIDAD UT 1': at(u.actividades, 0), 'ACTIVIDAD UT 2': at(u.actividades, 1), 'ACTIVIDAD UT 3': at(u.actividades, 2),
+            'ACTIVIDAD UT 4': at(u.actividades, 3), 'ACTIVIDAD UT 5': at(u.actividades, 4),
+            'DESCRIPCIÓN DE LA ACTIVIDAD': s(u.descripcionActividad),
+            'PERFIL 1': s(pf[0]?.perfil), 'HORAS EJECUTADAS 1': n0(pf[0]?.horas),
+            'PERFIL 2': s(pf[1]?.perfil), 'HORAS EJECUTADAS 2': n0(pf[1]?.horas),
+            'PERFIL 3': s(pf[2]?.perfil), 'HORAS EJECUTADAS 3': n0(pf[2]?.horas),
+            'PERFIL 4': s(pf[3]?.perfil), 'HORAS EJECUTADAS 4': n0(pf[3]?.horas),
+            'PERFIL 5': s(pf[4]?.perfil), 'HORAS EJECUTADAS 5': n0(pf[4]?.horas),
+            'HABILIDAD TRANSVERSAL': s(u.articulacionTerritorial),
+            '¿ES ARTICULACIÓN PARA EL DESARROLLO?': u.esArticulacionTerritorial ? 'SI' : 'NO',
           })
         }
+
+        // ── Datos cobertura ──
+        for (const cob of af.cobertura ?? []) {
+          const dep = cob.departamentos ?? []
+          const row: Record<string, unknown> = {
+            'NIT': nit,
+            'Proponente': razon,
+            'AF': n0(af.consecutivo),
+            'GRUPO': n0(cob.numeroGrupo),
+            'DEPARTAMENTO PRE': s(cob.departamentoPresencial),
+            'CIUDAD PRE': s(cob.ciudadPresencial),
+            'BENEFICIARIOS': n0(cob.beneficiariosPresencial),
+          }
+          for (let i = 0; i < 25; i++) {
+            row[`DEPARTAMENTO ${i + 1}`] = s(dep[i]?.departamento)
+            row[`BENEFICIARIOS ${i + 1}`] = n0(dep[i]?.beneficiarios)
+          }
+          row['JUSTIFICACIÓN DE LA RELACIÓN CON LOS LUGARES DE EJECUCIÓN'] = s(cob.justificacion)
+          coberturaSheet.push(row)
+        }
+
+        // ── Datos rubros ──
         for (const r of af.rubros ?? []) {
-          const t = n0(r.totalRubro)
           const id = Number(r.idRubro)
           rubrosRows.push({
             prop: razon,
@@ -589,23 +729,50 @@ export class ConvocatoriaProyectosService {
             row: {
               'NIT': nit,
               'Proponente': razon,
-              'N.º AF': n0(af.consecutivo),
-              'Rubro': s(r.nombreRubro),
-              'Justificación': s(r.justificacion),
-              'Unid.': unidadesRubro(r),
-              'Valor unidad': valorUnidadRubro(r),
-              'Cofin. SENA': n0(r.cofinanciacionSena),
-              '% Cofin. SENA': pctRubro(n0(r.cofinanciacionSena), t),
-              'Especie': n0(r.contrapartidaEspecie),
-              '% Especie': pctRubro(n0(r.contrapartidaEspecie), t),
-              'Dinero': n0(r.contrapartidaDinero),
-              '% Dinero': pctRubro(n0(r.contrapartidaDinero), t),
-              'Total': t,
+              'N° AF': n0(af.consecutivo),
+              'IDRUBRO': s(r.idRubro),
+              'NOMBRERUBRO': s(r.nombreRubro),
+              'DESCRIPCIÓN': s(r.descripcion),
+              'JUSTIFICACIÓN': s(r.justificacion),
+              'TARIFA MÁXIMA': n0(r.tarifaMaxima),
+              '# HORAS': n0(r.numHoras),
+              '# PÁGINAS/UNIDADES': n0(r.numPaginasUnidades),
+              '# DE BENEFICIARIOS': n0(r.numBeneficiarios),
+              '# DE DÍAS': n0(r.numDias),
+              'TOTALRUBRO': n0(r.totalRubro),
+              'VALOR MÁXIMO': n0(r.valorMaximo),
+              'CASO': s(r.caso),
+              'PAQUETE': s(r.paquete),
+              'VALOR * BENEFICIARIOS': n0(r.valorPorBeneficiarios),
+              'COFINANCIACIÓN SENA': n0(r.cofinanciacionSena),
+              'CONTRAPARTIDA ESPECIE': n0(r.contrapartidaEspecie),
+              'CONTRAPARTIDA DINERO': n0(r.contrapartidaDinero),
             },
           })
         }
       }
+
+      // ── Datos presupuesto ──
+      presupuestoSheet.push({
+        'NIT': nit,
+        'Proponente': razon,
+        '# AF DEL PROYECTO': n0(pres?.numeroAFs),
+        '# DE BENEFICIARIOS': n0(pres?.beneficiarios),
+        'VALOR DE LAS AF': n0(pres?.valorAFs),
+        'GASTOS DE OPERACIÓN': n0(pres?.gastosOperacion),
+        'VALOR TRANSFERENCIA': n0(pres?.valorTransferencia),
+        '# DE BENEFICIARIOS TRANSFERENCIA': n0(pres?.beneficiariosTransferencia),
+        'POLIZA': n0(pres?.poliza),
+        'VALOR TOTAL DEL PROYECTO': n0(pres?.valorTotal),
+        'COFINANCIACIÓN SENA': n0(pres?.cofinanciacionSena),
+        'CONTRAPARTIDA EN ESPECIE': n0(pres?.contrapartidaEspecie),
+        'CONTRAPARTIDA EN DINERO': n0(pres?.contrapartidaDinero),
+        'GASTOS OPERACIÓN COFINANCIACIÓN SENA': n0(pres?.gastosOpCofinSena),
+        'GASTOS OPERACIÓN CONTRAPARTIDA ESPECIE': n0(pres?.gastosOpContraEspecie),
+        'GASTOS OPERACIÓN CONTRAPARTIDA DINERO': n0(pres?.gastosOpContraDinero),
+      })
     }
+
     // Orden final de los rubros: proponente → acción de formación → id de rubro.
     rubrosRows.sort((a, b) => a.prop.localeCompare(b.prop) || (a.af - b.af) || (a.id - b.id))
     const rubrosSheet = rubrosRows.map(x => x.row)
@@ -617,10 +784,16 @@ export class ConvocatoriaProyectosService {
     }
     add(resumenSheet, 'Resumen')
     add(porProponenteSheet, 'Por proponente')
-    add(proyectos, 'Proyectos')
-    add(afsSheet, 'Acciones de formacion')
-    add(utsSheet, 'Unidades tematicas')
-    add(rubrosSheet, 'Rubros')
+    add(basicosSheet, 'Datos basicos')
+    add(contactoSheet, 'Datos contacto')
+    add(generalesSheet, 'Datos generales')
+    add(diagnosticoSheet, 'Diagnostico')
+    add(necesidadesSheet, 'Necesidades')
+    add(afSheet, 'Datos AF')
+    add(utSheet, 'Datos UT')
+    add(coberturaSheet, 'Datos cobertura')
+    add(rubrosSheet, 'Datos rubros')
+    add(presupuestoSheet, 'Datos presupuesto')
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
   }

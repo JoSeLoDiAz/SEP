@@ -255,8 +255,15 @@ export class ConvocatoriaProyectosService {
     )
     if (!rows[0]) throw new NotFoundException('Proyecto guardado no encontrado')
     const json = await this.readClob(rows[0].datos)
-    return JSON.parse(json) as PreviewImportacion
-  }
+    const preview = JSON.parse(json) as PreviewImportacion
+
+    const pres = preview.proyecto?.presupuesto
+    if (pres) {
+      pres.valorAFs = pres.valorTotal - pres.gastosOperacion - pres.valorTransferencia
+    }
+
+    return preview
+}
 
   async eliminar(id: number) {
     await this.dataSource.query(`DELETE FROM CONVPROYGUARDADO WHERE GUARDADOID = :1`, [id])

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { DataSource } from 'typeorm'
 import * as crypto from 'crypto'
+import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { twofish } = require('twofish')
@@ -403,6 +403,10 @@ export class ImportarProyectoService {
 
     const data = this.parseExcel(buffer)
     const validaciones: PreviewValidacion[] = []
+
+    data.presupuesto.valorAFs = data.presupuesto.valorTotal
+      - data.presupuesto.gastosOperacion
+      - data.presupuesto.valorTransferencia
 
     // ── Convocatoria ────────────────────────────────────────────────────────
     const conv = await this.dataSource.query(
@@ -1895,7 +1899,7 @@ export class ImportarProyectoService {
   // ╚════════════════════════════════════════════════════════════════════════╝
 
   private toRows(ws: XLSX.WorkSheet): unknown[][] {
-    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false }) as unknown[][]
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false })
   }
 
   private str(v: unknown): string | null {

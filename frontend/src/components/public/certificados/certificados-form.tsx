@@ -7,14 +7,24 @@ import api from '@/lib/api'
 // ── Tipos ──────────────────────────────────────────────────────────
 type Modo = 'persona' | 'codigo'
 
+/**
+ * Una fila puede venir de dos orígenes: la participación como beneficiario de
+ * una acción de formación, o la participación como evaluador de una
+ * convocatoria. Los campos son genéricos porque las columnas son las mismas;
+ * `tipo` solo cambia la etiqueta y el color.
+ */
 interface CertificadoRow {
   consecutivo: number
-  empresaRazonSocial: string
-  accionFormacionNombre: string
-  fechaValidacionInterventor: string
-  afGrupoBeneficiarioId: number
+  tipo: 'BENEFICIARIO' | 'EVALUADOR'
+  tipoNombre: string
+  entidad: string
+  concepto: string
+  detalle: string
+  fecha: string
+  codigo: string
+  /** La arma el backend: cada tipo tiene su propia ruta de descarga. */
+  urlPdf: string
   personaId: number
-  proyectoId: number
 }
 
 const TIPOS_DOCUMENTO = [
@@ -43,22 +53,43 @@ function ResultsTable({ rows, onDescargar }: { rows: CertificadoRow[]; onDescarg
         <thead>
           <tr className="bg-cerulean-500 text-white">
             <th className="px-4 py-3 text-left font-semibold w-12">No.</th>
-            <th className="px-4 py-3 text-left font-semibold">Empresa</th>
-            <th className="px-4 py-3 text-left font-semibold">Acción de Formación</th>
-            <th className="px-4 py-3 text-left font-semibold whitespace-nowrap">Fecha de Certificado</th>
+            <th className="px-4 py-3 text-left font-semibold w-32">Participación</th>
+            <th className="px-4 py-3 text-left font-semibold w-1/4">Entidad</th>
+            <th className="px-4 py-3 text-left font-semibold">Certificado por</th>
+            <th className="px-4 py-3 text-left font-semibold whitespace-nowrap">Fecha</th>
             <th className="px-4 py-3 text-center font-semibold w-32">Ver</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
             <tr
-              key={row.afGrupoBeneficiarioId}
+              // El id no basta como key: los dos orígenes numeran por separado
+              // y un beneficiario y un evaluador pueden compartir el mismo id.
+              key={`${row.tipo}-${row.urlPdf}`}
               className={`border-t border-neutral-100 ${i % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}`}
             >
               <td className="px-4 py-3 text-neutral-600">{row.consecutivo}</td>
-              <td className="px-4 py-3 text-neutral-800 font-medium">{row.empresaRazonSocial}</td>
-              <td className="px-4 py-3 text-neutral-700">{row.accionFormacionNombre}</td>
-              <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{row.fechaValidacionInterventor}</td>
+              <td className="px-4 py-3">
+                {/* Celeste y no cerulean: `cerulean-50` es casi neutro y el
+                    distintivo se leía como gris junto al verde del
+                    beneficiario, que es justo la distinción que debe saltar.
+                    Ojo: la paleta cerulean solo define 50/500/700. */}
+                <span className={`inline-block px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
+                  row.tipo === 'EVALUADOR'
+                    ? 'bg-celeste-50 text-celeste-700 border border-celeste-500/40'
+                    : 'bg-green-50 text-green-700 border border-green-200'
+                }`}>
+                  {row.tipoNombre}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-neutral-800 font-medium">{row.entidad}</td>
+              <td className="px-4 py-3 text-neutral-700">
+                {row.concepto}
+                {row.detalle && (
+                  <span className="block text-xs text-neutral-400 mt-0.5">{row.detalle}</span>
+                )}
+              </td>
+              <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{row.fecha}</td>
               <td className="px-4 py-3 text-center">
                 <button
                   onClick={() => onDescargar(row)}
@@ -126,7 +157,7 @@ export function CertificadosForm() {
       const { data } = await api.get<CertificadoRow[]>('/certificados', { params })
 
       if (!data.length) {
-        setAlerta({ msg: 'El beneficiario no tiene certificados registrados', tipo: 'error' })
+        setAlerta({ msg: 'No hay certificados registrados con esos datos', tipo: 'error' })
       } else {
         setResultados(data)
       }
@@ -140,9 +171,9 @@ export function CertificadosForm() {
   function descargar(row: CertificadoRow) {
     // Reutilizamos la baseURL de axios: en dev apunta a http://localhost:4000
     // (sin /api), en prod queda en /api proxied por nginx.
+    // La ruta la arma el backend porque cada tipo de certificado tiene la suya.
     const base = api.defaults.baseURL ?? ''
-    const url = `${base}/certificados/${row.afGrupoBeneficiarioId}/pdf?personaId=${row.personaId}`
-    window.open(url, '_blank', 'noopener,noreferrer')
+    window.open(`${base}${row.urlPdf}`, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -171,7 +202,8 @@ export function CertificadosForm() {
 
       {/* Descripción */}
       <p className="text-center text-sm text-neutral-500">
-        En este espacio podrá descargar los certificados por la participación en los diferentes eventos del GGPC.
+        En este espacio podrá descargar sus certificados de participación en los eventos del GGPC,
+        como beneficiario de una acción de formación o como evaluador del banco de evaluadores.
       </p>
 
       <div className="h-px bg-neutral-200" />

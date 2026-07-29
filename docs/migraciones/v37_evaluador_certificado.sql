@@ -1,0 +1,152 @@
+-- v37_evaluador_certificado.sql
+-- ──────────────────────────────────────────────────────────────────────────
+-- EVALUADORCERTIFICADO — emisión del certificado de participación DESDE el
+-- SEP (decisión confirmada: el sistema lo genera, no se sube a mano).
+--
+-- Reusa la infraestructura ya existente:
+--   - FIRMACERTIFICADOS  → bloque de firma (nombre, cargo, imagen). Misma
+--                          tabla que usa el módulo certificados/ de beneficiarios.
+--   - PDFKit en backend/src/certificados/certificados.service.ts → mismo motor.
+--
+-- Diseño:
+--   * CONSECUTIVO único por año — es un documento oficial, necesita numeración.
+--   * CODIGOVERIFICACION — cadena aleatoria para validar autenticidad en una
+--     URL pública /verificar/:codigo. Sin esto, un PDF es trivialmente falsificable.
+--   * DATOSSNAPSHOT (JSON) — congela nombre, cédula, rol, proceso, mesa, fechas
+--     y horas al momento de emitir. Si mañana se corrige la ficha, el
+--     certificado ya emitido sigue reimprimiéndose idéntico.
+--   * ANULADO + MOTIVOANULACION — nunca se borra un certificado emitido; se anula.
+--
+-- Idempotente. Ejecutar como SEPLOCAL, después de la v34.
+-- ──────────────────────────────────────────────────────────────────────────
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 1. Tabla                                                                ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORCERTIFICADO (
+    CERTIFICADOID        NUMBER(10)      NOT NULL,
+    PARTICIPACIONID      NUMBER(10)      NOT NULL,
+    ANIO                 NUMBER(4)       NOT NULL,
+    CONSECUTIVO          NUMBER(6)       NOT NULL,
+    CODIGOVERIFICACION   NVARCHAR2(40)   NOT NULL,
+    FECHAEMISION         DATE            DEFAULT SYSDATE NOT NULL,
+    EMITIDOPOR           NVARCHAR2(200)  NOT NULL,
+    FIRMACERTIFICADOSID  NUMBER(10),
+    HORASCERTIFICADAS    NUMBER(5),
+    DATOSSNAPSHOT        NCLOB           NOT NULL,
+    ARCHIVOPDF           BLOB,
+    ARCHIVOMIME          NVARCHAR2(120)  DEFAULT N'application/pdf',
+    ARCHIVONOMBRE        NVARCHAR2(255),
+    ANULADO              NUMBER(1)       DEFAULT 0 NOT NULL,
+    MOTIVOANULACION      NVARCHAR2(500),
+    FECHAANULACION       DATE,
+    ANULADOPOR           NVARCHAR2(200),
+    CONSTRAINT PK_EVALUADORCERTIFICADO PRIMARY KEY (CERTIFICADOID),
+    CONSTRAINT UQ_CERT_CONSECUTIVO UNIQUE (ANIO, CONSECUTIVO),
+    CONSTRAINT UQ_CERT_CODIGO UNIQUE (CODIGOVERIFICACION),
+    CONSTRAINT FK_CERT_PART FOREIGN KEY (PARTICIPACIONID)
+      REFERENCES EVALUADORPARTICIPACION(PARTICIPACIONID)
+  )]';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
+COMMENT ON TABLE EVALUADORCERTIFICADO IS
+  'Certificado de participación emitido por el sistema. No se borra: se anula.';
+COMMENT ON COLUMN EVALUADORCERTIFICADO.CONSECUTIVO IS
+  'Numeración oficial dentro del año. Se calcula con SELECT ... FOR UPDATE sobre el año para evitar huecos y colisiones.';
+COMMENT ON COLUMN EVALUADORCERTIFICADO.CODIGOVERIFICACION IS
+  'Código público para validar el certificado en /verificar/:codigo. Aleatorio, no derivable del consecutivo.';
+COMMENT ON COLUMN EVALUADORCERTIFICADO.DATOSSNAPSHOT IS
+  'JSON con los datos usados al emitir (nombre, cédula, rol, proceso, mesa, fechas, horas). Congela el contenido para reimpresiones.';
+COMMENT ON COLUMN EVALUADORCERTIFICADO.ARCHIVOPDF IS
+  'PDF generado. Nullable: se puede regenerar desde DATOSSNAPSHOT si se pierde el BLOB.';
+
+-- Un solo certificado vigente por participación (los anulados no cuentan).
+BEGIN
+  EXECUTE IMMEDIATE q'[CREATE UNIQUE INDEX UQ_CERT_PART_VIGENTE
+    ON EVALUADORCERTIFICADO (CASE WHEN ANULADO = 0 THEN PARTICIPACIONID END)]';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 2. Secuencia e índices                                                  ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORCERTIFICADO_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 THEN RAISE; END IF;
+END;
+/
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE INDEX IX_CERT_PART ON EVALUADORCERTIFICADO (PARTICIPACIONID)';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE INDEX IX_CERT_ANIO ON EVALUADORCERTIFICADO (ANIO, ANULADO)';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLCODE != -955 AND SQLCODE != -1408 THEN RAISE; END IF;
+END;
+/
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 3. Plantilla de texto del certificado (configurable, no hardcodeada)    ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+-- El cuerpo del certificado cambia de un año a otro (nombre de la convocatoria,
+-- normativa citada). Se guarda por convocatoria para no tocar código cada año.
+
+DECLARE
+  PROCEDURE add_col(p_tabla VARCHAR2, p_ddl VARCHAR2) IS
+  BEGIN
+    EXECUTE IMMEDIATE 'ALTER TABLE ' || p_tabla || ' ADD (' || p_ddl || ')';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE != -1430 THEN RAISE; END IF;
+  END;
+BEGIN
+  add_col('EVALUADORCONVOCATORIA', 'CERTIFICADOTEXTO NCLOB');
+  add_col('EVALUADORCONVOCATORIA', 'CERTIFICADOFIRMAID NUMBER(10)');
+  add_col('EVALUADORCONVOCATORIA', 'CERTIFICADOHABILITADO NUMBER(1) DEFAULT 0');
+END;
+/
+
+COMMENT ON COLUMN EVALUADORCONVOCATORIA.CERTIFICADOTEXTO IS
+  'Cuerpo del certificado con placeholders: {{nombre}} {{identificacion}} {{rol}} {{proceso}} {{anio}} {{horas}} {{fechaInicio}} {{fechaFin}}.';
+COMMENT ON COLUMN EVALUADORCONVOCATORIA.CERTIFICADOHABILITADO IS
+  '1 = la coordinación ya autorizó emitir certificados de este ciclo. Evita emisiones antes de cerrar el proceso.';
+
+-- Texto por defecto para las convocatorias que no lo tengan.
+UPDATE EVALUADORCONVOCATORIA
+   SET CERTIFICADOTEXTO = N'El Grupo de Gestión para la Productividad y la Competitividad del SENA hace constar que ' ||
+                          N'{{nombre}}, identificado(a) con documento No. {{identificacion}}, participó como {{rol}} ' ||
+                          N'en el proceso de evaluación de proyectos de {{proceso}} durante la vigencia {{anio}}, ' ||
+                          N'con una dedicación de {{horas}} horas.'
+ WHERE CERTIFICADOTEXTO IS NULL;
+
+
+-- ╔════════════════════════════════════════════════════════════════════════╗
+-- ║ 4. GRANTS y SINÓNIMOS                                                   ║
+-- ╚════════════════════════════════════════════════════════════════════════╝
+-- Sin DELETE: un certificado emitido se anula (ANULADO = 1), nunca se borra.
+
+GRANT SELECT, INSERT, UPDATE ON EVALUADORCERTIFICADO     TO SEP_APP;
+GRANT SELECT                 ON EVALUADORCERTIFICADO     TO SEP_LECTOR;
+GRANT SELECT                 ON EVALUADORCERTIFICADO_SEQ TO SEP_APP;
+
+CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORCERTIFICADO     FOR SEPLOCAL.EVALUADORCERTIFICADO;
+CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORCERTIFICADO_SEQ FOR SEPLOCAL.EVALUADORCERTIFICADO_SEQ;
+CREATE OR REPLACE SYNONYM SEP_LECTOR.EVALUADORCERTIFICADO  FOR SEPLOCAL.EVALUADORCERTIFICADO;
+
+COMMIT;

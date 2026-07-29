@@ -547,16 +547,20 @@ export class CertificadoService {
   /**
    * URL de validación que se imprime en el certificado.
    *
-   * Sale de `APP_PUBLIC_URL` porque el documento se imprime y circula fuera
-   * del sistema: si apuntara a localhost o a un dominio viejo, el certificado
-   * quedaría inservible justo para quien más lo necesita — alguien externo
-   * intentando comprobarlo. Sin la variable, se imprime la ruta relativa, que
-   * al menos dice dónde buscar.
+   * Sale de `APP_URL` —la misma que ya usa `MailService` para los enlaces de
+   * restablecimiento— y no de una variable propia: el documento se imprime y
+   * circula fuera del sistema, así que apuntar a un dominio distinto del de
+   * los correos sería una segunda dirección que mantener y que se desactualiza
+   * sola. Con dos variables, la que nadie configura es la que rompe.
+   *
+   * El respaldo es el dominio institucional, no una ruta relativa: un
+   * certificado que dice "/verificar-certificado/XXXX" es inservible justo
+   * para quien más lo necesita, alguien externo intentando comprobarlo.
    */
   private urlVerificacion(codigo: string): string {
-    const base = (process.env.APP_PUBLIC_URL ?? '').trim().replace(/\/+$/, '')
-    const ruta = `/verificar-certificado/${codigo}`
-    return base ? `${base}${ruta}` : ruta
+    const base = (process.env.APP_URL || 'https://sep.sena.edu.co')
+      .trim().replace(/\/+$/, '')
+    return `${base}/verificar-certificado/${codigo}`
   }
 
   private enmascarar(identificacion: string): string {

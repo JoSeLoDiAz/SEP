@@ -1038,6 +1038,8 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [items, setItems] = useState<Participacion[]>([])
   const [roles, setRoles] = useState<Cat[]>([])
   const [procesos, setProcesos] = useState<Cat[]>([])
+  const [areas, setAreas] = useState<Cat[]>([])
+  const [convocatorias, setConvocatorias] = useState<Array<{ id: number; nombre: string; anio: number; periodo: string | null }>>([])
   const [loading, setLoading] = useState(true)
   const [agregar, setAgregar] = useState(false)
 
@@ -1047,6 +1049,8 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [rolId, setRolId] = useState<string>('')
   const [modalidad, setModalidad] = useState('')
   const [procId, setProcId] = useState<string>('')
+  const [convId, setConvId] = useState<string>('')
+  const [areaId, setAreaId] = useState<string>('')
   const [revocado, setRevocado] = useState(false)
   const [mesa, setMesa] = useState('')
   const [equipo, setEquipo] = useState('')
@@ -1056,14 +1060,19 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   async function cargar() {
     setLoading(true)
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         api.get<Participacion[]>(`/evaluadores/${evaluadorId}/participaciones`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/roles`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/procesos`),
+        api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/areas`),
+        api.get<Array<{ id: number; nombre: string; anio: number; periodo: string | null }>>(
+          `/evaluadores/convocatorias`),
       ])
       setItems(r1.data ?? [])
       setRoles(r2.data ?? [])
       setProcesos(r3.data ?? [])
+      setAreas(r4.data ?? [])
+      setConvocatorias(r5.data ?? [])
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudieron cargar las participaciones') })
     } finally {
@@ -1082,13 +1091,19 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
         rolEvaluadorId: rolId ? Number(rolId) : null,
         modalidadPart: modalidad || null,
         procesoId: procId ? Number(procId) : null,
+        // Sin convocatoria el ciclo queda huérfano: no hereda la invitación, no
+        // entra en la matriz de retroalimentación y no se puede certificar,
+        // porque la habilitación de certificados vive en la convocatoria.
+        convocatoriaId: convId ? Number(convId) : null,
+        areaId: areaId ? Number(areaId) : null,
         procesoRevocado: revocado,
         mesa: mesa || null,
         equipoEvaluador: equipo || null,
       })
       setToast({ tipo: 'success', msg: 'Participación agregada' })
       setAgregar(false)
-      setPeriodo(''); setRolId(''); setModalidad(''); setProcId(''); setRevocado(false); setMesa(''); setEquipo('')
+      setPeriodo(''); setRolId(''); setModalidad(''); setProcId(''); setConvId(''); setAreaId('')
+      setRevocado(false); setMesa(''); setEquipo('')
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
@@ -1145,6 +1160,40 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
             <select value={procId} onChange={e => setProcId(e.target.value)} className={input}>
               <option value="">—</option>
               {procesos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className={label}>Convocatoria *</label>
+            <select
+              value={convId}
+              onChange={e => {
+                setConvId(e.target.value)
+                // El año y el período salen de la convocatoria: tenerlos que
+                // repetir a mano es la forma más fácil de que no cuadren.
+                const c = convocatorias.find(x => String(x.id) === e.target.value)
+                if (c) { setAnio(String(c.anio)); if (c.periodo) setPeriodo(c.periodo) }
+              }}
+              className={input}
+            >
+              <option value="">— Sin convocatoria —</option>
+              {convocatorias.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre} ({c.anio}{c.periodo ? `-${c.periodo}` : ''})
+                </option>
+              ))}
+            </select>
+            {!convId && (
+              <p className="mt-1 text-[11px] text-amber-700">
+                Sin convocatoria el ciclo no hereda la invitación, no entra en la
+                retroalimentación y no se podrá certificar.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className={label}>Área</label>
+            <select value={areaId} onChange={e => setAreaId(e.target.value)} className={input}>
+              <option value="">—</option>
+              {areas.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
             </select>
           </div>
           <div className="flex items-end">

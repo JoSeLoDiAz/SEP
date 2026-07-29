@@ -47,7 +47,10 @@ async function bootstrap() {
       'http://127.0.0.1:8081',
     ],
     credentials: true,
-    exposedHeaders: ['X-New-Token'],
+    // Content-Disposition va expuesto porque en desarrollo el front corre en
+    // otro origen: sin esto el navegador oculta el header y toda descarga se
+    // guarda con el nombre de respaldo del cliente, no con el del servidor.
+    exposedHeaders: ['X-New-Token', 'Content-Disposition'],
   })
 
   const config = new DocumentBuilder()

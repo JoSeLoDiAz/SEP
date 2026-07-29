@@ -1,20 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import * as crypto from 'crypto'
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { twofish } = require('twofish')
-
-function getEncryptionKey(): string {
-  return crypto.randomBytes(16).toString('hex').toUpperCase()
-}
-function encrypt64(plainText: string, key: string): string {
-  const tf = twofish(new Array(16).fill(0))
-  const keyArr = Array.from(Buffer.from(key, 'hex')) as number[]
-  const padded = Array.from(Buffer.from(plainText, 'utf8')) as number[]
-  while (padded.length < 16) padded.push(0x20)
-  return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
-}
+import { cifrarClave, generarLlaveEncriptacion } from '../common/crypto/usuario-clave'
 
 export interface CrearUsuarioDto {
   email: string
@@ -362,8 +349,8 @@ export class UsuariosAdminService {
     const perfilOk = await this.dataSource.query(`SELECT 1 FROM PERFIL WHERE PERFILID = :1`, [perfilId])
     if (!perfilOk[0]) throw new NotFoundException('Perfil no encontrado')
 
-    const llave = getEncryptionKey()
-    const claveCifrada = encrypt64(clave, llave)
+    const llave = generarLlaveEncriptacion()
+    const claveCifrada = cifrarClave(clave, llave)
 
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
@@ -455,7 +442,7 @@ export class UsuariosAdminService {
       throw new ForbiddenException('No se permite resetear la contraseña de un administrador desde este panel')
     }
 
-    const cifrada = encrypt64(clave, u.llave)
+    const cifrada = cifrarClave(clave, u.llave)
     await this.dataSource.query(
       `UPDATE USUARIO SET USUARIOCLAVE = :1 WHERE USUARIOID = :2`,
       [cifrada, usuarioId],

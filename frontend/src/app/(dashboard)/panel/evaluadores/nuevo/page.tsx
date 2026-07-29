@@ -3,13 +3,24 @@
 import api from '@/lib/api'
 import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
-import { ArrowLeft, ChevronRight, Loader2, Search, ShieldCheck, UserPlus } from 'lucide-react'
+import {
+  AlertTriangle, ArrowLeft, Check, ChevronRight, Copy, KeyRound, Loader2,
+  Search, ShieldCheck, UserPlus,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface TipoDoc { id: number; nombre: string }
-interface RespCrear { evaluadorId: number; personaId: number }
+interface Acceso {
+  creada: boolean
+  perfilAgregado: boolean
+  usuarioId: number | null
+  /** Solo viene si se creó una cuenta nueva. Se muestra una única vez. */
+  claveInicial: string | null
+  detalle: string
+}
+interface RespCrear { evaluadorId: number; personaId: number; acceso?: Acceso }
 interface RegionalCat { id: number; nombre: string }
 interface CentroCat { id: number; nombre: string }
 interface CiudadCat { id: number; ciudad: string; depto: string }
@@ -54,11 +65,9 @@ export default function NuevoEvaluadorPage() {
   const [cargo, setCargo] = useState('')
   const [profesion, setProfesion] = useState('')
   const [posgrado, setPosgrado] = useState('')
-  const [otrosEstudios, setOtrosEstudios] = useState('')
   const [jefeNombre, setJefeNombre] = useState('')
   const [jefeEmail, setJefeEmail] = useState('')
   const [jefeCargo, setJefeCargo] = useState('')
-  const [quienAprueba, setQuienAprueba] = useState('')
 
   // Catálogos Regional / Centro
   const [regionales, setRegionales] = useState<RegionalCat[]>([])
@@ -70,6 +79,10 @@ export default function NuevoEvaluadorPage() {
   const [aviso, setAviso] = useState<{ tipo: 'info' | 'success' | 'warn'; msg: string; evaluadorId?: number } | null>(null)
   const [bloqueado, setBloqueado] = useState(false) // si la persona ya es evaluador
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
+  const [credenciales, setCredenciales] = useState<{
+    evaluadorId: number; email: string; clave: string; detalle: string
+  } | null>(null)
+  const [copiado, setCopiado] = useState(false)
 
   useEffect(() => {
     api.get<TipoDoc[]>('/auth/tipos-documento', { params: { para: 'persona' } })
@@ -168,14 +181,30 @@ export default function NuevoEvaluadorPage() {
         cargo: cargo.trim() || undefined,
         profesion: profesion.trim() || undefined,
         posgrado: posgrado.trim() || undefined,
-        otrosEstudios: otrosEstudios.trim() || undefined,
         jefeNombre: jefeNombre.trim() || undefined,
         jefeEmail: jefeEmail.trim().toLowerCase() || undefined,
         jefeCargo: jefeCargo.trim() || undefined,
-        quienAprueba: quienAprueba.trim() || undefined,
       })
-      setToast({ tipo: 'success', msg: 'Evaluador creado' })
-      setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 700)
+      const acceso = res.data.acceso
+      if (acceso?.claveInicial) {
+        // La clave solo existe en esta respuesta: si redirigimos, se pierde y
+        // el evaluador se queda sin poder entrar. Se muestra y el gestor
+        // decide cuándo continuar.
+        setCredenciales({
+          evaluadorId: res.data.evaluadorId,
+          email: email.trim().toLowerCase(),
+          clave: acceso.claveInicial,
+          detalle: acceso.detalle,
+        })
+        return
+      }
+      setToast({
+        tipo: 'success',
+        msg: acceso?.perfilAgregado
+          ? 'Evaluador creado. Se agregó el perfil de evaluador a su cuenta existente.'
+          : 'Evaluador creado',
+      })
+      setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 900)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
       setToast({ tipo: 'error', msg: msg ?? 'No se pudo crear el evaluador' })
@@ -187,6 +216,80 @@ export default function NuevoEvaluadorPage() {
   const label = 'block text-xs font-semibold text-neutral-700 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40 disabled:bg-neutral-50 disabled:text-neutral-500'
   const textarea = `${input} resize-y`
+
+  // Pantalla de credenciales: reemplaza el formulario en vez de superponerse,
+  // para que no haya forma de salir sin haber visto la clave.
+  if (credenciales) {
+    const copiar = async () => {
+      try {
+        await navigator.clipboard.writeText(
+          `SEP — Banco de Evaluadores\nUsuario: ${credenciales.email}\nClave: ${credenciales.clave}`,
+        )
+        setCopiado(true)
+        setTimeout(() => setCopiado(false), 2500)
+      } catch {
+        setToast({ tipo: 'error', msg: 'El navegador no dejó copiar. Selecciona el texto a mano.' })
+      }
+    }
+    return (
+      <div className="p-5 sm:p-7 xl:p-10 max-w-2xl">
+        {toast && (
+          <ToastBetowa
+            show onClose={() => setToast(null)} tipo={toast.tipo}
+            titulo={toast.tipo === 'success' ? 'Listo' : 'Error'} mensaje={toast.msg} duration={3500}
+          />
+        )}
+        <section className="overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-lg">
+          <header className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50/70 px-6 py-4">
+            <KeyRound size={18} className="text-emerald-700" />
+            <h1 className="text-base font-bold text-emerald-900">Evaluador creado con acceso al SEP</h1>
+          </header>
+
+          <div className="px-6 py-5">
+            <p className="text-[13px] text-neutral-600">{credenciales.detalle}</p>
+
+            <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 px-5 py-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Usuario</p>
+              <p className="font-mono text-sm text-neutral-800">{credenciales.email}</p>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                Clave inicial
+              </p>
+              <p className="select-all font-mono text-2xl font-bold tracking-widest" style={{ color: PRIMARY }}>
+                {credenciales.clave}
+              </p>
+            </div>
+
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+              <p className="text-[12px] text-amber-900">
+                Esta clave <strong>no se puede volver a consultar</strong>: no queda guardada en texto
+                plano en ningún lado. Cópiala y entrégasela al evaluador antes de continuar. Si se
+                pierde, hay que restablecerla desde el panel de usuarios.
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={copiar}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-50"
+              >
+                {copiado ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
+                {copiado ? 'Copiado' : 'Copiar usuario y clave'}
+              </button>
+              <button
+                onClick={() => router.push(`/panel/evaluadores/${credenciales.evaluadorId}`)}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90"
+                style={{ backgroundColor: INSTITUTIONAL }}
+              >
+                Ya la guardé, ir a la ficha
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6 max-w-4xl">
@@ -383,10 +486,6 @@ export default function NuevoEvaluadorPage() {
               <input value={posgrado} onChange={(e) => setPosgrado(e.target.value)} className={input} disabled={bloqueado} />
             </div>
             <div className="sm:col-span-2">
-              <label className={label}>Otros estudios</label>
-              <textarea value={otrosEstudios} onChange={(e) => setOtrosEstudios(e.target.value)} rows={3} className={textarea} disabled={bloqueado} />
-            </div>
-            <div className="sm:col-span-2">
               <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-2">Jefe directo</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -409,13 +508,11 @@ export default function NuevoEvaluadorPage() {
                 </div>
               </div>
             </div>
-            <div className="sm:col-span-2">
-              <label className={label}>Quién aprueba participación</label>
-              <input value={quienAprueba} onChange={(e) => setQuienAprueba(e.target.value)} className={input} disabled={bloqueado} />
-            </div>
           </div>
           <p className="text-[11px] text-neutral-500 mt-3">
             La foto, certificados, experiencia, TIC y participaciones se cargan después desde la ficha del evaluador.
+            Los otros estudios se registran en <strong>Perfil → Hoja de vida y estudios</strong>, y la autorización del
+            jefe en cada año de la <strong>Trayectoria</strong>.
           </p>
         </section>
 

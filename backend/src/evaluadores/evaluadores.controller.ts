@@ -13,6 +13,13 @@ import type {
   MulterFile, ParticipacionDto, PruebaDto, TicDto,
 } from './evaluadores.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
+import { TrayectoriaService } from './trayectoria.service'
+import { AuditoriaService } from './auditoria.service'
+import { CicloService } from './ciclo.service'
+import { CertificadoService } from './certificado.service'
+import { FichaPdfService } from './ficha-pdf.service'
+import { ReportesEvaluadorService } from './reportes.service'
+import type { AprobacionDto, CapacitacionDto, PartProyectoDto } from './ciclo.service'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
@@ -23,6 +30,8 @@ const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUA
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
 const MAX_FOTO_BYTES = 8 * 1024 * 1024 // 8 MB
+// Los .msg de Outlook con adjuntos pesan bastante más que un PDF suelto.
+const MAX_EVIDENCIA_BYTES = 20 * 1024 * 1024 // 20 MB
 
 @ApiTags('evaluadores')
 @Controller('evaluadores')
@@ -32,8 +41,52 @@ export class EvaluadoresController {
   constructor(
     private readonly service: EvaluadoresService,
     private readonly catalogos: CatalogosEvaluadorService,
+    private readonly trayectoria: TrayectoriaService,
+    private readonly auditoria: AuditoriaService,
+    private readonly ciclo: CicloService,
+    private readonly certificados: CertificadoService,
+    private readonly reportes: ReportesEvaluadorService,
+    private readonly fichaPdf: FichaPdfService,
   ) {}
 
+
+  /** Contexto de auditoría que acompaña a toda escritura del ciclo. */
+  private ctx(user: JwtUser) {
+    return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
+  }
+
+  /**
+   * Sirve un BLOB. `descargar = true` fuerza el guardado con el nombre
+   * original; los .msg no se pueden previsualizar en el navegador, así que
+   * ahí siempre va como adjunto.
+   */
+  private responderArchivo(
+    res: Response, buffer: Buffer, mime: string, nombre: string, descargar: boolean,
+  ) {
+    const limpio = (nombre ?? '').trim() || 'archivo'
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Length', String(buffer.length))
+    res.setHeader(
+      'Content-Disposition',
+      descargar
+        // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
+        ? `attachment; filename="${limpio.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(limpio)}`
+        : `inline; filename="${encodeURIComponent(limpio)}"`,
+    )
+    res.end(buffer)
+  }
+
+  /**
+   * Único control de acceso del módulo.
+   *
+   * Decisión explícita: quien gestiona el banco de evaluadores lo gestiona
+   * completo — fichas, ciclos, matriz, resultados, certificados y auditoría.
+   * No hay funciones reservadas a un perfil dentro del módulo: repartirlas
+   * obligaba a que dos personas se turnaran para completar un mismo trámite.
+   *
+   * Lo único que queda fuera son los catálogos del sistema (`exigirAdmin`),
+   * que no son parte de la operación del banco sino de su configuración.
+   */
   private exigirGestion(user: JwtUser) {
     if (!PERFILES_GESTION.includes(user.perfilId)) {
       throw new ForbiddenException('No tiene permisos para gestionar el banco de evaluadores')
@@ -44,6 +97,21 @@ export class EvaluadoresController {
     if (user.perfilId !== PERFIL_ADMIN) {
       throw new ForbiddenException('Solo un administrador puede modificar los catálogos')
     }
+  }
+
+
+  /**
+   * Borrar un ciclo completo lo puede hacer cualquiera que gestione el banco:
+   * el caso de todos los días es corregir una participación recién creada por
+   * error, y mandar eso a otro perfil convertía una corrección de segundos en
+   * un trámite.
+   *
+   * Los límites que quedan no son de permiso sino de integridad, y aplican
+   * igual a todos: un ciclo con certificado emitido no se borra nunca, y uno
+   * con historia avisa antes de arrastrarla.
+   */
+  private puedeForzarBorrado(_user: JwtUser) {
+    return true
   }
 
   // ── Catálogos ──────────────────────────────────────────────────────────
@@ -172,6 +240,37 @@ export class EvaluadoresController {
     return this.catalogos.actualizarTipoDocumentoConvocatoria(id, dto)
   }
 
+  // Catálogos del ciclo (v29). Solo lectura: son el vocabulario del proceso,
+  // no datos operativos — cambiarlos es una migración, no una pantalla.
+
+  @Get('catalogos/estados-participacion')
+  @ApiOperation({ summary: 'Estados del año, para los filtros del banco y el select del ciclo' })
+  estadosPartCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarEstadosParticipacion(todos !== '1')
+  }
+
+  @Get('catalogos/areas')
+  @ApiOperation({ summary: 'Áreas de evaluación (técnica, jurídica, transversal…)' })
+  areasCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarAreas(todos !== '1')
+  }
+
+  @Get('catalogos/anios')
+  @ApiOperation({ summary: 'Años con participaciones registradas, para el filtro del banco' })
+  aniosCat(@CurrentUser() user: JwtUser) {
+    this.exigirGestion(user)
+    return this.catalogos.listarAniosParticipacion()
+  }
+
+  @Get('catalogos/modalidades')
+  @ApiOperation({ summary: 'Modalidades de participación' })
+  modalidadesCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
+    this.exigirGestion(user)
+    return this.catalogos.listarModalidades(todos !== '1')
+  }
+
   // Catálogos para Fase 3 (regional / centro de formación / municipio)
 
   @Get('catalogos/regionales')
@@ -218,18 +317,109 @@ export class EvaluadoresController {
     return this.service.buscarPorDocumento(tipoDocumentoIdentidadId, doc)
   }
 
+  // ── Auditoría ──────────────────────────────────────────────────────────
+  // Va antes de @Get(':id') a propósito: si se declarara después, la ruta
+  // paramétrica se tragaría 'auditoria' y ParseIntPipe reventaría con 400.
+
+  @Get('auditoria')
+  @ApiOperation({ summary: 'Log de auditoría del banco (coordinación y admin)' })
+  auditoriaGlobal(
+    @CurrentUser() user: JwtUser,
+    @Query('tabla') tabla?: string,
+    @Query('operacion') operacion?: string,
+    @Query('usuarioEmail') usuarioEmail?: string,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+  ) {
+    this.exigirGestion(user)
+    return this.auditoria.listar({
+      tabla, operacion, usuarioEmail, desde, hasta,
+      page: Number(page), limit: Number(limit),
+    })
+  }
+
+  @Get('auditoria/:logId')
+  @ApiOperation({ summary: 'Snapshots antes/después de un registro del log' })
+  auditoriaDetalle(@CurrentUser() user: JwtUser, @Param('logId', ParseIntPipe) logId: number) {
+    this.exigirGestion(user)
+    return this.auditoria.getDetalle(logId)
+  }
+
+  @Get('buscar-proyectos')
+  @ApiOperation({ summary: 'Typeahead de proyectos (ejecutados + formulados) para asignar a un ciclo' })
+  buscarProyectos(
+    @CurrentUser() user: JwtUser,
+    @Query('q') q = '',
+    @Query('limit') limit = '15',
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.buscarProyectos(q, Number(limit))
+  }
+
   // ── Listado y ficha ────────────────────────────────────────────────────
 
   @Get()
-  @ApiOperation({ summary: 'Listado paginado de evaluadores activos' })
+  @ApiOperation({ summary: 'Listado del banco con filtros por año, estado, proceso, rol y alertas' })
   listar(
     @CurrentUser() user: JwtUser,
     @Query('busqueda') busqueda = '',
     @Query('page') page = '1',
     @Query('limit') limit = '20',
+    @Query() query: Record<string, string> = {},
   ) {
     this.exigirGestion(user)
-    return this.service.listar(busqueda, Number(page), Number(limit))
+    return this.service.listar(busqueda, Number(page), Number(limit), this.leerFiltros(query))
+  }
+
+  /**
+   * Los query params llegan como texto. Se descarta lo que no sea número para
+   * que un `?anio=abc` no termine como NaN en un bind de Oracle, y los
+   * booleanos solo cuentan si vienen explícitos — "no filtrar" y "filtrar por
+   * false" son cosas distintas.
+   */
+  private leerFiltros(query: Record<string, string>) {
+    const num = (v?: string) => {
+      const n = Number(v)
+      return v != null && v !== '' && Number.isFinite(n) ? n : undefined
+    }
+    const bool = (v?: string) =>
+      v === '1' || v === 'true' ? true : v === '0' || v === 'false' ? false : undefined
+
+    return {
+      anio: num(query.anio),
+      procesoId: num(query.procesoId),
+      rolEvaluadorId: num(query.rolEvaluadorId),
+      areaId: num(query.areaId),
+      regionalId: num(query.regionalId),
+      centroId: num(query.centroId),
+      estadoCodigo: query.estadoCodigo?.trim() || undefined,
+      sinCedula: bool(query.sinCedula),
+      sinFoto: bool(query.sinFoto),
+      pruebaVigente: bool(query.pruebaVigente),
+      incluirInactivos: bool(query.incluirInactivos),
+    }
+  }
+
+  @Get('reportes/banco.xlsx')
+  @ApiOperation({ summary: 'Sábana del banco en Excel, con los mismos filtros del listado' })
+  async sabanaBanco(
+    @CurrentUser() user: JwtUser,
+    @Query('busqueda') busqueda = '',
+    @Query() query: Record<string, string> = {},
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, nombre } = await this.reportes.sabanaBanco(busqueda, this.leerFiltros(query))
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Length', String(buffer.length))
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nombre}"; filename*=UTF-8''${encodeURIComponent(nombre)}`,
+    )
+    res.end(buffer)
   }
 
   @Get(':id')
@@ -237,6 +427,54 @@ export class EvaluadoresController {
   ficha(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     this.exigirGestion(user)
     return this.service.getFicha(id)
+  }
+
+  // Dos segmentos a propósito: `@Get(':id')` captura cualquier ruta de uno solo.
+  @Get(':id/ficha.pdf')
+  @ApiOperation({ summary: 'Hoja de vida imprimible del evaluador (PDF)' })
+  async fichaPdfDe(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, nombre } = await this.fichaPdf.generar(id)
+    this.responderArchivo(res, buffer, 'application/pdf', nombre, true)
+  }
+
+  // ── Trayectoria (vista por año) ────────────────────────────────────────
+
+  @Get(':id/resumen')
+  @ApiOperation({ summary: 'KPIs del evaluador para la cabecera de la ficha' })
+  resumen(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
+    this.exigirGestion(user)
+    return this.trayectoria.getResumen(id)
+  }
+
+  @Get(':id/trayectoria')
+  @ApiOperation({ summary: 'Años del evaluador con estado, progreso y contadores por ciclo' })
+  trayectoriaDe(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
+    this.exigirGestion(user)
+    return this.trayectoria.getTrayectoria(id)
+  }
+
+  @Get(':id/auditoria')
+  @ApiOperation({ summary: 'Log de auditoría de este evaluador' })
+  auditoriaDeEvaluador(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+  ) {
+    this.exigirGestion(user)
+    return this.auditoria.listar({ evaluadorId: id, page: Number(page), limit: Number(limit) })
+  }
+
+  @Get('participaciones/:pid/detalle')
+  @ApiOperation({ summary: 'Detalle completo de un ciclo: ficha, hitos, documentos propios y heredados' })
+  detalleParticipacion(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+    this.exigirGestion(user)
+    return this.trayectoria.getParticipacion(pid)
   }
 
   @Post()
@@ -349,7 +587,8 @@ export class EvaluadoresController {
     @Body() dto: ParticipacionDto,
   ) {
     this.exigirGestion(user)
-    return this.service.crearParticipacion(id, dto)
+    // `usuarioEmail` sale del JWT, nunca del body: es la columna de auditoría.
+    return this.service.crearParticipacion(id, { ...dto, usuarioEmail: user.email })
   }
 
   @Put('participaciones/:pid')
@@ -363,9 +602,28 @@ export class EvaluadoresController {
   }
 
   @Delete('participaciones/:pid')
+  @ApiOperation({ summary: 'Eliminar un ciclo vacío. Si tiene historia, responde 409 y hay que anular' })
   eliminarParticipacion(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
     this.exigirGestion(user)
-    return this.service.eliminarParticipacion(pid)
+    return this.service.eliminarParticipacion(pid, {
+      forzar: this.puedeForzarBorrado(user),
+      usuarioEmail: user.email,
+      usuarioPerfilId: user.perfilId,
+    })
+  }
+
+  @Put('participaciones/:pid/estado')
+  @ApiOperation({ summary: 'Cambiar el estado del ciclo (anular, revocar, declinar…). Queda en el log' })
+  cambiarEstadoParticipacion(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: { estadoCodigo: string; motivo?: string },
+  ) {
+    this.exigirGestion(user)
+    return this.service.cambiarEstadoParticipacion(pid, dto, {
+      usuarioEmail: user.email,
+      usuarioPerfilId: user.perfilId,
+    })
   }
 
   // ── Hoja de vida (separada de Estudios) ────────────────────────────────
@@ -590,6 +848,196 @@ export class EvaluadoresController {
     return this.service.eliminarPrueba(pid)
   }
 
+  // ── Ciclo: aprobación del jefe ─────────────────────────────────────────
+
+  @Post('participaciones/:pid/aprobacion')
+  @ApiOperation({ summary: 'Registrar la autorización del jefe para este ciclo' })
+  crearAprobacion(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: AprobacionDto,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.crearAprobacion(pid, dto, this.ctx(user))
+  }
+
+  @Put('aprobaciones/:aid')
+  actualizarAprobacion(
+    @CurrentUser() user: JwtUser,
+    @Param('aid', ParseIntPipe) aid: number,
+    @Body() dto: Partial<AprobacionDto>,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.actualizarAprobacion(aid, dto, this.ctx(user))
+  }
+
+  @Post('aprobaciones/:aid/evidencia')
+  @ApiOperation({ summary: 'Subir el correo de autorización (.msg, .eml o PDF, hasta 20 MB)' })
+  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: MAX_EVIDENCIA_BYTES } }))
+  subirEvidenciaAprobacion(
+    @CurrentUser() user: JwtUser,
+    @Param('aid', ParseIntPipe) aid: number,
+    @UploadedFile() file: MulterFile,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.subirEvidenciaAprobacion(aid, file, this.ctx(user))
+  }
+
+  @Get('aprobaciones/:aid/evidencia')
+  async descargarEvidenciaAprobacion(
+    @CurrentUser() user: JwtUser,
+    @Param('aid', ParseIntPipe) aid: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, mime, nombre } = await this.ciclo.getEvidenciaAprobacion(aid)
+    this.responderArchivo(res, buffer, mime, nombre, true)
+  }
+
+  @Delete('aprobaciones/:aid')
+  eliminarAprobacion(@CurrentUser() user: JwtUser, @Param('aid', ParseIntPipe) aid: number) {
+    this.exigirGestion(user)
+    return this.ciclo.eliminarAprobacion(aid, this.ctx(user))
+  }
+
+  // ── Ciclo: capacitación ────────────────────────────────────────────────
+
+  @Post('participaciones/:pid/capacitacion')
+  @ApiOperation({ summary: 'Registrar el curso de formación del ciclo. APROBADO se deriva de la nota' })
+  crearCapacitacion(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: CapacitacionDto,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.crearCapacitacion(pid, dto, this.ctx(user))
+  }
+
+  @Put('capacitaciones/:cid')
+  actualizarCapacitacion(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() dto: Partial<CapacitacionDto>,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.actualizarCapacitacion(cid, dto, this.ctx(user))
+  }
+
+  @Post('capacitaciones/:cid/certificado')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_PDF_BYTES },
+    fileFilter: (_r, f, cb) => {
+      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
+      cb(null, true)
+    },
+  }))
+  subirCertificadoCapacitacion(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @UploadedFile() file: MulterFile,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.subirCertificadoCapacitacion(cid, file, this.ctx(user))
+  }
+
+  @Get('capacitaciones/:cid/certificado')
+  async descargarCertificadoCapacitacion(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, mime, nombre } = await this.ciclo.getCertificadoCapacitacion(cid)
+    this.responderArchivo(res, buffer, mime, nombre, false)
+  }
+
+  @Delete('capacitaciones/:cid')
+  eliminarCapacitacion(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.ciclo.eliminarCapacitacion(cid, this.ctx(user))
+  }
+
+  // ── Ciclo: proyectos evaluados ─────────────────────────────────────────
+
+  @Post('participaciones/:pid/proyectos')
+  agregarProyecto(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: PartProyectoDto,
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.agregarProyecto(pid, dto, this.ctx(user))
+  }
+
+  @Delete('proyectos-evaluados/:ppid')
+  eliminarProyectoEvaluado(@CurrentUser() user: JwtUser, @Param('ppid', ParseIntPipe) ppid: number) {
+    this.exigirGestion(user)
+    return this.ciclo.eliminarProyecto(ppid, this.ctx(user))
+  }
+
+  // ── Certificados ───────────────────────────────────────────────────────
+
+  @Post('participaciones/:pid/certificado')
+  @ApiOperation({ summary: 'Emite el certificado del ciclo con consecutivo y código de verificación' })
+  emitirCertificado(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: { horas?: number },
+  ) {
+    this.exigirGestion(user)
+    return this.certificados.emitir(pid, this.ctx(user), dto?.horas ?? null)
+  }
+
+  @Get('certificados/lote/:cid')
+  @ApiOperation({ summary: 'A quiénes les falta certificado en el ciclo, sin emitir nada' })
+  previsualizarLote(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.certificados.pendientesDeCertificado(cid)
+  }
+
+  @Post('certificados/lote/:cid')
+  @ApiOperation({ summary: 'Emite los certificados que falten de un ciclo. No aborta si alguno falla' })
+  emitirLote(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.certificados.emitirLote(cid, this.ctx(user))
+  }
+
+  @Get('certificados/:cid/pdf')
+  @ApiOperation({ summary: 'Descarga el PDF. Si el BLOB se perdió, lo regenera desde el snapshot' })
+  async descargarCertificado(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, nombre } = await this.certificados.getPdf(cid)
+    this.responderArchivo(res, buffer, 'application/pdf', nombre, true)
+  }
+
+  @Put('certificados/:cid/anular')
+  @ApiOperation({ summary: 'Anula un certificado emitido. Exige motivo; el consecutivo no se reutiliza' })
+  anularCertificado(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() dto: { motivo: string },
+  ) {
+    this.exigirGestion(user)
+    return this.certificados.anular(cid, dto?.motivo ?? '', this.ctx(user))
+  }
+
+  // ── Ciclo: grupos / mesas ──────────────────────────────────────────────
+
+  @Put('participaciones/:pid/grupos')
+  @ApiOperation({ summary: 'Reemplaza el conjunto de grupos del ciclo (set, no add)' })
+  definirGrupos(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Body() dto: { grupos: number[] },
+  ) {
+    this.exigirGestion(user)
+    return this.ciclo.definirGrupos(pid, dto?.grupos ?? [], this.ctx(user))
+  }
+
   // ── Documentos genéricos (cédula en Fase 1) ────────────────────────────
 
   @Get(':id/cedula')
@@ -630,17 +1078,24 @@ export class EvaluadoresController {
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: MulterFile,
-    @Body() body: { tipoDocumentoEvalId?: string; descripcion?: string; anioReferencia?: string },
+    @Body() body: {
+      tipoDocumentoEvalId?: string; descripcion?: string
+      anioReferencia?: string; participacionId?: string
+    },
   ) {
     this.exigirGestion(user)
     const tipoId = Number(body.tipoDocumentoEvalId)
     if (!Number.isFinite(tipoId) || tipoId <= 0) {
       throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
     }
+    // multipart manda todo como texto: los números hay que convertirlos y
+    // descartar los que no lo sean, o Oracle recibe NaN.
     const anio = body.anioReferencia ? Number(body.anioReferencia) : undefined
+    const participacionId = body.participacionId ? Number(body.participacionId) : undefined
     return this.service.subirDocumento(id, tipoId, file, {
       descripcion: body.descripcion,
       anioReferencia: Number.isFinite(anio) ? anio : undefined,
+      participacionId: Number.isFinite(participacionId) ? participacionId : undefined,
     })
   }
 

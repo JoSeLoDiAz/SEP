@@ -1,0 +1,212 @@
+import {
+  BadRequestException, Body, Controller, ForbiddenException, Get, Param, ParseIntPipe,
+  Post, Put, Req, Res, UseGuards,
+} from '@nestjs/common'
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import type { Request, Response } from 'express'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { CurrentUser } from '../auth/decorators/current-user.decorator'
+import { RetroalimentacionService } from './retroalimentacion.service'
+import type { RespuestaEnviada } from './retroalimentacion.service'
+import { RetroReporteService } from './retro-reporte.service'
+
+interface JwtUser { usuarioId: number; email: string; perfilId: number }
+
+const PERFIL_ADMIN = 1
+const PERFIL_COORDINADOR = 2
+const PERFIL_GESTOR_EVALUADORES = 15
+const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
+
+/**
+ * Retroalimentación 360°.
+ *
+ * Dos audiencias en un mismo controller:
+ *   - el evaluador, que solo ve y contesta LO SUYO (`mi-ciclo`, `sesion`);
+ *   - la gestión, que arma la matriz y lee los resultados del ciclo.
+ *
+ * Ningún endpoint del lado del evaluador recibe su `participacionId` por
+ * parámetro: se resuelve siempre desde el JWT. Si se aceptara del cliente,
+ * cualquiera podría contestar en nombre de otro cambiando un número.
+ */
+@ApiTags('retroalimentacion')
+@Controller('retroalimentacion')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+export class RetroalimentacionController {
+  constructor(
+    private readonly service: RetroalimentacionService,
+    private readonly reportes: RetroReporteService,
+  ) {}
+
+  private exigirGestion(user: JwtUser) {
+    if (!PERFILES_GESTION.includes(user.perfilId)) {
+      throw new ForbiddenException('No tiene permisos para gestionar la retroalimentación')
+    }
+  }
+
+
+  private ctx(user: JwtUser) {
+    return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
+  }
+
+  /** El ciclo abierto del usuario logueado, o 403 si no tiene ninguno. */
+  private async miParticipacion(user: JwtUser): Promise<number> {
+    const ciclo = await this.service.miCiclo(user.email)
+    if (!ciclo) {
+      throw new ForbiddenException(
+        'No tienes un ciclo de retroalimentación abierto. Si crees que es un error, ' +
+        'consulta con el equipo del banco de evaluadores.',
+      )
+    }
+    return ciclo.participacionId
+  }
+
+  // ── Lado del evaluador ─────────────────────────────────────────────────
+
+  @Get('mi-ciclo')
+  @ApiOperation({ summary: 'Ciclo abierto del usuario logueado (rol, área, convocatoria)' })
+  async miCiclo(@CurrentUser() user: JwtUser) {
+    const ciclo = await this.service.miCiclo(user.email)
+    return ciclo ?? { sinCiclo: true }
+  }
+
+  @Get('mis-asignaciones')
+  @ApiOperation({ summary: 'Personas que le toca retroalimentar, agrupadas por rol' })
+  async misAsignaciones(@CurrentUser() user: JwtUser) {
+    return this.service.misAsignaciones(await this.miParticipacion(user))
+  }
+
+  @Get('formulario')
+  @ApiOperation({ summary: 'Preguntas del instrumento de su ciclo' })
+  async miFormulario(@CurrentUser() user: JwtUser) {
+    const ciclo = await this.service.miCiclo(user.email)
+    if (!ciclo) throw new ForbiddenException('No tienes un ciclo de retroalimentación abierto')
+    return this.service.getFormulario(ciclo.convocatoriaId)
+  }
+
+  @Post('sesion')
+  @ApiOperation({ summary: 'Inicia el cronómetro de diligenciamiento' })
+  async iniciarSesion(@CurrentUser() user: JwtUser, @Req() req: Request) {
+    return this.service.iniciarSesion(await this.miParticipacion(user), {
+      ...this.ctx(user),
+      ip: (req.headers['x-forwarded-for'] as string) ?? req.ip,
+    })
+  }
+
+  @Get('sesion/:sid')
+  @ApiOperation({ summary: 'Rehidrata el cronómetro al recargar la página' })
+  async getSesion(@CurrentUser() user: JwtUser, @Param('sid', ParseIntPipe) sid: number) {
+    return this.service.getSesion(sid, await this.miParticipacion(user))
+  }
+
+  @Post('sesion/:sid/enviar')
+  @ApiOperation({ summary: 'Envía todas las retroalimentaciones de la sesión' })
+  async enviar(
+    @CurrentUser() user: JwtUser,
+    @Param('sid', ParseIntPipe) sid: number,
+    @Body() body: { respuestas: RespuestaEnviada[]; sugerenciaGeneral?: string },
+  ) {
+    return this.service.enviarSesion(sid, await this.miParticipacion(user), body)
+  }
+
+  // ── Gestión del ciclo ──────────────────────────────────────────────────
+
+  @Get('convocatorias/:cid/formulario')
+  @ApiOperation({ summary: 'Instrumento de la convocatoria (lo clona de la plantilla la primera vez)' })
+  formularioDe(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.service.getFormulario(cid)
+  }
+
+  @Put('convocatorias/:cid/apertura')
+  @ApiOperation({ summary: 'Abre o cierra el diligenciamiento del ciclo' })
+  apertura(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() dto: { abierto: boolean },
+  ) {
+    this.exigirGestion(user)
+    if (typeof dto?.abierto !== 'boolean') {
+      throw new BadRequestException('Indique `abierto` como true o false')
+    }
+    return this.service.cambiarApertura(cid, dto.abierto, this.ctx(user))
+  }
+
+  @Get('convocatorias/:cid/matriz/preview')
+  @ApiOperation({ summary: 'Simula la matriz sin escribir. Mismo cálculo que generar' })
+  preview(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.service.previewMatriz(cid)
+  }
+
+  @Post('convocatorias/:cid/matriz/generar')
+  @ApiOperation({ summary: 'Persiste los pares. Reejecutable: solo agrega los que faltan' })
+  generar(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.service.generarMatriz(cid, this.ctx(user))
+  }
+
+  @Post('convocatorias/:cid/asignaciones')
+  @ApiOperation({ summary: 'Agrega a mano un par que la regla no cubrió' })
+  agregarAsignacion(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() dto: { evaluadorParticipacionId: number; evaluadoParticipacionId: number },
+  ) {
+    this.exigirGestion(user)
+    return this.service.agregarAsignacion(cid, dto, this.ctx(user))
+  }
+
+  @Put('asignaciones/:aid/anular')
+  @ApiOperation({ summary: 'Retira una asignación pendiente sin borrar la traza' })
+  anular(
+    @CurrentUser() user: JwtUser,
+    @Param('aid', ParseIntPipe) aid: number,
+    @Body() dto: { motivo?: string },
+  ) {
+    this.exigirGestion(user)
+    return this.service.anularAsignacion(aid, dto?.motivo ?? 'anulada', this.ctx(user))
+  }
+
+  @Get('convocatorias/:cid/avance')
+  @ApiOperation({ summary: 'Quién diligenció y quién no, con tiempos' })
+  avance(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.service.avance(cid)
+  }
+
+  @Get('convocatorias/:cid/sugerencias')
+  @ApiOperation({ summary: 'Respuestas a la pregunta general del proceso (sin nombres)' })
+  sugerencias(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.service.sugerencias(cid)
+  }
+
+  @Get('convocatorias/:cid/reporte.xlsx')
+  @ApiOperation({ summary: 'Reporte de 7 hojas del ciclo. Incluye nombres: es para auditoría' })
+  async reporte(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Res() res: Response,
+  ) {
+    this.exigirGestion(user)
+    const { buffer, nombre } = await this.reportes.generar(cid)
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Length', String(buffer.length))
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nombre}"; filename*=UTF-8''${encodeURIComponent(nombre)}`,
+    )
+    res.end(buffer)
+  }
+
+  @Get('participaciones/:pid/resultados')
+  @ApiOperation({
+    summary: 'Lo que recibió un evaluador en un ciclo. Los nombres solo salen para admin y coordinación',
+  })
+  resultados(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+    this.exigirGestion(user)
+    return this.service.resultados(pid, user.perfilId, user.email)
+  }
+}

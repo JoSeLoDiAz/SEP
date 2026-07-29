@@ -2,6 +2,14 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { aTitleCase } from '../common/text/title-case'
+import { bindRepetido, enBloques } from '../common/db/binds'
+import {
+  cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
+} from '../common/crypto/usuario-clave'
+import { AuditoriaService } from './auditoria.service'
+
+/** PERFIL.PERFILID 9 = EVALUADORGFCE. Es el perfil con el que entra al SEP. */
+const PERFIL_EVALUADOR = 9
 
 export interface EvaluadorCrearDto {
   // PERSONA
@@ -28,6 +36,11 @@ export interface EvaluadorCrearDto {
   jefeEmail?: string
   jefeCargo?: string
   municipioId?: number
+  /**
+   * Clave de acceso al SEP. Si no viene, se genera una y se devuelve UNA sola
+   * vez en la respuesta para que el gestor se la entregue al evaluador.
+   */
+  claveInicial?: string
 }
 
 export interface EvaluadorActualizarDto {
@@ -58,15 +71,24 @@ export interface ParticipacionDto {
   anio: number
   periodo?: string | null
   rolEvaluadorId?: number | null
+  /** Ciclo del banco. Sin esto la participación no hereda documentos ni entra a la matriz. */
+  convocatoriaId?: number | null
+  /** Área del equipo evaluador ESE año (FK AREAEVALUACION). */
+  areaId?: number | null
+  /** 1 = evalúa por alcance explícito multi-área en vez de por su grupo. */
+  esTransversal?: boolean
+  /** Código del catálogo MODALIDADPART: PRESENCIAL | PAT | VIRTUAL. */
   modalidadPart?: string | null
   procesoId?: number | null
+  /** Legacy: hoy se traduce al estado REVOCADO. La columna se dropeó en v36. */
   procesoRevocado?: boolean
-  proyectosEvaluados?: string | null
   mesa?: string | null
   equipoEvaluador?: string | null
   dinamizadorPersonaId?: number | null
   retroalimentacion?: string | null
   observaciones?: string | null
+  /** Lo inyecta el controller desde el JWT; no viene del body. */
+  usuarioEmail?: string
 }
 
 export interface EstudioDto {
@@ -93,6 +115,10 @@ export interface TicDto {
 export interface PruebaDto {
   anio: number
   periodo?: string | null
+  /** Ciclo al que pertenece. Si se omite se resuelve por año, cuando no hay ambigüedad. */
+  participacionId?: number | null
+  /** Nota de corte. Si se omite se toma de la convocatoria del ciclo y se congela. */
+  puntajeMinimo?: number | null
   fechaPresentacion?: string | null
   horario?: string | null
   intentos?: number | null
@@ -105,6 +131,79 @@ export interface PruebaDto {
   observacion?: string | null
 }
 
+/** Filtros del listado del banco. Todos opcionales y combinables. */
+export interface EvaluadorFiltros {
+  anio?: number
+  procesoId?: number
+  rolEvaluadorId?: number
+  areaId?: number
+  regionalId?: number
+  centroId?: number
+  /** Código de ESTADOPARTICIPACION: basta con que UN ciclo lo tenga. */
+  estadoCodigo?: string
+  sinCedula?: boolean
+  sinFoto?: boolean
+  /** true = solo con prueba vigente; false = solo sin ella; omitir = ambos. */
+  pruebaVigente?: boolean
+  incluirInactivos?: boolean
+}
+
+/** Chip de año que se pinta en la tarjeta del listado. */
+export interface CicloResumido {
+  /** Lo único único: un evaluador puede tener dos ciclos en el mismo año. */
+  participacionId: number
+  anio: number
+  estadoCodigo: string | null
+  estadoColor: string | null
+}
+
+/** Una tarjeta del listado del banco. */
+export interface EvaluadorListaItem {
+  evaluadorId: number
+  personaId: number
+  identificacion: string | null
+  nombres: string | null
+  primerApellido: string | null
+  segundoApellido: string | null
+  email: string | null
+  cargo: string | null
+  profesion: string | null
+  regionalNombre: string | null
+  activo: boolean
+  tieneFoto: boolean
+  tieneCedula: boolean
+  pruebaVigente: boolean
+  totalCiclos: number
+  totalProyectos: number
+  ultimoAnio: number | null
+  promedioRetro: number | null
+  ciclos: CicloResumido[]
+}
+
+/**
+ * "Prueba vigente" — un solo predicado para el filtro y para el flag.
+ *
+ * Mira **la última** prueba del evaluador, no cualquiera de los últimos dos
+ * años. La diferencia no es cosmética: quien aprobó en 2025 y reprobó en 2026
+ * NO está vigente, y con el `EXISTS` suelto que había antes salía como si lo
+ * estuviera — la tarjeta y la sábana decían "Sí" mientras la ficha decía "No".
+ *
+ * Es el mismo criterio de `TrayectoriaService.getResumen`, expresado en SQL.
+ * Correlaciona por `e.EVALUADORID`, así que solo sirve dentro de una consulta
+ * que tenga a `EVALUADOR` con el alias `e`.
+ */
+const PRUEBA_VIGENTE = `EXISTS (
+  SELECT 1 FROM (
+    SELECT pr.APROBADA, pr.PUNTAJEMAYOR, pr.PUNTAJEMINIMO, pr.ANIO,
+           ROW_NUMBER() OVER (ORDER BY pr.ANIO DESC, pr.PRUEBAID DESC) AS rn
+      FROM EVALUADORPRUEBA pr
+     WHERE pr.EVALUADORID = e.EVALUADORID
+  ) u
+   WHERE u.rn = 1
+     AND u.ANIO >= EXTRACT(YEAR FROM SYSDATE) - 1
+     AND (u.APROBADA = 1
+          OR (u.PUNTAJEMINIMO IS NOT NULL AND u.PUNTAJEMAYOR >= u.PUNTAJEMINIMO)))`
+
 export interface MulterFile {
   originalname: string
   mimetype: string
@@ -114,7 +213,10 @@ export interface MulterFile {
 
 @Injectable()
 export class EvaluadoresService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly auditoria: AuditoriaService,
+  ) {}
 
   // ╔══════════════════════════════════════════════════════════════════════╗
   // ║ Búsqueda previa (al crear)                                            ║
@@ -169,24 +271,97 @@ export class EvaluadoresService {
   // ║ Listado / Ficha                                                       ║
   // ╚══════════════════════════════════════════════════════════════════════╝
 
-  async listar(busqueda: string, page = 1, limit = 20) {
+  /**
+   * Listado del banco con los filtros que la operación necesita.
+   *
+   * Cada tarjeta trae los últimos años del evaluador y sus alertas, porque el
+   * uso real no es "buscar a Fulano" sino "quiénes están listos", "a quién le
+   * falta la cédula", "quiénes participaron en 2025". Sin eso, decidir a quién
+   * invitar obliga a abrir fichas una por una.
+   */
+  async listar(
+    busqueda: string, page = 1, limit = 20, filtros: EvaluadorFiltros = {},
+    topePagina = 100,
+  ) {
     const q = (busqueda ?? '').trim()
-    const pagina = Math.max(1, page)
-    const tamPag = Math.min(100, Math.max(1, limit))
-    const offset = (pagina - 1) * tamPag
+    // `page` y `limit` son los ÚNICOS valores que se interpolan en el SQL en
+    // vez de ir por bind (Oracle no admite bind en OFFSET/FETCH). Un `NaN` se
+    // imprimiría literalmente como el texto "NaN" y reventaría con ORA-00933:
+    // `?limit=abc` daba un 500. `entero()` los deja siempre en un entero seguro.
+    const entero = (v: unknown, porDefecto: number) => {
+      const n = Math.trunc(Number(v))
+      return Number.isFinite(n) ? n : porDefecto
+    }
+    const pagina = Math.max(1, entero(page, 1))
+    // El tope existe para que un `?limit=99999` desde el navegador no arrastre
+    // el banco entero. La exportación a Excel sí necesita pasarse de 100, y lo
+    // hace subiendo `topePagina` explícitamente — nunca desde la query string.
+    const tamPag = Math.min(entero(topePagina, 100), Math.max(1, entero(limit, 20)))
+    // Números ≥ 1e21 se serializan en notación exponencial ("2e+21"), que
+    // tampoco es SQL válido; el tope corta eso antes de llegar a la consulta.
+    const offset = Math.min((pagina - 1) * tamPag, 1_000_000)
 
     const params: unknown[] = []
-    let where = `WHERE e.EVALUADORACTIVO = 1`
+    const cond: string[] = []
+    const bind = (valor: unknown) => { params.push(valor); return `:${params.length}` }
+
+    cond.push(filtros.incluirInactivos ? '1 = 1' : 'e.EVALUADORACTIVO = 1')
 
     if (q) {
-      const like = `%${q.toUpperCase()}%`
-      params.push(like, like, like)
-      where += ` AND (
-        UPPER(p.PERSONANOMBRES) || ' ' || UPPER(p.PERSONAPRIMERAPELLIDO) LIKE :1
-        OR UPPER(p.PERSONAEMAIL) LIKE :2
-        OR p.PERSONAIDENTIFICACION LIKE :3
-      )`
+      // Se escapan los comodines: si alguien teclea "%" no debe convertirse
+      // en "trae todo".
+      const like = `%${q.toUpperCase().replace(/([%_\\])/g, '\\$1')}%`
+      // ⚠️ PERSONANOMBRES y PERSONAPRIMERAPELLIDO son NCHAR(100) y NCHAR(20):
+      // Oracle los devuelve rellenos de espacios hasta el ancho fijo. Sin TRIM,
+      // concatenarlos produce "Ana<97 espacios> Ríos<15 espacios>" y buscar
+      // "Ana Ríos" no encontraba NADA — solo funcionaba buscar una palabra
+      // suelta. El apellido va con NVL porque un segundo apellido nulo
+      // anulaba la concatenación entera.
+      const nombreCompleto = `TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO)`
+        + ` || ' ' || TRIM(NVL(p.PERSONASEGUNDOAPELLIDO, ' '))`
+      cond.push(`(UPPER(${nombreCompleto}) LIKE ${bind(like)} ESCAPE '\\'
+              OR UPPER(TRIM(p.PERSONAEMAIL)) LIKE ${bind(like)} ESCAPE '\\'
+              OR TRIM(p.PERSONAIDENTIFICACION) LIKE ${bind(like)} ESCAPE '\\')`)
     }
+    if (filtros.regionalId) cond.push(`e.REGIONALID = ${bind(filtros.regionalId)}`)
+    if (filtros.centroId) cond.push(`e.CENTROID = ${bind(filtros.centroId)}`)
+
+    // Los filtros por ciclo se resuelven con EXISTS: un evaluador entra si
+    // ALGUNA de sus participaciones cumple, sin multiplicar filas por join.
+    const condCiclo: string[] = []
+    if (filtros.anio) condCiclo.push(`pa.ANIO = ${bind(filtros.anio)}`)
+    if (filtros.procesoId) condCiclo.push(`pa.PROCESOID = ${bind(filtros.procesoId)}`)
+    if (filtros.rolEvaluadorId) condCiclo.push(`pa.ROLEVALUADORID = ${bind(filtros.rolEvaluadorId)}`)
+    if (filtros.areaId) condCiclo.push(`pa.AREAID = ${bind(filtros.areaId)}`)
+    if (filtros.estadoCodigo) {
+      condCiclo.push(`es.CODIGO = ${bind(filtros.estadoCodigo.trim().toUpperCase())}`)
+    }
+    if (condCiclo.length) {
+      cond.push(`EXISTS (SELECT 1 FROM EVALUADORPARTICIPACION pa
+                          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+                         WHERE pa.EVALUADORID = e.EVALUADORID AND ${condCiclo.join(' AND ')})`)
+    }
+
+    // Los tres flags se comparan contra null, no por truthiness: `false`
+    // significa "solo los que SÍ la tienen", que es una pregunta legítima
+    // ("¿a quiénes ya les llegó la cédula?"). Tratándolo como truthy, un
+    // `?sinCedula=false` no filtraba nada y la sábana anunciaba en su cabecera
+    // un filtro que no había aplicado.
+    if (filtros.sinCedula != null) {
+      const tieneCedula = `EXISTS (SELECT 1 FROM EVALUADORDOCUMENTO d
+                                    JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
+                                   WHERE d.EVALUADORID = e.EVALUADORID AND UPPER(t.CODIGO) = 'CEDULA')`
+      cond.push(filtros.sinCedula ? `NOT ${tieneCedula}` : tieneCedula)
+    }
+    if (filtros.sinFoto != null) {
+      cond.push(filtros.sinFoto ? 'e.EVALUADORFOTO IS NULL' : 'e.EVALUADORFOTO IS NOT NULL')
+    }
+
+    if (filtros.pruebaVigente != null) {
+      cond.push(filtros.pruebaVigente ? PRUEBA_VIGENTE : `NOT ${PRUEBA_VIGENTE}`)
+    }
+
+    const where = `WHERE ${cond.join(' AND ')}`
 
     const totalRows: Array<{ T: number }> = await this.dataSource.query(
       `SELECT COUNT(*) AS "T"
@@ -197,18 +372,7 @@ export class EvaluadoresService {
     )
     const total = Number(totalRows[0]?.T ?? 0)
 
-    const rows: Array<{
-      evaluadorId: number
-      personaId: number
-      identificacion: string
-      nombres: string
-      primerApellido: string
-      segundoApellido: string | null
-      email: string
-      cargo: string | null
-      profesion: string | null
-      tieneFoto: number
-    }> = await this.dataSource.query(
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT e.EVALUADORID                  AS "evaluadorId",
               e.PERSONAID                    AS "personaId",
               TRIM(p.PERSONAIDENTIFICACION)  AS "identificacion",
@@ -218,19 +382,101 @@ export class EvaluadoresService {
               TRIM(p.PERSONAEMAIL)           AS "email",
               TRIM(e.EVALUADORCARGO)         AS "cargo",
               TRIM(e.EVALUADORPROFESION)     AS "profesion",
-              CASE WHEN e.EVALUADORFOTO IS NULL THEN 0 ELSE 1 END AS "tieneFoto"
+              e.EVALUADORACTIVO              AS "activo",
+              TRIM(r.REGIONALNOMBRE)         AS "regionalNombre",
+              CASE WHEN e.EVALUADORFOTO IS NULL THEN 0 ELSE 1 END AS "tieneFoto",
+              (SELECT COUNT(*) FROM EVALUADORPARTICIPACION pa
+                WHERE pa.EVALUADORID = e.EVALUADORID)            AS "totalCiclos",
+              (SELECT MAX(pa.ANIO) FROM EVALUADORPARTICIPACION pa
+                WHERE pa.EVALUADORID = e.EVALUADORID)            AS "ultimoAnio",
+              (SELECT COUNT(*) FROM EVALUADORPARTPROYECTO pp
+                 JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = pp.PARTICIPACIONID
+                WHERE pa.EVALUADORID = e.EVALUADORID)            AS "totalProyectos",
+              (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr
+                 JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = rr.PARTEVALUADOID
+                 LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+                WHERE pa.EVALUADORID = e.EVALUADORID
+                  AND NVL(es.ESNEGATIVO, 0) = 0)                 AS "promedioRetro",
+              CASE WHEN EXISTS (SELECT 1 FROM EVALUADORDOCUMENTO d
+                                  JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
+                                 WHERE d.EVALUADORID = e.EVALUADORID AND UPPER(t.CODIGO) = 'CEDULA')
+                   THEN 1 ELSE 0 END                             AS "tieneCedula",
+              CASE WHEN ${PRUEBA_VIGENTE}
+                   THEN 1 ELSE 0 END                             AS "pruebaVigente"
          FROM EVALUADOR e
-         JOIN PERSONA   p ON p.PERSONAID = e.PERSONAID
+         JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
+         LEFT JOIN REGIONAL r ON r.REGIONALID = e.REGIONALID
          ${where}
-         ORDER BY e.EVALUADORID DESC
+         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES, e.EVALUADORID
          OFFSET ${offset} ROWS FETCH NEXT ${tamPag} ROWS ONLY`,
       params,
     )
 
-    return {
-      items: rows.map(r => ({ ...r, evaluadorId: Number(r.evaluadorId), personaId: Number(r.personaId), tieneFoto: Number(r.tieneFoto) === 1 })),
-      total, page: pagina, limit: tamPag,
+    // Se arma campo por campo en vez de con spread: así el tipo de retorno es
+    // el contrato real de la tarjeta y no "lo que devolvió el SELECT".
+    const texto = (v: unknown) => (v == null ? null : String(v))
+    const items: EvaluadorListaItem[] = rows.map(r => ({
+      evaluadorId: Number(r.evaluadorId),
+      personaId: Number(r.personaId),
+      identificacion: texto(r.identificacion),
+      nombres: texto(r.nombres),
+      primerApellido: texto(r.primerApellido),
+      segundoApellido: texto(r.segundoApellido),
+      email: texto(r.email),
+      cargo: texto(r.cargo),
+      profesion: texto(r.profesion),
+      regionalNombre: texto(r.regionalNombre),
+      activo: Number(r.activo) === 1,
+      tieneFoto: Number(r.tieneFoto) === 1,
+      tieneCedula: Number(r.tieneCedula) === 1,
+      pruebaVigente: Number(r.pruebaVigente) === 1,
+      totalCiclos: Number(r.totalCiclos ?? 0),
+      totalProyectos: Number(r.totalProyectos ?? 0),
+      ultimoAnio: r.ultimoAnio != null ? Number(r.ultimoAnio) : null,
+      promedioRetro: r.promedioRetro != null ? Number(r.promedioRetro) : null,
+      ciclos: [],
+    }))
+
+    // Los chips de años se traen en UNA consulta para todos los de la página,
+    // en vez de una por tarjeta.
+    if (items.length) {
+      const porEvaluador = new Map<number, CicloResumido[]>()
+      for (const bloque of enBloques(items.map(i => i.evaluadorId))) {
+        const marcadores = bloque.map((_, i) => `:${i + 1}`).join(',')
+        // Nada impide dos participaciones del mismo año (p. ej. FCE p1 y FEEC
+        // p2), así que el desempate por PARTICIPACIONID no es adorno: sin él,
+        // cuál de los dos estados se pinta en el chip cambia entre recargas.
+        // El ORDER BY externo tampoco sobra — un SELECT sin él no garantiza
+        // el orden de llegada, y los chips salían desordenados.
+        const ciclos: Array<Record<string, unknown>> = await this.dataSource.query(
+          `SELECT * FROM (
+             SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
+                    pa.PARTICIPACIONID AS "participacionId",
+                    TRIM(es.CODIGO) AS "estadoCodigo", TRIM(es.COLOR) AS "estadoColor",
+                    ROW_NUMBER() OVER (PARTITION BY pa.EVALUADORID
+                                       ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC) AS rn
+               FROM EVALUADORPARTICIPACION pa
+               LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+              WHERE pa.EVALUADORID IN (${marcadores})
+           ) WHERE rn <= 3
+           ORDER BY "evaluadorId", rn`,
+          bloque,
+        )
+        for (const c of ciclos) {
+          const id = Number(c.evaluadorId)
+          if (!porEvaluador.has(id)) porEvaluador.set(id, [])
+          porEvaluador.get(id)!.push({
+            participacionId: Number(c.participacionId),
+            anio: Number(c.anio),
+            estadoCodigo: (c.estadoCodigo as string | null) ?? null,
+            estadoColor: (c.estadoColor as string | null) ?? null,
+          })
+        }
+      }
+      for (const it of items) it.ciclos = porEvaluador.get(it.evaluadorId) ?? []
     }
+
+    return { items, total, page: pagina, limit: tamPag }
   }
 
   async getFicha(evaluadorId: number) {
@@ -242,9 +488,6 @@ export class EvaluadoresService {
               TRIM(e.EVALUADORCARGO)          AS "cargo",
               TRIM(e.EVALUADORPROFESION)      AS "profesion",
               TRIM(e.EVALUADORPOSGRADO)       AS "posgrado",
-              e.EVALUADOROTROSEST             AS "otrosEstudios",
-              TRIM(e.EVALUADORJEFEDIR)        AS "jefeDirecto",
-              TRIM(e.EVALUADORQUIENAPRUEBA)   AS "quienAprueba",
               TRIM(e.EVALUADORJEFENOMBRE)     AS "jefeNombre",
               TRIM(e.EVALUADORJEFEEMAIL)      AS "jefeEmail",
               TRIM(e.EVALUADORJEFECARGO)      AS "jefeCargo",
@@ -364,25 +607,23 @@ export class EvaluadoresService {
 
       const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL FROM dual`)
       const evaluadorId = Number(seqE[0].NEXTVAL)
-      // EVALUADORJEFEDIR queda como columna heredada — a partir de Fase 3 se
-      // usan EVALUADORJEFENOMBRE / EVALUADORJEFEEMAIL / EVALUADORJEFECARGO y
-      // el municipio del evaluador se guarda en EVALUADORMUNICIPIOID.
-      // EVALUADORQUIENAPRUEBA se sigue escribiendo (queda para Fase 4).
+      // El jefe directo va en las tres columnas estructuradas de la v25.
+      // EVALUADORJEFEDIR, EVALUADORQUIENAPRUEBA y EVALUADOROTROSEST se
+      // dropearon en la v36: el aprobador vive ahora en EVALUADORAPROBACION
+      // (por ciclo) y los otros estudios en EVALUADORESTUDIO.
       await qr.query(
         `INSERT INTO EVALUADOR
            (EVALUADORID, PERSONAID, CENTROID, REGIONALID, EVALUADORCARGO, EVALUADORPROFESION,
-            EVALUADORPOSGRADO, EVALUADOROTROSEST, EVALUADORQUIENAPRUEBA,
+            EVALUADORPOSGRADO,
             EVALUADORJEFENOMBRE, EVALUADORJEFEEMAIL, EVALUADORJEFECARGO, EVALUADORMUNICIPIOID,
             EVALUADORACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, 1, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 1, SYSDATE)`,
         [
           evaluadorId, personaId,
           dto.centroId ?? null, dto.regionalId ?? null,
           (dto.cargo ?? '').trim() || null,
           (dto.profesion ?? '').trim() || null,
           (dto.posgrado ?? '').trim() || null,
-          (dto.otrosEstudios ?? '').trim() || null,
-          (dto.quienAprueba ?? '').trim() || null,
           aTitleCase(dto.jefeNombre) || null,
           (dto.jefeEmail ?? '').trim().toLowerCase() || null,
           (dto.jefeCargo ?? '').trim() || null,
@@ -390,13 +631,131 @@ export class EvaluadoresService {
         ],
       )
 
+      // La cuenta va en la MISMA transacción que el evaluador: si algo falla,
+      // no queda un evaluador sin acceso ni una cuenta sin evaluador.
+      const acceso = await this.provisionarCuenta(qr, {
+        email: (dto.email ?? '').trim().toLowerCase(),
+        claveInicial: dto.claveInicial,
+      })
+
       await qr.commitTransaction()
-      return { evaluadorId, personaId, message: 'Evaluador creado' }
+      return {
+        evaluadorId, personaId,
+        acceso,
+        message: acceso.claveInicial
+          ? 'Evaluador creado con cuenta de acceso'
+          : 'Evaluador creado',
+      }
     } catch (err) {
       await qr.rollbackTransaction()
       throw err
     } finally {
       await qr.release()
+    }
+  }
+
+  /**
+   * Da acceso al SEP a la persona recién registrada como evaluadora.
+   *
+   * Desde que la retroalimentación vive dentro del SEP, el evaluador TIENE que
+   * poder entrar: si no, no hay forma de que diligencie. Esto reemplaza la
+   * decisión #9 del doc 00 ("el evaluador no inicia sesión"), que quedó
+   * obsoleta al absorber el módulo.
+   *
+   * Tres casos, y los tres importan:
+   *   - sin correo            → no se crea nada y se dice por qué
+   *   - la persona ya entra   → NO se toca su cuenta ni su clave; solo se le
+   *                             suma el perfil 9 (multirol). Es el caso de
+   *                             quien ya es Profesional de Seguimiento y
+   *                             además va a evaluar
+   *   - persona nueva         → cuenta nueva con perfil 9 predeterminado
+   */
+  private async provisionarCuenta(
+    qr: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+    datos: { email: string; claveInicial?: string },
+  ): Promise<{
+    creada: boolean
+    perfilAgregado: boolean
+    usuarioId: number | null
+    claveInicial: string | null
+    detalle: string
+  }> {
+    const email = datos.email
+    if (!email) {
+      return {
+        creada: false, perfilAgregado: false, usuarioId: null, claveInicial: null,
+        detalle: 'Sin correo: no se creó cuenta de acceso.',
+      }
+    }
+
+    const existentes = (await qr.query(
+      `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(TRIM(USUARIOEMAIL)) = :1`,
+      [email],
+    )) as Array<{ id: number }>
+
+    if (existentes[0]) {
+      const usuarioId = Number(existentes[0].id)
+      const yaTiene = (await qr.query(
+        `SELECT USUARIOPERFILID AS "id", ESTADO AS "estado"
+           FROM USUARIOPERFIL WHERE USUARIOID = :1 AND PERFILID = :2`,
+        [usuarioId, PERFIL_EVALUADOR],
+      )) as Array<{ id: number; estado: number }>
+
+      if (yaTiene[0] && Number(yaTiene[0].estado) === 1) {
+        return {
+          creada: false, perfilAgregado: false, usuarioId, claveInicial: null,
+          detalle: 'La persona ya tenía cuenta con el perfil de evaluador.',
+        }
+      }
+      if (yaTiene[0]) {
+        await qr.query(
+          `UPDATE USUARIOPERFIL SET ESTADO = 1 WHERE USUARIOPERFILID = :1`,
+          [Number(yaTiene[0].id)],
+        )
+        return {
+          creada: false, perfilAgregado: true, usuarioId, claveInicial: null,
+          detalle: 'Se reactivó el perfil de evaluador en su cuenta existente.',
+        }
+      }
+
+      // Perfil adicional, no predeterminado: no se le cambia la experiencia
+      // por defecto a alguien que ya usa el sistema para otra cosa.
+      await qr.query(
+        `INSERT INTO USUARIOPERFIL
+           (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 0, 1, SYSDATE)`,
+        [usuarioId, PERFIL_EVALUADOR],
+      )
+      return {
+        creada: false, perfilAgregado: true, usuarioId, claveInicial: null,
+        detalle: 'La persona ya tenía cuenta; se le agregó el perfil de evaluador (multirol). Conserva su clave.',
+      }
+    }
+
+    const clave = (datos.claveInicial ?? '').trim() || generarClaveInicial()
+    if (clave.length < 6) throw new BadRequestException('La clave inicial debe tener al menos 6 caracteres')
+
+    const llave = generarLlaveEncriptacion()
+    const seq = (await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)) as Array<{ NEXTVAL: number }>
+    const usuarioId = Number(seq[0].NEXTVAL)
+
+    await qr.query(
+      `INSERT INTO USUARIO
+         (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
+          USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
+       VALUES (:1, :2, :3, SYSDATE, 1, 1, :4, :5)`,
+      [usuarioId, PERFIL_EVALUADOR, cifrarClave(clave, llave), email, llave],
+    )
+    await qr.query(
+      `INSERT INTO USUARIOPERFIL
+         (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
+       VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, SYSDATE)`,
+      [usuarioId, PERFIL_EVALUADOR],
+    )
+
+    return {
+      creada: true, perfilAgregado: true, usuarioId, claveInicial: clave,
+      detalle: 'Cuenta creada. La clave se muestra una sola vez: entrégasela al evaluador.',
     }
   }
 
@@ -413,8 +772,9 @@ export class EvaluadoresService {
     try {
       // ── EVALUADOR ────────────────────────────────────────────────────────
       // jefeNombre pasa por Title Case y jefeEmail por lowercase+trim.
-      // EVALUADORJEFEDIR queda como columna heredada — se actualiza sólo si el
-      // caller sigue enviando el campo antiguo `jefeDirecto`.
+      // Los campos legacy (jefeDirecto, quienAprueba, otrosEstudios) ya no se
+      // mapean: sus columnas se dropearon en la v36. Si un cliente viejo los
+      // sigue enviando, se ignoran en silencio en vez de romper el guardado.
       const setsEval: string[] = []
       const paramsEval: unknown[] = []
       const mapEval: Array<[keyof EvaluadorActualizarDto, string]> = [
@@ -423,9 +783,6 @@ export class EvaluadoresService {
         ['cargo',         'EVALUADORCARGO'],
         ['profesion',     'EVALUADORPROFESION'],
         ['posgrado',      'EVALUADORPOSGRADO'],
-        ['otrosEstudios', 'EVALUADOROTROSEST'],
-        ['jefeDirecto',   'EVALUADORJEFEDIR'],
-        ['quienAprueba',  'EVALUADORQUIENAPRUEBA'],
         ['jefeNombre',    'EVALUADORJEFENOMBRE'],
         ['jefeEmail',     'EVALUADORJEFEEMAIL'],
         ['jefeCargo',     'EVALUADORJEFECARGO'],
@@ -600,18 +957,26 @@ export class EvaluadoresService {
               TRIM(pa.PERIODO)           AS "periodo",
               pa.ROLEVALUADORID          AS "rolEvaluadorId",
               TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(pa.MODALIDADPART)     AS "modalidadPart",
+              pa.MODALIDADPARTID         AS "modalidadPartId",
+              TRIM(mo.CODIGO)            AS "modalidadPart",
+              TRIM(mo.NOMBRE)            AS "modalidadNombre",
               pa.PROCESOID               AS "procesoId",
               TRIM(pe.PROCESONOMBRE)     AS "procesoNombre",
-              pa.PROCESOREVOCADO         AS "procesoRevocado",
+              pa.ESTADOPARTID            AS "estadoPartId",
+              TRIM(es.CODIGO)            AS "estadoCodigo",
+              TRIM(es.NOMBRE)            AS "estadoNombre",
+              NVL(es.ESNEGATIVO, 0)      AS "estadoNegativo",
+              TRIM(pa.MOTIVONOPARTICIPA) AS "motivoNoParticipa",
               TRIM(pa.MESA)              AS "mesa",
               TRIM(pa.EQUIPOEVALUADOR)   AS "equipoEvaluador",
               pa.DINAMIZADORPERSONAID    AS "dinamizadorPersonaId",
               TRIM(d.PERSONANOMBRES) || ' ' || TRIM(d.PERSONAPRIMERAPELLIDO) AS "dinamizadorNombre"
          FROM EVALUADORPARTICIPACION pa
-         LEFT JOIN ROLEVALUADOR r ON r.ROLEVALUADORID = pa.ROLEVALUADORID
-         LEFT JOIN PROCESOEVAL pe ON pe.PROCESOID = pa.PROCESOID
-         LEFT JOIN PERSONA     d  ON d.PERSONAID = pa.DINAMIZADORPERSONAID
+         LEFT JOIN ROLEVALUADOR        r  ON r.ROLEVALUADORID  = pa.ROLEVALUADORID
+         LEFT JOIN PROCESOEVAL         pe ON pe.PROCESOID      = pa.PROCESOID
+         LEFT JOIN MODALIDADPART       mo ON mo.MODALIDADPARTID = pa.MODALIDADPARTID
+         LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID   = pa.ESTADOPARTID
+         LEFT JOIN PERSONA             d  ON d.PERSONAID       = pa.DINAMIZADORPERSONAID
         WHERE pa.EVALUADORID = :1
         ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC`,
       [evaluadorId],
@@ -620,8 +985,34 @@ export class EvaluadoresService {
       ...r,
       participacionId: Number(r.participacionId),
       anio: Number(r.anio),
-      procesoRevocado: Number(r.procesoRevocado) === 1,
+      // `procesoRevocado` era una bandera NUMBER(1) que se dropeó en la v36.
+      // Se deriva del estado para no romper a los clientes que aún la leen.
+      procesoRevocado: r.estadoCodigo === 'REVOCADO',
+      estadoNegativo: Number(r.estadoNegativo) === 1,
     }))
+  }
+
+  /**
+   * Traduce el código de modalidad ('PRESENCIAL', 'PAT', 'VIRTUAL') al id del
+   * catálogo. El front sigue mandando el texto y no hay razón para obligarlo a
+   * conocer ids que cambian por entorno.
+   */
+  private async idModalidad(codigo?: string | null): Promise<number | null> {
+    const c = (codigo ?? '').trim().toUpperCase()
+    if (!c) return null
+    const rows: Array<{ id: number }> = await this.dataSource.query(
+      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = :1`, [c],
+    )
+    if (!rows[0]) throw new BadRequestException(`Modalidad '${codigo}' no existe en el catálogo`)
+    return Number(rows[0].id)
+  }
+
+  /** Id de un estado por código, para las escrituras que lo necesitan. */
+  private async idEstado(codigo: string): Promise<number | null> {
+    const rows: Array<{ id: number }> = await this.dataSource.query(
+      `SELECT ESTADOPARTID AS "id" FROM ESTADOPARTICIPACION WHERE CODIGO = :1`, [codigo],
+    )
+    return rows[0] ? Number(rows[0].id) : null
   }
 
   async crearParticipacion(evaluadorId: number, dto: ParticipacionDto) {
@@ -633,25 +1024,34 @@ export class EvaluadoresService {
       `SELECT EVALUADORPARTICIPACION_SEQ.NEXTVAL FROM dual`,
     )
     const id = Number(seq[0].NEXTVAL)
+
+    // Un ciclo nuevo nace POSTULADO salvo que se pida revocarlo de entrada.
+    // El checklist irá sugiriendo el avance a medida que se carguen los datos.
+    const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
+
     await this.dataSource.query(
       `INSERT INTO EVALUADORPARTICIPACION
-         (PARTICIPACIONID, EVALUADORID, ANIO, PERIODO, ROLEVALUADORID, MODALIDADPART,
-          PROCESOID, PROCESOREVOCADO, PROYECTOSEVALUADOS, MESA, EQUIPOEVALUADOR,
-          DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14)`,
+         (PARTICIPACIONID, EVALUADORID, ANIO, PERIODO, ROLEVALUADORID, MODALIDADPARTID,
+          PROCESOID, ESTADOPARTID, CONVOCATORIAID, AREAID, ESTRANSVERSAL,
+          MESA, EQUIPOEVALUADOR,
+          DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES, USUARIOCREACION)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17)`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
         dto.rolEvaluadorId ?? null,
-        dto.modalidadPart?.trim() || null,
+        await this.idModalidad(dto.modalidadPart),
         dto.procesoId ?? null,
-        dto.procesoRevocado ? 1 : 0,
-        dto.proyectosEvaluados?.trim() || null,
+        estadoId,
+        dto.convocatoriaId ?? null,
+        dto.areaId ?? null,
+        dto.esTransversal ? 1 : 0,
         dto.mesa?.trim() || null,
         dto.equipoEvaluador?.trim() || null,
         dto.dinamizadorPersonaId ?? null,
         dto.retroalimentacion?.trim() || null,
         dto.observaciones?.trim() || null,
+        dto.usuarioEmail ?? null,
       ],
     )
     return { participacionId: id, message: 'Participación creada' }
@@ -669,10 +1069,10 @@ export class EvaluadoresService {
       ['anio',                 'ANIO',                  v => v],
       ['periodo',              'PERIODO',               v => (v as string)?.trim() || null],
       ['rolEvaluadorId',       'ROLEVALUADORID',        v => v ?? null],
-      ['modalidadPart',        'MODALIDADPART',         v => (v as string)?.trim() || null],
       ['procesoId',            'PROCESOID',             v => v ?? null],
-      ['procesoRevocado',      'PROCESOREVOCADO',       v => (v ? 1 : 0)],
-      ['proyectosEvaluados',   'PROYECTOSEVALUADOS',    v => (v as string)?.trim() || null],
+      ['convocatoriaId',       'CONVOCATORIAID',        v => v ?? null],
+      ['areaId',               'AREAID',                v => v ?? null],
+      ['esTransversal',        'ESTRANSVERSAL',         v => (v ? 1 : 0)],
       ['mesa',                 'MESA',                  v => (v as string)?.trim() || null],
       ['equipoEvaluador',      'EQUIPOEVALUADOR',       v => (v as string)?.trim() || null],
       ['dinamizadorPersonaId', 'DINAMIZADORPERSONAID',  v => v ?? null],
@@ -685,6 +1085,23 @@ export class EvaluadoresService {
         sets.push(`${col} = :${params.length}`)
       }
     }
+
+    // La modalidad llega como código y hay que resolverla contra el catálogo,
+    // así que no cabe en el mapa declarativo de arriba.
+    if (dto.modalidadPart !== undefined) {
+      params.push(await this.idModalidad(dto.modalidadPart))
+      sets.push(`MODALIDADPARTID = :${params.length}`)
+    }
+
+    // `procesoRevocado` sobrevive como azúcar de compatibilidad: hoy mueve el
+    // estado en vez de una bandera propia. Para cualquier otro cambio de estado
+    // está cambiarEstadoParticipacion(), que además exige motivo y audita.
+    if (dto.procesoRevocado !== undefined) {
+      const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
+      params.push(estadoId)
+      sets.push(`ESTADOPARTID = :${params.length}`)
+    }
+
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(participacionId)
     await this.dataSource.query(
@@ -694,11 +1111,195 @@ export class EvaluadoresService {
     return { message: 'Participación actualizada' }
   }
 
-  async eliminarParticipacion(participacionId: number) {
-    await this.dataSource.query(
-      `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId],
+  /**
+   * Borra un ciclo. Desde la v34 cuelgan de la participación la aprobación, el
+   * curso, las pruebas, los documentos, los proyectos evaluados y toda la
+   * retroalimentación, así que un DELETE a secas reventaría con ORA-02292 —
+   * o peor, se llevaría la historia por delante si algún día se agregara
+   * ON DELETE CASCADE.
+   *
+   * Se cuenta primero lo que cuelga:
+   *   - vacío       → se borra sin más (corregir un alta reciente es rutina)
+   *   - con historia→ 409 pidiendo anular; solo el admin puede forzar
+   */
+  async eliminarParticipacion(
+    participacionId: number,
+    opciones: { forzar?: boolean; usuarioEmail?: string; usuarioPerfilId?: number } = {},
+  ) {
+    const cabecera = await this.dataSource.query(
+      `SELECT EVALUADORID AS "evaluadorId", ANIO AS "anio"
+         FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
+      [participacionId],
     )
+    if (!cabecera[0]) throw new NotFoundException('Participación no encontrada')
+
+    const dependencias = await this.contarDependenciasParticipacion(participacionId)
+    const conDatos = Object.entries(dependencias).filter(([, v]) => v > 0)
+
+    // Los certificados son el único caso que NO se puede forzar, ni siendo
+    // admin: `SEP_APP` no tiene DELETE sobre EVALUADORCERTIFICADO (v37) porque
+    // un documento oficial que ya circuló no debe poder desaparecer. Sin este
+    // chequeo, el borrado forzado reventaría con ORA-02292 a mitad de la
+    // transacción, después de haber borrado media historia del ciclo.
+    if ((dependencias['certificados'] ?? 0) > 0) {
+      throw new ConflictException(
+        `No se puede eliminar: el ciclo ${cabecera[0].anio} tiene certificados emitidos, ` +
+        'y esos no se borran ni forzando. Anule el certificado y cambie el estado del ciclo.',
+      )
+    }
+
+    if (conDatos.length > 0 && !opciones.forzar) {
+      const detalle = conDatos.map(([k, v]) => `${v} ${k}`).join(', ')
+      throw new ConflictException(
+        `No se puede eliminar: el ciclo ${cabecera[0].anio} ya tiene ${detalle}. ` +
+        `Cambie el estado a REVOCADO o DECLINO en vez de borrarlo, para no perder la historia.`,
+      )
+    }
+
+    // Con forzar = true (admin) se limpian los hijos en orden de dependencia.
+    if (conDatos.length > 0) {
+      // Ojo con los binds: oracledb cuenta cada aparición de un placeholder
+      // como un bind distinto, así que las condiciones sobre las dos puntas
+      // del par (evaluador/evaluado) llevan :1 y :2 con el valor repetido.
+      const par = [participacionId, participacionId]
+      await this.dataSource.transaction(async manager => {
+        await manager.query(
+          `DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID IN
+             (SELECT RETRORESPUESTAID FROM RETRORESPUESTA
+               WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2)`, par)
+        await manager.query(
+          `UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL
+            WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+        await manager.query(
+          `DELETE FROM RETRORESPUESTA WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+        await manager.query(
+          `DELETE FROM RETROASIGNACION WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+        await manager.query(
+          `DELETE FROM RETROSUGERENCIA WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM RETROSESION WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORPARTPROYECTO WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORCAPACITACION WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORAPROBACION WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORPARTGRUPO WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORPARTALCANCE WHERE PARTICIPACIONID = :1`, [participacionId])
+        // Pruebas y documentos NO se borran: son del evaluador, no del ciclo.
+        // Se desatan para que sobrevivan como histórico suelto.
+        await manager.query(
+          `UPDATE EVALUADORPRUEBA SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `UPDATE EVALUADORDOCUMENTO SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = :1`, [participacionId])
+        await manager.query(
+          `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId])
+      })
+    } else {
+      await this.dataSource.query(
+        `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId],
+      )
+    }
+
+    await this.auditoria.registrar({
+      tabla: 'EVALUADORPARTICIPACION',
+      operacion: 'DELETE',
+      registroId: participacionId,
+      evaluadorId: Number(cabecera[0].evaluadorId),
+      usuarioEmail: opciones.usuarioEmail ?? 'desconocido',
+      usuarioPerfilId: opciones.usuarioPerfilId,
+      valorAntes: { ...cabecera[0], dependencias },
+      comentario: conDatos.length > 0 ? 'Borrado forzado por administrador' : 'Ciclo vacío',
+    })
+
     return { message: 'Participación eliminada' }
+  }
+
+  /** Qué cuelga de un ciclo. Se usa para decidir si se puede borrar. */
+  private async contarDependenciasParticipacion(participacionId: number) {
+    const q = bindRepetido(
+      `SELECT
+         (SELECT COUNT(*) FROM EVALUADORAPROBACION    WHERE PARTICIPACIONID = :pid) AS "aprobaciones",
+         (SELECT COUNT(*) FROM EVALUADORCAPACITACION  WHERE PARTICIPACIONID = :pid) AS "capacitaciones",
+         (SELECT COUNT(*) FROM EVALUADORPARTPROYECTO  WHERE PARTICIPACIONID = :pid) AS "proyectos evaluados",
+         (SELECT COUNT(*) FROM EVALUADORPRUEBA        WHERE PARTICIPACIONID = :pid) AS "pruebas",
+         (SELECT COUNT(*) FROM EVALUADORDOCUMENTO     WHERE PARTICIPACIONID = :pid) AS "documentos",
+         (SELECT COUNT(*) FROM EVALUADORCERTIFICADO   WHERE PARTICIPACIONID = :pid) AS "certificados",
+         (SELECT COUNT(*) FROM RETROASIGNACION
+           WHERE PARTEVALUADORID = :pid OR PARTEVALUADOID = :pid)                   AS "retroalimentaciones"
+       FROM DUAL`,
+      'pid', participacionId,
+    )
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(q.sql, q.params)
+    const r = rows[0] ?? {}
+    return Object.fromEntries(
+      Object.entries(r).map(([k, v]) => [k, Number(v ?? 0)]),
+    ) as Record<string, number>
+  }
+
+  /**
+   * Cambia el estado del ciclo. Es la alternativa al borrado: anular sin
+   * perder nada. Los estados marcados ESNEGATIVO exigen motivo — un año
+   * cerrado en rojo sin explicación no le sirve a nadie que audite después.
+   */
+  async cambiarEstadoParticipacion(
+    participacionId: number,
+    dto: { estadoCodigo: string; motivo?: string },
+    ctx: { usuarioEmail: string; usuarioPerfilId?: number },
+  ) {
+    const codigo = (dto.estadoCodigo ?? '').trim().toUpperCase()
+    if (!codigo) throw new BadRequestException('Código de estado requerido')
+
+    const estados: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT ESTADOPARTID AS "id", TRIM(NOMBRE) AS "nombre", NVL(ESNEGATIVO, 0) AS "negativo"
+         FROM ESTADOPARTICIPACION WHERE CODIGO = :1 AND ACTIVO = 1`,
+      [codigo],
+    )
+    if (!estados[0]) throw new BadRequestException(`Estado '${codigo}' no existe o está inactivo`)
+
+    const esNegativo = Number(estados[0].negativo) === 1
+    const motivo = dto.motivo?.trim() || null
+    if (esNegativo && !motivo) {
+      throw new BadRequestException(
+        `El estado '${estados[0].nombre}' cierra el ciclo sin evaluación: hay que indicar el motivo.`,
+      )
+    }
+
+    const antes: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
+              TRIM(es.CODIGO) AS "estadoCodigo", TRIM(pa.MOTIVONOPARTICIPA) AS "motivo"
+         FROM EVALUADORPARTICIPACION pa
+         LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+        WHERE pa.PARTICIPACIONID = :1`,
+      [participacionId],
+    )
+    if (!antes[0]) throw new NotFoundException('Participación no encontrada')
+
+    await this.dataSource.query(
+      `UPDATE EVALUADORPARTICIPACION
+          SET ESTADOPARTID = :1,
+              MOTIVONOPARTICIPA = :2,
+              USUARIOMODIFICACION = :3,
+              FECHAMODIFICACION = SYSDATE
+        WHERE PARTICIPACIONID = :4`,
+      [Number(estados[0].id), motivo, ctx.usuarioEmail, participacionId],
+    )
+
+    await this.auditoria.registrar({
+      tabla: 'EVALUADORPARTICIPACION',
+      operacion: 'ESTADO',
+      registroId: participacionId,
+      evaluadorId: Number(antes[0].evaluadorId),
+      participacionId,
+      usuarioEmail: ctx.usuarioEmail,
+      usuarioPerfilId: ctx.usuarioPerfilId,
+      valorAntes: { estadoCodigo: antes[0].estadoCodigo, motivo: antes[0].motivo },
+      valorDespues: { estadoCodigo: codigo, motivo },
+    })
+
+    return { message: `Estado cambiado a ${estados[0].nombre}` }
   }
 
   // ╔══════════════════════════════════════════════════════════════════════╗
@@ -1040,10 +1641,27 @@ export class EvaluadoresService {
     }))
   }
 
+  /**
+   * Registra una prueba de conocimiento.
+   *
+   * Se ata sola al ciclo del año y toma la nota de corte de la convocatoria,
+   * congelándola en la fila: si el año siguiente sube el corte, esta prueba
+   * sigue evaluándose contra el que estaba vigente cuando se presentó.
+   *
+   * `APROBADA` se deriva del puntaje contra el corte — nunca llega del
+   * cliente. Es lo que enciende el hito del checklist, y dejarlo en manos de
+   * quien digita significaría que un descuido cambia el estado del ciclo.
+   */
   async crearPrueba(evaluadorId: number, dto: PruebaDto) {
     if (!dto.anio) throw new BadRequestException('Año requerido')
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
+
+    const ciclo = await this.resolverCicloDePrueba(evaluadorId, dto)
+    const minimo = dto.puntajeMinimo ?? ciclo.puntajeMinimo
+    const aprobada = dto.puntajeMayor != null && minimo != null
+      ? Number(dto.puntajeMayor) >= Number(minimo)
+      : null
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
       `SELECT EVALUADORPRUEBA_SEQ.NEXTVAL FROM dual`,
@@ -1053,8 +1671,8 @@ export class EvaluadoresService {
       `INSERT INTO EVALUADORPRUEBA
          (PRUEBAID, EVALUADORID, ANIO, PERIODO, FECHAPRESENTACION, HORARIO, INTENTOS,
           PUNTAJEMAYOR, PRUEBANUMERO, EFECTIVIDAD, CORRECTAS, INCORRECTAS, TOTALTIEMPO,
-          OBSERVACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14)`,
+          OBSERVACION, PARTICIPACIONID, PUNTAJEMINIMO, APROBADA)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17)`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -1068,9 +1686,69 @@ export class EvaluadoresService {
         dto.incorrectas ?? null,
         dto.totalTiempo?.trim() || null,
         dto.observacion?.trim() || null,
+        ciclo.participacionId,
+        minimo ?? null,
+        aprobada == null ? null : (aprobada ? 1 : 0),
       ],
     )
-    return { pruebaId: id, message: 'Prueba registrada' }
+    return {
+      pruebaId: id,
+      participacionId: ciclo.participacionId,
+      puntajeMinimo: minimo ?? null,
+      aprobada,
+      message: aprobada == null
+        ? 'Prueba registrada (sin nota de corte definida, no se puede determinar si aprobó)'
+        : `Prueba registrada — ${aprobada ? 'aprobada' : 'no aprobada'}`,
+    }
+  }
+
+  /**
+   * Ubica el ciclo al que pertenece una prueba y el corte que le aplica.
+   *
+   * Si el evaluador tiene exactamente una participación ese año, se ata sola.
+   * Con dos (ej. FCE p1 y FEEC p2) hay que decir cuál: adivinar pondría la
+   * prueba en el ciclo equivocado y encendería un hito que no corresponde.
+   */
+  private async resolverCicloDePrueba(
+    evaluadorId: number, dto: PruebaDto,
+  ): Promise<{ participacionId: number | null; puntajeMinimo: number | null }> {
+    if (dto.participacionId) {
+      const filas: Array<{ minimo: number | null }> = await this.dataSource.query(
+        `SELECT cv.PUNTAJEMINIMOPRUEBA AS "minimo"
+           FROM EVALUADORPARTICIPACION pa
+           LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
+          WHERE pa.PARTICIPACIONID = :1 AND pa.EVALUADORID = :2`,
+        [dto.participacionId, evaluadorId],
+      )
+      if (!filas[0]) throw new BadRequestException('Esa participación no es de este evaluador')
+      return {
+        participacionId: dto.participacionId,
+        puntajeMinimo: filas[0].minimo != null ? Number(filas[0].minimo) : null,
+      }
+    }
+
+    const candidatos: Array<{ id: number; minimo: number | null }> = await this.dataSource.query(
+      `SELECT pa.PARTICIPACIONID AS "id", cv.PUNTAJEMINIMOPRUEBA AS "minimo"
+         FROM EVALUADORPARTICIPACION pa
+         LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
+        WHERE pa.EVALUADORID = :1 AND pa.ANIO = :2`,
+      [evaluadorId, dto.anio],
+    )
+    if (candidatos.length === 1) {
+      return {
+        participacionId: Number(candidatos[0].id),
+        puntajeMinimo: candidatos[0].minimo != null ? Number(candidatos[0].minimo) : null,
+      }
+    }
+    if (candidatos.length > 1) {
+      throw new BadRequestException(
+        `El evaluador tiene ${candidatos.length} ciclos en ${dto.anio}. ` +
+        'Indique `participacionId` para saber a cuál pertenece la prueba.',
+      )
+    }
+    // Sin ciclo ese año: la prueba entra como histórico suelto, que es
+    // exactamente lo que pasa con el histórico 2021-2023.
+    return { participacionId: null, puntajeMinimo: null }
   }
 
   async actualizarPrueba(pruebaId: number, dto: Partial<PruebaDto>) {
@@ -1189,7 +1867,7 @@ export class EvaluadoresService {
     evaluadorId: number,
     tipoId: number,
     file: MulterFile,
-    opts: { descripcion?: string; anioReferencia?: number } = {},
+    opts: { descripcion?: string; anioReferencia?: number; participacionId?: number } = {},
   ): Promise<{ mensaje: string; documentoId: number }> {
     if (!file?.buffer) throw new BadRequestException('Adjunta el PDF en el campo "archivo"')
     if (file.mimetype !== 'application/pdf') {
@@ -1231,16 +1909,21 @@ export class EvaluadoresService {
 
       const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
       await qr.query(
+        // PARTICIPACIONID decide si el documento es del año o permanente:
+        // con valor aparece en el ciclo (y enciende hitos como la
+        // confidencialidad); sin él queda como documento personal del
+        // evaluador, visible desde todos sus años.
         `INSERT INTO EVALUADORDOCUMENTO
            (DOCUMENTOID, EVALUADORID, TIPODOCUMENTOEVALID, DOCUMENTODESCRIPCION,
-            ANIOREFERENCIA, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, SYSDATE)`,
+            ANIOREFERENCIA, PARTICIPACIONID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
         [
           documentoId,
           evaluadorId,
           tipoId,
           opts.descripcion?.trim() || null,
           opts.anioReferencia ?? null,
+          opts.participacionId ?? null,
           file.buffer,
           file.mimetype,
           nombre,

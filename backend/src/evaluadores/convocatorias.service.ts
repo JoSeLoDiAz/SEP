@@ -31,6 +31,16 @@ export interface ConvocatoriaActualizarDto {
   fechaFin?: string | null
   observaciones?: string | null
   activo?: boolean
+  /** Nota de corte de la prueba de conocimiento de ESE año. */
+  puntajeMinimoPrueba?: number | null
+  /** Nota de corte del curso de formación de ESE año. */
+  calificacionMinimaCurso?: number | null
+  /** Cuerpo del certificado con placeholders {{nombre}}, {{rol}}, {{horas}}… */
+  certificadoTexto?: string | null
+  /** Firma que se estampa en el certificado (FK a FIRMACERTIFICADOS). */
+  certificadoFirmaId?: number | null
+  /** 1 = se pueden emitir certificados del ciclo. Se habilita al cerrar el proceso. */
+  certificadoHabilitado?: boolean
 }
 
 export interface ListarConvocatoriasQuery {
@@ -86,13 +96,16 @@ export class ConvocatoriasService {
               c.ANIO                 AS "anio",
               TRIM(c.PERIODO)        AS "periodo",
               TRIM(c.NOMBRE)         AS "nombre",
-              TRIM(c.MODALIDADPART)  AS "modalidadPart",
+              c.MODALIDADPARTID      AS "modalidadPartId",
+              TRIM(mo.CODIGO)        AS "modalidadPart",
+              TRIM(mo.NOMBRE)        AS "modalidadNombre",
               c.FECHAINICIO          AS "fechaInicio",
               c.FECHAFIN             AS "fechaFin",
               c.ACTIVO               AS "activo",
               (SELECT COUNT(*) FROM CONVOCATORIADOCUMENTO d
                  WHERE d.CONVOCATORIAID = c.CONVOCATORIAID) AS "numDocumentos"
          FROM EVALUADORCONVOCATORIA c
+         LEFT JOIN MODALIDADPART mo ON mo.MODALIDADPARTID = c.MODALIDADPARTID
          ${where}
          ORDER BY c.ANIO DESC, c.CONVOCATORIAID DESC
          OFFSET ${offset} ROWS FETCH NEXT ${tamPag} ROWS ONLY`,
@@ -123,13 +136,21 @@ export class ConvocatoriasService {
               c.ANIO                 AS "anio",
               TRIM(c.PERIODO)        AS "periodo",
               TRIM(c.NOMBRE)         AS "nombre",
-              TRIM(c.MODALIDADPART)  AS "modalidadPart",
+              c.MODALIDADPARTID      AS "modalidadPartId",
+              TRIM(mo.CODIGO)        AS "modalidadPart",
+              TRIM(mo.NOMBRE)        AS "modalidadNombre",
               c.FECHAINICIO          AS "fechaInicio",
               c.FECHAFIN             AS "fechaFin",
               TRIM(c.OBSERVACIONES)  AS "observaciones",
               c.ACTIVO               AS "activo",
+              c.PUNTAJEMINIMOPRUEBA  AS "puntajeMinimoPrueba",
+              c.CALIFICACIONMINIMACURSO AS "calificacionMinimaCurso",
+              c.CERTIFICADOTEXTO     AS "certificadoTexto",
+              c.CERTIFICADOFIRMAID   AS "certificadoFirmaId",
+              NVL(c.CERTIFICADOHABILITADO, 0) AS "certificadoHabilitado",
               c.FECHACREACION        AS "fechaCreacion"
          FROM EVALUADORCONVOCATORIA c
+         LEFT JOIN MODALIDADPART mo ON mo.MODALIDADPARTID = c.MODALIDADPARTID
         WHERE c.CONVOCATORIAID = :1`,
       [convocatoriaId],
     )
@@ -162,6 +183,11 @@ export class ConvocatoriasService {
       fechaFin: r.fechaFin ?? null,
       observaciones: r.observaciones ?? null,
       activo: Number(r.activo) === 1,
+      puntajeMinimoPrueba: r.puntajeMinimoPrueba != null ? Number(r.puntajeMinimoPrueba) : null,
+      calificacionMinimaCurso: r.calificacionMinimaCurso != null ? Number(r.calificacionMinimaCurso) : null,
+      certificadoTexto: (r.certificadoTexto as string | null) ?? null,
+      certificadoFirmaId: r.certificadoFirmaId != null ? Number(r.certificadoFirmaId) : null,
+      certificadoHabilitado: Number(r.certificadoHabilitado) === 1,
       fechaCreacion: r.fechaCreacion ?? null,
       documentosPorTipo: porTipo.map(t => ({
         tipoCodigo: String(t.tipoCodigo ?? ''),
@@ -190,7 +216,7 @@ export class ConvocatoriasService {
 
     await this.dataSource.query(
       `INSERT INTO EVALUADORCONVOCATORIA
-         (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPART, FECHAINICIO, FECHAFIN,
+         (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
           OBSERVACIONES, ACTIVO, FECHACREACION)
        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, 1, SYSDATE)`,
       [
@@ -198,7 +224,7 @@ export class ConvocatoriasService {
         Number(dto.anio),
         (dto.periodo ?? '').toString().trim() || null,
         dto.nombre.trim(),
-        (dto.modalidadPart ?? '').toString().trim() || null,
+        await this.idModalidad(dto.modalidadPart),
         dto.fechaInicio ? new Date(dto.fechaInicio) : null,
         dto.fechaFin ? new Date(dto.fechaFin) : null,
         (dto.observaciones ?? '').toString().trim() || null,
@@ -221,11 +247,15 @@ export class ConvocatoriasService {
       ['anio',          'ANIO',          v => Number(v)],
       ['periodo',       'PERIODO',       v => (v as string | null)?.toString().trim() || null],
       ['nombre',        'NOMBRE',        v => (v as string | null)?.toString().trim() || null],
-      ['modalidadPart', 'MODALIDADPART', v => (v as string | null)?.toString().trim() || null],
       ['fechaInicio',   'FECHAINICIO',   v => (v ? new Date(v as string) : null)],
       ['fechaFin',      'FECHAFIN',      v => (v ? new Date(v as string) : null)],
       ['observaciones', 'OBSERVACIONES', v => (v as string | null)?.toString().trim() || null],
       ['activo',        'ACTIVO',        v => (v ? 1 : 0)],
+      ['puntajeMinimoPrueba',     'PUNTAJEMINIMOPRUEBA',     v => v ?? null],
+      ['calificacionMinimaCurso', 'CALIFICACIONMINIMACURSO', v => v ?? null],
+      ['certificadoTexto',        'CERTIFICADOTEXTO',        v => (v as string | null)?.toString().trim() || null],
+      ['certificadoFirmaId',      'CERTIFICADOFIRMAID',      v => v ?? null],
+      ['certificadoHabilitado',   'CERTIFICADOHABILITADO',   v => (v ? 1 : 0)],
     ]
     for (const [k, col, transform] of map) {
       if (dto[k] !== undefined) {
@@ -233,6 +263,14 @@ export class ConvocatoriasService {
         sets.push(`${col} = :${params.length}`)
       }
     }
+
+    // La modalidad llega como código y hay que resolverla contra el catálogo
+    // (la columna de texto se dropeó en la v36), así que va fuera del mapa.
+    if (dto.modalidadPart !== undefined) {
+      params.push(await this.idModalidad(dto.modalidadPart))
+      sets.push(`MODALIDADPARTID = :${params.length}`)
+    }
+
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(convocatoriaId)
     await this.dataSource.query(
@@ -253,6 +291,21 @@ export class ConvocatoriasService {
       [activo ? 1 : 0, convocatoriaId],
     )
     return { message: activo ? 'Convocatoria activada' : 'Convocatoria desactivada', activo }
+  }
+
+  /**
+   * Traduce el código de modalidad al id del catálogo MODALIDADPART (v29).
+   * La columna de texto que había aquí se dropeó en la v36; el front sigue
+   * enviando 'PRESENCIAL' / 'PAT' / 'VIRTUAL' y no tiene por qué conocer ids.
+   */
+  private async idModalidad(codigo?: string | null): Promise<number | null> {
+    const c = (codigo ?? '').toString().trim().toUpperCase()
+    if (!c) return null
+    const rows: Array<{ id: number }> = await this.dataSource.query(
+      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = :1`, [c],
+    )
+    if (!rows[0]) throw new BadRequestException(`Modalidad '${codigo}' no existe en el catálogo`)
+    return Number(rows[0].id)
   }
 
   private validarAnio(anio: number | undefined) {

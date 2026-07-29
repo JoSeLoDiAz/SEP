@@ -8,20 +8,135 @@ export interface CatalogoItem { id: number; nombre: string; activo: number }
 export class CatalogosEvaluadorService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
+  // ── Catálogos del ciclo (v29) — solo lectura ────────────────────────────
+  //
+  // No tienen alta/baja desde la aplicación: son el vocabulario del proceso,
+  // no datos operativos. Se exponen porque los filtros del banco y los selects
+  // del año los necesitan; cambiarlos es una migración.
+
+  /** Estados del año. `codigo` es la llave que viaja en los filtros. */
+  async listarEstadosParticipacion(soloActivos = true) {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT ESTADOPARTID     AS "id",
+              TRIM(CODIGO)     AS "codigo",
+              TRIM(NOMBRE)     AS "nombre",
+              TRIM(DESCRIPCION) AS "descripcion",
+              TRIM(COLOR)      AS "color",
+              ORDEN            AS "orden",
+              ESFINAL          AS "esFinal",
+              ESNEGATIVO       AS "esNegativo",
+              ACTIVO           AS "activo"
+         FROM ESTADOPARTICIPACION ${soloActivos ? 'WHERE ACTIVO = 1' : ''}
+        ORDER BY ORDEN, NOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      codigo: r.codigo as string,
+      nombre: r.nombre as string,
+      descripcion: (r.descripcion as string | null) ?? null,
+      color: (r.color as string | null) ?? 'neutral',
+      orden: Number(r.orden),
+      esFinal: Number(r.esFinal) === 1,
+      esNegativo: Number(r.esNegativo) === 1,
+      activo: Number(r.activo),
+    }))
+  }
+
+  /** Áreas de evaluación (técnica, jurídica, transversal…). */
+  async listarAreas(soloActivas = true) {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT AREAID            AS "id",
+              TRIM(CODIGO)      AS "codigo",
+              TRIM(NOMBRE)      AS "nombre",
+              TRIM(GRUPOSDEFECTO) AS "gruposDefecto",
+              ORDEN             AS "orden",
+              ACTIVO            AS "activo"
+         FROM AREAEVALUACION ${soloActivas ? 'WHERE ACTIVO = 1' : ''}
+        ORDER BY ORDEN, NOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      codigo: r.codigo as string,
+      nombre: r.nombre as string,
+      gruposDefecto: (r.gruposDefecto as string | null) ?? null,
+      orden: Number(r.orden),
+      activo: Number(r.activo),
+    }))
+  }
+
+  /**
+   * Años que REALMENTE existen en el banco, de más reciente a más antiguo.
+   *
+   * El filtro de año se poblaba con una ventana fija (año actual + 1, seis
+   * hacia atrás). Eso deja fuera lo que hay: el histórico llega hasta 2020 y
+   * ese año no se podía seleccionar, mientras se ofrecían años vacíos.
+   */
+  async listarAniosParticipacion(): Promise<number[]> {
+    const rows: Array<{ anio: number }> = await this.dataSource.query(
+      `SELECT DISTINCT ANIO AS "anio" FROM EVALUADORPARTICIPACION
+        WHERE ANIO IS NOT NULL
+        ORDER BY 1 DESC`,
+    )
+    const anios = rows.map(r => Number(r.anio))
+    // El año en curso siempre está, aunque nadie haya participado todavía:
+    // en enero el banco está vacío y el filtro no puede quedarse sin él.
+    const actual = new Date().getFullYear()
+    if (!anios.includes(actual)) anios.unshift(actual)
+    return anios
+  }
+
+  /** Modalidades de participación (presencial, virtual…). */
+  async listarModalidades(soloActivas = true) {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT MODALIDADPARTID   AS "id",
+              TRIM(CODIGO)      AS "codigo",
+              TRIM(NOMBRE)      AS "nombre",
+              TRIM(DESCRIPCION) AS "descripcion",
+              ORDEN             AS "orden",
+              ACTIVO            AS "activo"
+         FROM MODALIDADPART ${soloActivas ? 'WHERE ACTIVO = 1' : ''}
+        ORDER BY ORDEN, NOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      codigo: r.codigo as string,
+      nombre: r.nombre as string,
+      descripcion: (r.descripcion as string | null) ?? null,
+      orden: Number(r.orden),
+      activo: Number(r.activo),
+    }))
+  }
+
   // ── ROLEVALUADOR ────────────────────────────────────────────────────────
 
+  /**
+   * Roles del evaluador. Expone CODIGO porque es la llave estable — el motor
+   * de la matriz razona sobre `EVALUADOR`, `APOYO_JURIDICO`, etc., no sobre el
+   * nombre, que puede reescribirse sin avisar.
+   *
+   * Ordena por ORDEN (jerarquía real: líder, coordinador, analista, evaluador,
+   * apoyos, transversal) y no alfabéticamente, que mezclaba niveles.
+   */
   async listarRoles(soloActivos = false) {
     const where = soloActivos ? `WHERE ROLEVALUADORACTIVO = 1` : ''
-    const rows: Array<{ id: number; nombre: string; descripcion: string | null; activo: number }> =
-      await this.dataSource.query(
-        `SELECT ROLEVALUADORID         AS "id",
-                TRIM(ROLEVALUADORNOMBRE) AS "nombre",
-                TRIM(ROLEVALUADORDESC)   AS "descripcion",
-                ROLEVALUADORACTIVO      AS "activo"
-           FROM ROLEVALUADOR ${where}
-          ORDER BY ROLEVALUADORNOMBRE`,
-      )
-    return rows.map(r => ({ ...r, id: Number(r.id), activo: Number(r.activo) }))
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT ROLEVALUADORID           AS "id",
+              TRIM(ROLEVALUADORNOMBRE) AS "nombre",
+              TRIM(ROLEVALUADORCODIGO) AS "codigo",
+              TRIM(ROLEVALUADORDESC)   AS "descripcion",
+              NVL(ROLEVALUADORORDEN, 100) AS "orden",
+              ROLEVALUADORACTIVO       AS "activo"
+         FROM ROLEVALUADOR ${where}
+        ORDER BY NVL(ROLEVALUADORORDEN, 100), ROLEVALUADORNOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      nombre: r.nombre as string,
+      codigo: (r.codigo as string | null) ?? null,
+      descripcion: (r.descripcion as string | null) ?? null,
+      orden: Number(r.orden),
+      activo: Number(r.activo),
+    }))
   }
 
   async crearRol(nombre: string, descripcion?: string) {

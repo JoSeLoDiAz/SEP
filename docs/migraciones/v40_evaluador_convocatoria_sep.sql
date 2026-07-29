@@ -77,14 +77,25 @@ END;
 -- ║ 2. Índices                                                              ║
 -- ╚════════════════════════════════════════════════════════════════════════╝
 
+-- La v34 ya creó IX_CONV_SEP sobre CONVOCATORIASEPID. Se comprueba en vez de
+-- crear otro: un segundo índice sobre la misma columna no aporta nada y Oracle
+-- lo rechazaría con ORA-01408.
+DECLARE
+  v_n NUMBER;
 BEGIN
-  EXECUTE IMMEDIATE
-    'CREATE INDEX IX_EVALCONV_CONVSEP ON EVALUADORCONVOCATORIA (CONVOCATORIASEPID)';
-  DBMS_OUTPUT.PUT_LINE('IX_EVALCONV_CONVSEP creado');
-EXCEPTION WHEN OTHERS THEN
-  IF SQLCODE IN (-955, -1408) THEN
-    DBMS_OUTPUT.PUT_LINE('IX_EVALCONV_CONVSEP ya existía');
-  ELSE RAISE; END IF;
+  SELECT COUNT(*) INTO v_n
+    FROM ALL_IND_COLUMNS
+   WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
+     AND COLUMN_NAME = 'CONVOCATORIASEPID'
+     AND COLUMN_POSITION = 1;
+
+  IF v_n > 0 THEN
+    DBMS_OUTPUT.PUT_LINE('CONVOCATORIASEPID ya está indexada (v34: IX_CONV_SEP)');
+  ELSE
+    EXECUTE IMMEDIATE
+      'CREATE INDEX IX_EVALCONV_CONVSEP ON EVALUADORCONVOCATORIA (CONVOCATORIASEPID)';
+    DBMS_OUTPUT.PUT_LINE('IX_EVALCONV_CONVSEP creado');
+  END IF;
 END;
 /
 
@@ -108,10 +119,10 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-COMMENT ON COLUMN EVALUADORCONVOCATORIA.CONVOCATORIASEPID IS
-  'Convocatoria real del SEP sobre la que se monta este ciclo de evaluadores. ' ||
-  'De ahí salen el nombre y el año; aquí solo viven las reglas del banco ' ||
-  '(notas de corte, certificación, matriz de retroalimentación).';
+-- COMMENT no admite expresiones: el texto tiene que ir en UN literal. Con
+-- `'a' || 'b'` Oracle responde ORA-00933 y el resto del script sigue como si
+-- nada, así que el comentario se quedaba sin actualizar sin que se notara.
+COMMENT ON COLUMN EVALUADORCONVOCATORIA.CONVOCATORIASEPID IS 'Convocatoria real del SEP sobre la que se monta este ciclo de evaluadores. De ahi salen el nombre y el anio; aqui solo viven las reglas del banco (notas de corte, certificacion, matriz de retroalimentacion). Nullable: el historico anterior a la v40 no tiene con que atarse.';
 
 
 -- ╔════════════════════════════════════════════════════════════════════════╗
@@ -119,22 +130,53 @@ COMMENT ON COLUMN EVALUADORCONVOCATORIA.CONVOCATORIASEPID IS
 -- ╚════════════════════════════════════════════════════════════════════════╝
 
 DECLARE
-  v_fk NUMBER; v_ix NUMBER; v_sueltas NUMBER;
+  v_fk NUMBER; v_ix NUMBER; v_uq NUMBER; v_com NUMBER; v_sueltas NUMBER;
 BEGIN
   SELECT COUNT(*) INTO v_fk FROM ALL_CONSTRAINTS
-   WHERE CONSTRAINT_NAME = 'FK_EVALCONV_CONVSEP' AND CONSTRAINT_TYPE = 'R';
-  SELECT COUNT(*) INTO v_ix FROM ALL_INDEXES
-   WHERE INDEX_NAME IN ('IX_EVALCONV_CONVSEP', 'UQ_EVALCONV_SEP_PERIODO');
+   WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
+     AND CONSTRAINT_NAME = 'FK_EVALCONV_CONVSEP' AND CONSTRAINT_TYPE = 'R';
+
+  -- Se comprueba el HECHO —que la columna esté indexada— y no un nombre que
+  -- yo escogí: la v34 ya la había indexado como IX_CONV_SEP, y buscar por
+  -- nombre daba "falta un índice" cuando no faltaba nada.
+  SELECT COUNT(*) INTO v_ix FROM ALL_IND_COLUMNS
+   WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
+     AND COLUMN_NAME = 'CONVOCATORIASEPID' AND COLUMN_POSITION = 1;
+
+  SELECT COUNT(*) INTO v_uq FROM ALL_INDEXES
+   WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
+     AND INDEX_NAME = 'UQ_EVALCONV_SEP_PERIODO' AND UNIQUENESS = 'UNIQUE';
+
+  SELECT COUNT(*) INTO v_com FROM ALL_COL_COMMENTS
+   WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
+     AND COLUMN_NAME = 'CONVOCATORIASEPID' AND COMMENTS IS NOT NULL;
+
   SELECT COUNT(*) INTO v_sueltas FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIASEPID IS NULL;
 
   DBMS_OUTPUT.PUT_LINE('── Verificación ───────────────────');
-  DBMS_OUTPUT.PUT_LINE('Llave foránea      : ' || v_fk || '  (esperado 1)');
-  DBMS_OUTPUT.PUT_LINE('Índices            : ' || v_ix || '  (esperado 2)');
-  DBMS_OUTPUT.PUT_LINE('Ciclos sin atar    : ' || v_sueltas ||
-                       '  (histórico; se atan a mano desde la pantalla)');
+  DBMS_OUTPUT.PUT_LINE('Llave foránea         : ' || v_fk || '  (esperado 1)');
+  DBMS_OUTPUT.PUT_LINE('Columna indexada      : ' || v_ix || '  (esperado >= 1)');
+  DBMS_OUTPUT.PUT_LINE('Único por convocatoria: ' || v_uq || '  (esperado 1)');
+  DBMS_OUTPUT.PUT_LINE('Comentario            : ' || v_com || '  (esperado 1)');
+  DBMS_OUTPUT.PUT_LINE('Ciclos sin atar       : ' || v_sueltas ||
+                       '  (histórico; se atan desde la pantalla, en Editar)');
 
+  -- Cada cosa que se imprime también bloquea. Un contador que se muestra pero
+  -- no detiene da la sensación de que se verificó y no verifica nada — es la
+  -- lección que dejó el incidente de la v36.
   IF v_fk < 1 THEN
-    RAISE_APPLICATION_ERROR(-20041, 'La llave foránea no quedó creada.');
+    RAISE_APPLICATION_ERROR(-20041, 'La llave foránea FK_EVALCONV_CONVSEP no quedó creada.');
+  END IF;
+  IF v_ix < 1 THEN
+    RAISE_APPLICATION_ERROR(-20042, 'CONVOCATORIASEPID quedó sin índice.');
+  END IF;
+  IF v_uq < 1 THEN
+    RAISE_APPLICATION_ERROR(-20043,
+      'Falta UQ_EVALCONV_SEP_PERIODO. Si falló por duplicados, revise qué dos ciclos ' ||
+      'comparten convocatoria del SEP y periodo, corríjalos y vuelva a correr.');
+  END IF;
+  IF v_com < 1 THEN
+    RAISE_APPLICATION_ERROR(-20044, 'El comentario de la columna no quedó puesto.');
   END IF;
 END;
 /

@@ -675,7 +675,7 @@ Y dos que se descartaron tras verificarlos: **no hay inyección SQL** (todo valo
 | **G** | Listado con filtros + sábana Excel + ficha PDF | M (3-4 d) | Reportes para la coordinación |
 | **H** | v36 → limpieza | S (1 d) | — |
 
-> Con la fase G cerrada, **todas las fases están implementadas y verificadas**. Lo que queda son las dos dependencias externas del §10 (`APP_PUBLIC_URL` y la entrega de la clave inicial) y las preguntas abiertas de negocio.
+> Con la fase G cerrada, **todas las fases están implementadas y verificadas**. Lo único externo que queda es decidir cómo se le entrega la clave inicial al evaluador; el resto son preguntas abiertas de negocio.
 
 **Total: 31–40 días.** La fase D es la más grande porque no es solo BD: es portar un sistema entero (motor de matriz, formulario con cronómetro, 7 hojas de Excel) de Mongo/Express/Vue a Oracle/Nest/Next.
 
@@ -708,7 +708,7 @@ Y dos que se descartaron tras verificarlos: **no hay inyección SQL** (todo valo
 | 1 | ~~El evaluador inicia sesión en el SEP~~ → **decidido: sí**, y ya implementado. Queda informar que reemplaza la decisión #9 del doc 00 | **Coordinación** *(informativo)* |
 | 2 | ¿Se migra el histórico que ya está en Mongo (asignaciones y respuestas del ciclo 2026) o se arranca limpio? | **Coordinación / Gestión de evaluadores** |
 | 3 | ¿La retroalimentación se abre solo al cierre del proceso, o queda disponible durante todo el ciclo? | **Coordinación** |
-| 4 | **Falta `APP_PUBLIC_URL` en el `.env` del backend.** Sin ella el PDF del certificado imprime la ruta relativa, y quien lo reciba no sabe a qué dominio ir a validarlo | **Equipo TIC** *(técnico, bloquea emisión real)* |
+| 4 | ~~Falta una variable de entorno para la URL del certificado~~ → **resuelto**: usa `APP_URL`, la misma que `MailService`, que ya está configurada. Se descartó crear una variable propia: con dos, la que nadie configura es la que rompe | — |
 | 5 | ¿El código de verificación se entrega solo como texto o también como QR en el PDF? | **Equipo TIC / Coordinación** |
 | 6 | ¿Cómo se le entrega la clave inicial al evaluador? Hoy se muestra una vez en pantalla al registrarlo; enviarla por correo requiere cablear el `MailService` que ya existe | **Coordinación** |
 

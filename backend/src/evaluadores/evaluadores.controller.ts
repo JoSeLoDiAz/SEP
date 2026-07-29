@@ -257,6 +257,13 @@ export class EvaluadoresController {
     return this.catalogos.listarAreas(todos !== '1')
   }
 
+  @Get('catalogos/firmas')
+  @ApiOperation({ summary: 'Firmas disponibles para los certificados' })
+  firmasCat(@CurrentUser() user: JwtUser) {
+    this.exigirGestion(user)
+    return this.catalogos.listarFirmasCertificado()
+  }
+
   @Get('catalogos/anios')
   @ApiOperation({ summary: 'Años con participaciones registradas, para el filtro del banco' })
   aniosCat(@CurrentUser() user: JwtUser) {

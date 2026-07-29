@@ -166,6 +166,12 @@ export default function EvaluadoresDashboardPage() {
     relanzar('', FILTROS_VACIOS)
   }
 
+  /** Quita solo la búsqueda de texto y conserva los filtros puestos. */
+  function limpiarBusqueda() {
+    setBusqueda('')
+    relanzar('', filtros)
+  }
+
   async function exportar() {
     setExportando(true)
     try {
@@ -288,8 +294,10 @@ export default function EvaluadoresDashboardPage() {
 
       <BarraFiltrosBanco
         busqueda={busqueda}
+        busquedaAplicada={busquedaAplicada}
         onBusquedaChange={setBusqueda}
         onBuscar={handleBuscar}
+        onLimpiarBusqueda={limpiarBusqueda}
         filtros={filtros}
         onCambiarFiltros={aplicarFiltros}
         onLimpiar={limpiarTodo}

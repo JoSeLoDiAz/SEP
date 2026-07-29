@@ -85,6 +85,30 @@ export class CatalogosEvaluadorService {
     return anios
   }
 
+  /**
+   * Firmas disponibles para los certificados.
+   *
+   * Es la misma tabla que usan los certificados de beneficiario, no una copia:
+   * la firma de quien avala es institucional, no del módulo. Se excluye la
+   * imagen del BLOB — aquí solo hace falta poder elegir.
+   */
+  async listarFirmasCertificado() {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT FIRMACERTIFICADOSID        AS "id",
+              TRIM(FIRMACERTIFICADOSNOMBRE) AS "nombre",
+              TRIM(FIRMACERTIFICADOSCARGO)  AS "cargo",
+              CASE WHEN FIRMACERTIFICADOSFIRMA IS NULL THEN 0 ELSE 1 END AS "tieneImagen"
+         FROM FIRMACERTIFICADOS
+        ORDER BY FIRMACERTIFICADOSNOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      nombre: (r.nombre as string | null) ?? '(sin nombre)',
+      cargo: (r.cargo as string | null) ?? null,
+      tieneImagen: Number(r.tieneImagen) === 1,
+    }))
+  }
+
   /** Modalidades de participación (presencial, virtual…). */
   async listarModalidades(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(

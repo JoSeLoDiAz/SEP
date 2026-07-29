@@ -5,9 +5,10 @@ import { abrirArchivo, descargarArchivoConNombreDelServidor } from '@/lib/descar
 import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { ReglasDelCiclo } from '@/components/evaluadores/reglas-convocatoria'
 import {
-  ArrowLeft, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone, Network,
-  Paperclip, Pencil, PowerOff, Save, ShieldCheck, Trash2, Upload, UserCircle2,
+  ArrowLeft, Award, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone,
+  Network, Paperclip, Pencil, PowerOff, Save, ShieldCheck, Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -26,17 +27,25 @@ interface Convocatoria {
   fechaFin: string | null
   observaciones: string | null
   activo: boolean
+  // Reglas del ciclo. El backend siempre las devolvió; la pantalla no las
+  // declaraba, así que no había forma de verlas ni de cambiarlas.
+  puntajeMinimoPrueba: number | null
+  calificacionMinimaCurso: number | null
+  certificadoTexto: string | null
+  certificadoFirmaId: number | null
+  certificadoHabilitado: boolean
 }
 
-type TabId = 'datos' | 'documentos'
+type TabId = 'datos' | 'reglas' | 'documentos'
 interface Tab {
   id: TabId
   label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
 }
 const TABS: Tab[] = [
-  { id: 'datos',      label: 'Datos',      icon: UserCircle2 },
-  { id: 'documentos', label: 'Documentos', icon: Paperclip },
+  { id: 'datos',      label: 'Datos',            icon: UserCircle2 },
+  { id: 'reglas',     label: 'Reglas y certificados', icon: Award },
+  { id: 'documentos', label: 'Documentos',       icon: Paperclip },
 ]
 
 const MODALIDADES = ['PRESENCIAL', 'PAT', 'VIRTUAL', 'MIXTA'] as const
@@ -199,6 +208,21 @@ export default function FichaConvocatoriaPage() {
 
       {/* Contenido */}
       {tab === 'datos'      && <SeccionDatos      conv={conv} onChanged={cargar} setToast={setToast} />}
+      {tab === 'reglas' && (
+        <ReglasDelCiclo
+          convocatoriaId={cid}
+          reglas={{
+            puntajeMinimoPrueba: conv.puntajeMinimoPrueba,
+            calificacionMinimaCurso: conv.calificacionMinimaCurso,
+            certificadoTexto: conv.certificadoTexto,
+            certificadoFirmaId: conv.certificadoFirmaId,
+            certificadoHabilitado: conv.certificadoHabilitado,
+          }}
+          onChanged={cargar}
+          setToast={setToast}
+        />
+      )}
+
       {tab === 'documentos' && <SeccionDocumentosConvocatoria convocatoriaId={cid} setToast={setToast} />}
 
       <ConfirmModal

@@ -34,6 +34,10 @@ interface Convocatoria {
   certificadoTexto: string | null
   certificadoFirmaId: number | null
   certificadoHabilitado: boolean
+  /** Convocatoria real del SEP sobre la que se monta este ciclo (v40). */
+  convocatoriaSepId: number | null
+  convocatoriaSepNombre: string | null
+  convocatoriaSepAnio: number | null
 }
 
 type TabId = 'datos' | 'reglas' | 'documentos'
@@ -141,6 +145,18 @@ export default function FichaConvocatoriaPage() {
               }`}>
                 {conv.activo ? 'Activa' : 'Inactiva'}
               </span>
+              {/* Se muestra en la cabecera y no escondido en una pestaña: es la
+                  convocatoria oficial, y saber si el ciclo cuelga de ella o
+                  quedó suelto cambia lo que se puede hacer después. */}
+              {conv.convocatoriaSepNombre ? (
+                <span className="inline-flex items-center gap-1 rounded bg-white/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/90">
+                  SEP · {conv.convocatoriaSepNombre}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  Sin convocatoria del SEP
+                </span>
+              )}
             </div>
           </div>
           <div className="shrink-0">
@@ -280,6 +296,17 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
   const [fechaInicio, setFechaInicio] = useState(conv.fechaInicio ? conv.fechaInicio.substring(0, 10) : '')
   const [fechaFin, setFechaFin] = useState(conv.fechaFin ? conv.fechaFin.substring(0, 10) : '')
   const [observaciones, setObservaciones] = useState(conv.observaciones ?? '')
+  const [convSepId, setConvSepId] = useState(conv.convocatoriaSepId?.toString() ?? '')
+  const [convsSep, setConvsSep] = useState<Array<{ id: number; nombre: string; anio: number }>>([])
+
+  useEffect(() => {
+    let vivo = true
+    api.get<Array<{ id: number; nombre: string; anio: number }>>(
+      '/evaluadores/catalogos/convocatorias-sep')
+      .then(r => { if (vivo) setConvsSep(r.data) })
+      .catch(() => { if (vivo) setConvsSep([]) })
+    return () => { vivo = false }
+  }, [])
 
   function iniciarEdicion() {
     setAnio(String(conv.anio))
@@ -289,6 +316,7 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
     setFechaInicio(conv.fechaInicio ? conv.fechaInicio.substring(0, 10) : '')
     setFechaFin(conv.fechaFin ? conv.fechaFin.substring(0, 10) : '')
     setObservaciones(conv.observaciones ?? '')
+    setConvSepId(conv.convocatoriaSepId?.toString() ?? '')
     setEditando(true)
   }
 
@@ -314,6 +342,7 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
         fechaInicio: fechaInicio || null,
         fechaFin: fechaFin || null,
         observaciones: observaciones.trim() || null,
+        convocatoriaSepId: convSepId ? Number(convSepId) : null,
       })
       setToast({ tipo: 'success', msg: 'Datos actualizados' })
       setEditando(false)
@@ -338,6 +367,14 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
         </button>
       }>
         <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+          <div className="sm:col-span-2">
+            <Dato
+              label="Convocatoria del SEP"
+              valor={conv.convocatoriaSepNombre
+                ? `${conv.convocatoriaSepNombre} (${conv.convocatoriaSepAnio})`
+                : null}
+            />
+          </div>
           <Dato label="Año" valor={conv.anio} />
           <Dato label="Período" valor={conv.periodo} />
           <Dato label="Modalidad" valor={conv.modalidadPart} />
@@ -355,6 +392,25 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
   return (
     <Section titulo="Editar datos de la convocatoria">
       <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
+          <label className={label}>Convocatoria del SEP</label>
+          <select
+            value={convSepId}
+            onChange={e => {
+              setConvSepId(e.target.value)
+              const c = convsSep.find(x => String(x.id) === e.target.value)
+              // El año debe cuadrar con el de la convocatoria: el backend lo
+              // rechaza, así que se ajusta aquí en vez de dejar que falle.
+              if (c) setAnio(String(c.anio))
+            }}
+            className={input}
+          >
+            <option value="">— Sin convocatoria del SEP —</option>
+            {convsSep.map(c => (
+              <option key={c.id} value={c.id}>{c.nombre} ({c.anio})</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className={label}>Año *</label>
           <input

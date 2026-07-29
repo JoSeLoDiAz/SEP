@@ -6,12 +6,14 @@ import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ArrowLeft, ChevronRight, Loader2, Megaphone, Save } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
 
 interface RespCrear { id: number }
+/** Convocatoria real del SEP: la que tiene programa, presupuesto y fechas. */
+interface ConvocatoriaSep { id: number; nombre: string; anio: number; ciclos: number }
 
 const MODALIDADES = ['PRESENCIAL', 'PAT', 'VIRTUAL', 'MIXTA'] as const
 const PERIODOS = ['01', '02'] as const
@@ -27,12 +29,22 @@ export default function NuevaConvocatoriaPage() {
   const [fechaInicio, setFechaInicio] = useState('')
   const [fechaFin, setFechaFin] = useState('')
   const [observaciones, setObservaciones] = useState('')
+  const [convSepId, setConvSepId] = useState<string>('')
+  const [convsSep, setConvsSep] = useState<ConvocatoriaSep[]>([])
 
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
 
   const anioMin = 2020
   const anioMax = currentYear + 2
+
+  useEffect(() => {
+    let vivo = true
+    api.get<ConvocatoriaSep[]>('/evaluadores/catalogos/convocatorias-sep')
+      .then(r => { if (vivo) setConvsSep(r.data) })
+      .catch(() => { if (vivo) setConvsSep([]) })
+    return () => { vivo = false }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -58,6 +70,7 @@ export default function NuevaConvocatoriaPage() {
         fechaInicio: fechaInicio || null,
         fechaFin: fechaFin || null,
         observaciones: observaciones.trim() || null,
+        convocatoriaSepId: convSepId ? Number(convSepId) : null,
       })
       setToast({ tipo: 'success', msg: 'Convocatoria creada' })
       setTimeout(() => router.push(`/panel/evaluadores/convocatorias/${res.data.id}`), 700)
@@ -109,6 +122,43 @@ export default function NuevaConvocatoriaPage() {
         <section>
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos generales</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Va primero porque de aquí salen el año y el nombre: el ciclo de
+                evaluadores no es una convocatoria aparte, es la capa de reglas
+                que se le pone encima a una que ya existe en el SEP. */}
+            <div className="sm:col-span-2">
+              <label className={label}>Convocatoria del SEP *</label>
+              <select
+                value={convSepId}
+                onChange={(e) => {
+                  setConvSepId(e.target.value)
+                  const c = convsSep.find(x => String(x.id) === e.target.value)
+                  if (c) {
+                    setAnio(String(c.anio))
+                    // El nombre se propone, no se impone: puede haber dos
+                    // ciclos —uno por período— sobre la misma convocatoria.
+                    if (!nombre.trim()) setNombre(c.nombre)
+                  }
+                }}
+                className={input}
+                required
+              >
+                <option value="">— Escoja la convocatoria —</option>
+                {convsSep.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre} ({c.anio}){c.ciclos > 0 ? ` · ya tiene ${c.ciclos} ciclo(s)` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-neutral-400 mt-0.5">
+                De ella salen el programa, el presupuesto y las fechas. Aquí solo
+                se agregan las reglas del banco de evaluadores.
+              </p>
+              {convsSep.length === 0 && (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  No se pudo cargar la lista de convocatorias del SEP.
+                </p>
+              )}
+            </div>
             <div>
               <label className={label}>Año *</label>
               <input

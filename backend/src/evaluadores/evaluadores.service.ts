@@ -633,8 +633,16 @@ export class EvaluadoresService {
 
       // La cuenta va en la MISMA transacción que el evaluador: si algo falla,
       // no queda un evaluador sin acceso ni una cuenta sin evaluador.
+      //
+      // Con el correo INSTITUCIONAL, no con el personal. Las cuentas del SEP
+      // son institucionales: crearla con el gmail de la persona genera una
+      // segunda cuenta para alguien que ya entra con su correo @sena, y a
+      // partir de ahí tiene dos identidades y su historia queda partida.
+      // El personal solo se usa si no hay institucional, para no dejar sin
+      // acceso a un evaluador externo.
       const acceso = await this.provisionarCuenta(qr, {
-        email: (dto.email ?? '').trim().toLowerCase(),
+        email: ((dto.emailInstitucional ?? '').trim() || (dto.email ?? '').trim()).toLowerCase(),
+        emailAlterno: (dto.email ?? '').trim().toLowerCase(),
         claveInicial: dto.claveInicial,
       })
 
@@ -672,29 +680,50 @@ export class EvaluadoresService {
    */
   private async provisionarCuenta(
     qr: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
-    datos: { email: string; claveInicial?: string },
+    datos: { email: string; emailAlterno?: string; claveInicial?: string },
   ): Promise<{
     creada: boolean
     perfilAgregado: boolean
     usuarioId: number | null
     claveInicial: string | null
+    /**
+     * El correo con el que REALMENTE quedó la cuenta. Es lo que hay que
+     * entregarle al evaluador: el login compara exacto contra USUARIOEMAIL, así
+     * que mostrar otro correo en la pantalla de credenciales le impide entrar.
+     */
+    email: string | null
     detalle: string
   }> {
     const email = datos.email
     if (!email) {
       return {
         creada: false, perfilAgregado: false, usuarioId: null, claveInicial: null,
+        email: null,
         detalle: 'Sin correo: no se creó cuenta de acceso.',
       }
     }
 
+    // Se busca por los DOS correos, no solo por el que se va a usar. Quien ya
+    // entra al SEP con su personal —o con una cuenta creada antes de que esto
+    // usara el institucional— no debe terminar con dos identidades: se le suma
+    // el perfil a la que ya tiene. Crear la segunda le partiría la historia y
+    // lo dejaría sin saber con cuál entrar.
+    const correos = [email, (datos.emailAlterno ?? '').trim().toLowerCase()]
+      .filter(Boolean)
+      .filter((c, i, a) => a.indexOf(c) === i)
+    const marcadores = correos.map((_, i) => `:${i + 1}`).join(',')
+    // Se trae también el correo: si la cuenta ya existía puede estar bajo el
+    // personal, y ese —no el institucional— es el que la persona debe teclear.
     const existentes = (await qr.query(
-      `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(TRIM(USUARIOEMAIL)) = :1`,
-      [email],
-    )) as Array<{ id: number }>
+      `SELECT USUARIOID AS "id", TRIM(USUARIOEMAIL) AS "email" FROM USUARIO
+        WHERE LOWER(TRIM(USUARIOEMAIL)) IN (${marcadores})
+        ORDER BY USUARIOID`,
+      correos,
+    )) as Array<{ id: number; email: string }>
 
     if (existentes[0]) {
       const usuarioId = Number(existentes[0].id)
+      const correoCuenta = (existentes[0].email ?? '').trim()
       const yaTiene = (await qr.query(
         `SELECT USUARIOPERFILID AS "id", ESTADO AS "estado"
            FROM USUARIOPERFIL WHERE USUARIOID = :1 AND PERFILID = :2`,
@@ -704,7 +733,8 @@ export class EvaluadoresService {
       if (yaTiene[0] && Number(yaTiene[0].estado) === 1) {
         return {
           creada: false, perfilAgregado: false, usuarioId, claveInicial: null,
-          detalle: 'La persona ya tenía cuenta con el perfil de evaluador.',
+          email: correoCuenta,
+          detalle: `La persona ya tenía cuenta con el perfil de evaluador. Entra con ${correoCuenta} y su clave de siempre.`,
         }
       }
       if (yaTiene[0]) {
@@ -714,7 +744,8 @@ export class EvaluadoresService {
         )
         return {
           creada: false, perfilAgregado: true, usuarioId, claveInicial: null,
-          detalle: 'Se reactivó el perfil de evaluador en su cuenta existente.',
+          email: correoCuenta,
+          detalle: `Se reactivó el perfil de evaluador en su cuenta existente (${correoCuenta}). Conserva su clave.`,
         }
       }
 
@@ -728,7 +759,8 @@ export class EvaluadoresService {
       )
       return {
         creada: false, perfilAgregado: true, usuarioId, claveInicial: null,
-        detalle: 'La persona ya tenía cuenta; se le agregó el perfil de evaluador (multirol). Conserva su clave.',
+        email: correoCuenta,
+        detalle: `La persona ya tenía cuenta (${correoCuenta}); se le agregó el perfil de evaluador. Conserva su clave.`,
       }
     }
 
@@ -755,6 +787,7 @@ export class EvaluadoresService {
 
     return {
       creada: true, perfilAgregado: true, usuarioId, claveInicial: clave,
+      email,
       detalle: 'Cuenta creada. La clave se muestra una sola vez: entrégasela al evaluador.',
     }
   }

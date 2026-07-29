@@ -79,13 +79,20 @@ const etiqueta = 'block text-[10px] font-semibold uppercase tracking-wide text-n
 const control = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-neutral-700 focus:outline-none focus:ring-2 focus:ring-[#00304D]/40 disabled:bg-neutral-50 disabled:text-neutral-400'
 
 export function BarraFiltrosBanco({
-  busqueda, onBusquedaChange, onBuscar,
+  busqueda, busquedaAplicada, onBusquedaChange, onBuscar, onLimpiarBusqueda,
   filtros, onCambiarFiltros, onLimpiar,
   onExportar, exportando, cargando,
 }: {
   busqueda: string
+  /**
+   * Lo que se está filtrando ahora mismo, que no es lo mismo que lo tecleado:
+   * el listado no cambia hasta pulsar "Buscar". El chip debe reflejar lo que
+   * el usuario está viendo, no lo que va escribiendo.
+   */
+  busquedaAplicada: string
   onBusquedaChange: (valor: string) => void
   onBuscar: () => void
+  onLimpiarBusqueda: () => void
   filtros: FiltrosBanco
   onCambiarFiltros: (filtros: FiltrosBanco) => void
   onLimpiar: () => void
@@ -93,6 +100,7 @@ export function BarraFiltrosBanco({
   exportando: boolean
   cargando: boolean
 }) {
+  const hayBusqueda = busquedaAplicada.trim() !== ''
   const [roles, setRoles] = useState<CatalogoItem[]>([])
   const [procesos, setProcesos] = useState<CatalogoItem[]>([])
   const [regionales, setRegionales] = useState<CatalogoItem[]>([])
@@ -301,13 +309,27 @@ export function BarraFiltrosBanco({
 
         <span className="w-px h-5 bg-neutral-200" />
 
-        {chips.length === 0 ? (
+        {chips.length === 0 && !hayBusqueda ? (
           <span className="inline-flex items-center gap-1.5 text-[11px] text-neutral-400">
             <Filter size={12} />
             Sin filtros aplicados
           </span>
         ) : (
           <>
+            {/* La búsqueda de texto también es un criterio: sin este chip, quien
+                buscó "cardona" y obtuvo resultados no tenía forma de volver al
+                listado completo salvo borrar el campo a mano. */}
+            {hayBusqueda && (
+              <button
+                type="button"
+                onClick={onLimpiarBusqueda}
+                title="Quitar la búsqueda"
+                className="inline-flex items-center gap-1 rounded-full border border-[#00304D]/20 bg-[#00304D]/5 px-2.5 py-1 text-[11px] font-semibold text-[#00304D] transition hover:bg-[#00304D]/10"
+              >
+                Búsqueda: {busquedaAplicada.trim()}
+                <X size={11} />
+              </button>
+            )}
             {chips.map(chip => (
               <button
                 key={chip.clave}

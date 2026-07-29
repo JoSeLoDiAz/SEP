@@ -18,6 +18,13 @@ interface Acceso {
   usuarioId: number | null
   /** Solo viene si se creó una cuenta nueva. Se muestra una única vez. */
   claveInicial: string | null
+  /**
+   * El correo con el que quedó la cuenta. Lo decide el backend y NO tiene por
+   * qué ser el que se tecleó aquí: las cuentas del SEP son institucionales, y
+   * si la persona ya entraba al sistema se reusa la suya. El login compara
+   * exacto, así que mostrar otro correo deja al evaluador sin poder entrar.
+   */
+  email: string | null
   detalle: string
 }
 interface RespCrear { evaluadorId: number; personaId: number; acceso?: Acceso }
@@ -192,19 +199,23 @@ export default function NuevoEvaluadorPage() {
         // decide cuándo continuar.
         setCredenciales({
           evaluadorId: res.data.evaluadorId,
-          email: email.trim().toLowerCase(),
+          // El correo que devuelve el backend, no el que se tecleó: es el que
+          // de verdad quedó en la cuenta y el único con el que se puede entrar.
+          email: acceso.email ?? emailInstitucional.trim().toLowerCase(),
           clave: acceso.claveInicial,
           detalle: acceso.detalle,
         })
         return
       }
+      // Sin clave nueva la gestora igual necesita saber qué pasó y con qué
+      // correo entra la persona; antes solo decía "Evaluador creado".
       setToast({
         tipo: 'success',
-        msg: acceso?.perfilAgregado
-          ? 'Evaluador creado. Se agregó el perfil de evaluador a su cuenta existente.'
-          : 'Evaluador creado',
+        msg: acceso?.detalle ?? 'Evaluador creado',
       })
-      setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 900)
+      // 3,5 s: el mensaje ahora dice con qué correo entra la persona, y con
+      // 900 ms no daba tiempo de leerlo antes de que la pantalla cambiara.
+      setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 3500)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
       setToast({ tipo: 'error', msg: msg ?? 'No se pudo crear el evaluador' })
@@ -249,7 +260,9 @@ export default function NuevoEvaluadorPage() {
             <p className="text-[13px] text-neutral-600">{credenciales.detalle}</p>
 
             <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 px-5 py-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Usuario</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                Usuario <span className="normal-case font-normal text-neutral-400">(correo institucional)</span>
+              </p>
               <p className="font-mono text-sm text-neutral-800">{credenciales.email}</p>
               <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
                 Clave inicial

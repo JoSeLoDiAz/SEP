@@ -99,8 +99,11 @@ export function AuditoriaEvaluador({
       <section className="rounded-2xl border border-neutral-200 bg-white px-5 py-12 text-center shadow-sm">
         <ShieldAlert size={28} className="mx-auto text-neutral-300" />
         <p className="mt-3 text-sm font-semibold text-neutral-600">Auditoría restringida</p>
+        {/* Decía "solo coordinación y administración", y era falso: el backend
+            autoriza a los tres perfiles de gestión, incluida la gestora de
+            evaluadores. El mensaje le decía que algo no era suyo cuando sí lo es. */}
         <p className="mt-1 text-[12px] text-neutral-400">
-          Solo coordinación y administración pueden consultar el registro de cambios.
+          Su perfil no tiene permiso para consultar el registro de cambios.
         </p>
       </section>
     )

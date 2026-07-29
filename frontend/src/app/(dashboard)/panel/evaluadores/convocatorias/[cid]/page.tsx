@@ -6,7 +6,7 @@ import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
-  ArrowLeft, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone,
+  ArrowLeft, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone, Network,
   Paperclip, Pencil, PowerOff, Save, ShieldCheck, Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -157,10 +157,24 @@ export default function FichaConvocatoriaPage() {
         </div>
       </div>
 
-      <Link href="/panel/evaluadores/convocatorias" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
-        <ArrowLeft size={13} />
-        Volver al listado
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/panel/evaluadores/convocatorias" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
+          <ArrowLeft size={13} />
+          Volver al listado
+        </Link>
+
+        {/* La matriz vive en su propia pantalla: es una operación del ciclo
+            completo, no un documento más de esta ficha. */}
+        <Link
+          href={`/panel/evaluadores/convocatorias/${cid}/matriz`}
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+          style={{ backgroundColor: PRIMARY }}
+        >
+          <Network size={13} />
+          Retroalimentación del ciclo
+          <ChevronRight size={13} />
+        </Link>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto bg-white border border-neutral-200 rounded-2xl p-1.5 shadow-sm">

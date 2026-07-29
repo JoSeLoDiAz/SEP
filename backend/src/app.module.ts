@@ -11,6 +11,7 @@ import { ConvocatoriaProyectosModule } from './convocatoria-proyectos/convocator
 import { CronogramaModule } from './cronograma/cronograma.module'
 import { EmpresaModule } from './empresa/empresa.module'
 import { EvaluadoresModule } from './evaluadores/evaluadores.module'
+import { RetroalimentacionModule } from './retroalimentacion/retroalimentacion.module'
 import { GruposModule } from './grupos/grupos.module'
 import { ImportarProyectoModule } from './importar-proyecto/importar-proyecto.module'
 import { ModificacionesModule } from './modificaciones/modificaciones.module'
@@ -59,6 +60,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ModificacionesModule,
     PlataformasVirtualesModule,
     EvaluadoresModule,
+    RetroalimentacionModule,
     ImportarProyectoModule,
     ConvocatoriaProyectosModule,
     UsuariosAdminModule,

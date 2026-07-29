@@ -39,12 +39,15 @@ function nombreDesdeContentDisposition(header: string | undefined | null): strin
 }
 
 /** Descarga usando el nombre del `Content-Disposition` que envíe el server.
- *  Si el server no envía nombre, cae en el `fallback`. */
+ *  Si el server no envía nombre, cae en el `fallback`. `timeoutMs` sube el
+ *  límite de axios (15 s por defecto) para reportes que el backend arma sobre
+ *  la marcha y tardan más que una descarga normal. */
 export async function descargarArchivoConNombreDelServidor(
   url: string,
   fallback: string,
+  timeoutMs?: number,
 ): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob' })
+  const res = await api.get(url, { responseType: 'blob', ...(timeoutMs ? { timeout: timeoutMs } : {}) })
   const blob = new Blob([res.data as Blob], { type: (res.data as Blob).type || 'application/octet-stream' })
   const cd = res.headers?.['content-disposition'] as string | undefined
   const nombre = nombreDesdeContentDisposition(cd) || fallback

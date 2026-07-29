@@ -6,10 +6,12 @@ import { useFotoEvaluador } from '@/lib/use-foto-evaluador'
 import { aTitleCase } from '@/lib/title-case'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
+import { TrayectoriaEvaluador } from '@/components/evaluadores/trayectoria-evaluador'
+import { AuditoriaEvaluador } from '@/components/evaluadores/auditoria-evaluador'
 import {
-  ArrowLeft, Award, Briefcase, ChevronRight, ClipboardList, Download, Eye, FileText,
-  GraduationCap, IdCard, Loader2, Paperclip, Pencil, PowerOff, Save, Settings2, ShieldCheck,
-  Trash2, Upload, UserCircle2,
+  ArrowLeft, Award, Briefcase, ChevronRight, Download, Eye, FileText,
+  GraduationCap, History, IdCard, Loader2, Paperclip, Pencil, PowerOff, Save, Settings2,
+  ShieldCheck, Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -31,12 +33,9 @@ interface Ficha {
   cargo: string | null
   profesion: string | null
   posgrado: string | null
-  otrosEstudios: string | null
-  jefeDirecto: string | null
   jefeNombre?: string | null
   jefeEmail?: string | null
   jefeCargo?: string | null
-  quienAprueba: string | null
   activo: number
   tieneFoto: boolean
   identificacion: string
@@ -52,17 +51,32 @@ interface RegionalCat { id: number; nombre: string }
 interface CentroCat { id: number; nombre: string }
 interface CiudadCat { id: number; ciudad: string; depto: string }
 
-type TabId = 'datos' | 'estudios' | 'tic' | 'experiencia' | 'documentos' | 'pruebas' | 'participaciones'
+/**
+ * La ficha pasó de 7 tabs planos a 4 con jerarquía. El criterio es qué cambia
+ * año a año y qué no:
+ *
+ *   Trayectoria → todo lo temporal (ciclos, hitos, documentos del año)
+ *   Perfil      → lo atemporal (datos, HV, estudios, TIC, experiencia)
+ *   Documentos  → archivos personales permanentes
+ *   Auditoría   → registro de cambios; solo coordinación y admin
+ */
+type TabId = 'trayectoria' | 'perfil' | 'documentos' | 'auditoria'
+type PerfilSubTab = 'datos' | 'estudios' | 'tic' | 'experiencia'
 
 interface Tab { id: TabId; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
 const TABS: Tab[] = [
-  { id: 'datos',           label: 'Datos',                  icon: UserCircle2 },
-  { id: 'estudios',        label: 'Hoja de vida y estudios', icon: GraduationCap },
-  { id: 'tic',             label: 'Certificaciones TIC',    icon: Award },
-  { id: 'experiencia',     label: 'Experiencia',            icon: Briefcase },
-  { id: 'documentos',      label: 'Documentos',             icon: Paperclip },
-  { id: 'pruebas',         label: 'Pruebas',                icon: ClipboardList },
-  { id: 'participaciones', label: 'Participaciones',        icon: ShieldCheck },
+  { id: 'trayectoria', label: 'Trayectoria', icon: ShieldCheck },
+  { id: 'perfil',      label: 'Perfil',      icon: UserCircle2 },
+  { id: 'documentos',  label: 'Documentos',  icon: Paperclip },
+  { id: 'auditoria',   label: 'Auditoría',   icon: History },
+]
+
+interface SubTab { id: PerfilSubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
+const PERFIL_SUBTABS: SubTab[] = [
+  { id: 'datos',       label: 'Datos básicos',           icon: UserCircle2 },
+  { id: 'estudios',    label: 'Hoja de vida y estudios', icon: GraduationCap },
+  { id: 'tic',         label: 'Certificaciones TIC',     icon: Award },
+  { id: 'experiencia', label: 'Experiencia',             icon: Briefcase },
 ]
 
 export default function FichaEvaluadorPage() {
@@ -72,10 +86,12 @@ export default function FichaEvaluadorPage() {
   const [ficha, setFicha] = useState<Ficha | null>(null)
   const [loading, setLoading] = useState(true)
   const [errMsg, setErrMsg] = useState('')
-  const [tab, setTab] = useState<TabId>('datos')
+  const [tab, setTab] = useState<TabId>('trayectoria')
+  const [perfilTab, setPerfilTab] = useState<PerfilSubTab>('datos')
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const [confirmDesactivar, setConfirmDesactivar] = useState(false)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
+  const [descargandoFicha, setDescargandoFicha] = useState(false)
 
   const cargar = async () => {
     setLoading(true)
@@ -157,7 +173,25 @@ export default function FichaEvaluadorPage() {
               </span>
             </div>
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
+            <button
+              onClick={() => {
+                setDescargandoFicha(true)
+                descargarArchivoConNombreDelServidor(
+                  `/evaluadores/${evaluadorId}/ficha.pdf`,
+                  `ficha_evaluador_${ficha.identificacion ?? evaluadorId}.pdf`,
+                  // La ficha recorre toda la trayectoria y embebe la foto.
+                  60_000,
+                )
+                  .catch(() => setToast({ tipo: 'error', msg: 'No se pudo generar la ficha PDF' }))
+                  .finally(() => setDescargandoFicha(false))
+              }}
+              disabled={descargandoFicha}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-semibold rounded-xl backdrop-blur-sm transition disabled:opacity-50"
+            >
+              {descargandoFicha ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              Ficha PDF
+            </button>
             {ficha.activo === 1 ? (
               <button
                 onClick={() => setConfirmDesactivar(true)}
@@ -206,27 +240,63 @@ export default function FichaEvaluadorPage() {
         })}
       </div>
 
-      {/* Contenido del tab */}
-      {tab === 'datos' && (
+      {/* ── Trayectoria: la vista por año + los editores que la alimentan ── */}
+      {tab === 'trayectoria' && (
         <>
-          <SeccionDatos ficha={ficha} onChanged={cargar} setToast={setToast} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <SeccionFoto   ficha={ficha} onChanged={cargar} setToast={setToast} />
-            <SeccionCedula evaluadorId={evaluadorId}       setToast={setToast} />
+          <TrayectoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} />
+          {/* El rail es de lectura; el alta y baja de ciclos y pruebas sigue
+              aquí abajo para no perder funcionalidad mientras se construyen
+              los formularios inline del panel del año. */}
+          <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} />
+          <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} />
+        </>
+      )}
+
+      {/* ── Perfil: lo atemporal, con sub-tabs ── */}
+      {tab === 'perfil' && (
+        <>
+          <div className="flex gap-1 overflow-x-auto rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-sm">
+            {PERFIL_SUBTABS.map(t => {
+              const Icon = t.icon
+              const activo = perfilTab === t.id
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setPerfilTab(t.id)}
+                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activo ? 'text-white shadow-sm' : 'text-neutral-600 hover:bg-neutral-50'
+                  }`}
+                  style={activo ? { backgroundColor: PRIMARY } : undefined}
+                >
+                  <Icon size={14} />
+                  {t.label}
+                </button>
+              )
+            })}
           </div>
+
+          {perfilTab === 'datos' && (
+            <>
+              <SeccionDatos ficha={ficha} onChanged={cargar} setToast={setToast} />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <SeccionFoto   ficha={ficha} onChanged={cargar} setToast={setToast} />
+                <SeccionCedula evaluadorId={evaluadorId}       setToast={setToast} />
+              </div>
+            </>
+          )}
+          {perfilTab === 'estudios' && (
+            <>
+              <SeccionHV       evaluadorId={evaluadorId} setToast={setToast} />
+              <SeccionEstudios evaluadorId={evaluadorId} setToast={setToast} />
+            </>
+          )}
+          {perfilTab === 'tic'         && <SeccionTic         evaluadorId={evaluadorId} setToast={setToast} />}
+          {perfilTab === 'experiencia' && <SeccionExperiencia evaluadorId={evaluadorId} setToast={setToast} />}
         </>
       )}
-      {tab === 'estudios' && (
-        <>
-          <SeccionHV        evaluadorId={evaluadorId} setToast={setToast} />
-          <SeccionEstudios  evaluadorId={evaluadorId} setToast={setToast} />
-        </>
-      )}
-      {tab === 'tic'             && <SeccionTic             evaluadorId={evaluadorId} setToast={setToast} />}
-      {tab === 'experiencia'     && <SeccionExperiencia     evaluadorId={evaluadorId} setToast={setToast} />}
-      {tab === 'documentos'      && <SeccionDocumentos      evaluadorId={evaluadorId} setToast={setToast} />}
-      {tab === 'pruebas'         && <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} />}
-      {tab === 'participaciones' && <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} />}
+
+      {tab === 'documentos' && <SeccionDocumentos  evaluadorId={evaluadorId} setToast={setToast} />}
+      {tab === 'auditoria'  && <AuditoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} />}
 
       <ConfirmModal
         open={confirmDesactivar}
@@ -275,11 +345,9 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
   const [cargo, setCargo] = useState(ficha.cargo ?? '')
   const [profesion, setProfesion] = useState(ficha.profesion ?? '')
   const [posgrado, setPosgrado] = useState(ficha.posgrado ?? '')
-  const [otrosEstudios, setOtros] = useState(ficha.otrosEstudios ?? '')
   const [jefeNombre, setJefeNombre] = useState(ficha.jefeNombre ?? '')
   const [jefeEmail, setJefeEmail] = useState(ficha.jefeEmail ?? '')
   const [jefeCargo, setJefeCargo] = useState(ficha.jefeCargo ?? '')
-  const [quienAprueba, setAprueba] = useState(ficha.quienAprueba ?? '')
   // PERSONA
   const [nombres, setNombres] = useState(ficha.nombres ?? '')
   const [primerApellido, setPrimerAp] = useState(ficha.primerApellido ?? '')
@@ -333,11 +401,9 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
         cargo: cargo.trim() || null,
         profesion: profesion.trim() || null,
         posgrado: posgrado.trim() || null,
-        otrosEstudios: otrosEstudios.trim() || null,
         jefeNombre: jefeNombre.trim() || null,
         jefeEmail: jefeEmail.trim().toLowerCase() || null,
         jefeCargo: jefeCargo.trim() || null,
-        quienAprueba: quienAprueba.trim() || null,
         nombres: nombres.trim(),
         primerApellido: primerApellido.trim(),
         segundoApellido: segundoApellido.trim(),
@@ -402,9 +468,7 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
               <p className="text-sm text-neutral-800">—</p>
             )}
           </div>
-          <Dato label="Quién aprueba" valor={ficha.quienAprueba} />
           <div className="sm:col-span-2">
-            <Dato label="Otros estudios" valor={ficha.otrosEstudios} multiline />
           </div>
         </div>
       </Section>
@@ -485,7 +549,6 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
               />
             </div>
             <div className="sm:col-span-2"><label className={label}>Posgrado</label><input value={posgrado} onChange={e => setPosgrado(e.target.value)} className={input} /></div>
-            <div className="sm:col-span-2"><label className={label}>Otros estudios</label><textarea value={otrosEstudios} onChange={e => setOtros(e.target.value)} rows={3} className={`${input} resize-y`} /></div>
             <div className="sm:col-span-2">
               <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-2">Jefe directo</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -508,7 +571,6 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
                 </div>
               </div>
             </div>
-            <div className="sm:col-span-2"><label className={label}>Quién aprueba</label><input value={quienAprueba} onChange={e => setAprueba(e.target.value)} className={input} /></div>
           </div>
         </div>
       </div>

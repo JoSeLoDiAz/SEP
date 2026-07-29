@@ -129,6 +129,33 @@ function anoEnLetras(a: number): string {
   return result.trim();
 }
 
+/**
+ * Fila de la tabla pública, común a los dos orígenes.
+ *
+ * Los campos son deliberadamente genéricos (`entidad`, `concepto`) en vez de
+ * `empresaRazonSocial` / `accionFormacionNombre`: un certificado de evaluador
+ * no tiene empresa ni acción de formación, y forzarlo a esos nombres obligaba
+ * a la pantalla a interpretarlos según el tipo.
+ */
+export interface CertificadoPublico {
+  consecutivo: number;
+  tipo: 'BENEFICIARIO' | 'EVALUADOR';
+  tipoNombre: string;
+  entidad: string;
+  concepto: string;
+  detalle: string;
+  fecha: string;
+  /** Epoch en ms, solo para ordenar. No se pinta. */
+  fechaOrden: number;
+  codigo: string;
+  /** Ruta relativa lista para abrir. La arma el backend porque cada tipo tiene la suya. */
+  urlPdf: string;
+  personaId: number;
+}
+
+const ENTIDAD_EVALUADOR =
+  'SENA — Grupo de Gestión para la Productividad y la Competitividad';
+
 @Injectable()
 export class CertificadosService {
   constructor(private readonly dataSource: DataSource) {}
@@ -149,30 +176,80 @@ export class CertificadosService {
     return rows.length ? (rows[0]['PERSONAID'] as number) : null;
   }
 
-  /** Lista certificados de una persona */
+  /**
+   * Lista TODOS los certificados de una persona: los de beneficiario de una
+   * acción de formación y los de evaluador de un ciclo del banco.
+   *
+   * Van juntos a propósito. Quien entra a esta página busca "mi certificado"
+   * con su cédula; obligarlo a saber de antemano en calidad de qué participó,
+   * y a entrar por dos pantallas distintas, es pedirle que conozca la
+   * organización interna del sistema.
+   */
   async buscarPorPersona(tipoDocumento: string, numero: string) {
     const personaId = await this.findPersonaId(tipoDocumento, numero);
     if (!personaId) return [];
-    return this.listarCertificados(personaId, null);
+    return this.unir(
+      await this.listarCertificados(personaId, null),
+      await this.listarCertificadosEvaluador(personaId, null),
+    );
   }
 
-  /** Lista certificados por código de evidencia */
+  /**
+   * Lista certificados por código.
+   *
+   * Los dos tipos tienen códigos con formas distintas —`EVIDENCIAVALIDACION`
+   * del beneficiario y `CODIGOVERIFICACION` del evaluador—, así que se
+   * consultan ambos y gana el que responda. Un solo campo en pantalla: quien
+   * tiene el código en la mano no sabe cuál de los dos es.
+   */
   async buscarPorCodigo(codigo: string) {
+    const limpio = codigo.trim();
+    if (!limpio) return [];
+
     const rows = await this.dataSource.query(
       `SELECT P.PERSONAID FROM AFGRUPOBENEFICIARIO AFGB
        JOIN PERSONA P ON P.PERSONAID = AFGB.PERSONAID
        WHERE TO_CHAR(AFGB.EVIDENCIAVALIDACION) LIKE :param_0`,
-      [`%${codigo.trim()}%`],
+      [`%${limpio}%`],
     );
-    if (!rows.length) return [];
-    const personaId = rows[0]['PERSONAID'] as number;
-    return this.listarCertificados(personaId, codigo.trim());
+    const beneficiario = rows.length
+      ? await this.listarCertificados(rows[0]['PERSONAID'] as number, limpio)
+      : [];
+
+    // El código del evaluador es exacto y único (UQ_CERT_CODIGO), no un LIKE:
+    // buscarlo por substring permitiría pescar certificados ajenos tecleando
+    // un prefijo corto.
+    const evalRows = await this.dataSource.query(
+      `SELECT E.PERSONAID FROM EVALUADORCERTIFICADO C
+       JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+       JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+       WHERE UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER(:param_0)`,
+      [limpio],
+    );
+    const evaluador = evalRows.length
+      ? await this.listarCertificadosEvaluador(
+          evalRows[0]['PERSONAID'] as number,
+          limpio,
+        )
+      : [];
+
+    return this.unir(beneficiario, evaluador);
+  }
+
+  /** Mezcla las dos fuentes por fecha y renumera el consecutivo de pantalla. */
+  private unir(
+    beneficiario: CertificadoPublico[],
+    evaluador: CertificadoPublico[],
+  ): CertificadoPublico[] {
+    return [...beneficiario, ...evaluador]
+      .sort((a, b) => b.fechaOrden - a.fechaOrden)
+      .map((c, i) => ({ ...c, consecutivo: i + 1 }));
   }
 
   private async listarCertificados(
     personaId: number,
     soloEvidencia: string | null,
-  ) {
+  ): Promise<CertificadoPublico[]> {
     let sql = `
       SELECT
         AFGB.AFGRUPOBENEFICIARIOID,
@@ -207,21 +284,122 @@ export class CertificadosService {
 
     const str = (v: unknown) => String(v ?? '').trim();
 
-    return rows.map((r, i) => ({
-      consecutivo: i + 1,
-      afGrupoBeneficiarioId: r['AFGRUPOBENEFICIARIOID'],
-      personaId: r['PERSONAID'],
-      proyectoId: r['PROYECTOID'],
-      empresaRazonSocial: str(r['EMPRESARAZONSOCIAL']),
-      accionFormacionNombre: str(r['ACCIONFORMACIONNOMBRE'])
-        .toUpperCase()
-        .replace('TRANSFERENCIA:', '')
-        .trim(),
-      fechaValidacionInterventor: this.formatFecha(
-        r['FECHAVALIDACIONINTERVENTOR'] as Date,
-      ),
-      evidenciaValidacion: str(r['EVIDENCIAVALIDACION']),
-    }));
+    return rows.map((r, i) => {
+      const id = Number(r['AFGRUPOBENEFICIARIOID']);
+      const personaIdFila = Number(r['PERSONAID']);
+      const fecha = r['FECHAVALIDACIONINTERVENTOR'] as Date;
+      return {
+        consecutivo: i + 1,
+        tipo: 'BENEFICIARIO' as const,
+        tipoNombre: 'Beneficiario',
+        entidad: str(r['EMPRESARAZONSOCIAL']),
+        concepto: str(r['ACCIONFORMACIONNOMBRE'])
+          .toUpperCase()
+          .replace('TRANSFERENCIA:', '')
+          .trim(),
+        detalle: 'Acción de formación',
+        fecha: this.formatFecha(fecha),
+        fechaOrden: fecha ? new Date(fecha).getTime() : 0,
+        codigo: str(r['EVIDENCIAVALIDACION']),
+        urlPdf: `/certificados/${id}/pdf?personaId=${personaIdFila}`,
+        personaId: personaIdFila,
+      };
+    });
+  }
+
+  /**
+   * Certificados de evaluador de una persona.
+   *
+   * Solo los vigentes: un certificado anulado no se descarga, y aparecer en la
+   * lista sin poder abrirse sería peor que no aparecer. La consulta parte del
+   * `PERSONAID` porque una persona puede ser evaluador y beneficiario a la vez
+   * —de hecho es lo normal en el SENA— y aquí se la trata como una sola.
+   */
+  private async listarCertificadosEvaluador(
+    personaId: number,
+    soloCodigo: string | null,
+  ): Promise<CertificadoPublico[]> {
+    const params: unknown[] = [personaId];
+    let filtroCodigo = '';
+    if (soloCodigo) {
+      filtroCodigo = ` AND UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER(:param_1)`;
+      params.push(soloCodigo);
+    }
+
+    const rows: Record<string, unknown>[] = await this.dataSource.query(
+      `SELECT C.CERTIFICADOID, C.ANIO, C.CONSECUTIVO, C.CODIGOVERIFICACION,
+              C.FECHAEMISION, C.DATOSSNAPSHOT, E.PERSONAID
+         FROM EVALUADORCERTIFICADO C
+         JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+         JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+        WHERE E.PERSONAID = :param_0
+          AND C.ANULADO = 0${filtroCodigo}
+        ORDER BY C.ANIO DESC, C.CONSECUTIVO DESC`,
+      params,
+    );
+
+    const str = (v: unknown) => String(v ?? '').trim();
+
+    return rows.map((r, i) => {
+      // El snapshot es la fuente de verdad del documento (v37): trae el rol y
+      // la convocatoria tal como estaban al emitirlo. Si estuviera corrupto,
+      // la fila sigue saliendo con lo que hay en columnas propias.
+      let s: Record<string, unknown> = {};
+      try {
+        s = JSON.parse(str(r['DATOSSNAPSHOT'])) as Record<string, unknown>;
+      } catch {
+        /* snapshot ilegible: se muestra el certificado igual */
+      }
+      const id = Number(r['CERTIFICADOID']);
+      const personaIdFila = Number(r['PERSONAID']);
+      const fecha = r['FECHAEMISION'] as Date;
+      const numero = `${r['ANIO']}-${String(Number(r['CONSECUTIVO'])).padStart(4, '0')}`;
+      const rol = str(s['rol']) || 'Evaluador';
+      const contexto = str(s['convocatoria']) || str(s['proceso']);
+
+      return {
+        consecutivo: i + 1,
+        tipo: 'EVALUADOR' as const,
+        tipoNombre: 'Evaluador',
+        entidad: ENTIDAD_EVALUADOR,
+        concepto: [rol.toUpperCase(), contexto.toUpperCase()]
+          .filter(Boolean)
+          .join(' · '),
+        detalle: `Banco de Evaluadores · Certificado N° ${numero}`,
+        fecha: this.formatFecha(fecha),
+        fechaOrden: fecha ? new Date(fecha).getTime() : 0,
+        codigo: str(r['CODIGOVERIFICACION']),
+        urlPdf: `/certificados/evaluador/${id}/pdf?personaId=${personaIdFila}`,
+        personaId: personaIdFila,
+      };
+    });
+  }
+
+  /**
+   * PDF de un certificado de evaluador, para la página pública.
+   *
+   * Exige el `personaId` además del id del certificado, igual que la descarga
+   * del beneficiario: sin él, un id secuencial bastaría para bajarse cualquier
+   * certificado del sistema. Y vuelve a comprobar que no esté anulado, porque
+   * entre la búsqueda y el clic pudo anularse.
+   */
+  async pdfEvaluador(
+    certificadoId: number,
+    personaId: number,
+  ): Promise<{ certificadoId: number }> {
+    const rows = await this.dataSource.query(
+      `SELECT C.CERTIFICADOID, C.ANULADO
+         FROM EVALUADORCERTIFICADO C
+         JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+         JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+        WHERE C.CERTIFICADOID = :param_0 AND E.PERSONAID = :param_1`,
+      [certificadoId, personaId],
+    );
+    if (!rows.length) throw new NotFoundException('Certificado no encontrado');
+    if (Number(rows[0]['ANULADO']) === 1) {
+      throw new NotFoundException('Este certificado fue anulado');
+    }
+    return { certificadoId };
   }
 
   /** Genera el PDF del certificado */

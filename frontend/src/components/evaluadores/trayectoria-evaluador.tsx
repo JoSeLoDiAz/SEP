@@ -6,7 +6,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   AlertTriangle, Award, BadgeCheck, Briefcase, CalendarDays, Check, CheckCircle2,
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
-  Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Users, XCircle,
+  Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Trash2, Users, XCircle,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -100,6 +100,9 @@ interface Detalle extends Participacion {
   proyectos: Array<{
     partProyectoId: number; nombreProyecto: string | null; razonSocial: string | null
     nit: string | null; puntajeOtorgado: number | null; origen: string
+    // El backend siempre los devolvió; sin declararlos no se podía saber si un
+    // candidato del buscador ya estaba puesto.
+    proyectoId: number | null; guardadoId: number | null
   }>
   documentos: { propios: Documento[]; heredados: Documento[]; permanentes: Documento[] }
   certificado: { certificadoId: number; consecutivo: number; codigoVerificacion: string; anulado: boolean } | null
@@ -570,7 +573,9 @@ function PanelSubTabs({
 
       {subTab === 'documentos' && <TabDocumentos detalle={detalle} setToast={setToast} />}
       {subTab === 'formacion' && <TabFormacion detalle={detalle} setToast={setToast} />}
-      {subTab === 'proyectos' && <TabProyectos detalle={detalle} />}
+      {subTab === 'proyectos' && (
+        <TabProyectos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+      )}
       {subTab === 'retroalimentacion' && <TabRetroalimentacion detalle={detalle} />}
       {subTab === 'certificado' && (
         <TabCertificado detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
@@ -809,37 +814,218 @@ const ORIGEN_PROYECTO: Record<string, { texto: string; clase: string }> = {
   HISTORICO: { texto: 'Histórico', clase: 'bg-neutral-100 text-neutral-600' },
 }
 
-function TabProyectos({ detalle }: { detalle: Detalle }) {
-  if (!detalle.proyectos.length) {
-    return <Vacio texto="Sin proyectos registrados en este ciclo." />
+/** Un proyecto candidato tal como lo devuelve el buscador del backend. */
+interface ProyectoCandidato {
+  proyectoId: number | null
+  guardadoId: number | null
+  nit: string | null
+  razonSocial: string | null
+  nombreProyecto: string | null
+  anio: number | null
+  origen: string
+}
+interface RespProyectos {
+  convocatoria: { id: number; nombre: string | null } | null
+  motivo: string | null
+  items: ProyectoCandidato[]
+}
+
+/**
+ * Proyectos evaluados en el ciclo.
+ *
+ * Era de solo lectura: el endpoint para asignarlos existía y ninguna pantalla
+ * lo llamaba, así que el hito 7 no había forma de encenderlo. Los candidatos
+ * salen acotados a la convocatoria del ciclo — un evaluador de 2026 solo pudo
+ * evaluar proyectos de esa convocatoria.
+ */
+function TabProyectos({
+  detalle, setToast, onRecargar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
+  const [resp, setResp] = useState<RespProyectos | null>(null)
+  const [buscando, setBuscando] = useState(false)
+  const [guardando, setGuardando] = useState<string | null>(null)
+  const [quitando, setQuitando] = useState<number | null>(null)
+
+  const pid = detalle.participacionId
+
+  // Se busca con un respiro tras dejar de teclear, para no lanzar una consulta
+  // por letra. Con la convocatoria puesta la lista sale sin escribir nada.
+  useEffect(() => {
+    if (!abierto) return
+    let vivo = true
+    const t = setTimeout(async () => {
+      setBuscando(true)
+      try {
+        const r = await api.get<RespProyectos>('/evaluadores/buscar-proyectos', {
+          params: { q: busqueda.trim(), participacionId: pid, limit: 60 },
+        })
+        if (vivo) setResp(r.data)
+      } catch (err) {
+        if (vivo) setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo buscar proyectos') })
+      } finally {
+        if (vivo) setBuscando(false)
+      }
+    }, 350)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [abierto, busqueda, pid, setToast])
+
+  const yaEsta = (c: ProyectoCandidato) => detalle.proyectos.some(p =>
+    (c.proyectoId != null && p.proyectoId === c.proyectoId) ||
+    (c.guardadoId != null && p.guardadoId === c.guardadoId))
+
+  async function agregar(c: ProyectoCandidato) {
+    const clave = `${c.proyectoId ?? 'g'}-${c.guardadoId ?? 'p'}`
+    setGuardando(clave)
+    try {
+      await api.post(`/evaluadores/participaciones/${pid}/proyectos`, {
+        proyectoId: c.proyectoId, guardadoId: c.guardadoId,
+      })
+      setToast({ tipo: 'success', msg: 'Proyecto agregado al ciclo' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo agregar el proyecto') })
+    } finally {
+      setGuardando(null)
+    }
   }
+
+  async function quitar(partProyectoId: number) {
+    setQuitando(partProyectoId)
+    try {
+      await api.delete(`/evaluadores/proyectos-evaluados/${partProyectoId}`)
+      setToast({ tipo: 'success', msg: 'Proyecto retirado del ciclo' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo retirar') })
+    } finally {
+      setQuitando(null)
+    }
+  }
+
+  const etiqueta = (c: { nombreProyecto: string | null; razonSocial: string | null }) =>
+    // El nombre del proyecto viene vacío en casi todos: la empresa es lo que
+    // de verdad identifica al proyecto para quien lo está buscando.
+    c.razonSocial || c.nombreProyecto || 'Sin identificar'
+
   return (
-    <ul className="flex flex-col divide-y divide-neutral-100">
-      {detalle.proyectos.map(p => {
-        const o = ORIGEN_PROYECTO[p.origen] ?? ORIGEN_PROYECTO.HISTORICO
-        return (
-          <li key={p.partProyectoId} className="flex items-center gap-3 px-5 py-3">
-            <Briefcase size={15} className="shrink-0 text-neutral-400" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium text-neutral-800">
-                {p.nombreProyecto || 'Sin nombre'}
-              </p>
-              <p className="truncate text-[11px] text-neutral-500">
-                {[p.razonSocial, p.nit].filter(Boolean).join(' · ') || '—'}
-              </p>
-            </div>
-            {p.puntajeOtorgado != null && (
-              <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: PRIMARY }}>
-                {p.puntajeOtorgado}
-              </span>
-            )}
-            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${o.clase}`}>
-              {o.texto}
-            </span>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-100 px-5 py-3">
+        <p className="text-[12px] text-neutral-500">
+          {detalle.proyectos.length === 0
+            ? 'Sin proyectos registrados en este ciclo.'
+            : `${detalle.proyectos.length} proyecto(s) evaluado(s)`}
+        </p>
+        <button
+          onClick={() => setAbierto(v => !v)}
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+          style={{ backgroundColor: INSTITUTIONAL }}
+        >
+          <Plus size={13} />
+          {abierto ? 'Cerrar' : 'Agregar proyecto'}
+        </button>
+      </div>
+
+      {abierto && (
+        <div className="border-b border-neutral-100 bg-neutral-50/60 px-5 py-4">
+          {resp?.convocatoria && (
+            <p className="mb-2 text-[11px] text-neutral-500">
+              Proyectos de <strong>{resp.convocatoria.nombre}</strong>
+            </p>
+          )}
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="Filtrar por empresa o NIT..."
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
+          />
+
+          {buscando && (
+            <p className="mt-3 flex items-center gap-2 text-[12px] text-neutral-500">
+              <Loader2 size={13} className="animate-spin" /> Buscando...
+            </p>
+          )}
+
+          {!buscando && resp?.motivo && (
+            <p className="mt-3 text-[12px] text-amber-800">{resp.motivo}</p>
+          )}
+
+          {!buscando && resp && resp.items.length > 0 && (
+            <ul className="mt-3 max-h-72 divide-y divide-neutral-100 overflow-y-auto rounded-xl border border-neutral-200 bg-white">
+              {resp.items.map(c => {
+                const clave = `${c.proyectoId ?? 'g'}-${c.guardadoId ?? 'p'}`
+                const puesto = yaEsta(c)
+                return (
+                  <li key={clave} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-neutral-800">
+                        {etiqueta(c)}
+                      </p>
+                      <p className="truncate text-[11px] text-neutral-500">
+                        {[c.nit, c.anio].filter(Boolean).join(' · ') || '—'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => agregar(c)}
+                      disabled={puesto || guardando === clave}
+                      className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-[11px] font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-40"
+                    >
+                      {guardando === clave
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : puesto ? 'Ya está' : 'Agregar'}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {detalle.proyectos.length > 0 && (
+        <ul className="flex flex-col divide-y divide-neutral-100">
+          {detalle.proyectos.map(p => {
+            const o = ORIGEN_PROYECTO[p.origen] ?? ORIGEN_PROYECTO.HISTORICO
+            return (
+              <li key={p.partProyectoId} className="flex items-center gap-3 px-5 py-3">
+                <Briefcase size={15} className="shrink-0 text-neutral-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium text-neutral-800">
+                    {p.razonSocial || p.nombreProyecto || 'Sin identificar'}
+                  </p>
+                  <p className="truncate text-[11px] text-neutral-500">
+                    {[p.nit, p.nombreProyecto].filter(Boolean).join(' · ') || '—'}
+                  </p>
+                </div>
+                {p.puntajeOtorgado != null && (
+                  <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: PRIMARY }}>
+                    {p.puntajeOtorgado}
+                  </span>
+                )}
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${o.clase}`}>
+                  {o.texto}
+                </span>
+                <button
+                  onClick={() => quitar(p.partProyectoId)}
+                  disabled={quitando === p.partProyectoId}
+                  title="Retirar del ciclo"
+                  className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                >
+                  {quitando === p.partProyectoId
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Trash2 size={13} />}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }
 

@@ -168,13 +168,22 @@ export class FichaPdfService {
    */
   private async proyectosPorCiclo(evaluadorId: number): Promise<Map<number, ProyectoCiclo[]>> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      // Igual que en la trayectoria: la empresa se resuelve contra el proyecto
+      // real. Las columnas de la tabla pivote solo se llenan en los registros
+      // históricos escritos a mano.
       `SELECT pp.PARTICIPACIONID   AS "participacionId",
-              TRIM(pp.NIT)         AS "nit",
-              TRIM(pp.RAZONSOCIAL) AS "razonSocial",
-              TRIM(pp.NOMBREPROYECTO) AS "nombreProyecto",
+              COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
+                       TRIM(pp.NIT))                 AS "nit",
+              COALESCE(TRIM(em.EMPRESARAZONSOCIAL), TRIM(g.RAZONSOCIAL),
+                       TRIM(pp.RAZONSOCIAL))         AS "razonSocial",
+              COALESCE(TRIM(pr.PROYECTONOMBRE), TRIM(g.NOMBREPROYECTO),
+                       TRIM(pp.NOMBREPROYECTO))      AS "nombreProyecto",
               pp.PUNTAJEOTORGADO   AS "puntajeOtorgado"
          FROM EVALUADORPARTPROYECTO pp
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = pp.PARTICIPACIONID
+         LEFT JOIN PROYECTO pr ON pr.PROYECTOID = pp.PROYECTOID
+         LEFT JOIN EMPRESA  em ON em.EMPRESAID  = pr.EMPRESAID
+         LEFT JOIN CONVPROYGUARDADO g ON g.GUARDADOID = pp.GUARDADOID
         WHERE pa.EVALUADORID = :1
         ORDER BY pp.PARTICIPACIONID, pp.PARTPROYECTOID`,
       [evaluadorId],

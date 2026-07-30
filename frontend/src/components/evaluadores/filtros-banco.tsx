@@ -327,7 +327,7 @@ export function BarraFiltrosBanco({
         ) : (
           <>
             {/* La búsqueda de texto también es un criterio: sin este chip, quien
-                buscó "cardona" y obtuvo resultados no tenía forma de volver al
+                buscó un apellido y obtuvo resultados no tenía forma de volver al
                 listado completo salvo borrar el campo a mano. */}
             {hayBusqueda && (
               <button

@@ -88,7 +88,8 @@ certificados".
   Emisión de certificados
       Déjela BLOQUEADA hasta que el proceso cierre.
   Firma
-      Quién avala el certificado. Sale de las firmas institucionales.
+      Quién avala los certificados de este año. Déjela lista antes de
+      emitir (ver 7.2).
   Texto del certificado
       Opcional. Vacío usa el texto estándar.
 
@@ -264,7 +265,7 @@ uno está apagado es porque falta el dato, no porque se le olvidó marcarlo.
   6. Asignación a proceso, mesa y equipo
       Se enciende cuando están los TRES. Con dos no basta.
   7. Proyectos evaluados
-      Registre los proyectos que evaluó, buscándolos por nombre o NIT.
+      Registre los proyectos que evaluó. Ver el paso a paso en 5.1.
   8. Retroalimentación diligenciada
       Cuando el evaluador contesta todas las que le asignaron.
   9. Certificado emitido
@@ -285,6 +286,47 @@ El sistema también le sugiere el estado del ciclo según los hitos que
 lleve: Postulado, Autorizado, Habilitado, Asignado, Evaluando, Finalizó,
 Certificado. Usted puede cambiarlo a mano, pero tiene que escribir el
 motivo, y ese cambio queda en la auditoría.
+
+  5.1 Registrar los proyectos que evaluó (hito 7)
+
+Este es el único hito que hay que ir alimentando durante el proceso, a
+medida que el evaluador va terminando proyectos.
+
+  1. Abra el año del evaluador y entre a la pestaña "Proyectos evaluados".
+
+  2. Haga clic en "Agregar proyecto". Se abre un panel con los proyectos
+     disponibles.
+
+  3. Arriba del panel le dice de qué convocatoria son. Debajo hay un campo
+     para filtrar por empresa o NIT.
+
+  4. Al lado de cada proyecto hay un botón "Agregar". Púlselo y el proyecto
+     queda registrado.
+
+  5. El panel NO se cierra. Siga agregando los que falten: un evaluador
+     normalmente evalúa varios proyectos, no uno.
+
+  6. Cuando termine, pulse "Cerrar".
+
+  +----------------------------------------------------------------------+
+  | La lista solo trae los proyectos de la convocatoria del SEP a la que |
+  | está atado el ciclo. Es a propósito: un evaluador de la convocatoria |
+  | de 2026 no pudo evaluar proyectos de otra. Si no encuentra un        |
+  | proyecto que usted sabe que existe, casi siempre es porque pertenece |
+  | a otra convocatoria.                                                 |
+  +----------------------------------------------------------------------+
+
+Los que ya registró aparecen con el botón en gris diciendo "Ya está", para
+que no los agregue dos veces.
+
+Si se equivocó, en la lista de arriba cada proyecto tiene un botón de
+papelera para retirarlo del ciclo.
+
+Al agregar el primero, el hito 7 se enciende solo.
+
+Los proyectos se identifican por la EMPRESA, no por un nombre de proyecto:
+en la base casi todos vienen sin nombre, así que busque por la razón
+social o por el NIT.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -338,7 +380,23 @@ evita certificar un ciclo que sigue abierto.
   | motivo número uno de "no me deja certificar".                        |
   +----------------------------------------------------------------------+
 
-  7.2 Emitir
+  7.2 Quién firma
+
+La firma sale del campo "Firma" del ciclo (Parte 1.2). Es la persona que
+avala los certificados de ESE año.
+
+  +----------------------------------------------------------------------+
+  | En el momento de emitir, el sistema GUARDA dentro del certificado el |
+  | nombre y el cargo de quien firmó. Si el año entrante cambia la       |
+  | coordinación y usted actualiza la firma del ciclo nuevo, los         |
+  | certificados ya emitidos siguen mostrando a quien los firmó en su    |
+  | momento. No se reescriben nunca.                                     |
+  +----------------------------------------------------------------------+
+
+Por eso vale la pena revisar la firma ANTES de emitir en lote: una vez
+emitido, cambiarla exige anular y volver a emitir.
+
+  7.3 Emitir
 
 Dos formas:
 
@@ -352,17 +410,27 @@ Dos formas:
 Cada certificado recibe un número consecutivo del año y un código de
 verificación único.
 
-  7.3 Anular y reemitir
+  7.4 Anular y reemitir
 
 Un certificado emitido NO se borra: se anula, con motivo. Queda el
 registro de que existió y de por qué se anuló. Es deliberado: un documento
 oficial que ya circuló no puede desaparecer del sistema.
 
-Después de anular, en la misma pantalla aparece "Emitir uno nuevo". El
-número anulado no se reutiliza: el nuevo lleva el siguiente consecutivo
-del año.
+  1. Abra el año del evaluador → pestaña "Certificado".
 
-  7.4 Cómo lo descarga el evaluador
+  2. Pulse "Anular" y escriba el motivo. Sin motivo no deja continuar.
+
+  3. En la misma pantalla aparece "Emitir uno nuevo". Púlselo y confirme.
+
+El número anulado no se reutiliza: el nuevo lleva el siguiente consecutivo
+del año. Así que si anula el 2027-0004, el siguiente será el 2027-0005 y
+el 0004 queda marcado como anulado para siempre.
+
+Este es el camino para corregir cualquier cosa del certificado: un dato
+mal escrito, las horas, o la firma equivocada. Se anula y se emite de
+nuevo con lo corregido.
+
+  7.5 Cómo lo descarga el evaluador
 
 No necesita pedírselo a usted. Entra a la página pública de certificados
 del SEP —la misma que usan los beneficiarios—, escribe su cédula y lo
@@ -458,7 +526,14 @@ SI ALGO NO SALE COMO ESPERA
   No me deja emitir el certificado
       Falta activar la emisión en el ciclo (Parte 7.1).
   Dice que ya hay un certificado vigente
-      Ese año ya tiene uno. Anúlelo y use "Emitir uno nuevo".
+      Ese año ya tiene uno. Anúlelo y use "Emitir uno nuevo" (Parte
+      7.4).
+  El certificado salió con la firma equivocada
+      Corrija la firma en el ciclo, anule el certificado y emita uno
+      nuevo. Cambiar la firma del ciclo no reescribe los ya emitidos.
+  No encuentro el proyecto que evaluó
+      La lista solo trae los de la convocatoria del ciclo. Busque por la
+      empresa o el NIT, no por nombre del proyecto.
   Dice que la convocatoria ya tiene un ciclo de ese periodo
       Alguien ya lo abrió. Búsquelo en la lista en vez de crear otro.
   El hito de asignación no se enciende
@@ -507,11 +582,12 @@ EL CICLO COMPLETO EN UNA PÁGINA
   6. Cargar del año: autorización del jefe, confidencialidad, curso y
      prueba.
 
-  7. Registrar los proyectos que evaluó.
+  7. Registrar los proyectos que evaluó, uno por uno, a medida que los
+     termina.
 
   8. Generar y abrir la retroalimentación; descargar el reporte al cerrar.
 
-  9. Habilitar la emisión y certificar.
+  9. Revisar la firma del ciclo, habilitar la emisión y certificar.
 
   10. El evaluador descarga su certificado solo, desde la página pública.
 

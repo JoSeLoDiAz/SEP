@@ -714,14 +714,29 @@ export class TrayectoriaService {
     return rows.map(r => ({ ...r, partAlcanceId: Number(r.partAlcanceId) }))
   }
 
+  /**
+   * Los proyectos que evaluó en un ciclo.
+   *
+   * El NIT y la razón social se resuelven contra el proyecto real, no contra
+   * la copia de la tabla pivote: al asignar desde la pantalla solo se guarda
+   * el identificador, así que esas columnas quedan vacías y la lista salía
+   * entera como "Sin identificar". La copia solo manda para los registros
+   * históricos escritos a mano, que no apuntan a ningún proyecto.
+   */
   private async cargarProyectos(participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pp.PARTPROYECTOID     AS "partProyectoId",
               pp.PROYECTOID         AS "proyectoId",
               pp.GUARDADOID         AS "guardadoId",
-              TRIM(pp.NIT)          AS "nit",
-              TRIM(pp.RAZONSOCIAL)  AS "razonSocial",
-              TRIM(pp.NOMBREPROYECTO) AS "nombreProyecto",
+              -- TO_NCHAR sobre el NIT: en EMPRESA es NUMBER y las otras dos
+              -- son NVARCHAR2. Sin igualar el juego de caracteres, el COALESCE
+              -- falla con ORA-12704 y la pestaña entera se cae.
+              COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
+                       TRIM(pp.NIT))                    AS "nit",
+              COALESCE(TRIM(em.EMPRESARAZONSOCIAL), TRIM(g.RAZONSOCIAL),
+                       TRIM(pp.RAZONSOCIAL))            AS "razonSocial",
+              COALESCE(TRIM(pr.PROYECTONOMBRE), TRIM(g.NOMBREPROYECTO),
+                       TRIM(pp.NOMBREPROYECTO))         AS "nombreProyecto",
               pp.PUNTAJEOTORGADO    AS "puntajeOtorgado",
               pp.FECHAEVALUACION    AS "fechaEvaluacion",
               TRIM(pp.OBSERVACIONES) AS "observaciones",
@@ -729,6 +744,9 @@ export class TrayectoriaService {
                    WHEN pp.GUARDADOID IS NOT NULL THEN 'FORMULADO'
                    ELSE 'HISTORICO' END AS "origen"
          FROM EVALUADORPARTPROYECTO pp
+         LEFT JOIN PROYECTO pr ON pr.PROYECTOID = pp.PROYECTOID
+         LEFT JOIN EMPRESA  em ON em.EMPRESAID  = pr.EMPRESAID
+         LEFT JOIN CONVPROYGUARDADO g ON g.GUARDADOID = pp.GUARDADOID
         WHERE pp.PARTICIPACIONID = :1
         ORDER BY pp.FECHAEVALUACION DESC NULLS LAST, pp.PARTPROYECTOID`,
       [participacionId],

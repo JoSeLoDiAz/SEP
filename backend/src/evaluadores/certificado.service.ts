@@ -43,6 +43,17 @@ interface Snapshot {
   fechaFin: string | null
   convocatoria: string | null
   proyectosEvaluados: number
+
+  // ── Congelado al emitir ──────────────────────────────────────────────
+  // Quién firma y con qué texto salió el documento. Se guardan aquí y no se
+  // vuelven a leer del catálogo, porque la coordinación del GGPC cambia de un
+  // año a otro: si el PDF se regenerara leyendo FIRMACERTIFICADOS, un
+  // certificado de 2024 pasaría a mostrar a quien coordina hoy — es decir,
+  // el documento diría que lo firmó alguien que no lo firmó.
+  firmaNombre?: string | null
+  firmaCargo?: string | null
+  /** Cuerpo con el que se emitió. La plantilla del ciclo puede reescribirse. */
+  textoCertificado?: string | null
 }
 
 const PRIMARY = '#00304D'
@@ -82,6 +93,11 @@ export class CertificadoService {
     const snapshot: Snapshot = {
       ...datos.snapshot,
       horas: horasManuales ?? datos.snapshot.horas,
+      // Se congelan aquí, no al imprimir: quien firma y el cuerpo del documento
+      // son parte de lo que se certificó, no de cómo se ve hoy el catálogo.
+      firmaNombre: datos.firma?.nombre || null,
+      firmaCargo: datos.firma?.cargo || null,
+      textoCertificado: datos.texto ?? null,
     }
 
     let certificadoId = 0
@@ -247,7 +263,7 @@ export class CertificadoService {
       `SELECT ARCHIVOPDF AS "pdf", TRIM(ARCHIVONOMBRE) AS "nombre",
               DATOSSNAPSHOT AS "snapshot", CONSECUTIVO AS "consecutivo",
               TRIM(CODIGOVERIFICACION) AS "codigo", ANULADO AS "anulado",
-              FIRMACERTIFICADOSID AS "firmaId"
+              FIRMACERTIFICADOSID AS "firmaId", PARTICIPACIONID AS "participacionId"
          FROM EVALUADORCERTIFICADO WHERE CERTIFICADOID = :1`,
       [certificadoId],
     )
@@ -264,7 +280,11 @@ export class CertificadoService {
     // Sin BLOB se regenera desde el snapshot. Por eso el snapshot es NOT NULL:
     // es la fuente de verdad del documento, el PDF es solo su presentación.
     const snapshot = JSON.parse(f.snapshot as string) as Snapshot
-    const extras = await this.textoYFirma(snapshot, f.firmaId as number | null)
+    const extras = await this.textoYFirma(
+      snapshot,
+      f.firmaId as number | null,
+      f.participacionId != null ? Number(f.participacionId) : null,
+    )
     const pdf = await this.construirPdf(snapshot, {
       consecutivo: Number(f.consecutivo),
       codigo: f.codigo as string,
@@ -385,12 +405,49 @@ export class CertificadoService {
     }
   }
 
-  private async textoYFirma(snapshot: Snapshot, firmaId: number | null) {
+  /**
+   * Reconstruye texto y firma para reimprimir un certificado ya emitido.
+   *
+   * La regla es: **manda el snapshot**. Un certificado emitido en 2024 debe
+   * salir hoy exactamente igual que el día que se firmó, aunque desde entonces
+   * haya cambiado la coordinación del GGPC o se haya reescrito la plantilla
+   * del ciclo. Del catálogo solo se toma la imagen de la rúbrica, y solo para
+   * la firma que quedó registrada en la fila del certificado.
+   *
+   * El respaldo al catálogo existe únicamente para los certificados anteriores
+   * a este congelamiento, cuyo snapshot no trae estos campos.
+   */
+  private async textoYFirma(
+    snapshot: Snapshot,
+    firmaId: number | null,
+    participacionId: number | null,
+  ) {
+    const catalogo = await this.cargarFirma(firmaId)
+    const congelada = snapshot.firmaNombre || snapshot.firmaCargo
+    const firma = congelada
+      ? {
+          nombre: snapshot.firmaNombre ?? '',
+          cargo: snapshot.firmaCargo ?? '',
+          imagen: catalogo?.imagen ?? null,
+        }
+      : catalogo
+
+    if (snapshot.textoCertificado != null) {
+      return { texto: snapshot.textoCertificado, firma }
+    }
+
+    // Certificado viejo: se busca la plantilla por la participación, no por el
+    // año. Un mismo año puede tener varias convocatorias y `ROWNUM = 1` traía
+    // cualquiera de ellas, así que el cuerpo podía no ser el que correspondía.
+    if (participacionId == null) return { texto: null, firma }
     const filas: Array<{ texto: string | null }> = await this.dataSource.query(
-      `SELECT CERTIFICADOTEXTO AS "texto" FROM EVALUADORCONVOCATORIA
-        WHERE ANIO = :1 AND ROWNUM = 1`, [snapshot.anio],
+      `SELECT cv.CERTIFICADOTEXTO AS "texto"
+         FROM EVALUADORPARTICIPACION pa
+         JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
+        WHERE pa.PARTICIPACIONID = :1`,
+      [participacionId],
     )
-    return { texto: filas[0]?.texto ?? null, firma: await this.cargarFirma(firmaId) }
+    return { texto: filas[0]?.texto ?? null, firma }
   }
 
   private async cargarFirma(firmaId: number | null) {

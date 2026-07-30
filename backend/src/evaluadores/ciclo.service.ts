@@ -465,15 +465,86 @@ export class CicloService {
   }
 
   /**
-   * Typeahead para asignar proyectos. Busca en las dos fuentes reales del SEP
-   * y las devuelve mezcladas y etiquetadas, para que quien carga no tenga que
-   * saber de antemano si el proyecto llegó a ejecutarse o se quedó formulado.
+   * Los proyectos que se le pueden asignar a un ciclo.
+   *
+   * Se acotan a la CONVOCATORIA del ciclo, no a todo el SEP: un evaluador del
+   * ciclo 2026 solo pudo evaluar proyectos de esa convocatoria, y ofrecerle
+   * los 1.024 del histórico es invitar a atribuirle uno de otro año. Con el
+   * filtro puesto, la lista es corta —entre 8 y 300 según la convocatoria— y
+   * se puede navegar sin escribir nada.
+   *
+   * Ojo con los datos: `PROYECTONOMBRE` viene NULL en todos los registros, así
+   * que el proyecto se identifica por la EMPRESA. Buscar por nombre de
+   * proyecto no encuentra nada, y por eso la búsqueda mira sobre todo la razón
+   * social y el NIT.
+   *
+   * Devuelve también el contexto para que la pantalla pueda explicar por qué
+   * la lista está vacía en vez de mostrar un hueco.
    */
-  async buscarProyectos(q: string, limite = 15) {
+  async buscarProyectos(q: string, limite = 15, participacionId?: number) {
     const texto = (q ?? '').trim()
-    if (texto.length < 3) return []
+    const tope = Math.min(200, Math.max(1, limite))
+
+    let convocatoriaSepId: number | null = null
+    let convocatoriaNombre: string | null = null
+    if (participacionId) {
+      const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+        `SELECT ec.CONVOCATORIASEPID AS "sepId",
+                TRIM(cs.CONVOCATORIANOMBRE) AS "nombre"
+           FROM EVALUADORPARTICIPACION pa
+           LEFT JOIN EVALUADORCONVOCATORIA ec ON ec.CONVOCATORIAID = pa.CONVOCATORIAID
+           LEFT JOIN CONVOCATORIA cs ON cs.CONVOCATORIAID = ec.CONVOCATORIASEPID
+          WHERE pa.PARTICIPACIONID = :1`,
+        [participacionId],
+      )
+      if (!filas[0]) throw new NotFoundException('Participación no encontrada')
+      convocatoriaSepId = filas[0].sepId != null ? Number(filas[0].sepId) : null
+      convocatoriaNombre = (filas[0].nombre as string | null) ?? null
+
+      if (convocatoriaSepId == null) {
+        // Sin convocatoria del SEP no hay universo de proyectos que ofrecer.
+        // Se dice por qué en vez de devolver una lista vacía muda.
+        return {
+          convocatoria: null,
+          motivo: 'Este ciclo no está atado a una convocatoria del SEP. ' +
+                  'Vincúlelo primero para poder asignarle proyectos.',
+          items: [],
+        }
+      }
+    }
+
+    // Sin convocatoria que acote, se exige un mínimo de texto: buscar en los
+    // 1.024 proyectos con dos letras no ayuda a nadie.
+    if (!convocatoriaSepId && texto.length < 3) {
+      return { convocatoria: null, motivo: 'Escriba al menos 3 caracteres.', items: [] }
+    }
+
     const like = `%${texto.toUpperCase()}%`
-    const tope = Math.min(50, Math.max(1, limite))
+
+    // Cada rama arma sus propios binds: con la convocatoria puesta cambia el
+    // número de parámetros, y numerarlos a mano se rompe en cuanto alguien
+    // agrega una condición.
+    const armar = (cols: { conv: string; nombre: string; social: string; nit: string }) => {
+      const params: unknown[] = []
+      const bind = (v: unknown) => { params.push(v); return `:${params.length}` }
+      const cond: string[] = []
+      if (convocatoriaSepId != null) cond.push(`${cols.conv} = ${bind(convocatoriaSepId)}`)
+      if (texto) {
+        cond.push(`(UPPER(${cols.nombre}) LIKE ${bind(like)}
+                OR UPPER(${cols.social}) LIKE ${bind(like)}
+                OR TRIM(${cols.nit}) LIKE ${bind(like)})`)
+      }
+      return { where: cond.length ? `WHERE ${cond.join(' AND ')}` : '', params }
+    }
+
+    const eje = armar({
+      conv: 'p.CONVOCATORIAID', nombre: 'p.PROYECTONOMBRE',
+      social: 'e.EMPRESARAZONSOCIAL', nit: 'e.EMPRESAIDENTIFICACION',
+    })
+    const form = armar({
+      conv: 'g.CONVOCATORIAID', nombre: 'g.NOMBREPROYECTO',
+      social: 'g.RAZONSOCIAL', nit: 'g.NIT',
+    })
 
     // Sin .catch silencioso a propósito: si una de las dos consultas falla por
     // un cambio de esquema, el typeahead tiene que romperse de forma visible y
@@ -490,12 +561,10 @@ export class CicloService {
            FROM PROYECTO p
            LEFT JOIN EMPRESA      e  ON e.EMPRESAID = p.EMPRESAID
            LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
-          WHERE UPPER(p.PROYECTONOMBRE) LIKE :1
-             OR UPPER(e.EMPRESARAZONSOCIAL) LIKE :2
-             OR TRIM(e.EMPRESAIDENTIFICACION) LIKE :3
-          ORDER BY cv.CONVOCATORIAANIO DESC NULLS LAST, p.PROYECTOID DESC
+          ${eje.where}
+          ORDER BY e.EMPRESARAZONSOCIAL, p.PROYECTOID DESC
           FETCH FIRST ${tope} ROWS ONLY`,
-        [like, like, like],
+        eje.params,
       ),
       this.dataSource.query(
         `SELECT NULL                   AS "proyectoId",
@@ -507,16 +576,14 @@ export class CicloService {
                 'FORMULADO'            AS "origen"
            FROM CONVPROYGUARDADO g
            LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = g.CONVOCATORIAID
-          WHERE UPPER(g.NOMBREPROYECTO) LIKE :1
-             OR UPPER(g.RAZONSOCIAL) LIKE :2
-             OR TRIM(g.NIT) LIKE :3
-          ORDER BY cv.CONVOCATORIAANIO DESC NULLS LAST, g.GUARDADOID DESC
+          ${form.where}
+          ORDER BY g.RAZONSOCIAL, g.GUARDADOID DESC
           FETCH FIRST ${tope} ROWS ONLY`,
-        [like, like, like],
+        form.params,
       ),
     ])
 
-    return [...ejecutados, ...formulados]
+    const items = [...ejecutados, ...formulados]
       .map((r: Record<string, unknown>) => ({
         ...r,
         proyectoId: r.proyectoId != null ? Number(r.proyectoId) : null,
@@ -524,6 +591,18 @@ export class CicloService {
         anio: r.anio != null ? Number(r.anio) : null,
       }))
       .slice(0, tope)
+
+    return {
+      convocatoria: convocatoriaSepId != null
+        ? { id: convocatoriaSepId, nombre: convocatoriaNombre }
+        : null,
+      motivo: items.length === 0
+        ? (convocatoriaSepId != null
+            ? `La convocatoria "${convocatoriaNombre}" no tiene proyectos que coincidan.`
+            : 'Ningún proyecto coincide con la búsqueda.')
+        : null,
+      items,
+    }
   }
 
   // ╔══════════════════════════════════════════════════════════════════════╗

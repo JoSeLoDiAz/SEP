@@ -1065,14 +1065,18 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/roles`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/procesos`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/areas`),
-        api.get<Array<{ id: number; nombre: string; anio: number; periodo: string | null }>>(
-          `/evaluadores/convocatorias`),
+        // A diferencia de los catálogos, este endpoint viene paginado: devuelve
+        // { items, total, page, limit }, no el arreglo pelado. Se pide el tope
+        // de página porque esto llena un desplegable, no una tabla — con el
+        // valor por defecto se quedarían convocatorias fuera sin avisar.
+        api.get<{ items: Array<{ id: number; nombre: string; anio: number; periodo: string | null }> }>(
+          `/evaluadores/convocatorias`, { params: { limit: 100 } }),
       ])
       setItems(r1.data ?? [])
       setRoles(r2.data ?? [])
       setProcesos(r3.data ?? [])
       setAreas(r4.data ?? [])
-      setConvocatorias(r5.data ?? [])
+      setConvocatorias(r5.data?.items ?? [])
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudieron cargar las participaciones') })
     } finally {
@@ -1182,7 +1186,19 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
                 </option>
               ))}
             </select>
-            {!convId && (
+            {/* Sin ninguna convocatoria abierta, el aviso de arriba no ayuda:
+                dice qué se pierde pero no qué hacer, y el desplegable está
+                vacío aunque el campo se marque obligatorio. Se manda al sitio
+                donde se resuelve. */}
+            {convocatorias.length === 0 ? (
+              <p className="mt-1 text-[11px] text-amber-700">
+                Todavía no hay ninguna convocatoria del banco.{' '}
+                <Link href="/panel/evaluadores/convocatorias/nueva" className="font-semibold underline">
+                  Cree primero el ciclo del año
+                </Link>{' '}
+                y vuelva: de él salen la invitación, las notas de corte y el certificado.
+              </p>
+            ) : !convId && (
               <p className="mt-1 text-[11px] text-amber-700">
                 Sin convocatoria el ciclo no hereda la invitación, no entra en la
                 retroalimentación y no se podrá certificar.

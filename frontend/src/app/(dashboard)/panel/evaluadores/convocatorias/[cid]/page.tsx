@@ -5,9 +5,10 @@ import { abrirArchivo, descargarArchivoConNombreDelServidor } from '@/lib/descar
 import { aTitleCase } from '@/lib/title-case'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { ReglasDelCiclo } from '@/components/evaluadores/reglas-convocatoria'
 import {
-  ArrowLeft, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone, Network,
-  Paperclip, Pencil, PowerOff, Save, ShieldCheck, Trash2, Upload, UserCircle2,
+  ArrowLeft, Award, CalendarDays, ChevronRight, Download, Eye, FileText, Loader2, Megaphone,
+  Network, Paperclip, Pencil, PowerOff, Save, ShieldCheck, Trash2, Upload, UserCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
@@ -26,17 +27,29 @@ interface Convocatoria {
   fechaFin: string | null
   observaciones: string | null
   activo: boolean
+  // Reglas del ciclo. El backend siempre las devolvió; la pantalla no las
+  // declaraba, así que no había forma de verlas ni de cambiarlas.
+  puntajeMinimoPrueba: number | null
+  calificacionMinimaCurso: number | null
+  certificadoTexto: string | null
+  certificadoFirmaId: number | null
+  certificadoHabilitado: boolean
+  /** Convocatoria real del SEP sobre la que se monta este ciclo (v40). */
+  convocatoriaSepId: number | null
+  convocatoriaSepNombre: string | null
+  convocatoriaSepAnio: number | null
 }
 
-type TabId = 'datos' | 'documentos'
+type TabId = 'datos' | 'reglas' | 'documentos'
 interface Tab {
   id: TabId
   label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
 }
 const TABS: Tab[] = [
-  { id: 'datos',      label: 'Datos',      icon: UserCircle2 },
-  { id: 'documentos', label: 'Documentos', icon: Paperclip },
+  { id: 'datos',      label: 'Datos',            icon: UserCircle2 },
+  { id: 'reglas',     label: 'Reglas y certificados', icon: Award },
+  { id: 'documentos', label: 'Documentos',       icon: Paperclip },
 ]
 
 const MODALIDADES = ['PRESENCIAL', 'PAT', 'VIRTUAL', 'MIXTA'] as const
@@ -132,6 +145,18 @@ export default function FichaConvocatoriaPage() {
               }`}>
                 {conv.activo ? 'Activa' : 'Inactiva'}
               </span>
+              {/* Se muestra en la cabecera y no escondido en una pestaña: es la
+                  convocatoria oficial, y saber si el ciclo cuelga de ella o
+                  quedó suelto cambia lo que se puede hacer después. */}
+              {conv.convocatoriaSepNombre ? (
+                <span className="inline-flex items-center gap-1 rounded bg-white/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/90">
+                  SEP · {conv.convocatoriaSepNombre}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  Sin convocatoria del SEP
+                </span>
+              )}
             </div>
           </div>
           <div className="shrink-0">
@@ -199,6 +224,21 @@ export default function FichaConvocatoriaPage() {
 
       {/* Contenido */}
       {tab === 'datos'      && <SeccionDatos      conv={conv} onChanged={cargar} setToast={setToast} />}
+      {tab === 'reglas' && (
+        <ReglasDelCiclo
+          convocatoriaId={cid}
+          reglas={{
+            puntajeMinimoPrueba: conv.puntajeMinimoPrueba,
+            calificacionMinimaCurso: conv.calificacionMinimaCurso,
+            certificadoTexto: conv.certificadoTexto,
+            certificadoFirmaId: conv.certificadoFirmaId,
+            certificadoHabilitado: conv.certificadoHabilitado,
+          }}
+          onChanged={cargar}
+          setToast={setToast}
+        />
+      )}
+
       {tab === 'documentos' && <SeccionDocumentosConvocatoria convocatoriaId={cid} setToast={setToast} />}
 
       <ConfirmModal
@@ -256,6 +296,17 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
   const [fechaInicio, setFechaInicio] = useState(conv.fechaInicio ? conv.fechaInicio.substring(0, 10) : '')
   const [fechaFin, setFechaFin] = useState(conv.fechaFin ? conv.fechaFin.substring(0, 10) : '')
   const [observaciones, setObservaciones] = useState(conv.observaciones ?? '')
+  const [convSepId, setConvSepId] = useState(conv.convocatoriaSepId?.toString() ?? '')
+  const [convsSep, setConvsSep] = useState<Array<{ id: number; nombre: string; anio: number }>>([])
+
+  useEffect(() => {
+    let vivo = true
+    api.get<Array<{ id: number; nombre: string; anio: number }>>(
+      '/evaluadores/catalogos/convocatorias-sep')
+      .then(r => { if (vivo) setConvsSep(r.data) })
+      .catch(() => { if (vivo) setConvsSep([]) })
+    return () => { vivo = false }
+  }, [])
 
   function iniciarEdicion() {
     setAnio(String(conv.anio))
@@ -265,6 +316,7 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
     setFechaInicio(conv.fechaInicio ? conv.fechaInicio.substring(0, 10) : '')
     setFechaFin(conv.fechaFin ? conv.fechaFin.substring(0, 10) : '')
     setObservaciones(conv.observaciones ?? '')
+    setConvSepId(conv.convocatoriaSepId?.toString() ?? '')
     setEditando(true)
   }
 
@@ -290,6 +342,7 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
         fechaInicio: fechaInicio || null,
         fechaFin: fechaFin || null,
         observaciones: observaciones.trim() || null,
+        convocatoriaSepId: convSepId ? Number(convSepId) : null,
       })
       setToast({ tipo: 'success', msg: 'Datos actualizados' })
       setEditando(false)
@@ -314,6 +367,14 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
         </button>
       }>
         <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+          <div className="sm:col-span-2">
+            <Dato
+              label="Convocatoria del SEP"
+              valor={conv.convocatoriaSepNombre
+                ? `${conv.convocatoriaSepNombre} (${conv.convocatoriaSepAnio})`
+                : null}
+            />
+          </div>
           <Dato label="Año" valor={conv.anio} />
           <Dato label="Período" valor={conv.periodo} />
           <Dato label="Modalidad" valor={conv.modalidadPart} />
@@ -331,6 +392,25 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
   return (
     <Section titulo="Editar datos de la convocatoria">
       <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
+          <label className={label}>Convocatoria del SEP</label>
+          <select
+            value={convSepId}
+            onChange={e => {
+              setConvSepId(e.target.value)
+              const c = convsSep.find(x => String(x.id) === e.target.value)
+              // El año debe cuadrar con el de la convocatoria: el backend lo
+              // rechaza, así que se ajusta aquí en vez de dejar que falle.
+              if (c) setAnio(String(c.anio))
+            }}
+            className={input}
+          >
+            <option value="">— Sin convocatoria del SEP —</option>
+            {convsSep.map(c => (
+              <option key={c.id} value={c.id}>{c.nombre} ({c.anio})</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className={label}>Año *</label>
           <input

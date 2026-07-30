@@ -47,7 +47,27 @@ export async function descargarArchivoConNombreDelServidor(
   fallback: string,
   timeoutMs?: number,
 ): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob', ...(timeoutMs ? { timeout: timeoutMs } : {}) })
+  let res
+  try {
+    res = await api.get(url, { responseType: 'blob', ...(timeoutMs ? { timeout: timeoutMs } : {}) })
+  } catch (err) {
+    // Con `responseType: 'blob'` el cuerpo del error también llega como Blob,
+    // así que `err.response.data.message` es SIEMPRE undefined y quien llame
+    // solo puede mostrar un mensaje genérico. Aquí se lee el Blob y se
+    // reescribe el error con el motivo real del servidor.
+    const cuerpo = (err as { response?: { data?: unknown } })?.response?.data
+    if (cuerpo instanceof Blob) {
+      try {
+        const texto = await cuerpo.text()
+        const json = JSON.parse(texto) as { message?: string }
+        if (json?.message) {
+          const e = err as { response?: { data?: unknown } }
+          e.response!.data = json
+        }
+      } catch { /* no era JSON: se deja el error tal cual */ }
+    }
+    throw err
+  }
   const blob = new Blob([res.data as Blob], { type: (res.data as Blob).type || 'application/octet-stream' })
   const cd = res.headers?.['content-disposition'] as string | undefined
   const nombre = nombreDesdeContentDisposition(cd) || fallback

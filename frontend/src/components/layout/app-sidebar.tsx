@@ -1,6 +1,6 @@
 'use client'
 
-import { clearSepAuth, type SepUsuario } from '@/lib/auth'
+import { clearSepAuth, getSepUsuario, type SepUsuario } from '@/lib/auth'
 import api from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useTieneConvenios } from '@/lib/use-tiene-convenios'
@@ -8,8 +8,8 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
   ClipboardList, Cog, FileCheck2, FileText, FolderKanban,
-  Home, LayoutDashboard, LogOut, ScrollText, Users, Wallet, X,
-  BookUser, BarChart2,
+  Home, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
+  ShieldCheck, Users, Wallet, X, BookUser, BarChart2,
 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -34,6 +34,20 @@ const URL_MAP: Record<string, string> = {
   'Certificados.aspx':         '/panel/certificacion',
   'Desembolsos.aspx':          '/panel/desembolsos',
   'Evaluaciones.aspx':         '/panel/evaluaciones',
+}
+
+/**
+ * Resuelve la ruta de un ítem del menú.
+ *
+ * Las entradas heredadas del GeneXus guardan un `.aspx` y necesitan el mapa de
+ * arriba. Las pantallas nuevas guardan directamente su ruta Next, así que
+ * agregar una opción al menú es sembrar una fila y nada más — sin tocar código
+ * ni desplegar. El mapa queda solo para lo viejo, que no va a crecer.
+ */
+function rutaDe(url: string): string | null {
+  const u = (url ?? '').trim()
+  if (!u) return null
+  return u.startsWith('/') ? u : (URL_MAP[u] ?? null)
 }
 
 // ── Mapa ícono FontAwesome → Lucide ─────────────────────────────────────────
@@ -66,6 +80,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'fa-tachometer-alt':    LayoutDashboard,
   'fa-chart-bar':         BarChart2,
   'fa-address-book':      BookUser,
+  // Banco de evaluadores. Se nombran como el resto (prefijo fa-) para no
+  // introducir una segunda convención en la tabla MENU.
+  'fa-shield-check':      ShieldCheck,
+  'fa-bullhorn':          Megaphone,
+  'fa-sitemap':           Network,
+  'fa-sliders':           Cog,
 }
 
 function faToLucide(iconClass: string): LucideIcon {
@@ -94,6 +114,8 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [menuFallo, setMenuFallo] = useState(false)
+  const [intento, setIntento] = useState(0)
   const { tieneConvenios } = useTieneConvenios()
 
   const LABEL_OVERRIDE: Record<string, string> = {
@@ -105,6 +127,14 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
     { desc: 'Convenios', url: 'WPConvenios.aspx', icono: 'ScrollText' },
   ]
 
+  /**
+   * Perfiles del banco de evaluadores. Su menú sale entero de la tabla MENU
+   * (v39), así que no se les inyecta "Convenios": es un módulo que no les
+   * corresponde y aparecía solo porque el extra estaba en duro para todos.
+   * Se acota a estos dos para no quitárselo a quien hoy sí lo usa.
+   */
+  const PERFILES_BANCO = [9, 15]
+
   useEffect(() => {
     api.get<MenuItem[]>('/empresa/menu')
       .then(r => {
@@ -112,17 +142,24 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
           ...item,
           desc: LABEL_OVERRIDE[item.desc] ?? item.desc,
         }))
-        // Añadir items extra que no vengan del API
-        for (const extra of EXTRA_ITEMS) {
-          if (!items.some(it => it.url === extra.url)) {
-            items.push(extra)
+        if (!PERFILES_BANCO.includes(getSepUsuario()?.perfilId ?? 0)) {
+          // Añadir items extra que no vengan del API
+          for (const extra of EXTRA_ITEMS) {
+            if (!items.some(it => it.url === extra.url)) {
+              items.push(extra)
+            }
           }
         }
         setMenuItems(items)
+        setMenuFallo(false)
       })
-      .catch(() => setMenuItems([]))
+      // Si el menú no carga, la barra lateral se quedaba VACÍA y en silencio.
+      // Es la única navegación del panel —la barra superior no tiene enlaces—,
+      // así que el usuario queda encerrado en la pantalla donde esté sin saber
+      // por qué. Se avisa y se ofrece reintentar.
+      .catch(() => { setMenuItems([]); setMenuFallo(true) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [intento])
 
   function handleLogout() {
     clearSepAuth()
@@ -130,12 +167,30 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   }
 
   function renderNav(isMobile: boolean) {
+    // Sin menú y con fallo: se dice qué pasó y se ofrece reintentar. Antes se
+    // devolvía null y la barra quedaba vacía, indistinguible de "este perfil no
+    // tiene opciones".
+    if (menuItems.length === 0 && menuFallo) {
+      return (
+        <nav className="flex flex-col gap-2 flex-1 px-2 py-3">
+          <p className="text-[11px] leading-snug text-white/60">
+            No se pudo cargar el menú.
+          </p>
+          <button
+            onClick={() => setIntento(n => n + 1)}
+            className="rounded-lg border border-white/20 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:bg-white/10"
+          >
+            Reintentar
+          </button>
+        </nav>
+      )
+    }
     if (menuItems.length === 0) return null
 
     return (
       <nav className="flex flex-col gap-0.5 flex-1 overflow-y-auto">
         {menuItems.map((item, i) => {
-          const path = URL_MAP[item.url] ?? null
+          const path = rutaDe(item.url)
           const Icon = faToLucide(item.icono)
           const active = path !== null && pathname === path
           const isDisabled = path === null

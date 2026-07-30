@@ -114,6 +114,8 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [menuFallo, setMenuFallo] = useState(false)
+  const [intento, setIntento] = useState(0)
   const { tieneConvenios } = useTieneConvenios()
 
   const LABEL_OVERRIDE: Record<string, string> = {
@@ -149,10 +151,15 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
           }
         }
         setMenuItems(items)
+        setMenuFallo(false)
       })
-      .catch(() => setMenuItems([]))
+      // Si el menú no carga, la barra lateral se quedaba VACÍA y en silencio.
+      // Es la única navegación del panel —la barra superior no tiene enlaces—,
+      // así que el usuario queda encerrado en la pantalla donde esté sin saber
+      // por qué. Se avisa y se ofrece reintentar.
+      .catch(() => { setMenuItems([]); setMenuFallo(true) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [intento])
 
   function handleLogout() {
     clearSepAuth()
@@ -160,6 +167,24 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   }
 
   function renderNav(isMobile: boolean) {
+    // Sin menú y con fallo: se dice qué pasó y se ofrece reintentar. Antes se
+    // devolvía null y la barra quedaba vacía, indistinguible de "este perfil no
+    // tiene opciones".
+    if (menuItems.length === 0 && menuFallo) {
+      return (
+        <nav className="flex flex-col gap-2 flex-1 px-2 py-3">
+          <p className="text-[11px] leading-snug text-white/60">
+            No se pudo cargar el menú.
+          </p>
+          <button
+            onClick={() => setIntento(n => n + 1)}
+            className="rounded-lg border border-white/20 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:bg-white/10"
+          >
+            Reintentar
+          </button>
+        </nav>
+      )
+    }
     if (menuItems.length === 0) return null
 
     return (

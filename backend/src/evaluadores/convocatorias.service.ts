@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import type { MulterFile } from './evaluadores.service'
@@ -235,23 +235,28 @@ export class ConvocatoriasService {
 
     await this.validarConvocatoriaSep(dto.convocatoriaSepId, dto.anio)
 
-    await this.dataSource.query(
-      `INSERT INTO EVALUADORCONVOCATORIA
-         (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
-          OBSERVACIONES, CONVOCATORIASEPID, ACTIVO, FECHACREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, SYSDATE)`,
-      [
-        convocatoriaId,
-        Number(dto.anio),
-        (dto.periodo ?? '').toString().trim() || null,
-        dto.nombre.trim(),
-        await this.idModalidad(dto.modalidadPart),
-        dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-        dto.fechaFin ? new Date(dto.fechaFin) : null,
-        (dto.observaciones ?? '').toString().trim() || null,
-        dto.convocatoriaSepId ?? null,
-      ],
-    )
+    const modalidadId = await this.idModalidad(dto.modalidadPart)
+    try {
+      await this.dataSource.query(
+        `INSERT INTO EVALUADORCONVOCATORIA
+           (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
+            OBSERVACIONES, CONVOCATORIASEPID, ACTIVO, FECHACREACION)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, SYSDATE)`,
+        [
+          convocatoriaId,
+          Number(dto.anio),
+          (dto.periodo ?? '').toString().trim() || null,
+          dto.nombre.trim(),
+          modalidadId,
+          dto.fechaInicio ? new Date(dto.fechaInicio) : null,
+          dto.fechaFin ? new Date(dto.fechaFin) : null,
+          (dto.observaciones ?? '').toString().trim() || null,
+          dto.convocatoriaSepId ?? null,
+        ],
+      )
+    } catch (e) {
+      this.traducirDuplicado(e, dto.convocatoriaSepId)
+    }
     return { id: convocatoriaId, message: 'Convocatoria creada' }
   }
 
@@ -309,10 +314,16 @@ export class ConvocatoriasService {
 
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(convocatoriaId)
-    await this.dataSource.query(
-      `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${params.length}`,
-      params,
-    )
+    try {
+      await this.dataSource.query(
+        `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${params.length}`,
+        params,
+      )
+    } catch (e) {
+      // Reasignar la convocatoria del SEP puede chocar con el mismo índice
+      // único que al crear: si ya hay otro ciclo de ese periodo sobre ella.
+      this.traducirDuplicado(e, dto.convocatoriaSepId)
+    }
     return { message: 'Convocatoria actualizada' }
   }
 
@@ -360,6 +371,25 @@ export class ConvocatoriasService {
    * 2026 sobre la convocatoria 2024 es un error silencioso que solo se nota
    * meses después, cuando los certificados salen con el año equivocado.
    */
+  /**
+   * Traduce el choque del índice único de la v40 a un mensaje que se entienda.
+   *
+   * Sin esto, intentar abrir un segundo ciclo sobre la misma convocatoria y el
+   * mismo periodo devuelve un 500 "Internal server error": la gestora no sabe
+   * qué hizo mal ni que el ciclo ya existe.
+   */
+  private traducirDuplicado(e: unknown, sepId: number | null | undefined): never {
+    const msg = (e as { message?: string })?.message ?? ''
+    if (/ORA-00001/.test(msg) && /UQ_EVALCONV_SEP_PERIODO/i.test(msg)) {
+      throw new ConflictException(
+        'Esa convocatoria del SEP ya tiene un ciclo del banco para ese periodo. ' +
+        'Abra el que ya existe, o use otro periodo.',
+      )
+    }
+    void sepId
+    throw e as Error
+  }
+
   private async validarConvocatoriaSep(sepId: number | null | undefined, anio: number) {
     if (sepId == null) return
 

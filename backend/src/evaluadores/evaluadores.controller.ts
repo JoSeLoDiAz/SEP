@@ -257,6 +257,21 @@ export class EvaluadoresController {
     return this.catalogos.listarAreas(todos !== '1')
   }
 
+  @Get('catalogos/convocatorias-sep')
+  @ApiOperation({ summary: 'Convocatorias reales del SEP, para atarles el ciclo de evaluadores' })
+  convocatoriasSepCat(@CurrentUser() user: JwtUser, @Query('anio') anio?: string) {
+    this.exigirGestion(user)
+    const n = anio != null && anio !== '' ? Number(anio) : undefined
+    return this.catalogos.listarConvocatoriasSep(Number.isFinite(n) ? n : undefined)
+  }
+
+  @Get('catalogos/firmas')
+  @ApiOperation({ summary: 'Firmas disponibles para los certificados' })
+  firmasCat(@CurrentUser() user: JwtUser) {
+    this.exigirGestion(user)
+    return this.catalogos.listarFirmasCertificado()
+  }
+
   @Get('catalogos/anios')
   @ApiOperation({ summary: 'Años con participaciones registradas, para el filtro del banco' })
   aniosCat(@CurrentUser() user: JwtUser) {

@@ -79,13 +79,20 @@ const etiqueta = 'block text-[10px] font-semibold uppercase tracking-wide text-n
 const control = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-neutral-700 focus:outline-none focus:ring-2 focus:ring-[#00304D]/40 disabled:bg-neutral-50 disabled:text-neutral-400'
 
 export function BarraFiltrosBanco({
-  busqueda, onBusquedaChange, onBuscar,
+  busqueda, busquedaAplicada, onBusquedaChange, onBuscar, onLimpiarBusqueda,
   filtros, onCambiarFiltros, onLimpiar,
   onExportar, exportando, cargando,
 }: {
   busqueda: string
+  /**
+   * Lo que se está filtrando ahora mismo, que no es lo mismo que lo tecleado:
+   * el listado no cambia hasta pulsar "Buscar". El chip debe reflejar lo que
+   * el usuario está viendo, no lo que va escribiendo.
+   */
+  busquedaAplicada: string
   onBusquedaChange: (valor: string) => void
   onBuscar: () => void
+  onLimpiarBusqueda: () => void
   filtros: FiltrosBanco
   onCambiarFiltros: (filtros: FiltrosBanco) => void
   onLimpiar: () => void
@@ -93,12 +100,14 @@ export function BarraFiltrosBanco({
   exportando: boolean
   cargando: boolean
 }) {
+  const hayBusqueda = busquedaAplicada.trim() !== ''
   const [roles, setRoles] = useState<CatalogoItem[]>([])
   const [procesos, setProcesos] = useState<CatalogoItem[]>([])
   const [regionales, setRegionales] = useState<CatalogoItem[]>([])
   const [centros, setCentros] = useState<CatalogoItem[]>([])
   const [areas, setAreas] = useState<CatalogoItem[]>([])
   const [estados, setEstados] = useState<EstadoItem[]>([])
+  const [catalogosFallaron, setCatalogosFallaron] = useState(false)
 
   // Los años salen de los datos, no de una ventana móvil calculada aquí: el
   // histórico llega a 2020 y con `anioActual + 1 - i` ese año no aparecía en
@@ -124,8 +133,10 @@ export function BarraFiltrosBanco({
         setEstados(e.data)
         setAnios(y.data)
       })
-      // Un catálogo caído deja su select vacío, pero el listado sigue usable.
-      .catch(() => { /* silencioso a propósito */ })
+      // Un catálogo caído deja los selects vacíos. El listado sigue usable, pero
+      // hay que decirlo: unos selects en "Todos" sin explicación se leen como
+      // "no hay nada que filtrar", que es distinto de "no se pudo cargar".
+      .catch(() => { if (vivo) setCatalogosFallaron(true) })
     return () => { vivo = false }
   }, [])
 
@@ -202,6 +213,13 @@ export function BarraFiltrosBanco({
       </form>
 
       {/* Selects */}
+      {catalogosFallaron && (
+        <p className="border-t border-neutral-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          No se pudieron cargar las listas de los filtros. El buscador y las alertas
+          siguen funcionando; recargue la página para reintentar.
+        </p>
+      )}
+
       <div className="border-t border-neutral-100 px-3 py-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
         <div>
           <label className={etiqueta}>Año del ciclo</label>
@@ -301,13 +319,27 @@ export function BarraFiltrosBanco({
 
         <span className="w-px h-5 bg-neutral-200" />
 
-        {chips.length === 0 ? (
+        {chips.length === 0 && !hayBusqueda ? (
           <span className="inline-flex items-center gap-1.5 text-[11px] text-neutral-400">
             <Filter size={12} />
             Sin filtros aplicados
           </span>
         ) : (
           <>
+            {/* La búsqueda de texto también es un criterio: sin este chip, quien
+                buscó un apellido y obtuvo resultados no tenía forma de volver al
+                listado completo salvo borrar el campo a mano. */}
+            {hayBusqueda && (
+              <button
+                type="button"
+                onClick={onLimpiarBusqueda}
+                title="Quitar la búsqueda"
+                className="inline-flex items-center gap-1 rounded-full border border-[#00304D]/20 bg-[#00304D]/5 px-2.5 py-1 text-[11px] font-semibold text-[#00304D] transition hover:bg-[#00304D]/10"
+              >
+                Búsqueda: {busquedaAplicada.trim()}
+                <X size={11} />
+              </button>
+            )}
             {chips.map(chip => (
               <button
                 key={chip.clave}

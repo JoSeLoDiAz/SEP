@@ -1,252 +1,320 @@
 ﻿==========================================================================
-  GUÍA DEL GESTOR DE EVALUADORES
+  GUÍA DEL BANCO DE EVALUADORES
 ==========================================================================
+
+Para el Gestor de Evaluadores
 
 Sistema Especializado de Proyectos — SEP
 
 Grupo de Gestión para la Productividad y la Competitividad — SENA
 
-Versión de julio de 2026
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LO PRIMERO
+----------
+
+Usted entra al SEP con su usuario de siempre. Al entrar, el sistema lo
+lleva directo al Banco de Evaluadores.
+
+En la barra azul de la izquierda tiene sus tres pantallas:
+
+  Banco de Evaluadores
+      La lista de todos. Es su pantalla de trabajo.
+  Convocatorias
+      El ciclo de cada año, con sus reglas.
+  Catálogos
+      Los roles, procesos y tipos de documento. Solo para consultar.
+
+  +----------------------------------------------------------------------+
+  | Con este perfil usted hace TODO el trámite de principio a fin:       |
+  | registrar, cargar documentos, abrir el ciclo del año, generar la     |
+  | retroalimentación, certificar y consultar la auditoría. No tiene que |
+  | pedirle a nadie que le habilite un paso.                             |
+  +----------------------------------------------------------------------+
+
+Lo único que no puede es cambiar los catálogos —agregar un rol, desactivar
+un proceso—. Esos los toca el administrador, porque un cambio ahí afecta a
+todos los años, no solo al que usted está trabajando. Puede verlos, pero
+no editarlos.
+
+  El orden importa
+
+El ciclo del año se abre PRIMERO. Todo lo demás cuelga de él: la
+invitación, las notas de corte, la retroalimentación y los certificados.
+Si registra evaluadores antes de tener el ciclo, después toca volver a
+entrar uno por uno a vincularlos.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-ANTES DE EMPEZAR
-----------------
+PARTE 1 — ABRIR EL CICLO DEL AÑO
+--------------------------------
 
-Usted entra al SEP con su usuario de siempre. Su perfil es Gestor de
-Evaluadores.
+Lo que en el banco llamamos "convocatoria" no es una convocatoria nueva:
+es la capa de reglas que se le pone encima a una convocatoria del SEP que
+ya existe, con su programa, su presupuesto y sus fechas.
 
-En el menú izquierdo encontrará el Banco de Evaluadores. Todo lo que se
-explica aquí se hace desde ahí.
+  1.1 Crear el ciclo
+
+  1. Menú izquierdo → Convocatorias → botón "Nueva convocatoria".
+
+  2. Escoja la CONVOCATORIA DEL SEP. Es el primer campo y el más
+     importante: de ella salen el año y el nombre que se propone.
+
+  3. Revise el período (01 o 02) y la modalidad.
+
+  4. Guarde.
 
   +----------------------------------------------------------------------+
-  | Con este perfil usted puede hacer TODO el trámite de principio a     |
-  | fin: registrar, cargar documentos, abrir convocatorias, generar la   |
-  | retroalimentación, emitir certificados y consultar la auditoría. No  |
-  | necesita pedirle a nadie que le habilite un paso.                    |
+  | Si deja la convocatoria del SEP vacía, el ciclo queda suelto: no     |
+  | hereda la invitación, sus evaluadores no entran en la                |
+  | retroalimentación y no se podrá certificar. La ficha se lo advierte  |
+  | en amarillo.                                                         |
   +----------------------------------------------------------------------+
 
-Lo único que no le corresponde es modificar los catálogos del sistema (la
-lista de roles, de procesos, de tipos de documento). Eso lo hace el
-administrador, porque cambiarlos afecta a todos los años, no solo al que
-usted está trabajando.
+Un aviso que puede aparecer: "Esa convocatoria del SEP ya tiene un ciclo
+del banco para ese periodo". Significa que alguien ya lo abrió — búsquelo
+en la lista en vez de crear otro.
+
+  1.2 Poner las reglas
+
+Abra el ciclo que acaba de crear y vaya a la pestaña "Reglas y
+certificados".
+
+  Puntaje mínimo de la prueba
+      De 0 a 100. Por debajo de este número, la prueba no se marca
+      aprobada.
+  Calificación mínima del curso
+      De 0 a 5. Igual que la anterior, pero para el curso de formación.
+  Emisión de certificados
+      Déjela BLOQUEADA hasta que el proceso cierre.
+  Firma
+      Quién avala el certificado. Sale de las firmas institucionales.
+  Texto del certificado
+      Opcional. Vacío usa el texto estándar.
+
+  +----------------------------------------------------------------------+
+  | Las notas de corte se congelan en cada registro cuando usted lo      |
+  | carga. Si el año siguiente cambian, lo ya cargado conserva la nota   |
+  | con la que se evaluó. Por eso hay que ponerlas ANTES de empezar a    |
+  | registrar pruebas y cursos — si las pone después, lo anterior queda  |
+  | con la nota vieja.                                                   |
+  +----------------------------------------------------------------------+
+
+No olvide "Guardar reglas" al final.
+
+  1.3 Cargar el correo de invitación
+
+  1. En el mismo ciclo, pestaña "Documentos".
+
+  2. Escoja el tipo "Invitación" y suba el correo en PDF.
+
+Se carga UNA sola vez y lo heredan todos los evaluadores del ciclo. En la
+ficha de cada uno aparecerá marcado como HEREDADO y en solo lectura — no
+hay que subirlo evaluador por evaluador.
+
+  +----------------------------------------------------------------------+
+  | Sin este documento, el primero de los nueve hitos no se enciende     |
+  | nunca, por más que todo lo demás esté completo.                      |
+  +----------------------------------------------------------------------+
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PARTE 1 — REGISTRAR UN EVALUADOR NUEVO
---------------------------------------
+PARTE 2 — REGISTRAR UN EVALUADOR
+--------------------------------
 
-  1.1 Primero busque, no registre de una vez
+  2.1 Busque antes de registrar
 
-  1. Entre a Banco de Evaluadores y haga clic en "Nuevo evaluador".
+  1. Banco de Evaluadores → "Nuevo evaluador".
 
-  2. Escoja el tipo de documento y escriba el número.
+  2. Escoja el tipo de documento, escriba el número y haga clic en "Buscar
+     persona".
 
-  3. Haga clic en "Buscar persona".
+El sistema le responde una de tres cosas:
 
-El sistema le dirá una de tres cosas:
+  - No existe: siga y llene todo. Se crea desde cero.
 
-  - No existe: siga y llene los datos. Se creará todo desde cero.
+  - Ya existe como persona —por ejemplo, fue beneficiario de una acción de
+    formación—: le trae los datos y usted solo completa lo del banco. No
+    se duplica.
 
-  - Ya existe como persona (por ejemplo, fue beneficiario de una acción de
-    formación): el sistema le trae los datos y usted solo completa lo del
-    banco. No se duplica la persona.
-
-  - Ya es evaluador: no lo registre otra vez. Ábralo desde el listado y
+  - Ya es evaluador: no lo registre otra vez. Ábralo desde la lista y
     trabaje sobre su ficha.
 
   +----------------------------------------------------------------------+
-  | Buscar primero evita el problema más caro de este módulo: una misma  |
-  | persona registrada dos veces, con la historia partida en dos fichas. |
+  | Buscar primero evita el problema más caro de este módulo: la misma   |
+  | persona registrada dos veces, con la historia partida en dos fichas  |
+  | que después no se pueden unir.                                       |
   +----------------------------------------------------------------------+
 
-  1.2 Llene los datos
+  2.2 Llenar los datos
 
-Hay tres bloques. Los campos con asterisco son obligatorios.
+Tres bloques. Los campos con asterisco son obligatorios.
 
   - Datos personales: nombres, apellidos, identificación, correo personal,
     correo institucional, celular, municipio.
 
-  - Datos del banco de evaluadores: cargo, profesión (pregrado), posgrado,
-    regional y centro de formación.
+  - Datos del banco: cargo, profesión, posgrado, regional y centro de
+    formación.
 
-  - Jefe directo: nombre, correo y cargo. Se usa después, cuando cargue la
-    autorización del jefe.
+  - Jefe directo: nombre, correo y cargo. Se usa después, al cargar la
+    autorización.
 
-  1.3 El sistema le crea la cuenta de acceso
+  2.3 La cuenta de acceso
 
 Al guardar, el evaluador queda registrado Y con usuario para entrar al
 SEP. No hay que crearlo aparte.
 
-La pantalla le mostrará UNA SOLA VEZ la clave inicial. Cópiela en ese
-momento.
+La pantalla le muestra el USUARIO y la CLAVE INICIAL. Hay un botón para
+copiar los dos de una vez.
 
   +----------------------------------------------------------------------+
-  | IMPORTANTE: esa clave no se vuelve a mostrar. Si la pierde, hay que  |
-  | restablecerla. Téngala lista para entregársela al evaluador antes de |
-  | guardar.                                                             |
+  | La clave se muestra UNA SOLA VEZ y no queda guardada en ningún lado. |
+  | Cópiela y entréguesela antes de continuar. Si se pierde, hay que     |
+  | restablecerla desde el panel de usuarios, que es de administración.  |
   +----------------------------------------------------------------------+
+
+El usuario es el CORREO INSTITUCIONAL, no el personal. Es el único con el
+que puede entrar: el sistema lo compara exacto.
 
 Si la persona ya usaba el SEP por otro motivo, no se le cambia nada:
 conserva su clave y su pantalla de inicio, y solo se le suma el perfil de
-evaluador. Al entrar podrá escoger con cuál de sus perfiles trabaja.
+evaluador. En ese caso no aparece clave nueva, y el aviso le dice con qué
+correo entra.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PARTE 2 — COMPLETAR LA HOJA DE VIDA
+PARTE 3 — COMPLETAR LA HOJA DE VIDA
 -----------------------------------
 
-Abra el evaluador desde el listado. Arriba verá cuatro pestañas:
+Abra el evaluador desde la lista. Arriba tiene cuatro pestañas:
 Trayectoria, Perfil, Documentos y Auditoría.
 
-Para la hoja de vida use la pestaña "Perfil", que tiene cuatro secciones:
+La hoja de vida está en "Perfil", que se divide en cuatro:
 
   Datos básicos
-      Corregir cargo, profesión, regional, centro, jefe.
+      Cargo, profesión, regional, centro, jefe. Y aquí van la FOTO y la
+      CÉDULA.
   Hoja de vida y estudios
       La hoja de vida en PDF y cada título con su soporte.
   Certificaciones TIC
-      Cursos y certificaciones en tecnología, con horas y fecha.
+      Cursos de tecnología, con horas y fecha.
   Experiencia
       Entidad, cargo, fechas y soporte. Deje el fin vacío si sigue
       vigente.
 
-En la pestaña "Documentos" van los archivos permanentes de la persona: la
-cédula y cualquier otro documento que no cambie de un año a otro.
-
   +----------------------------------------------------------------------+
-  | Todos los archivos son PDF de máximo 8 MB. La cédula y la foto son   |
+  | La cédula y la foto van en Perfil → Datos básicos, NO en la pestaña  |
+  | Documentos. Esa pestaña es para otros documentos permanentes. Son    |
   | las dos cosas que más se olvidan, y sin ellas no se puede            |
-  | certificar. En el listado hay un atajo para encontrar a quién le     |
-  | faltan (Parte 8).                                                    |
+  | certificar.                                                          |
   +----------------------------------------------------------------------+
+
+Todos los archivos son PDF de máximo 8 MB. La foto es imagen.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PARTE 3 — ABRIR LA CONVOCATORIA DEL AÑO
----------------------------------------
-
-La convocatoria es el ciclo de evaluación de un año. Todo lo demás cuelga
-de ella.
-
-  1. Entre a Banco de Evaluadores y luego a "Convocatorias".
-
-  2. Cree la convocatoria: año, período, nombre y modalidad.
-
-  3. Abra la convocatoria recién creada y registre las notas de corte: el
-     puntaje mínimo de la prueba de conocimiento y la calificación mínima
-     del curso.
-
-  4. Cargue el correo de invitación general del ciclo, en la sección de
-     documentos de la convocatoria.
-
-  +----------------------------------------------------------------------+
-  | Las notas de corte se congelan en cada registro en el momento de     |
-  | cargarlo. Si el año siguiente cambian, los registros del año pasado  |
-  | conservan la nota con la que se evaluaron. Por eso hay que ponerlas  |
-  | ANTES de empezar a cargar pruebas.                                   |
-  +----------------------------------------------------------------------+
-
-  +----------------------------------------------------------------------+
-  | El correo de invitación se carga UNA vez en la convocatoria y lo     |
-  | heredan todos los evaluadores del ciclo. No hay que subirlo          |
-  | evaluador por evaluador. En la ficha de cada uno aparecerá marcado   |
-  | como HEREDADO y en solo lectura.                                     |
-  +----------------------------------------------------------------------+
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-PARTE 4 — VINCULAR A CADA EVALUADOR AL CICLO
---------------------------------------------
+PARTE 4 — VINCULAR AL CICLO
+---------------------------
 
 Un evaluador registrado todavía no participa en nada. Hay que vincularlo
 al año.
 
-  1. Abra la ficha del evaluador y vaya a la pestaña "Trayectoria".
+  1. Abra su ficha y vaya a la pestaña "Trayectoria".
 
-  2. Cree la participación del año y complete: año, período, rol,
-     convocatoria, área, proceso, modalidad, mesa y equipo evaluador.
+  2. Baje a la sección de participaciones y haga clic en "Agregar".
 
-  3. Asigne los grupos que le corresponden.
+  3. Escoja la CONVOCATORIA. Al hacerlo se completan solos el año y el
+     período.
+
+  4. Complete rol, área, proceso, modalidad, mesa y equipo evaluador.
+
+  5. Guarde y asigne los grupos que le corresponden.
 
   +----------------------------------------------------------------------+
-  | El rol importa más de lo que parece: de él depende quién evalúa a    |
-  | quién en la retroalimentación. Un líder, un analista y un evaluador  |
-  | no reciben las mismas asignaciones.                                  |
+  | El rol pesa más de lo que parece: de él depende quién evalúa a quién |
+  | en la retroalimentación. Un líder, un analista y un evaluador no     |
+  | reciben las mismas asignaciones.                                     |
   +----------------------------------------------------------------------+
+
+Si deja la convocatoria vacía, la pantalla se lo advierte. Un ciclo sin
+convocatoria no sirve para casi nada.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PARTE 5 — EL AÑO DEL EVALUADOR: LOS NUEVE HITOS
------------------------------------------------
+PARTE 5 — LOS NUEVE HITOS DEL AÑO
+---------------------------------
 
-Dentro de cada año, la ficha muestra un avance de nueve hitos. Ninguno se
+Dentro de cada año la ficha muestra un avance de nueve hitos. Ninguno se
 marca a mano: se encienden solos cuando usted carga lo que corresponde. Si
-un hito está apagado, es porque falta el dato, no porque se le olvidó
-marcarlo.
+uno está apagado es porque falta el dato, no porque se le olvidó marcarlo.
 
   1. Invitación recibida
-      Se enciende con el correo de invitación de la convocatoria.
+      Se enciende sola al vincular el ciclo, si la convocatoria tiene
+      cargado el correo de invitación.
   2. Autorización del jefe
-      Cargue la aprobación del jefe con su evidencia (correo .msg o
-      PDF).
+      Registre la aprobación con el nombre y correo del jefe, y suba la
+      evidencia (.msg de Outlook o PDF).
   3. Confidencialidad firmada
-      Cargue el acuerdo de confidencialidad del año.
+      Suba el acuerdo del año.
   4. Curso de formación aprobado
-      Registre el curso con su calificación y el certificado.
+      Registre el curso con su calificación. Se compara contra el corte
+      del año.
   5. Prueba de conocimiento aprobada
-      Registre el puntaje. Se compara contra el mínimo del año.
+      Registre el puntaje. Se compara contra el corte del año.
   6. Asignación a proceso, mesa y equipo
-      Se enciende cuando los tres están puestos, no solo mesa y equipo.
+      Se enciende cuando están los TRES. Con dos no basta.
   7. Proyectos evaluados
       Registre los proyectos que evaluó, buscándolos por nombre o NIT.
   8. Retroalimentación diligenciada
       Cuando el evaluador contesta todas las que le asignaron.
   9. Certificado emitido
-      El último paso (Parte 7).
+      El último paso.
 
-Las secciones para cargar todo esto están dentro del año, en las pestañas:
-Documentos, Formación y pruebas, Proyectos evaluados, Retroalimentación y
-Certificado.
+Las secciones para cargar todo esto están DENTRO del año, en cinco
+pestañas: Documentos, Formación y pruebas, Proyectos evaluados,
+Retroalimentación y Certificado.
 
   +----------------------------------------------------------------------+
-  | Los documentos del año se cargan DENTRO del año, no en la pestaña    |
-  | Documentos general. La pestaña general es solo para lo permanente    |
-  | (la cédula). Si carga un documento del año en el sitio equivocado,   |
-  | quedará repetido en todos los años.                                  |
+  | Los documentos del año se cargan dentro del año. La pestaña          |
+  | Documentos general —la de arriba, junto a Perfil— es solo para lo    |
+  | permanente. Si se equivoca de sitio, el documento aparecerá repetido |
+  | en todos los años.                                                   |
   +----------------------------------------------------------------------+
 
-El sistema también le sugiere el estado del ciclo (Postulado, Autorizado,
-Habilitado, Asignado, Evaluando, Finalizó, Certificado…) según los hitos
-que lleve. Usted puede cambiarlo a mano, pero debe escribir el motivo, y
-ese cambio queda registrado en la auditoría.
+El sistema también le sugiere el estado del ciclo según los hitos que
+lleve: Postulado, Autorizado, Habilitado, Asignado, Evaluando, Finalizó,
+Certificado. Usted puede cambiarlo a mano, pero tiene que escribir el
+motivo, y ese cambio queda en la auditoría.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 PARTE 6 — RETROALIMENTACIÓN
 ---------------------------
 
-Es la evaluación de 360 grados entre los participantes del ciclo. Se llama
-retroalimentación, no encuesta.
+Es la evaluación de 360 grados entre los participantes del ciclo: cada uno
+califica a otros y recibe calificaciones. Se llama retroalimentación, no
+encuesta.
 
-  1. Entre a la convocatoria y abra la matriz de retroalimentación.
+  1. Abra el ciclo y haga clic en "Retroalimentación del ciclo", arriba a
+     la derecha.
 
-  2. Revise la vista previa: le muestra quién va a evaluar a quién, y por
+  2. Revise la VISTA PREVIA: le muestra quién va a evaluar a quién y por
      qué motivo, antes de generar nada.
 
   3. Genere la matriz.
 
-  4. Abra la retroalimentación para que los evaluadores puedan contestar.
+  4. Ábrala para que los evaluadores puedan contestar.
 
-Cada evaluador entra al SEP con su usuario y contesta el formulario. Tiene
-60 minutos por sesión, contados desde el servidor, no desde su computador.
+Cada evaluador entra al SEP con su usuario y ve "Mi retroalimentación" en
+su menú. Tiene 60 minutos por sesión, contados desde el servidor y no
+desde su computador.
 
-Cuando termine el ciclo puede descargar el reporte en Excel: siete hojas
-con la distribución, el consolidado, el detalle por pareja, los
-comentarios, las sugerencias, el avance y la matriz cruzada.
+Cuando el ciclo termine, descargue el reporte en Excel: siete hojas con la
+distribución, el consolidado, el detalle por pareja, los comentarios, las
+sugerencias, el avance y la matriz cruzada.
 
   +----------------------------------------------------------------------+
-  | Los resultados se muestran sin nombres para quien fue evaluado. La   |
+  | Los resultados se muestran SIN NOMBRES para quien fue evaluado. La   |
   | coordinación sí ve quién calificó a quién, porque necesita poder     |
   | auditar el proceso.                                                  |
   +----------------------------------------------------------------------+
@@ -258,80 +326,89 @@ PARTE 7 — CERTIFICADOS
 
   7.1 Habilitar la emisión
 
-El sistema no deja emitir certificados hasta que usted lo autoriza en la
-convocatoria. Es a propósito: evita certificar un ciclo que todavía está
-abierto.
+El sistema no deja certificar hasta que usted lo autoriza. Es a propósito:
+evita certificar un ciclo que sigue abierto.
 
-  1. Abra la convocatoria y active la emisión de certificados.
+  1. Abra el ciclo → pestaña "Reglas y certificados".
+
+  2. Active el interruptor "Emisión de certificados" y guarde.
+
+  +----------------------------------------------------------------------+
+  | Si no lo activa, el botón de emitir responde con un error. Es el     |
+  | motivo número uno de "no me deja certificar".                        |
+  +----------------------------------------------------------------------+
 
   7.2 Emitir
 
-Puede hacerlo de dos formas:
+Dos formas:
 
   - Uno por uno, desde la pestaña Certificado del año del evaluador.
 
-  - Todos de una vez, desde la convocatoria. El sistema emite a todos los
-    que estén al día y le muestra la lista de los que quedaron por fuera y
-    por qué.
+  - Todos de una vez, desde el ciclo → "Emitir a todos". Antes puede
+    pulsar "Ver quiénes están listos". El sistema certifica a los que
+    cumplen y le devuelve la lista de los que quedaron por fuera, con el
+    motivo de cada uno.
 
 Cada certificado recibe un número consecutivo del año y un código de
 verificación único.
 
-  7.3 Anular
+  7.3 Anular y reemitir
 
-  +----------------------------------------------------------------------+
-  | Un certificado emitido NO se borra: se anula, con motivo. Queda el   |
-  | registro de que existió y de por qué se anuló. Esto es deliberado;   |
-  | un documento oficial que ya circuló no puede desaparecer del         |
-  | sistema.                                                             |
-  +----------------------------------------------------------------------+
+Un certificado emitido NO se borra: se anula, con motivo. Queda el
+registro de que existió y de por qué se anuló. Es deliberado: un documento
+oficial que ya circuló no puede desaparecer del sistema.
 
-Después de anular uno, puede emitir otro para ese mismo ciclo.
+Después de anular, en la misma pantalla aparece "Emitir uno nuevo". El
+número anulado no se reutiliza: el nuevo lleva el siguiente consecutivo
+del año.
 
   7.4 Cómo lo descarga el evaluador
 
-El evaluador no necesita pedírselo a usted. Entra a la página pública de
-certificados del SEP (la misma que usan los beneficiarios de las acciones
-de formación), escribe su cédula y lo descarga.
+No necesita pedírselo a usted. Entra a la página pública de certificados
+del SEP —la misma que usan los beneficiarios—, escribe su cédula y lo
+descarga.
 
-Ahí le aparecen todos sus certificados: los de beneficiario y los de
-evaluador, distinguidos con una etiqueta. También puede buscarlo por el
-código del certificado.
+Ahí le aparecen todos sus certificados, los de beneficiario y los de
+evaluador, con una etiqueta que los distingue. También puede buscarlo por
+el código.
 
-Un certificado anulado desaparece de esa página inmediatamente.
+Un certificado anulado desaparece de esa página de inmediato.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PARTE 8 — EL LISTADO DEL BANCO: SU TABLERO DE TRABAJO
------------------------------------------------------
+PARTE 8 — EL LISTADO COMO TABLERO DE TRABAJO
+--------------------------------------------
 
-La pantalla principal del Banco de Evaluadores no es solo un buscador.
-Está pensada para responder "a quién le falta qué" antes de convocar.
+La pantalla principal no es solo un buscador. Está hecha para responder "a
+quién le falta qué" antes de convocar.
 
   8.1 Las alertas de arriba
 
-Los cuadros superiores le dicen cuántos evaluadores tienen cada problema.
-Haga clic en cualquiera y el listado se filtra por esa alerta:
+Los cuadros le dicen cuántos tienen cada problema. Haga clic en cualquiera
+y la lista se filtra por esa alerta.
 
   - Sin cédula: no tienen cargado el documento de identidad.
 
   - Sin foto: no tienen fotografía.
 
-  - Sin prueba vigente: no tienen una prueba de conocimiento aprobada de
-    este año o del anterior.
+  - Sin prueba vigente: su última prueba no está aprobada, o es de hace
+    más de un año.
+
+Si en vez de un número ve un signo de interrogación, es que no se pudo
+consultar — no que sean cero.
 
   8.2 Los filtros
 
-Puede combinar todos los que quiera: año del ciclo, proceso, rol, área,
-estado del ciclo, regional y centro. Debajo verá los filtros aplicados
-como etiquetas; puede quitarlos uno por uno o usar "Limpiar filtros".
-
-El interruptor "Solo activos" incluye o excluye a los evaluadores
-inactivos.
+Puede combinar los que quiera: año del ciclo, proceso, rol, área, estado
+del ciclo, regional y centro. Debajo aparecen como etiquetas y se quitan
+una por una, o todas con "Limpiar filtros".
 
 El buscador acepta nombre completo, correo o número de identificación.
+También sale como etiqueta, para que sepa qué está filtrando.
 
-  8.3 Lo que muestra cada tarjeta
+El interruptor "Solo activos" incluye o excluye a los inactivos.
+
+  8.3 Cada tarjeta
 
   - Los últimos tres años en que participó, con el color del estado de
     cada uno.
@@ -339,21 +416,17 @@ El buscador acepta nombre completo, correo o número de identificación.
   - Cuántos ciclos, cuántos proyectos evaluó y su promedio de
     retroalimentación.
 
-  - Etiquetas rojas cuando le falta la cédula, la foto o la prueba
+  - Etiquetas de aviso cuando le falta la cédula, la foto o la prueba
     vigente.
 
   8.4 Exportar a Excel
 
-El botón "Exportar" descarga la sábana del banco CON LOS FILTROS QUE TENGA
-PUESTOS. Lo que ve en pantalla es lo que sale en el archivo.
+El botón "Exportar" descarga la sábana CON LOS FILTROS QUE TENGA PUESTOS:
+lo que ve en pantalla es lo que sale en el archivo.
 
-El Excel trae dos hojas:
-
-  - Evaluadores: una fila por persona, con lo que le falta resaltado en
-    rojo.
-
-  - Ciclos: una fila por participación. Es la que sirve para hacer tablas
-    dinámicas por año, proceso o mesa.
+Trae dos hojas. "Evaluadores", una fila por persona con lo que le falta
+resaltado en rojo. Y "Ciclos", una fila por participación — es la que
+sirve para tablas dinámicas por año, proceso o mesa.
 
 La primera fila del archivo deja escrito qué filtros lo produjeron, para
 que dos descargas distintas no se confundan.
@@ -362,8 +435,7 @@ que dos descargas distintas no se confundan.
 
 En la ficha de cada evaluador, arriba a la derecha, el botón "Ficha PDF"
 descarga su hoja de vida completa para imprimir o archivar: datos,
-alertas, formación, experiencia, TIC y una sección por cada año con todo
-lo del ciclo.
+alertas, formación, experiencia, TIC y una sección por cada año.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -371,7 +443,7 @@ PARTE 9 — AUDITORÍA
 -------------------
 
 La pestaña "Auditoría" de cada ficha muestra quién hizo qué y cuándo sobre
-ese evaluador. También hay una vista global con filtros.
+ese evaluador, con el antes y el después de cada cambio.
 
   +----------------------------------------------------------------------+
   | Ese registro no se puede modificar ni borrar desde el sistema, ni    |
@@ -384,41 +456,53 @@ SI ALGO NO SALE COMO ESPERA
 ---------------------------
 
   No me deja emitir el certificado
-      Falta activar la emisión en la convocatoria (Parte 7.1).
+      Falta activar la emisión en el ciclo (Parte 7.1).
   Dice que ya hay un certificado vigente
-      Ese ciclo ya tiene uno. Anúlelo antes de emitir otro.
+      Ese año ya tiene uno. Anúlelo y use "Emitir uno nuevo".
+  Dice que la convocatoria ya tiene un ciclo de ese periodo
+      Alguien ya lo abrió. Búsquelo en la lista en vez de crear otro.
   El hito de asignación no se enciende
       Faltan los tres: proceso, mesa y equipo. Con dos no basta.
+  El hito de invitación no se enciende
+      Falta cargar el correo de invitación en el ciclo, o el evaluador
+      no está vinculado a ninguna convocatoria.
   Un documento aparece en todos los años
       Se cargó en la pestaña Documentos general en vez de dentro del
       año.
-  No encuentro a alguien buscando su nombre
-      Pruebe con la identificación o el correo. Y revise si tiene el
-      interruptor "Solo activos" puesto.
+  No encuentro a alguien por su nombre
+      Pruebe con la identificación o el correo. Y revise el interruptor
+      "Solo activos".
   No me deja borrar un ciclo
       Si ya tiene certificado emitido, no se borra nunca. Si tiene
       historia, el sistema le avisa antes de arrastrarla.
+  El evaluador no puede entrar
+      Verifique que esté usando el correo INSTITUCIONAL. Es el único que
+      sirve.
   El evaluador perdió su clave
-      Hay que restablecerla; la clave inicial solo se muestra una vez al
-      crear la cuenta.
+      Hay que restablecerla desde el panel de usuarios. La inicial solo
+      se muestra al crear la cuenta.
+  En Catálogos no me deja agregar nada
+      Es correcto: son de solo consulta. Cambiarlos le corresponde al
+      administrador.
+  La barra de la izquierda está vacía
+      No se pudo cargar el menú. Use el botón "Reintentar"; si sigue,
+      avise al equipo TIC.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-EN UNA SOLA PÁGINA
-------------------
+EL CICLO COMPLETO EN UNA PÁGINA
+-------------------------------
 
-  1. Buscar la persona antes de registrarla.
+  1. Abrir el ciclo del año sobre una convocatoria del SEP.
 
-  2. Registrarla — el sistema le crea la cuenta y le muestra la clave una
-     sola vez.
+  2. Ponerle las notas de corte y cargar el correo de invitación.
 
-  3. Completar hoja de vida, estudios, experiencia, TIC, cédula y foto.
+  3. Registrar a los evaluadores — el sistema crea la cuenta y muestra la
+     clave una sola vez.
 
-  4. Abrir la convocatoria del año, ponerle las notas de corte y cargar la
-     invitación.
+  4. Completar hoja de vida, estudios, experiencia, TIC, cédula y foto.
 
-  5. Vincular a cada evaluador al ciclo con su rol, área, proceso, mesa y
-     equipo.
+  5. Vincular a cada uno al ciclo con su rol, área, proceso, mesa y equipo.
 
   6. Cargar del año: autorización del jefe, confidencialidad, curso y
      prueba.

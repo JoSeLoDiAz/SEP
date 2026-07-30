@@ -85,6 +85,62 @@ export class CatalogosEvaluadorService {
     return anios
   }
 
+  /**
+   * Firmas disponibles para los certificados.
+   *
+   * Es la misma tabla que usan los certificados de beneficiario, no una copia:
+   * la firma de quien avala es institucional, no del módulo. Se excluye la
+   * imagen del BLOB — aquí solo hace falta poder elegir.
+   */
+  async listarFirmasCertificado() {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT FIRMACERTIFICADOSID        AS "id",
+              TRIM(FIRMACERTIFICADOSNOMBRE) AS "nombre",
+              TRIM(FIRMACERTIFICADOSCARGO)  AS "cargo",
+              CASE WHEN FIRMACERTIFICADOSFIRMA IS NULL THEN 0 ELSE 1 END AS "tieneImagen"
+         FROM FIRMACERTIFICADOS
+        ORDER BY FIRMACERTIFICADOSNOMBRE`,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      nombre: (r.nombre as string | null) ?? '(sin nombre)',
+      cargo: (r.cargo as string | null) ?? null,
+      tieneImagen: Number(r.tieneImagen) === 1,
+    }))
+  }
+
+  /**
+   * Convocatorias REALES del SEP, para atarles el ciclo de evaluadores (v40).
+   *
+   * Se marca cuáles ya tienen ciclo: dos ciclos sobre la misma convocatoria y
+   * el mismo periodo son dos verdades para lo mismo, y el índice único de la
+   * v40 lo rechaza. Avisarlo en la lista evita llegar al error.
+   */
+  async listarConvocatoriasSep(anio?: number) {
+    const params: unknown[] = []
+    let filtro = ''
+    if (anio) { params.push(anio); filtro = ` WHERE c.CONVOCATORIAANIO = :${params.length}` }
+
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT c.CONVOCATORIAID              AS "id",
+              TRIM(c.CONVOCATORIANOMBRE)    AS "nombre",
+              c.CONVOCATORIAANIO            AS "anio",
+              TRIM(c.CONVOCATORIAESTADOCONVOCATORIA) AS "estado",
+              (SELECT COUNT(*) FROM EVALUADORCONVOCATORIA e
+                WHERE e.CONVOCATORIASEPID = c.CONVOCATORIAID) AS "ciclos"
+         FROM CONVOCATORIA c${filtro}
+        ORDER BY c.CONVOCATORIAANIO DESC, c.CONVOCATORIAID DESC`,
+      params,
+    )
+    return rows.map(r => ({
+      id: Number(r.id),
+      nombre: (r.nombre as string | null) ?? '(sin nombre)',
+      anio: Number(r.anio),
+      estado: (r.estado as string | null) ?? null,
+      ciclos: Number(r.ciclos ?? 0),
+    }))
+  }
+
   /** Modalidades de participación (presencial, virtual…). */
   async listarModalidades(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(

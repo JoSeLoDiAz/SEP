@@ -42,6 +42,7 @@ export default function EvaluadoresDashboardPage() {
   const [data, setData] = useState<RespListado | null>(null)
   const [contadores, setContadores] = useState<Contadores | null>(null)
   const [cargandoContadores, setCargandoContadores] = useState(false)
+  const [contadoresFallaron, setContadoresFallaron] = useState(false)
   const [loading, setLoading] = useState(false)
   const [exportando, setExportando] = useState(false)
   const [errMsg, setErrMsg] = useState('')
@@ -114,6 +115,7 @@ export default function EvaluadoresDashboardPage() {
     const ctrl = new AbortController()
     contadoresCtrlRef.current = ctrl
     setContadores(null)
+    setContadoresFallaron(false)
     setCargandoContadores(true)
 
     const totalCon = async (extra: Record<string, string>) => {
@@ -134,7 +136,14 @@ export default function EvaluadoresDashboardPage() {
     } catch {
       // Los contadores son informativos: si fallan, la pantalla sigue sirviendo.
       // Se olvida la clave para que el próximo cambio de criterios reintente.
-      if (contadoresCtrlRef.current === ctrl) claveContadoresRef.current = null
+      //
+      // Pero hay que MARCAR el fallo: un "—" junto a "Filtrar por esta alerta"
+      // se lee como cero, y "nadie le falta la cédula" es lo contrario de lo
+      // que pasa cuando no se pudo contar.
+      if (contadoresCtrlRef.current === ctrl) {
+        claveContadoresRef.current = null
+        setContadoresFallaron(true)
+      }
     } finally {
       // Si esta carga ya fue reemplazada, el spinner lo apaga la nueva.
       if (contadoresCtrlRef.current === ctrl) setCargandoContadores(false)
@@ -166,6 +175,12 @@ export default function EvaluadoresDashboardPage() {
     relanzar('', FILTROS_VACIOS)
   }
 
+  /** Quita solo la búsqueda de texto y conserva los filtros puestos. */
+  function limpiarBusqueda() {
+    setBusqueda('')
+    relanzar('', filtros)
+  }
+
   async function exportar() {
     setExportando(true)
     try {
@@ -187,7 +202,11 @@ export default function EvaluadoresDashboardPage() {
   const totalPaginas = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1
   const numFiltros = contarFiltros(filtros)
   const hayCriterios = numFiltros > 0 || busquedaAplicada !== ''
-  const valorContador = (v: number | undefined) => (v == null ? '—' : String(v))
+  // "?" y no "—" cuando la consulta falló: el guion se confunde con un cero, y
+  // decirle que a nadie le falta la cédula cuando no se pudo contar es peor que
+  // no decir nada.
+  const valorContador = (v: number | undefined) =>
+    v != null ? String(v) : (contadoresFallaron ? '?' : '—')
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -288,8 +307,10 @@ export default function EvaluadoresDashboardPage() {
 
       <BarraFiltrosBanco
         busqueda={busqueda}
+        busquedaAplicada={busquedaAplicada}
         onBusquedaChange={setBusqueda}
         onBuscar={handleBuscar}
+        onLimpiarBusqueda={limpiarBusqueda}
         filtros={filtros}
         onCambiarFiltros={aplicarFiltros}
         onLimpiar={limpiarTodo}

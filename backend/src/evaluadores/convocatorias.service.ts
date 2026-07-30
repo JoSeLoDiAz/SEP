@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import type { MulterFile } from './evaluadores.service'
@@ -20,6 +20,16 @@ export interface ConvocatoriaCrearDto {
   fechaInicio?: string | null
   fechaFin?: string | null
   observaciones?: string | null
+  /**
+   * Convocatoria REAL del SEP sobre la que se monta este ciclo (v40).
+   *
+   * El ciclo de evaluadores no es una convocatoria aparte: es la capa de
+   * reglas —cortes, certificación, matriz— que se le pone encima a una
+   * convocatoria que ya existe, con su programa, presupuesto y fechas. Sin
+   * atarlo, el gestor teclea un nombre libre que no coincide con el oficial y
+   * los dos mundos dejan de cuadrar.
+   */
+  convocatoriaSepId?: number | null
 }
 
 export interface ConvocatoriaActualizarDto {
@@ -41,6 +51,8 @@ export interface ConvocatoriaActualizarDto {
   certificadoFirmaId?: number | null
   /** 1 = se pueden emitir certificados del ciclo. Se habilita al cerrar el proceso. */
   certificadoHabilitado?: boolean
+  /** Convocatoria real del SEP a la que pertenece el ciclo (v40). */
+  convocatoriaSepId?: number | null
 }
 
 export interface ListarConvocatoriasQuery {
@@ -148,9 +160,13 @@ export class ConvocatoriasService {
               c.CERTIFICADOTEXTO     AS "certificadoTexto",
               c.CERTIFICADOFIRMAID   AS "certificadoFirmaId",
               NVL(c.CERTIFICADOHABILITADO, 0) AS "certificadoHabilitado",
+              c.CONVOCATORIASEPID    AS "convocatoriaSepId",
+              TRIM(cs.CONVOCATORIANOMBRE) AS "convocatoriaSepNombre",
+              cs.CONVOCATORIAANIO    AS "convocatoriaSepAnio",
               c.FECHACREACION        AS "fechaCreacion"
          FROM EVALUADORCONVOCATORIA c
          LEFT JOIN MODALIDADPART mo ON mo.MODALIDADPARTID = c.MODALIDADPARTID
+         LEFT JOIN CONVOCATORIA  cs ON cs.CONVOCATORIAID  = c.CONVOCATORIASEPID
         WHERE c.CONVOCATORIAID = :1`,
       [convocatoriaId],
     )
@@ -187,6 +203,9 @@ export class ConvocatoriasService {
       calificacionMinimaCurso: r.calificacionMinimaCurso != null ? Number(r.calificacionMinimaCurso) : null,
       certificadoTexto: (r.certificadoTexto as string | null) ?? null,
       certificadoFirmaId: r.certificadoFirmaId != null ? Number(r.certificadoFirmaId) : null,
+      convocatoriaSepId: r.convocatoriaSepId != null ? Number(r.convocatoriaSepId) : null,
+      convocatoriaSepNombre: (r.convocatoriaSepNombre as string | null) ?? null,
+      convocatoriaSepAnio: r.convocatoriaSepAnio != null ? Number(r.convocatoriaSepAnio) : null,
       certificadoHabilitado: Number(r.certificadoHabilitado) === 1,
       fechaCreacion: r.fechaCreacion ?? null,
       documentosPorTipo: porTipo.map(t => ({
@@ -214,22 +233,30 @@ export class ConvocatoriasService {
     )
     const convocatoriaId = Number(seq[0].NUEVO)
 
-    await this.dataSource.query(
-      `INSERT INTO EVALUADORCONVOCATORIA
-         (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
-          OBSERVACIONES, ACTIVO, FECHACREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, 1, SYSDATE)`,
-      [
-        convocatoriaId,
-        Number(dto.anio),
-        (dto.periodo ?? '').toString().trim() || null,
-        dto.nombre.trim(),
-        await this.idModalidad(dto.modalidadPart),
-        dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-        dto.fechaFin ? new Date(dto.fechaFin) : null,
-        (dto.observaciones ?? '').toString().trim() || null,
-      ],
-    )
+    await this.validarConvocatoriaSep(dto.convocatoriaSepId, dto.anio)
+
+    const modalidadId = await this.idModalidad(dto.modalidadPart)
+    try {
+      await this.dataSource.query(
+        `INSERT INTO EVALUADORCONVOCATORIA
+           (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
+            OBSERVACIONES, CONVOCATORIASEPID, ACTIVO, FECHACREACION)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, SYSDATE)`,
+        [
+          convocatoriaId,
+          Number(dto.anio),
+          (dto.periodo ?? '').toString().trim() || null,
+          dto.nombre.trim(),
+          modalidadId,
+          dto.fechaInicio ? new Date(dto.fechaInicio) : null,
+          dto.fechaFin ? new Date(dto.fechaFin) : null,
+          (dto.observaciones ?? '').toString().trim() || null,
+          dto.convocatoriaSepId ?? null,
+        ],
+      )
+    } catch (e) {
+      this.traducirDuplicado(e, dto.convocatoriaSepId)
+    }
     return { id: convocatoriaId, message: 'Convocatoria creada' }
   }
 
@@ -239,6 +266,19 @@ export class ConvocatoriasService {
     )
     if (!ok[0]) throw new NotFoundException('Convocatoria no encontrada')
     if (dto.anio !== undefined) this.validarAnio(dto.anio)
+
+    if (dto.convocatoriaSepId !== undefined) {
+      // El año a comparar es el que va a quedar: si vienen los dos en el mismo
+      // PUT, manda el nuevo; si solo cambia la convocatoria, el que ya tiene.
+      const actual: Array<{ anio: number }> = await this.dataSource.query(
+        `SELECT ANIO AS "anio" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`,
+        [convocatoriaId],
+      )
+      await this.validarConvocatoriaSep(
+        dto.convocatoriaSepId,
+        dto.anio ?? Number(actual[0]?.anio),
+      )
+    }
 
     // UPDATE dinámico — mismo patrón que EvaluadoresService.actualizar.
     const sets: string[] = []
@@ -251,6 +291,7 @@ export class ConvocatoriasService {
       ['fechaFin',      'FECHAFIN',      v => (v ? new Date(v as string) : null)],
       ['observaciones', 'OBSERVACIONES', v => (v as string | null)?.toString().trim() || null],
       ['activo',        'ACTIVO',        v => (v ? 1 : 0)],
+      ['convocatoriaSepId',       'CONVOCATORIASEPID',       v => v ?? null],
       ['puntajeMinimoPrueba',     'PUNTAJEMINIMOPRUEBA',     v => v ?? null],
       ['calificacionMinimaCurso', 'CALIFICACIONMINIMACURSO', v => v ?? null],
       ['certificadoTexto',        'CERTIFICADOTEXTO',        v => (v as string | null)?.toString().trim() || null],
@@ -273,10 +314,16 @@ export class ConvocatoriasService {
 
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(convocatoriaId)
-    await this.dataSource.query(
-      `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${params.length}`,
-      params,
-    )
+    try {
+      await this.dataSource.query(
+        `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${params.length}`,
+        params,
+      )
+    } catch (e) {
+      // Reasignar la convocatoria del SEP puede chocar con el mismo índice
+      // único que al crear: si ya hay otro ciclo de ese periodo sobre ella.
+      this.traducirDuplicado(e, dto.convocatoriaSepId)
+    }
     return { message: 'Convocatoria actualizada' }
   }
 
@@ -313,6 +360,53 @@ export class ConvocatoriasService {
     const anioMax = new Date().getFullYear() + 2
     if (!Number.isFinite(n) || n < 2000 || n > anioMax) {
       throw new BadRequestException(`El año debe estar entre 2000 y ${anioMax}`)
+    }
+  }
+
+  /**
+   * Comprueba que la convocatoria del SEP exista y que el año coincida.
+   *
+   * La FK de la v40 ya impide apuntar a una que no existe, pero devolvería un
+   * ORA-02291 crudo. Y el año NO lo cubre ninguna restricción: montar el ciclo
+   * 2026 sobre la convocatoria 2024 es un error silencioso que solo se nota
+   * meses después, cuando los certificados salen con el año equivocado.
+   */
+  /**
+   * Traduce el choque del índice único de la v40 a un mensaje que se entienda.
+   *
+   * Sin esto, intentar abrir un segundo ciclo sobre la misma convocatoria y el
+   * mismo periodo devuelve un 500 "Internal server error": la gestora no sabe
+   * qué hizo mal ni que el ciclo ya existe.
+   */
+  private traducirDuplicado(e: unknown, sepId: number | null | undefined): never {
+    const msg = (e as { message?: string })?.message ?? ''
+    if (/ORA-00001/.test(msg) && /UQ_EVALCONV_SEP_PERIODO/i.test(msg)) {
+      throw new ConflictException(
+        'Esa convocatoria del SEP ya tiene un ciclo del banco para ese periodo. ' +
+        'Abra el que ya existe, o use otro periodo.',
+      )
+    }
+    void sepId
+    throw e as Error
+  }
+
+  private async validarConvocatoriaSep(sepId: number | null | undefined, anio: number) {
+    if (sepId == null) return
+
+    const filas: Array<{ anio: number; nombre: string }> = await this.dataSource.query(
+      `SELECT CONVOCATORIAANIO AS "anio", TRIM(CONVOCATORIANOMBRE) AS "nombre"
+         FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      [sepId],
+    )
+    if (!filas[0]) {
+      throw new BadRequestException('La convocatoria del SEP indicada no existe')
+    }
+    const anioSep = Number(filas[0].anio)
+    if (Number.isFinite(anioSep) && Number(anio) !== anioSep) {
+      throw new BadRequestException(
+        `El ciclo es del año ${anio} pero "${filas[0].nombre}" es del ${anioSep}. ` +
+        'Escoja la convocatoria de ese año o corrija el año del ciclo.',
+      )
     }
   }
 

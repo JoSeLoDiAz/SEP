@@ -368,9 +368,16 @@ export class EvaluadoresController {
     @CurrentUser() user: JwtUser,
     @Query('q') q = '',
     @Query('limit') limit = '15',
+    @Query('participacionId') participacionId?: string,
   ) {
     this.exigirGestion(user)
-    return this.ciclo.buscarProyectos(q, Number(limit))
+    // Con la participación, la búsqueda se acota a los proyectos de SU
+    // convocatoria. Sin ella queda la búsqueda global, que sigue sirviendo
+    // para consultar pero no debería usarse al asignar.
+    const pid = Number(participacionId)
+    return this.ciclo.buscarProyectos(
+      q, Number(limit), Number.isFinite(pid) && pid > 0 ? pid : undefined,
+    )
   }
 
   // ── Listado y ficha ────────────────────────────────────────────────────

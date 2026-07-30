@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { getSepUsuario, isAdmin } from '@/lib/auth'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { ArrowLeft, ChevronRight, Loader2, Plus, Power, PowerOff, Settings2 } from 'lucide-react'
 import Link from 'next/link'
@@ -68,6 +69,16 @@ function CatalogoBloque({
   const [agregando, setAgregando] = useState(false)
   const [accion, setAccion] = useState<number | null>(null)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
+
+  /**
+   * Consultar los catálogos lo puede hacer quien gestiona el banco; MODIFICARLOS
+   * es solo del administrador (el backend usa `exigirAdmin` en los POST y PUT).
+   *
+   * Sin este gate la pantalla se veía completa y solo fallaba al guardar, con un
+   * 403 que no explica nada. Se ocultan los controles de escritura en vez de
+   * dejar que la gestora descubra el límite chocándose con él.
+   */
+  const puedeEditar = isAdmin(getSepUsuario()?.perfilId ?? 0)
 
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
@@ -138,32 +149,39 @@ function CatalogoBloque({
         <p className="text-[11px] text-neutral-500 mt-0.5">{descripcion}</p>
       </header>
 
-      {/* Formulario agregar */}
-      <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 flex flex-wrap gap-2 items-center">
-        <input
-          value={nuevoNombre}
-          onChange={(e) => setNuevoNombre(e.target.value)}
-          placeholder="Nombre..."
-          className="flex-1 min-w-[160px] border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
-        />
-        {soportaDescripcion && (
+      {/* Formulario agregar — solo administrador */}
+      {puedeEditar ? (
+        <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 flex flex-wrap gap-2 items-center">
           <input
-            value={nuevoDesc}
-            onChange={(e) => setNuevoDesc(e.target.value)}
-            placeholder="Descripción (opcional)"
-            className="flex-1 min-w-[200px] border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
+            value={nuevoNombre}
+            onChange={(e) => setNuevoNombre(e.target.value)}
+            placeholder="Nombre..."
+            className="flex-1 min-w-[160px] border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
           />
-        )}
-        <button
-          onClick={agregar}
-          disabled={!nuevoNombre.trim() || agregando}
-          className="inline-flex items-center gap-1.5 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
-          style={{ backgroundColor: INSTITUTIONAL }}
-        >
-          {agregando ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-          Agregar
-        </button>
-      </div>
+          {soportaDescripcion && (
+            <input
+              value={nuevoDesc}
+              onChange={(e) => setNuevoDesc(e.target.value)}
+              placeholder="Descripción (opcional)"
+              className="flex-1 min-w-[200px] border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
+            />
+          )}
+          <button
+            onClick={agregar}
+            disabled={!nuevoNombre.trim() || agregando}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
+            style={{ backgroundColor: INSTITUTIONAL }}
+          >
+            {agregando ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+            Agregar
+          </button>
+        </div>
+      ) : (
+        <p className="px-5 py-3 text-[12px] text-neutral-500 bg-neutral-50/60 border-b border-neutral-100">
+          Solo consulta. Modificar los catálogos le corresponde al administrador,
+          porque un cambio aquí afecta a todos los años.
+        </p>
+      )}
 
       {errMsg && <p className="px-5 py-3 text-sm text-red-700 bg-red-50">{errMsg}</p>}
 
@@ -196,20 +214,22 @@ function CatalogoBloque({
               }`}>
                 {it.activo === 1 ? 'Activo' : 'Inactivo'}
               </span>
-              <button
-                onClick={() => toggleEstado(it)}
-                disabled={procesando}
-                className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition disabled:opacity-50 ${
-                  it.activo === 1
-                    ? 'bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-700'
-                    : 'bg-[#39a900]/10 hover:bg-[#39a900]/20 text-[#39a900]'
-                }`}
-              >
-                {procesando
-                  ? <Loader2 size={12} className="animate-spin" />
-                  : it.activo === 1 ? <PowerOff size={12} /> : <Power size={12} />}
-                {it.activo === 1 ? 'Desactivar' : 'Activar'}
-              </button>
+              {puedeEditar && (
+                <button
+                  onClick={() => toggleEstado(it)}
+                  disabled={procesando}
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition disabled:opacity-50 ${
+                    it.activo === 1
+                      ? 'bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-700'
+                      : 'bg-[#39a900]/10 hover:bg-[#39a900]/20 text-[#39a900]'
+                  }`}
+                >
+                  {procesando
+                    ? <Loader2 size={12} className="animate-spin" />
+                    : it.activo === 1 ? <PowerOff size={12} /> : <Power size={12} />}
+                  {it.activo === 1 ? 'Desactivar' : 'Activar'}
+                </button>
+              )}
             </li>
           )
         })}

@@ -1051,8 +1051,30 @@ function TabCertificado({
                 <XCircle size={13} /> Anular
               </button>
             )}
+            {/* Anulado: hay que poder emitir el reemplazo desde aquí. El botón
+                de emitir vivía solo en la rama "sin certificado", así que tras
+                anular uno el ciclo se quedaba sin salida en esta pantalla — el
+                único camino era el lote de la convocatoria, en otro sitio. */}
+            {!vigente && (
+              <button
+                onClick={() => setConfirmEmitir(true)}
+                disabled={emitiendo}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: INSTITUTIONAL }}
+              >
+                {emitiendo ? <Loader2 size={13} className="animate-spin" /> : <Stamp size={13} />}
+                Emitir uno nuevo
+              </button>
+            )}
           </div>
         </div>
+
+        {!vigente && (
+          <p className="mt-3 text-[12px] text-neutral-600">
+            Este número queda anulado y no se reutiliza. El nuevo certificado
+            llevará el siguiente consecutivo del año.
+          </p>
+        )}
 
         <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -1115,6 +1137,24 @@ function TabCertificado({
           </div>
         }
         textoConfirmar="Anular"
+        cargando={emitiendo}
+      />
+
+      {/* El mismo modal de emisión que la rama "sin certificado": sin esto, el
+          botón "Emitir uno nuevo" no tendría con qué confirmar. */}
+      <ConfirmModal
+        open={confirmEmitir}
+        onClose={() => setConfirmEmitir(false)}
+        onConfirm={emitir}
+        tipo="warning"
+        titulo="Emitir un certificado nuevo"
+        mensaje={
+          <>
+            El anterior (<strong>{numero}</strong>) queda anulado y su número no se reutiliza.
+            El nuevo llevará el siguiente consecutivo de <strong>{detalle.anio}</strong>.
+          </>
+        }
+        textoConfirmar="Emitir"
         cargando={emitiendo}
       />
     </div>

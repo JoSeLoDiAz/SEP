@@ -107,6 +107,7 @@ export function BarraFiltrosBanco({
   const [centros, setCentros] = useState<CatalogoItem[]>([])
   const [areas, setAreas] = useState<CatalogoItem[]>([])
   const [estados, setEstados] = useState<EstadoItem[]>([])
+  const [catalogosFallaron, setCatalogosFallaron] = useState(false)
 
   // Los años salen de los datos, no de una ventana móvil calculada aquí: el
   // histórico llega a 2020 y con `anioActual + 1 - i` ese año no aparecía en
@@ -132,8 +133,10 @@ export function BarraFiltrosBanco({
         setEstados(e.data)
         setAnios(y.data)
       })
-      // Un catálogo caído deja su select vacío, pero el listado sigue usable.
-      .catch(() => { /* silencioso a propósito */ })
+      // Un catálogo caído deja los selects vacíos. El listado sigue usable, pero
+      // hay que decirlo: unos selects en "Todos" sin explicación se leen como
+      // "no hay nada que filtrar", que es distinto de "no se pudo cargar".
+      .catch(() => { if (vivo) setCatalogosFallaron(true) })
     return () => { vivo = false }
   }, [])
 
@@ -210,6 +213,13 @@ export function BarraFiltrosBanco({
       </form>
 
       {/* Selects */}
+      {catalogosFallaron && (
+        <p className="border-t border-neutral-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          No se pudieron cargar las listas de los filtros. El buscador y las alertas
+          siguen funcionando; recargue la página para reintentar.
+        </p>
+      )}
+
       <div className="border-t border-neutral-100 px-3 py-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
         <div>
           <label className={etiqueta}>Año del ciclo</label>

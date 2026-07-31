@@ -575,7 +575,9 @@ function PanelSubTabs({
         })}
       </div>
 
-      {subTab === 'documentos' && <TabDocumentos detalle={detalle} setToast={setToast} />}
+      {subTab === 'documentos' && (
+        <TabDocumentos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+      )}
       {subTab === 'formacion' && <TabFormacion detalle={detalle} setToast={setToast} />}
       {subTab === 'proyectos' && (
         <TabProyectos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
@@ -593,21 +595,256 @@ function PanelSubTabs({
   )
 }
 
-/* ── Documentos: propios / heredados / permanentes ──────────────────────── */
+/* ── Autorización del jefe ──────────────────────────────────────────────── */
 
-function TabDocumentos({
-  detalle, setToast,
+/**
+ * Registra la autorización del jefe y su evidencia — el hito 2 del ciclo.
+ *
+ * Los endpoints existían desde el principio y ninguna pantalla los llamaba:
+ * el dato se mostraba en la cabecera del año ("Autorizó — ") pero no había
+ * forma de ponerlo, así que el hito no podía encenderse nunca.
+ *
+ * Va dentro del año y no en la ficha general porque la autorización es de un
+ * ciclo concreto: el jefe autoriza participar en ESA convocatoria.
+ */
+function BloqueAutorizacion({
+  detalle, setToast, onRecargar,
 }: {
   detalle: Detalle
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
 }) {
-  const { propios, heredados, permanentes } = detalle.documentos
-  if (!propios.length && !heredados.length && !permanentes.length) {
-    return <Vacio texto="Este ciclo aún no tiene documentos." />
+  const a = detalle.aprobacion
+  const [abierto, setAbierto] = useState(false)
+  const [nombre, setNombre] = useState('')
+  const [email, setEmail] = useState('')
+  const [cargo, setCargo] = useState('')
+  const [fecha, setFecha] = useState('')
+  const [observaciones, setObservaciones] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [subiendo, setSubiendo] = useState(false)
+  const [confirmBorrar, setConfirmBorrar] = useState(false)
+  const archivoRef = useRef<HTMLInputElement>(null)
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  async function registrar() {
+    if (!nombre.trim()) return setToast({ tipo: 'error', msg: 'El nombre del jefe es obligatorio' })
+    if (!email.trim()) return setToast({ tipo: 'error', msg: 'El correo del jefe es obligatorio' })
+    if (!fecha) return setToast({ tipo: 'error', msg: 'La fecha de la autorización es obligatoria' })
+    setGuardando(true)
+    try {
+      await api.post(`/evaluadores/participaciones/${detalle.participacionId}/aprobacion`, {
+        aprobadorNombre: nombre.trim(),
+        aprobadorEmail: email.trim(),
+        aprobadorCargo: cargo.trim() || null,
+        fechaAprobacion: fecha,
+        observaciones: observaciones.trim() || null,
+      })
+      setToast({ tipo: 'success', msg: 'Autorización registrada' })
+      setAbierto(false)
+      setNombre(''); setEmail(''); setCargo(''); setFecha(''); setObservaciones('')
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo registrar la autorización') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  async function subirEvidencia(archivo: File) {
+    if (!a) return
+    setSubiendo(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      await api.post(`/evaluadores/aprobaciones/${a.aprobacionId}/evidencia`, fd)
+      setToast({ tipo: 'success', msg: 'Evidencia cargada' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar la evidencia') })
+    } finally {
+      setSubiendo(false)
+      if (archivoRef.current) archivoRef.current.value = ''
+    }
+  }
+
+  async function borrar() {
+    if (!a) return
+    setGuardando(true)
+    try {
+      await api.delete(`/evaluadores/aprobaciones/${a.aprobacionId}`)
+      setToast({ tipo: 'success', msg: 'Autorización eliminada' })
+      setConfirmBorrar(false)
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo eliminar') })
+    } finally {
+      setGuardando(false)
+    }
   }
 
   return (
+    <div className="px-5 py-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-600">
+            Autorización del jefe
+          </p>
+          <p className="text-[11px] text-neutral-400">
+            Quién autorizó a este evaluador a participar en el ciclo, y el correo que lo prueba.
+          </p>
+        </div>
+        {!a && (
+          <button
+            onClick={() => setAbierto(v => !v)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+            style={{ backgroundColor: INSTITUTIONAL }}
+          >
+            <Plus size={13} /> {abierto ? 'Cerrar' : 'Registrar'}
+          </button>
+        )}
+      </div>
+
+      {!a && !abierto && (
+        <p className="rounded-xl border border-dashed border-neutral-200 px-4 py-5 text-center text-[12px] text-neutral-400">
+          Sin autorización registrada.
+        </p>
+      )}
+
+      {!a && abierto && (
+        <div className="grid grid-cols-1 gap-3 rounded-xl bg-neutral-50/60 p-4 sm:grid-cols-2">
+          <div>
+            <label className={label}>Nombre del jefe *</label>
+            <input value={nombre} onChange={e => setNombre(e.target.value)} className={input} />
+          </div>
+          <div>
+            <label className={label}>Correo del jefe *</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={input} />
+          </div>
+          <div>
+            <label className={label}>Cargo</label>
+            <input value={cargo} onChange={e => setCargo(e.target.value)} className={input} />
+          </div>
+          <div>
+            <label className={label}>Fecha de la autorización *</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>Observaciones</label>
+            <input
+              value={observaciones}
+              onChange={e => setObservaciones(e.target.value)}
+              maxLength={300}
+              className={input}
+            />
+          </div>
+          <div className="flex items-end justify-end sm:col-span-2">
+            <button
+              onClick={registrar}
+              disabled={guardando}
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: INSTITUTIONAL }}
+            >
+              {guardando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+              Guardar autorización
+            </button>
+          </div>
+          <p className="text-[11px] text-neutral-400 sm:col-span-2">
+            La evidencia del correo se adjunta después de guardar.
+          </p>
+        </div>
+      )}
+
+      {a && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-neutral-800">{a.aprobadorNombre}</p>
+              <p className="text-[11px] text-neutral-500">
+                {[a.aprobadorCargo, a.aprobadorEmail].filter(Boolean).join(' · ')}
+              </p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                Autorizó el {new Date(a.fechaAprobacion).toLocaleDateString('es-CO')}
+              </p>
+              {a.observaciones && (
+                <p className="mt-1 text-[11px] text-neutral-500">{a.observaciones}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {a.tieneEvidencia ? (
+                <button
+                  onClick={() => descargarArchivoConNombreDelServidor(
+                    `/evaluadores/aprobaciones/${a.aprobacionId}/evidencia`,
+                    `autorizacion-${detalle.anio}`)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-neutral-700 transition hover:bg-neutral-50"
+                >
+                  <Download size={12} /> Ver el correo
+                </button>
+              ) : (
+                <button
+                  onClick={() => archivoRef.current?.click()}
+                  disabled={subiendo}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-50 disabled:opacity-50"
+                >
+                  {subiendo ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                  Adjuntar el correo
+                </button>
+              )}
+              <button
+                onClick={() => setConfirmBorrar(true)}
+                title="Eliminar la autorización"
+                className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
+          {!a.tieneEvidencia && (
+            <p className="mt-2 text-[11px] text-amber-700">
+              Falta el correo. Guárdelo desde Outlook (.msg en el de escritorio, .eml en el web)
+              o adjunte el PDF impreso.
+            </p>
+          )}
+          <input
+            ref={archivoRef}
+            type="file"
+            accept=".msg,.eml,.html,.htm,.mht,.mhtml,.pdf"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) subirEvidencia(f) }}
+          />
+        </div>
+      )}
+
+      <ConfirmModal
+        open={confirmBorrar}
+        onClose={() => setConfirmBorrar(false)}
+        onConfirm={borrar}
+        tipo="delete"
+        titulo="Eliminar la autorización"
+        mensaje={<>Se borra el registro y el correo adjunto. El hito del ciclo vuelve a apagarse.</>}
+        textoConfirmar="Eliminar"
+        cargando={guardando}
+      />
+    </div>
+  )
+}
+
+/* ── Documentos: propios / heredados / permanentes ──────────────────────── */
+
+function TabDocumentos({
+  detalle, setToast, onRecargar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const { propios, heredados, permanentes } = detalle.documentos
+
+  return (
     <div className="flex flex-col divide-y divide-neutral-100">
+      <BloqueAutorizacion detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
       <BloqueDocs
         titulo="Propios del año"
         ayuda="Cargados para este evaluador en este ciclo."

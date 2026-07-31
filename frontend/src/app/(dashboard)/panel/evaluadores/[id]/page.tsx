@@ -1810,6 +1810,12 @@ interface Prueba {
 
 function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
   const [items, setItems] = useState<Prueba[]>([])
+  // La prueba pertenece a un ciclo, no solo a un año: un evaluador puede tener
+  // dos en el mismo año (por ejemplo FEEC en el 01 y FCE en el 02). El backend
+  // se niega a adivinar —pondría la prueba en el ciclo equivocado y encendería
+  // un hito que no corresponde—, así que hay que decírselo desde aquí.
+  const [ciclos, setCiclos] = useState<Participacion[]>([])
+  const [participacionId, setParticipacionId] = useState('')
   const [loading, setLoading] = useState(true)
   const [agregar, setAgregar] = useState(false)
   const [anio, setAnio] = useState(new Date().getFullYear().toString())
@@ -1823,13 +1829,24 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   async function cargar() {
     setLoading(true)
     try {
-      const r = await api.get<Prueba[]>(`/evaluadores/${evaluadorId}/pruebas`)
-      setItems(r.data ?? [])
+      const [rp, rc] = await Promise.all([
+        api.get<Prueba[]>(`/evaluadores/${evaluadorId}/pruebas`),
+        api.get<Participacion[]>(`/evaluadores/${evaluadorId}/participaciones`),
+      ])
+      setItems(rp.data ?? [])
+      setCiclos(rc.data ?? [])
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'Error cargando pruebas') })
     } finally {
       setLoading(false)
     }
+  }
+
+  /** Al escoger el ciclo, el año y el periodo salen de él: son los suyos. */
+  function elegirCiclo(valor: string) {
+    setParticipacionId(valor)
+    const c = ciclos.find(x => String(x.participacionId) === valor)
+    if (c) { setAnio(String(c.anio)); setPeriodo(c.periodo ?? '') }
   }
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
@@ -1840,12 +1857,14 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
       await api.post(`/evaluadores/${evaluadorId}/pruebas`, {
         anio: Number(anio),
         periodo: periodo || null,
+        participacionId: participacionId ? Number(participacionId) : null,
         fechaPresentacion: fecha || null,
         puntajeMayor: puntaje ? Number(puntaje) : null,
         intentos: intentos ? Number(intentos) : null,
       })
       setToast({ tipo: 'success', msg: 'Prueba registrada' })
       setAgregar(false)
+      setParticipacionId('')
       setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos('')
       await cargar()
     } catch (err) {
@@ -1871,6 +1890,11 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
 
+  // Con un solo ciclo ese año el backend lo ata solo; con dos o más exige que
+  // se diga cuál, y hasta ahora la pantalla no tenía cómo decirlo.
+  const mismosAnio = ciclos.filter(c => String(c.anio) === anio.trim()).length
+  const ambiguo = mismosAnio > 1 && !participacionId
+
   return (
     <Section titulo={`Pruebas de conocimiento (${items.length})`} accion={
       <button onClick={() => setAgregar(v => !v)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
@@ -1880,6 +1904,26 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
     }>
       {agregar && (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {ciclos.length > 0 && (
+            <div className="col-span-2 sm:col-span-4">
+              <label className={label}>Ciclo al que pertenece {ambiguo && '*'}</label>
+              <select value={participacionId} onChange={e => elegirCiclo(e.target.value)} className={input}>
+                <option value="">— Sin ciclo (prueba suelta) —</option>
+                {ciclos.map(c => (
+                  <option key={c.participacionId} value={String(c.participacionId)}>
+                    {c.anio}{c.periodo ? `-${c.periodo}` : ''} · {c.rolNombre ?? 'Sin rol'}
+                    {c.procesoNombre ? ` · ${c.procesoNombre}` : ''}
+                  </option>
+                ))}
+              </select>
+              {ambiguo && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Tiene {mismosAnio} ciclos en {anio}: escoja a cuál pertenece esta prueba, o el
+                  sistema no puede saber qué hito encender.
+                </p>
+              )}
+            </div>
+          )}
           <div><label className={label}>Año *</label><input value={anio} onChange={e => setAnio(e.target.value)} className={input} /></div>
           <div><label className={label}>Periodo</label><input value={periodo} onChange={e => setPeriodo(e.target.value)} className={input} /></div>
           <div><label className={label}>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>

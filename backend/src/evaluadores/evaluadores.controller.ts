@@ -13,6 +13,8 @@ import type {
   MulterFile, ParticipacionDto, PruebaDto, TicDto,
 } from './evaluadores.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
+import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
+import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { TrayectoriaService } from './trayectoria.service'
 import { AuditoriaService } from './auditoria.service'
 import { CicloService } from './ciclo.service'
@@ -64,14 +66,25 @@ export class EvaluadoresController {
     res: Response, buffer: Buffer, mime: string, nombre: string, descargar: boolean,
   ) {
     const limpio = (nombre ?? '').trim() || 'archivo'
-    res.setHeader('Content-Type', mime)
+
+    // Un correo guardado como .html o .mht es HTML, y servirlo en línea lo
+    // ejecutaría en el dominio del SEP: como el token vive en localStorage,
+    // bastaría un correo preparado para robar la sesión de quien lo abra.
+    // Esos archivos se fuerzan a descarga y se anuncian como binarios, de modo
+    // que el navegador los guarde en vez de interpretarlos.
+    const ejecutable = seEjecutaEnElNavegador(limpio, mime)
+    const enLinea = descargar ? false : !ejecutable
+
+    res.setHeader('Content-Type', ejecutable ? 'application/octet-stream' : mime)
     res.setHeader('Content-Length', String(buffer.length))
+    // Sin esto, Chrome puede olfatear el contenido y renderizarlo igual.
+    res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader(
       'Content-Disposition',
-      descargar
+      enLinea
+        ? `inline; filename="${encodeURIComponent(limpio)}"`
         // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
-        ? `attachment; filename="${limpio.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(limpio)}`
-        : `inline; filename="${encodeURIComponent(limpio)}"`,
+        : `attachment; filename="${limpio.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(limpio)}`,
     )
     res.end(buffer)
   }
@@ -533,10 +546,7 @@ export class EvaluadoresController {
   @Post(':id/foto')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_FOTO_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (!f.mimetype.startsWith('image/')) return cb(new BadRequestException('Solo imágenes (JPG, PNG)'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype.startsWith('image/'), 'Solo imágenes (JPG, PNG)'),
   }))
   subirFoto(
     @CurrentUser() user: JwtUser,
@@ -660,10 +670,7 @@ export class EvaluadoresController {
   @Post(':id/hoja-vida')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   subirHV(
     @CurrentUser() user: JwtUser,
@@ -691,10 +698,7 @@ export class EvaluadoresController {
   @Post(':id/estudios')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearEstudio(
     @CurrentUser() user: JwtUser,
@@ -743,10 +747,7 @@ export class EvaluadoresController {
   @Post(':id/experiencia')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearExperiencia(
     @CurrentUser() user: JwtUser,
@@ -795,10 +796,7 @@ export class EvaluadoresController {
   @Post(':id/tic')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearTic(
     @CurrentUser() user: JwtUser,
@@ -895,7 +893,12 @@ export class EvaluadoresController {
 
   @Post('aprobaciones/:aid/evidencia')
   @ApiOperation({ summary: 'Subir el correo de autorización (.msg, .eml o PDF, hasta 20 MB)' })
-  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: MAX_EVIDENCIA_BYTES } }))
+  // Sin filtro de tipo: lo valida el service contra las extensiones de correo.
+  // El filtro va igual, para que el nombre del .msg no llegue con la tilde rota.
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_EVIDENCIA_BYTES },
+    fileFilter: filtroSoloNombre,
+  }))
   subirEvidenciaAprobacion(
     @CurrentUser() user: JwtUser,
     @Param('aid', ParseIntPipe) aid: number,
@@ -948,10 +951,7 @@ export class EvaluadoresController {
   @Post('capacitaciones/:cid/certificado')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   subirCertificadoCapacitacion(
     @CurrentUser() user: JwtUser,
@@ -1091,10 +1091,13 @@ export class EvaluadoresController {
   @Post(':id/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
-    fileFilter: (_r, f, cb) => {
-      if (f.mimetype !== 'application/pdf') return cb(new BadRequestException('Solo PDF'), false)
-      cb(null, true)
-    },
+    // Puerta laxa: aquí no se sabe todavía de qué tipo es el documento, y hay
+    // tipos que son correos (.msg, .eml, .html…). Quién puede subir qué lo
+    // decide el service contra las extensiones declaradas en el catálogo, que
+    // es donde sí se conoce el tipo.
+    fileFilter: filtroArchivo(
+      f => f.mimetype === 'application/pdf' || MIMES_CORREO.includes(f.mimetype),
+      'Tipo de archivo no soportado. Se acepta PDF, y correos en .msg, .eml, .html o .mht'),
   }))
   subirDocumento(
     @CurrentUser() user: JwtUser,
@@ -1129,10 +1132,10 @@ export class EvaluadoresController {
   ) {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
-    res.setHeader('Content-Type', mime)
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombre)}"`)
-    res.setHeader('Content-Length', String(buffer.length))
-    res.end(buffer)
+    // Por el helper y no a mano: es el que decide que un correo en .html no
+    // se sirva en línea. Escribir las cabeceras aquí dejaba esta ruta fuera
+    // de esa protección justo cuando se empezaron a aceptar correos.
+    this.responderArchivo(res, buffer, mime, nombre, false)
   }
 
   @Get('documentos/:docId/descargar')

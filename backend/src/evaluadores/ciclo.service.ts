@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { AuditoriaService } from './auditoria.service'
 import type { MulterFile } from './evaluadores.service'
+import { EXTENSIONES_CORREO, MIMES_CORREO } from './formatos-correo'
 
 /**
  * Lo que cuelga de un ciclo del evaluador: aprobación del jefe, curso de
@@ -53,17 +54,17 @@ export interface CtxUsuario {
 const MAX_EVIDENCIA_BYTES = 20 * 1024 * 1024
 
 /**
- * Outlook manda los .msg como octet-stream y algunos navegadores como
- * `application/vnd.ms-outlook`. Validar solo por mimetype rechazaría archivos
- * legítimos, así que se acepta por extensión con el mime como respaldo.
+ * La evidencia es un correo, y cada quien lo guarda con lo que tiene: Outlook
+ * de escritorio da .msg, el web da .eml, y "guardar como" del navegador da
+ * .html o .mht. La lista vive en formatos-correo para que los cuatro sitios
+ * del banco que reciben correos acepten lo mismo.
+ *
+ * Se valida por extensión con el mime como respaldo: los navegadores mandan
+ * los .msg unas veces como octet-stream y otras como vnd.ms-outlook, y cerrar
+ * por mime rechazaría archivos legítimos.
  */
-const EVIDENCIA_EXTENSIONES = ['.msg', '.pdf', '.eml']
-const EVIDENCIA_MIMES = [
-  'application/pdf',
-  'application/vnd.ms-outlook',
-  'application/octet-stream',
-  'message/rfc822',
-]
+const EVIDENCIA_EXTENSIONES = ['pdf', ...EXTENSIONES_CORREO].map(x => `.${x}`)
+const EVIDENCIA_MIMES = ['application/pdf', ...MIMES_CORREO]
 
 @Injectable()
 export class CicloService {

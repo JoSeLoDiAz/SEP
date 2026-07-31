@@ -7,6 +7,7 @@ import {
   cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
 } from '../common/crypto/usuario-clave'
 import { AuditoriaService } from './auditoria.service'
+import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
 
 /** PERFIL.PERFILID 9 = EVALUADORGFCE. Es el perfil con el que entra al SEP. */
 const PERFIL_EVALUADOR = 9
@@ -1902,23 +1903,36 @@ export class EvaluadoresService {
     file: MulterFile,
     opts: { descripcion?: string; anioReferencia?: number; participacionId?: number } = {},
   ): Promise<{ mensaje: string; documentoId: number }> {
-    if (!file?.buffer) throw new BadRequestException('Adjunta el PDF en el campo "archivo"')
-    if (file.mimetype !== 'application/pdf') {
-      throw new BadRequestException('Solo se permiten archivos PDF')
-    }
+    if (!file?.buffer) throw new BadRequestException('Adjunta el archivo en el campo "archivo"')
     if (!tipoId) throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
 
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
-    const tipo: Array<{ admiteMultiple: number }> = await this.dataSource.query(
-      `SELECT ADMITEMULTIPLE AS "admiteMultiple"
-         FROM TIPODOCUMENTOEVAL
-        WHERE TIPODOCUMENTOEVALID = :1 AND ACTIVO = 1`,
-      [tipoId],
-    )
+    const tipo: Array<{ admiteMultiple: number; nombre: string; codigo: string }> =
+      await this.dataSource.query(
+        `SELECT ADMITEMULTIPLE AS "admiteMultiple",
+                TRIM(NOMBRE)   AS "nombre",
+                TRIM(CODIGO)   AS "codigo"
+           FROM TIPODOCUMENTOEVAL
+          WHERE TIPODOCUMENTOEVALID = :1 AND ACTIVO = 1`,
+        [tipoId],
+      )
     if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
     const admiteMultiple = Number(tipo[0].admiteMultiple) === 1
+
+    // Los formatos dependen del tipo: el "Correo de autorización" recibe .msg,
+    // .eml o .html, mientras la cédula y los soportes siguen siendo PDF. Antes
+    // estaba fijo en PDF, y por eso no se podía adjuntar un correo en el
+    // apartado que se llama, precisamente, "Correo de autorización".
+    const permitidas = extensionesDeTipoDocEval(tipo[0].codigo)
+    const ext = extensionDe(file.originalname)
+    if (!permitidas.includes(ext)) {
+      throw new BadRequestException(
+        `"${tipo[0].nombre}" admite ${permitidas.map(x => '.' + x).join(', ')}` +
+        (ext ? `; el archivo enviado es .${ext}` : '; el archivo no trae extensión'),
+      )
+    }
 
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()

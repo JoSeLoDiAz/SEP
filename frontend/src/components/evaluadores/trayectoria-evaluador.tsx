@@ -6,9 +6,9 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   AlertTriangle, Award, BadgeCheck, Briefcase, CalendarDays, Check, CheckCircle2,
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
-  Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Trash2, Users, XCircle,
+  Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -75,6 +75,8 @@ interface Documento {
   tipoCodigo: string
   tipoNombre: string
   descripcion: string | null
+  /** Año al que corresponde. Es lo que ata un documento permanente a un ciclo. */
+  anioReferencia?: number | null
   archivoNombre: string | null
   ambito: 'PROPIO' | 'HEREDADO' | 'PERMANENTE'
   soloLectura?: boolean
@@ -228,6 +230,7 @@ export function TrayectoriaEvaluador({
                 <CabeceraCiclo detalle={detalle} />
                 <Checklist progreso={detalle.progreso} />
                 <PanelSubTabs
+                  evaluadorId={evaluadorId}
                   detalle={detalle}
                   subTab={subTab}
                   onSubTab={setSubTab}
@@ -526,8 +529,9 @@ const SUBTABS: Array<{ id: SubTab; label: string; icon: React.ComponentType<{ si
 ]
 
 function PanelSubTabs({
-  detalle, subTab, onSubTab, setToast, onRecargar,
+  evaluadorId, detalle, subTab, onSubTab, setToast, onRecargar,
 }: {
+  evaluadorId: number
   detalle: Detalle
   subTab: SubTab
   onSubTab: (t: SubTab) => void
@@ -578,7 +582,12 @@ function PanelSubTabs({
       )}
       {subTab === 'retroalimentacion' && <TabRetroalimentacion detalle={detalle} />}
       {subTab === 'certificado' && (
-        <TabCertificado detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+        <TabCertificado
+          evaluadorId={evaluadorId}
+          detalle={detalle}
+          setToast={setToast}
+          onRecargar={onRecargar}
+        />
       )}
     </section>
   )
@@ -1091,9 +1100,146 @@ function Tarjeta({
 
 /* ── Certificado ────────────────────────────────────────────────────────── */
 
-function TabCertificado({
-  detalle, setToast, onRecargar,
+/**
+ * Carga el certificado que YA existe, para los años anteriores al módulo.
+ *
+ * No entra al registro de consecutivos: ese es el de los certificados que
+ * emitió el SEP, con un código de verificación que la página pública puede
+ * validar. Un PDF de 2025 no lo emitimos nosotros, así que se archiva como
+ * documento del ciclo — que es justo para lo que existe el tipo
+ * "Certificado de participación en evaluación".
+ */
+function SubirCertificadoExistente({
+  evaluadorId, participacionId, anio, setToast, onRecargar,
 }: {
+  evaluadorId: number
+  participacionId: number
+  anio: number
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [subiendo, setSubiendo] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function subir(archivo: File) {
+    setSubiendo(true)
+    try {
+      const tipos = await api.get<Array<{ id: number; codigo: string }>>(
+        '/evaluadores/catalogos/tipos-documento-evaluador')
+      const tipo = tipos.data.find(t => t.codigo === 'CERTIFICADO_PARTICIPACION')
+      if (!tipo) throw new Error('Falta el tipo "Certificado de participación" en los catálogos')
+
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      fd.append('tipoDocumentoEvalId', String(tipo.id))
+      // Con PARTICIPACIONID queda dentro del año y enciende el hito; sin él
+      // se iría a los documentos permanentes y aparecería en todos los años.
+      fd.append('participacionId', String(participacionId))
+      fd.append('anioReferencia', String(anio))
+      fd.append('descripcion', `Certificado de participación ${anio} (cargado)`)
+      await api.post(`/evaluadores/${evaluadorId}/documentos`, fd)
+
+      setToast({ tipo: 'success', msg: `Certificado de ${anio} archivado` })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar el certificado') })
+    } finally {
+      setSubiendo(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) subir(f) }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={subiendo}
+        className="mt-2 inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+      >
+        {subiendo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+        Cargar certificado existente (PDF)
+      </button>
+      <p className="mt-1.5 text-[11px] text-neutral-400">
+        Se archiva tal cual, sin número consecutivo ni código de verificación:
+        el SEP no lo emitió y no puede responder por uno.
+      </p>
+    </>
+  )
+}
+
+/** Los certificados de años anteriores ya archivados en este ciclo. */
+function CertificadosCargados({
+  docs, anio, setToast, onRecargar,
+}: {
+  docs: Array<{ documentoId: number; archivoNombre: string | null; descripcion: string | null }>
+  anio: number
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [ocupado, setOcupado] = useState<number | null>(null)
+
+  async function quitar(documentoId: number) {
+    setOcupado(documentoId)
+    try {
+      await api.delete(`/evaluadores/documentos/${documentoId}`)
+      setToast({ tipo: 'success', msg: 'Certificado retirado' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo retirar') })
+    } finally {
+      setOcupado(null)
+    }
+  }
+
+  return (
+    <div className="mx-auto mb-5 max-w-md text-left">
+      <p className="mb-2 text-center text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+        Certificado de {anio} archivado
+      </p>
+      {docs.map(d => (
+        <div
+          key={d.documentoId}
+          className="mb-2 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3"
+        >
+          <BadgeCheck size={16} className="shrink-0 text-emerald-600" />
+          <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-neutral-700">
+            {d.archivoNombre || d.descripcion || 'Certificado cargado'}
+          </p>
+          <button
+            onClick={() => descargarArchivoConNombreDelServidor(
+              `/evaluadores/documentos/${d.documentoId}/descargar`, `certificado-${anio}.pdf`)}
+            title="Descargar"
+            className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition hover:bg-white"
+          >
+            <Download size={14} />
+          </button>
+          <button
+            onClick={() => quitar(d.documentoId)}
+            disabled={ocupado === d.documentoId}
+            title="Retirar"
+            className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          >
+            {ocupado === d.documentoId
+              ? <Loader2 size={14} className="animate-spin" />
+              : <Trash2 size={14} />}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TabCertificado({
+  evaluadorId, detalle, setToast, onRecargar,
+}: {
+  evaluadorId: number
   detalle: Detalle
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
   onRecargar: () => void
@@ -1107,6 +1253,20 @@ function TabCertificado({
 
   const cert = detalle.certificado
   const vigente = cert && !cert.anulado
+
+  // Certificados de años anteriores que se archivaron a mano. Viven como
+  // documento del ciclo, no en el registro de consecutivos: el SEP no los
+  // emitió y no puede darles un código de verificación que pueda honrar.
+  //
+  // Se miran los dos sitios. Muchos se cargaron desde la pestaña general de
+  // Documentos, así que quedaron como permanentes con el año marcado; buscar
+  // solo entre los del ciclo los dejaba invisibles justo aquí, que es donde
+  // se los busca.
+  const cargados = [
+    ...detalle.documentos.propios.filter(d => d.tipoCodigo === 'CERTIFICADO_PARTICIPACION'),
+    ...detalle.documentos.permanentes.filter(
+      d => d.tipoCodigo === 'CERTIFICADO_PARTICIPACION' && d.anioReferencia === detalle.anio),
+  ]
 
   async function emitir() {
     setEmitiendo(true)
@@ -1159,8 +1319,14 @@ function TabCertificado({
     const hitosPendientes = detalle.progreso.hitos.filter(h => !h.cumplido && h.codigo !== 'CERTIFICADO')
     return (
       <div className="px-5 py-8 text-center">
-        <Stamp size={28} className="mx-auto text-neutral-300" />
-        <p className="mt-3 text-sm font-semibold text-neutral-600">Sin certificado emitido</p>
+        {cargados.length > 0 ? (
+          <CertificadosCargados docs={cargados} anio={detalle.anio} setToast={setToast} onRecargar={onRecargar} />
+        ) : (
+          <>
+            <Stamp size={28} className="mx-auto text-neutral-300" />
+            <p className="mt-3 text-sm font-semibold text-neutral-600">Sin certificado emitido</p>
+          </>
+        )}
         <p className="mx-auto mt-1 max-w-md text-[12px] text-neutral-500">
           El certificado se genera desde el sistema con número consecutivo y código de verificación.
           {hitosPendientes.length > 0 && (
@@ -1177,6 +1343,23 @@ function TabCertificado({
           {emitiendo ? <Loader2 size={15} className="animate-spin" /> : <Stamp size={15} />}
           Emitir certificado
         </button>
+
+        {/* Los años anteriores al módulo ya tienen su certificado en papel y no
+            se van a reemitir: pedirle al gestor que genere uno nuevo cambiaría
+            el número del documento que la persona ya tiene en la mano. Por eso
+            hay que poder cargar el que existe. */}
+        <div className="mx-auto mt-6 max-w-md border-t border-neutral-100 pt-5">
+          <p className="text-[12px] text-neutral-500">
+            ¿El certificado de <strong>{detalle.anio}</strong> ya existe y solo hay que archivarlo?
+          </p>
+          <SubirCertificadoExistente
+            evaluadorId={evaluadorId}
+            participacionId={detalle.participacionId}
+            anio={detalle.anio}
+            setToast={setToast}
+            onRecargar={onRecargar}
+          />
+        </div>
 
         <ConfirmModal
           open={confirmEmitir}

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { extensionesDeTipoDocEval } from './formatos-correo'
 
 export interface CatalogoItem { id: number; nombre: string; activo: number }
 
@@ -386,6 +387,11 @@ export class CatalogosEvaluadorService {
       codigo: r.codigo,
       nombre: r.nombre,
       admiteMultiple: Number(r.admiteMultiple) === 1,
+      // La pantalla lo usa para el `accept` del selector de archivo: así el
+      // gestor solo ve lo que de verdad se va a aceptar, en vez de escoger un
+      // .msg y que el servidor se lo rechace después. Es la misma fuente que
+      // valida la subida, para que no puedan discrepar.
+      extensiones: extensionesDeTipoDocEval(r.codigo),
       orden: Number(r.orden),
       activo: Number(r.activo) === 1,
     }))

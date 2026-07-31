@@ -14,6 +14,8 @@ import {
   type ConvocatoriaCrearDto,
 } from './convocatorias.service'
 import type { MulterFile } from './evaluadores.service'
+import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
+import { filtroArchivo } from './subida-archivo'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
@@ -24,16 +26,15 @@ const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
-// Mimes aceptados en la subida de documentos de convocatoria. Los .msg suelen
-// llegar como application/vnd.ms-outlook, pero algunos navegadores los envían
-// como application/octet-stream — se aceptan ambos y luego el service valida
-// la extensión contra el catálogo TIPODOCUMENTOCONV.
+// Mimes aceptados en la subida de documentos de convocatoria. Puerta laxa a
+// propósito: los correos llegan con mimes distintos según el navegador y el
+// cliente de correo (ver formatos-correo), así que quien decide de verdad es
+// el service, contra las extensiones declaradas en TIPODOCUMENTOCONV.
 const MIMES_CONVOCATORIA = new Set<string>([
   'application/pdf',
-  'application/vnd.ms-outlook',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
-  'application/octet-stream',
+  ...MIMES_CORREO,
 ])
 
 @ApiTags('evaluadores')
@@ -130,16 +131,13 @@ export class ConvocatoriasController {
   @Post(':cid/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_CONV_DOC_BYTES },
-    fileFilter: (_r, f, cb) => {
-      // Validación laxa por MIME — el service refina la validación contra las
-      // extensiones declaradas en el catálogo del tipo de documento.
-      if (!MIMES_CONVOCATORIA.has(f.mimetype)) {
-        return cb(new BadRequestException(
-          'Tipo de archivo no soportado. Se aceptan PDF, XLSX, XLS o MSG (Outlook)',
-        ), false)
-      }
-      cb(null, true)
-    },
+    // Validación laxa por MIME — el service refina contra las extensiones
+    // declaradas en el catálogo del tipo. El filtro compartido, además,
+    // corrige el nombre: la invitación llega como "Invitación Equipo
+    // Evaluador.pdf" y se guardaba con la tilde rota.
+    fileFilter: filtroArchivo(
+      f => MIMES_CONVOCATORIA.has(f.mimetype),
+      'Tipo de archivo no soportado. Se aceptan PDF, XLSX, XLS y correos (.msg, .eml, .html, .mht)'),
   }))
   subirDocumento(
     @CurrentUser() user: JwtUser,
@@ -164,12 +162,20 @@ export class ConvocatoriasController {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
     const nombreFinal = (nombre ?? '').trim() || `documento_${docId}`
-    res.setHeader('Content-Type', mime)
-    // Content-Disposition inline con filename + filename* (RFC 5987) para
-    // preservar UTF-8 en el nombre. Sanitizamos "double quotes" del ASCII.
+
+    // La invitación puede venir como .html o .mht. Servir eso en línea lo
+    // ejecutaría en el dominio del SEP y el token está en localStorage, así
+    // que un correo preparado bastaría para robar la sesión. Esos se fuerzan
+    // a descarga; el PDF sigue abriéndose en el visor como siempre.
+    const ejecutable = seEjecutaEnElNavegador(nombreFinal, mime)
+    res.setHeader('Content-Type', ejecutable ? 'application/octet-stream' : mime)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    // filename + filename* (RFC 5987) para preservar UTF-8 en el nombre.
+    // Sanitizamos "double quotes" del ASCII.
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+      `${ejecutable ? 'attachment' : 'inline'}; filename="${nombreFinal.replace(/"/g, '')}"` +
+      `; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
     )
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)

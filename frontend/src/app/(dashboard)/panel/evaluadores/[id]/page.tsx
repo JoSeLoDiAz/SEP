@@ -1949,8 +1949,23 @@ interface TipoDocEvalCat {
   codigo: string
   nombre: string
   admiteMultiple?: boolean
+  /** Qué formatos acepta este tipo, del catálogo. El correo de autorización
+   *  recibe .msg/.eml/.html; la cédula y los soportes, solo PDF. */
+  extensiones?: string[]
   orden?: number
   activo?: boolean
+}
+
+/** Extensiones por defecto cuando el catálogo no dice nada: como era antes. */
+const EXT_POR_DEFECTO = ['pdf']
+
+/** `accept` del selector de archivo y texto de la etiqueta, desde el catálogo. */
+function formatosDe(tipo: TipoDocEvalCat | undefined) {
+  const exts = tipo?.extensiones?.length ? tipo.extensiones : EXT_POR_DEFECTO
+  return {
+    accept: exts.map(e => '.' + e).join(','),
+    etiqueta: exts.map(e => e.toUpperCase()).join(', '),
+  }
 }
 
 // Tailwind JIT necesita las clases literales presentes en el source; por eso
@@ -2180,14 +2195,25 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
             />
           </div>
           <div className="sm:col-span-2">
-            <label className={label}>Archivo PDF * (máximo 8 MB)</label>
+            {/* Los formatos salen del tipo elegido, no fijos: el apartado se
+                llama "Correo de autorización" y hasta ahora solo dejaba
+                escoger PDF, así que había que convertir el correo antes. */}
+            <label className={label}>
+              Archivo {formatosDe(tipoSeleccionado).etiqueta} * (máximo 8 MB)
+            </label>
             <input
               ref={fileRef}
               type="file"
-              accept="application/pdf"
+              accept={formatosDe(tipoSeleccionado).accept}
               onChange={e => setArchivo(e.target.files?.[0] ?? null)}
               className="block w-full text-xs text-neutral-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-neutral-100 file:text-neutral-700 hover:file:bg-neutral-200"
             />
+            {tipoSeleccionado?.extensiones?.includes('msg') && (
+              <p className="mt-1 text-[11px] text-neutral-500">
+                Guarde el correo desde Outlook con &quot;Guardar como&quot;: .msg en el de
+                escritorio, .eml en el web. También sirve impreso a PDF.
+              </p>
+            )}
             {archivo && (
               <p className="mt-1 text-[11px] text-neutral-500 truncate">
                 {archivo.name} · {(archivo.size / (1024 * 1024)).toFixed(2)} MB

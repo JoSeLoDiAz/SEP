@@ -34,6 +34,9 @@ interface Participacion {
   estadoNegativo: boolean
   estadoSugerido: string
   convocatoriaNombre: string | null
+  /** Notas de corte del ciclo. Sin ellas nada puede marcarse aprobado. */
+  corteCurso?: number | null
+  cortePrueba?: number | null
   motivoNoParticipa: string | null
   mesa: string | null
   equipoEvaluador: string | null
@@ -576,9 +579,16 @@ function PanelSubTabs({
       </div>
 
       {subTab === 'documentos' && (
-        <TabDocumentos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+        <TabDocumentos
+          evaluadorId={evaluadorId}
+          detalle={detalle}
+          setToast={setToast}
+          onRecargar={onRecargar}
+        />
       )}
-      {subTab === 'formacion' && <TabFormacion detalle={detalle} setToast={setToast} />}
+      {subTab === 'formacion' && (
+        <TabFormacion detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+      )}
       {subTab === 'proyectos' && (
         <TabProyectos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
       )}
@@ -831,11 +841,165 @@ function BloqueAutorizacion({
   )
 }
 
+/**
+ * Sube un documento ATADO AL AÑO — la confidencialidad del ciclo, y cualquier
+ * otro soporte que corresponda a esta participación.
+ *
+ * Es la pieza que faltaba para el hito 3. El formulario de la ficha general
+ * sube igual de bien, pero nunca dice a qué ciclo pertenece el archivo, así
+ * que todo cae en "permanentes" y aparece repetido en 2024, 2025 y 2026
+ * cuando en realidad cada año tiene su propio acuerdo firmado.
+ */
+function SubirDocumentoDelAnio({
+  evaluadorId, detalle, setToast, onRecargar,
+}: {
+  evaluadorId: number
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [tipos, setTipos] = useState<Array<{ id: number; codigo: string; nombre: string; extensiones?: string[] }>>([])
+  const [tipoSel, setTipoSel] = useState('')
+  const [descripcion, setDescripcion] = useState('')
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [subiendo, setSubiendo] = useState(false)
+  const archivoRef = useRef<HTMLInputElement>(null)
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  useEffect(() => {
+    if (!abierto || tipos.length) return
+    let vivo = true
+    api.get<Array<{ id: number; codigo: string; nombre: string; extensiones?: string[] }>>(
+      '/evaluadores/catalogos/tipos-documento-evaluador')
+      .then(r => { if (vivo) setTipos(r.data ?? []) })
+      .catch(() => { if (vivo) setToast({ tipo: 'error', msg: 'No se pudo cargar el catálogo de tipos' }) })
+    return () => { vivo = false }
+  }, [abierto, tipos.length, setToast])
+
+  const tipo = tipos.find(t => String(t.id) === tipoSel)
+  const exts = tipo?.extensiones?.length ? tipo.extensiones : ['pdf']
+
+  async function subir() {
+    if (!tipoSel) return setToast({ tipo: 'error', msg: 'Escoja el tipo de documento' })
+    if (!archivo) return setToast({ tipo: 'error', msg: 'Escoja el archivo' })
+
+    // La extensión se comprueba aquí para decirlo con el nombre del tipo, en
+    // vez de dejar que el servidor devuelva un 400 después de subir el archivo.
+    const ext = (archivo.name.split('.').pop() ?? '').toLowerCase()
+    if (!exts.includes(ext)) {
+      return setToast({
+        tipo: 'error',
+        msg: `"${tipo?.nombre}" admite ${exts.map(e => '.' + e).join(', ')}; el archivo es .${ext || 'sin extensión'}`,
+      })
+    }
+    if (archivo.size > 8 * 1024 * 1024) {
+      return setToast({ tipo: 'error', msg: 'El archivo supera los 8 MB' })
+    }
+
+    setSubiendo(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      fd.append('tipoDocumentoEvalId', tipoSel)
+      // Esto es lo que lo ata al ciclo y enciende el hito. Sin este campo el
+      // documento queda como permanente y se ve en todos los años.
+      fd.append('participacionId', String(detalle.participacionId))
+      fd.append('anioReferencia', String(detalle.anio))
+      if (descripcion.trim()) fd.append('descripcion', descripcion.trim())
+      await api.post(`/evaluadores/${evaluadorId}/documentos`, fd)
+
+      setToast({ tipo: 'success', msg: `Documento cargado en el ciclo ${detalle.anio}` })
+      setAbierto(false); setTipoSel(''); setDescripcion(''); setArchivo(null)
+      if (archivoRef.current) archivoRef.current.value = ''
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar el documento') })
+    } finally {
+      setSubiendo(false)
+    }
+  }
+
+  return (
+    <div className="px-5 py-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-600">
+            Documentos de este año
+          </p>
+          <p className="text-[11px] text-neutral-400">
+            El acuerdo de confidencialidad y demás soportes que pertenecen al ciclo {detalle.anio}.
+          </p>
+        </div>
+        <button
+          onClick={() => setAbierto(v => !v)}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+          style={{ backgroundColor: INSTITUTIONAL }}
+        >
+          <Plus size={13} /> {abierto ? 'Cerrar' : 'Cargar documento'}
+        </button>
+      </div>
+
+      {abierto && (
+        <div className="grid grid-cols-1 gap-3 rounded-xl bg-neutral-50/60 p-4 sm:grid-cols-2">
+          <div>
+            <label className={label}>Tipo de documento *</label>
+            <select value={tipoSel} onChange={e => setTipoSel(e.target.value)} className={input}>
+              <option value="">— Escoja el tipo —</option>
+              {tipos.map(t => <option key={t.id} value={String(t.id)}>{t.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label}>
+              Archivo * ({exts.map(e => e.toUpperCase()).join(', ')}, máx. 8 MB)
+            </label>
+            <input
+              ref={archivoRef}
+              type="file"
+              accept={exts.map(e => '.' + e).join(',')}
+              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              className="block w-full text-xs text-neutral-600 file:mr-3 file:rounded-lg file:border-0 file:bg-neutral-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-neutral-700 hover:file:bg-neutral-200"
+            />
+            {archivo && (
+              <p className="mt-1 truncate text-[11px] text-neutral-500">
+                {archivo.name} · {(archivo.size / (1024 * 1024)).toFixed(2)} MB
+              </p>
+            )}
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>Descripción</label>
+            <input
+              value={descripcion}
+              onChange={e => setDescripcion(e.target.value)}
+              maxLength={300}
+              className={input}
+            />
+          </div>
+          <div className="flex items-end justify-end sm:col-span-2">
+            <button
+              onClick={subir}
+              disabled={subiendo}
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: INSTITUTIONAL }}
+            >
+              {subiendo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              Cargar en el ciclo {detalle.anio}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Documentos: propios / heredados / permanentes ──────────────────────── */
 
 function TabDocumentos({
-  detalle, setToast, onRecargar,
+  evaluadorId, detalle, setToast, onRecargar,
 }: {
+  evaluadorId: number
   detalle: Detalle
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
   onRecargar: () => void
@@ -845,6 +1009,12 @@ function TabDocumentos({
   return (
     <div className="flex flex-col divide-y divide-neutral-100">
       <BloqueAutorizacion detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
+      <SubirDocumentoDelAnio
+        evaluadorId={evaluadorId}
+        detalle={detalle}
+        setToast={setToast}
+        onRecargar={onRecargar}
+      />
       <BloqueDocs
         titulo="Propios del año"
         ayuda="Cargados para este evaluador en este ciclo."
@@ -963,23 +1133,243 @@ function BotonesArchivo({
 
 /* ── Formación y pruebas ────────────────────────────────────────────────── */
 
-function TabFormacion({
-  detalle, setToast,
+/**
+ * Registra el curso de formación del ciclo — el hito 4.
+ *
+ * El endpoint estaba desde el principio y ninguna pantalla lo llamaba: la
+ * pestaña mostraba los cursos pero no había cómo agregar el primero, así que
+ * el hito no podía encenderse nunca.
+ *
+ * "Aprobado" no se pide: lo deriva el backend comparando la calificación con
+ * la nota de corte del ciclo. Ponerlo aquí permitiría marcar aprobado a quien
+ * no llegó al corte, que es justo lo que la nota de corte existe para evitar.
+ */
+function FormularioCurso({
+  detalle, setToast, onRecargar, onCerrar,
 }: {
   detalle: Detalle
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+  onCerrar: () => void
 }) {
-  if (!detalle.capacitaciones.length && !detalle.pruebas.length) {
-    return <Vacio texto="Sin curso ni prueba registrados en este ciclo." />
+  const [nombre, setNombre] = useState('')
+  const [plataforma, setPlataforma] = useState('')
+  const [horas, setHoras] = useState('')
+  const [fechaInicio, setFechaInicio] = useState('')
+  const [fechaFin, setFechaFin] = useState('')
+  const [calificacion, setCalificacion] = useState('')
+  const [observaciones, setObservaciones] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  /** Lo mismo que valida el backend, para no gastar un viaje en decirlo. */
+  function problema(): string | null {
+    if (!nombre.trim()) return 'El nombre del curso es obligatorio'
+    if (horas && (!Number.isFinite(Number(horas)) || Number(horas) <= 0)) {
+      return 'Las horas deben ser un número mayor que cero'
+    }
+    if (calificacion) {
+      const n = Number(calificacion)
+      if (!Number.isFinite(n) || n < 0 || n > 5) return 'La calificación va de 0 a 5'
+    }
+    if (fechaInicio && fechaFin && fechaFin < fechaInicio) {
+      return 'La fecha de fin no puede ser anterior a la de inicio'
+    }
+    return null
+  }
+
+  async function guardar() {
+    const mal = problema()
+    if (mal) return setToast({ tipo: 'error', msg: mal })
+    setGuardando(true)
+    try {
+      await api.post(`/evaluadores/participaciones/${detalle.participacionId}/capacitacion`, {
+        nombre: nombre.trim(),
+        origen: 'EXTERNO',
+        plataforma: plataforma.trim() || null,
+        horas: horas ? Number(horas) : null,
+        fechaInicio: fechaInicio || null,
+        fechaFin: fechaFin || null,
+        calificacion: calificacion ? Number(calificacion) : null,
+        observaciones: observaciones.trim() || null,
+      })
+      setToast({ tipo: 'success', msg: 'Curso registrado' })
+      onCerrar()
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo registrar el curso') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="mb-3 grid grid-cols-1 gap-3 rounded-xl bg-neutral-50/60 p-4 sm:grid-cols-3">
+      <div className="sm:col-span-2">
+        <label className={label}>Nombre del curso *</label>
+        <input value={nombre} onChange={e => setNombre(e.target.value)} maxLength={200} className={input} />
+      </div>
+      <div>
+        <label className={label}>Plataforma</label>
+        <input
+          value={plataforma}
+          onChange={e => setPlataforma(e.target.value)}
+          placeholder="Sofia Plus, Territorium…"
+          maxLength={100}
+          className={input}
+        />
+      </div>
+      <div>
+        <label className={label}>Horas</label>
+        <input type="number" min={1} value={horas} onChange={e => setHoras(e.target.value)} className={input} />
+      </div>
+      <div>
+        <label className={label}>Fecha de inicio</label>
+        <input type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} className={input} />
+      </div>
+      <div>
+        <label className={label}>Fecha de fin</label>
+        <input type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)} className={input} />
+      </div>
+      <div>
+        <label className={label}>Calificación (0 a 5)</label>
+        <input
+          type="number" step="0.1" min={0} max={5}
+          value={calificacion}
+          onChange={e => setCalificacion(e.target.value)}
+          className={input}
+        />
+        <p className="mt-1 text-[10px] text-neutral-400">
+          Aprobado se calcula solo, contra la nota de corte del ciclo.
+        </p>
+      </div>
+      <div className="sm:col-span-2">
+        <label className={label}>Observaciones</label>
+        <input
+          value={observaciones}
+          onChange={e => setObservaciones(e.target.value)}
+          maxLength={300}
+          className={input}
+        />
+      </div>
+      {detalle.corteCurso == null && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800 sm:col-span-3">
+          Este ciclo todavía no tiene <strong>calificación mínima del curso</strong>. El curso se
+          guarda igual, pero quedará como &quot;no aprobado&quot; y el hito no se encenderá hasta que
+          la defina en las reglas de la convocatoria.
+        </p>
+      )}
+      <div className="flex items-end justify-end gap-2 sm:col-span-3">
+        <button
+          onClick={onCerrar}
+          disabled={guardando}
+          className="rounded-lg bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={guardar}
+          disabled={guardando}
+          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: INSTITUTIONAL }}
+        >
+          {guardando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+          Guardar curso
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function TabFormacion({
+  detalle, setToast, onRecargar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [ocupado, setOcupado] = useState<number | null>(null)
+  const [destino, setDestino] = useState<number | null>(null)
+  const archivoRef = useRef<HTMLInputElement>(null)
+
+  async function subirCertificado(capacitacionId: number, archivo: File) {
+    setOcupado(capacitacionId)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      await api.post(`/evaluadores/capacitaciones/${capacitacionId}/certificado`, fd)
+      setToast({ tipo: 'success', msg: 'Certificado del curso cargado' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar el certificado') })
+    } finally {
+      setOcupado(null); setDestino(null)
+      if (archivoRef.current) archivoRef.current.value = ''
+    }
+  }
+
+  async function eliminarCurso(capacitacionId: number) {
+    setOcupado(capacitacionId)
+    try {
+      await api.delete(`/evaluadores/capacitaciones/${capacitacionId}`)
+      setToast({ tipo: 'success', msg: 'Curso eliminado' })
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo eliminar') })
+    } finally {
+      setOcupado(null)
+    }
   }
 
   return (
     <div className="flex flex-col divide-y divide-neutral-100">
-      {detalle.capacitaciones.length > 0 && (
-        <div className="px-5 py-4">
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-neutral-600">
-            Curso de formación
+      <div className="px-5 py-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-600">
+              Curso de formación
+            </p>
+            <p className="text-[11px] text-neutral-400">
+              El curso que habilita a evaluar en este ciclo, con su nota.
+            </p>
+          </div>
+          <button
+            onClick={() => setAbierto(v => !v)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+            style={{ backgroundColor: INSTITUTIONAL }}
+          >
+            <Plus size={13} /> {abierto ? 'Cerrar' : 'Registrar curso'}
+          </button>
+        </div>
+
+        {abierto && (
+          <FormularioCurso
+            detalle={detalle}
+            setToast={setToast}
+            onRecargar={onRecargar}
+            onCerrar={() => setAbierto(false)}
+          />
+        )}
+
+        <input
+          ref={archivoRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0]
+            if (f && destino != null) subirCertificado(destino, f)
+          }}
+        />
+
+        {detalle.capacitaciones.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-neutral-200 px-4 py-5 text-center text-[12px] text-neutral-400">
+            Sin curso registrado en este ciclo.
           </p>
+        ) : (
           <ul className="flex flex-col gap-2">
             {detalle.capacitaciones.map(c => (
               <li key={c.capacitacionId} className="flex items-center gap-3 rounded-xl border border-neutral-100 px-3 py-2.5">
@@ -1003,19 +1393,38 @@ function TabFormacion({
                 }`}>
                   {c.aprobado ? 'Aprobado' : 'No aprobado'}
                 </span>
-                {c.tieneArchivo && (
+                {c.tieneArchivo ? (
                   <BotonesArchivo
                     verUrl={`/evaluadores/capacitaciones/${c.capacitacionId}/certificado`}
                     descargarUrl={`/evaluadores/capacitaciones/${c.capacitacionId}/certificado`}
                     nombreFallback={`certificado-curso-${c.capacitacionId}.pdf`}
                     setToast={setToast}
                   />
+                ) : (
+                  <button
+                    onClick={() => { setDestino(c.capacitacionId); archivoRef.current?.click() }}
+                    disabled={ocupado === c.capacitacionId}
+                    title="Adjuntar el certificado del curso"
+                    className="shrink-0 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-amber-800 transition hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {ocupado === c.capacitacionId
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <Upload size={12} />}
+                  </button>
                 )}
+                <button
+                  onClick={() => eliminarCurso(c.capacitacionId)}
+                  disabled={ocupado === c.capacitacionId}
+                  title="Eliminar el curso"
+                  className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                >
+                  <Trash2 size={13} />
+                </button>
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
 
       {detalle.pruebas.length > 0 && (
         <div className="px-5 py-4">

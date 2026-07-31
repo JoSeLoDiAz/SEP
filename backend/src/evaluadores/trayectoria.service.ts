@@ -482,6 +482,12 @@ export class TrayectoriaService {
            NVL(es.ESNEGATIVO, 0)       AS "estadoNegativo",
            pa.CONVOCATORIAID           AS "convocatoriaId",
            TRIM(cv.NOMBRE)             AS "convocatoriaNombre",
+           -- Las notas de corte del ciclo. Van al detalle para que la pantalla
+           -- pueda avisar ANTES de registrar: sin ellas, ni el curso ni la
+           -- prueba pueden marcarse aprobados y el hito se queda apagado sin
+           -- que nada explique por qué.
+           cv.CALIFICACIONMINIMACURSO  AS "corteCurso",
+           cv.PUNTAJEMINIMOPRUEBA      AS "cortePrueba",
            NVL(pa.ESTRANSVERSAL, 0)    AS "esTransversal",
            TRIM(pa.MOTIVONOPARTICIPA)  AS "motivoNoParticipa",
            pa.FECHAINICIO              AS "fechaInicio",

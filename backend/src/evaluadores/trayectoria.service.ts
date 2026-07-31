@@ -60,6 +60,8 @@ interface ContadoresRow {
   retroRecibidas: number
   retroPromedio: number | null
   tieneCertificado: number
+  /** Certificado de un año anterior, cargado como documento en vez de emitido. */
+  certificadoCargado: number
 }
 
 @Injectable()
@@ -402,7 +404,12 @@ export class TrayectoriaService {
       {
         codigo: 'CERTIFICADO',
         nombre: 'Certificado emitido',
-        cumplido: n(c?.tieneCertificado) > 0,
+        cumplido: n(c?.tieneCertificado) > 0 || n(c?.certificadoCargado) > 0,
+        // Se distingue: uno lo emitió el SEP con consecutivo y código de
+        // verificación; el otro es el documento de un año anterior, cargado.
+        detalle: n(c?.tieneCertificado) > 0
+          ? undefined
+          : n(c?.certificadoCargado) > 0 ? 'Cargado de un año anterior' : undefined,
       },
     ]
 
@@ -586,9 +593,23 @@ export class TrayectoriaService {
          (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr
            WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroPromedio",
 
+         -- Cuenta el emitido por el sistema Y el cargado a mano. Los años
+         -- anteriores al módulo tienen su certificado en papel y no se van a
+         -- reemitir: si solo se mirara EVALUADORCERTIFICADO, un ciclo de 2025
+         -- se quedaría para siempre en 8 de 9 aunque el documento esté ahí.
          (SELECT COUNT(*) FROM EVALUADORCERTIFICADO ce
            WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID
-             AND ce.ANULADO = 0)                                      AS "tieneCertificado"
+             AND ce.ANULADO = 0)                                      AS "tieneCertificado",
+         -- Se acepta también el que quedó sin participación pero con el año
+         -- marcado: así se cargaron los históricos desde la pestaña general
+         -- de Documentos, y exigirles la participación los dejaría sin contar.
+         (SELECT COUNT(*) FROM EVALUADORDOCUMENTO dc
+            JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
+           WHERE TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+             AND (dc.PARTICIPACIONID = pa.PARTICIPACIONID
+               OR (dc.PARTICIPACIONID IS NULL
+                   AND dc.EVALUADORID = pa.EVALUADORID
+                   AND dc.ANIOREFERENCIA = pa.ANIO)))                 AS "certificadoCargado"
 
        FROM EVALUADORPARTICIPACION pa
       WHERE pa.EVALUADORID = :1`,
@@ -817,6 +838,10 @@ export class TrayectoriaService {
               TRIM(te.CODIGO)           AS "tipoCodigo",
               TRIM(te.NOMBRE)           AS "tipoNombre",
               TRIM(ed.DOCUMENTODESCRIPCION) AS "descripcion",
+              -- Hace falta afuera: un documento permanente marcado con año
+              -- pertenece a ese ciclo aunque se haya cargado desde la pestaña
+              -- general, y así la pestaña del año puede reconocerlo.
+              ed.ANIOREFERENCIA         AS "anioReferencia",
               TRIM(ed.ARCHIVONOMBRE)    AS "archivoNombre",
               TRIM(ed.ARCHIVOMIME)      AS "mime",
               ed.FECHACARGUE            AS "fechaCargue"

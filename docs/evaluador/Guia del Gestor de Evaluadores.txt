@@ -253,19 +253,17 @@ uno está apagado es porque falta el dato, no porque se le olvidó marcarlo.
       Se enciende sola al vincular el ciclo, si la convocatoria tiene
       cargado el correo de invitación.
   2. Autorización del jefe
-      Registre la aprobación con el nombre y correo del jefe, y suba la
-      evidencia (.msg de Outlook o PDF).
+      Año → Documentos → "Registrar" en Autorización del jefe. Ver 5.1.
   3. Confidencialidad firmada
-      Suba el acuerdo del año.
+      Año → Documentos → "Cargar documento". Ver 5.2.
   4. Curso de formación aprobado
-      Registre el curso con su calificación. Se compara contra el corte
-      del año.
+      Año → Formación y pruebas → "Registrar curso". Ver 5.3.
   5. Prueba de conocimiento aprobada
       Registre el puntaje. Se compara contra el corte del año.
   6. Asignación a proceso, mesa y equipo
-      Se enciende cuando están los TRES. Con dos no basta.
+      Se enciende con los TRES. Con dos no basta. Ver 5.4.
   7. Proyectos evaluados
-      Registre los proyectos que evaluó. Ver el paso a paso en 5.1.
+      Año → Proyectos evaluados. Ver 5.5.
   8. Retroalimentación diligenciada
       Cuando el evaluador contesta todas las que le asignaron.
   9. Certificado emitido
@@ -283,11 +281,122 @@ Retroalimentación y Certificado.
   +----------------------------------------------------------------------+
 
 El sistema también le sugiere el estado del ciclo según los hitos que
-lleve: Postulado, Autorizado, Habilitado, Asignado, Evaluando, Finalizó,
-Certificado. Usted puede cambiarlo a mano, pero tiene que escribir el
-motivo, y ese cambio queda en la auditoría.
+lleve. Cómo cambiarlo a mano está en 5.6.
 
-  5.1 Registrar los proyectos que evaluó (hito 7)
+  5.1 Autorización del jefe (hito 2)
+
+Es el correo en que el jefe directo autoriza a esa persona a participar en
+ESTE ciclo. Va evaluador por evaluador: cada quien tiene su jefe.
+
+  1. Abra el año → pestaña "Documentos".
+
+  2. Arriba está el bloque "Autorización del jefe". Pulse "Registrar".
+
+  3. Llene el nombre, el correo, el cargo del jefe y la fecha de la
+     autorización. Guarde.
+
+  4. Ahora aparece "Adjuntar el correo". Súbalo ahí.
+
+  +----------------------------------------------------------------------+
+  | El correo se adjunta DESPUÉS de guardar, no en el mismo formulario:  |
+  | hasta que la autorización no existe no hay a qué adjuntarlo.         |
+  | Mientras falte, el bloque se lo dice en amarillo.                    |
+  +----------------------------------------------------------------------+
+
+Formatos del correo: .msg si usa el Outlook de escritorio, .eml si usa el
+web o Gmail, .html o .mht si lo guardó desde el navegador. También sirve
+impreso a PDF.
+
+Si se equivocó, la papelera del bloque borra el registro y el correo, y el
+hito vuelve a apagarse.
+
+  5.2 Acuerdo de confidencialidad y demás documentos del año (hito 3)
+
+Cada evaluador firma su propio acuerdo, y uno por cada año en que
+participa.
+
+  1. Abra el año → pestaña "Documentos".
+
+  2. En el bloque "Documentos de este año", pulse "Cargar documento".
+
+  3. Escoja el tipo —"Acuerdo de confidencialidad"—, el archivo y, si
+     quiere, una descripción.
+
+  4. Pulse "Cargar en el ciclo".
+
+  +----------------------------------------------------------------------+
+  | Cárguelo desde AQUÍ, no desde la pestaña Documentos de la ficha. La  |
+  | de la ficha no pregunta a qué año pertenece, así que el archivo      |
+  | queda como PERMANENTE, se ve repetido en todos los años y el hito no |
+  | enciende. Es el error más común, y el que más cuesta deshacer.       |
+  +----------------------------------------------------------------------+
+
+Cada tipo acepta lo suyo y la pantalla se lo dice: el acuerdo va en PDF,
+el correo de autorización acepta además formatos de correo. Máximo 8 MB.
+
+  5.3 Curso de formación (hito 4)
+
+  1. Abra el año → pestaña "Formación y pruebas".
+
+  2. Pulse "Registrar curso".
+
+  3. Llene el nombre del curso (obligatorio), la plataforma, las horas, las
+     fechas y la calificación de 0 a 5.
+
+  4. Guarde. Después, con el botón naranja de la fila, adjunte el
+     certificado del curso en PDF.
+
+  +----------------------------------------------------------------------+
+  | Usted NO marca si aprobó. Lo calcula el sistema comparando la        |
+  | calificación con la calificación mínima del ciclo. Si el ciclo no    |
+  | tiene esa nota puesta, el curso se guarda pero queda como "no        |
+  | aprobado" y el hito no enciende — el formulario se lo advierte       |
+  | antes.                                                               |
+  +----------------------------------------------------------------------+
+
+Si eso pasa, vaya a Convocatorias → el ciclo → "Reglas y certificados",
+ponga la calificación mínima y vuelva.
+
+  5.4 Asignación y grupos (hito 6)
+
+El hito 6 pide TRES cosas: proceso, mesa y equipo evaluador. Con dos no
+basta.
+
+  1. Los tres se editan en "Historial de participaciones", abajo en la
+     ficha: abra la participación del año y complételos.
+
+  2. Los grupos se asignan aparte, desde la cabecera del año: el botón que
+     dice "Asignar grupos" (o los que ya tenga).
+
+  3. Escriba los números separados por coma —por ejemplo 1, 3, 5— y guarde.
+
+Van del 1 al 99. El primero de la lista queda como el principal. Se guarda
+la lista completa: lo que quite del campo se retira, y dejarlo vacío los
+retira todos.
+
+  5.6 Cambiar el estado del ciclo
+
+El estado normalmente se deduce solo de lo que usted va cargando, y la
+ficha se lo sugiere. Pero hay salidas que ningún dato puede adivinar: que
+la persona declinó la invitación, que le revocaron la participación, que
+no aprobó. Esas hay que declararlas.
+
+  1. En la cabecera del año, pulse la etiqueta del estado (arriba a la
+     derecha).
+
+  2. Escoja el estado y, si hace falta, escriba el motivo.
+
+  3. Guarde.
+
+  +----------------------------------------------------------------------+
+  | Los estados que cierran el ciclo sin evaluación EXIGEN motivo. No es |
+  | un capricho: un año cerrado sin explicación no se puede auditar      |
+  | después. La lista los marca como "(cierra el ciclo)".                |
+  +----------------------------------------------------------------------+
+
+Todo cambio de estado queda en la auditoría con su usuario y la fecha.
+
+  5.5 Registrar los proyectos que evaluó (hito 7)
 
 Este es el único hito que hay que ir alimentando durante el proceso, a
 medida que el evaluador va terminando proyectos.
@@ -537,7 +646,23 @@ SI ALGO NO SALE COMO ESPERA
   Dice que la convocatoria ya tiene un ciclo de ese periodo
       Alguien ya lo abrió. Búsquelo en la lista en vez de crear otro.
   El hito de asignación no se enciende
-      Faltan los tres: proceso, mesa y equipo. Con dos no basta.
+      Faltan los tres: proceso, mesa y equipo. Con dos no basta (Parte
+      5.4).
+  Cargué el curso y sigue "no aprobado"
+      El ciclo no tiene calificación mínima. Póngala en Reglas y
+      certificados y el hito enciende (Parte 5.3).
+  La prueba aparece "no aprobada" con buen puntaje
+      Mismo caso: falta el puntaje mínimo de la prueba en las reglas del
+      ciclo.
+  Subí el acuerdo pero el hito sigue apagado
+      Se cargó desde la ficha y quedó como PERMANENTE. Vuélvalo a cargar
+      desde el año (Parte 5.2).
+  Un documento aparece en años en que no participó
+      Lo mismo: está como permanente. Los del año se cargan dentro del
+      año.
+  No me deja cambiar el estado
+      Los estados que cierran el ciclo exigen motivo. Escríbalo y vuelva
+      a guardar (Parte 5.6).
   El hito de invitación no se enciende
       Falta cargar el correo de invitación en el ciclo, o el evaluador
       no está vinculado a ninguna convocatoria.
@@ -579,15 +704,17 @@ EL CICLO COMPLETO EN UNA PÁGINA
 
   5. Vincular a cada uno al ciclo con su rol, área, proceso, mesa y equipo.
 
-  6. Cargar del año: autorización del jefe, confidencialidad, curso y
-     prueba.
+  6. Cargar del año, dentro del año: autorización del jefe,
+     confidencialidad, curso y prueba.
 
-  7. Registrar los proyectos que evaluó, uno por uno, a medida que los
+  7. Asignar proceso, mesa, equipo y grupos.
+
+  8. Registrar los proyectos que evaluó, uno por uno, a medida que los
      termina.
 
-  8. Generar y abrir la retroalimentación; descargar el reporte al cerrar.
+  9. Generar y abrir la retroalimentación; descargar el reporte al cerrar.
 
-  9. Revisar la firma del ciclo, habilitar la emisión y certificar.
+  10. Revisar la firma del ciclo, habilitar la emisión y certificar.
 
-  10. El evaluador descarga su certificado solo, desde la página pública.
+  11. El evaluador descarga su certificado solo, desde la página pública.
 

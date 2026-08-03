@@ -230,7 +230,11 @@ export function TrayectoriaEvaluador({
               </div>
             ) : detalle ? (
               <div className="flex flex-col gap-5">
-                <CabeceraCiclo detalle={detalle} />
+                <CabeceraCiclo
+                  detalle={detalle}
+                  setToast={setToast}
+                  onRecargar={() => setRecarga(n => n + 1)}
+                />
                 <Checklist progreso={detalle.progreso} />
                 <PanelSubTabs
                   evaluadorId={evaluadorId}
@@ -396,7 +400,227 @@ function BarraProgreso({ progreso, color }: { progreso: Progreso; color: string 
 
 /* ── Cabecera del ciclo ─────────────────────────────────────────────────── */
 
-function CabeceraCiclo({ detalle }: { detalle: Detalle }) {
+/**
+ * Cambia el estado del ciclo, con motivo.
+ *
+ * El estado normalmente lo sugiere el checklist, pero hay salidas que ningún
+ * dato puede deducir: alguien declinó la invitación, le revocaron la
+ * participación, no aprobó. Esas hay que declararlas.
+ *
+ * El motivo es obligatorio en los estados que cierran el ciclo sin evaluación
+ * —lo exige el backend y se pide aquí antes de intentarlo—, porque un año
+ * cerrado sin explicación no se puede auditar después.
+ */
+function CambiarEstado({
+  detalle, setToast, onRecargar, onCerrar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+  onCerrar: () => void
+}) {
+  const [estados, setEstados] = useState<Array<{
+    codigo: string; nombre: string; descripcion: string | null; esNegativo: boolean
+  }>>([])
+  const [codigo, setCodigo] = useState(detalle.estadoCodigo ?? '')
+  const [motivo, setMotivo] = useState(detalle.motivoNoParticipa ?? '')
+  const [guardando, setGuardando] = useState(false)
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  useEffect(() => {
+    let vivo = true
+    api.get<Array<{ codigo: string; nombre: string; descripcion: string | null; esNegativo: boolean }>>(
+      '/evaluadores/catalogos/estados-participacion')
+      .then(r => { if (vivo) setEstados(r.data ?? []) })
+      .catch(() => { if (vivo) setToast({ tipo: 'error', msg: 'No se pudieron cargar los estados' }) })
+    return () => { vivo = false }
+  }, [setToast])
+
+  const elegido = estados.find(e => e.codigo === codigo)
+  const exigeMotivo = elegido?.esNegativo === true
+
+  async function guardar() {
+    if (!codigo) return setToast({ tipo: 'error', msg: 'Escoja el estado' })
+    if (exigeMotivo && !motivo.trim()) {
+      return setToast({
+        tipo: 'error',
+        msg: `"${elegido?.nombre}" cierra el ciclo sin evaluación: escriba el motivo`,
+      })
+    }
+    setGuardando(true)
+    try {
+      await api.put(`/evaluadores/participaciones/${detalle.participacionId}/estado`, {
+        estadoCodigo: codigo,
+        motivo: motivo.trim() || null,
+      })
+      setToast({ tipo: 'success', msg: 'Estado actualizado' })
+      onCerrar()
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cambiar el estado') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-3 border-b border-neutral-100 bg-neutral-50/60 px-5 py-4 sm:grid-cols-2">
+      <div>
+        <label className={label}>Estado del ciclo *</label>
+        <select value={codigo} onChange={e => setCodigo(e.target.value)} className={input}>
+          <option value="">— Escoja el estado —</option>
+          {estados.map(e => (
+            <option key={e.codigo} value={e.codigo}>
+              {e.nombre}{e.esNegativo ? ' (cierra el ciclo)' : ''}
+            </option>
+          ))}
+        </select>
+        {elegido?.descripcion && (
+          <p className="mt-1 text-[11px] text-neutral-500">{elegido.descripcion}</p>
+        )}
+      </div>
+      <div>
+        <label className={label}>Motivo {exigeMotivo && '*'}</label>
+        <input
+          value={motivo}
+          onChange={e => setMotivo(e.target.value)}
+          maxLength={300}
+          placeholder={exigeMotivo ? 'Obligatorio para este estado' : 'Opcional'}
+          className={input}
+        />
+      </div>
+      <p className="text-[11px] text-neutral-400 sm:col-span-2">
+        El cambio queda en la auditoría con su usuario y la fecha.
+        {detalle.estadoSugerido && detalle.estadoSugerido !== codigo && (
+          <> Por lo que hay cargado correspondería <strong>{detalle.estadoSugerido}</strong>.</>
+        )}
+      </p>
+      <div className="flex items-end justify-end gap-2 sm:col-span-2">
+        <button
+          onClick={onCerrar}
+          disabled={guardando}
+          className="rounded-lg bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={guardar}
+          disabled={guardando}
+          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: INSTITUTIONAL }}
+        >
+          {guardando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+          Guardar estado
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Grupos del ciclo.
+ *
+ * Se guarda el conjunto completo, no de a uno: el backend reemplaza lo que
+ * haya (el primero queda como principal). Por eso la pantalla edita una lista
+ * y manda todo junto — mandar altas sueltas dejaría fuera los retiros.
+ */
+function EditarGrupos({
+  detalle, setToast, onRecargar, onCerrar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+  onCerrar: () => void
+}) {
+  const [texto, setTexto] = useState(detalle.grupos.map(g => g.grupo).join(', '))
+  const [guardando, setGuardando] = useState(false)
+
+  /** Acepta "1, 3 5" y devuelve [1,3,5]; `malos` son los que no sirven. */
+  const partes = texto.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean)
+  const numeros = [...new Set(partes.map(Number))]
+    .filter(n => Number.isInteger(n) && n >= 1 && n <= 99)
+    .sort((a, b) => a - b)
+  const malos = partes.filter(p => {
+    const n = Number(p)
+    return !Number.isInteger(n) || n < 1 || n > 99
+  })
+
+  async function guardar() {
+    if (malos.length) {
+      return setToast({
+        tipo: 'error',
+        msg: `Los grupos van de 1 a 99. No sirve: ${malos.join(', ')}`,
+      })
+    }
+    setGuardando(true)
+    try {
+      await api.put(`/evaluadores/participaciones/${detalle.participacionId}/grupos`, {
+        grupos: numeros,
+      })
+      setToast({
+        tipo: 'success',
+        msg: numeros.length ? `Grupos ${numeros.join(', ')} asignados` : 'Grupos retirados',
+      })
+      onCerrar()
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudieron guardar los grupos') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-neutral-100 bg-neutral-50/60 px-5 py-4">
+      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+        Grupos del ciclo
+      </label>
+      <input
+        value={texto}
+        onChange={e => setTexto(e.target.value)}
+        placeholder="1, 3, 5"
+        className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
+      />
+      <p className="mt-1 text-[11px] text-neutral-500">
+        Separados por coma. Del 1 al 99. El primero queda como principal.
+        {numeros.length > 0 && <> Quedará en: <strong>{numeros.join(', ')}</strong>.</>}
+        {texto.trim() === '' && <> Vacío retira todos los grupos.</>}
+      </p>
+      {malos.length > 0 && (
+        <p className="mt-1 text-[11px] text-red-700">No sirve: {malos.join(', ')}</p>
+      )}
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button
+          onClick={onCerrar}
+          disabled={guardando}
+          className="rounded-lg bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={guardar}
+          disabled={guardando || malos.length > 0}
+          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: INSTITUTIONAL }}
+        >
+          {guardando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+          Guardar grupos
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CabeceraCiclo({
+  detalle, setToast, onRecargar,
+}: {
+  detalle: Detalle
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [editando, setEditando] = useState<'estado' | 'grupos' | null>(null)
   const c = colorDe(detalle.estadoColor)
   const divergente =
     detalle.estadoCodigo != null &&
@@ -430,11 +654,44 @@ function CabeceraCiclo({ detalle }: { detalle: Detalle }) {
             </span>
           )}
         </div>
-        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${c.chip}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${c.punto}`} />
-          {detalle.estadoNombre ?? 'Sin estado'}
-        </span>
+        <div className="flex items-center gap-2">
+          {/* Los grupos se editan aquí y no en un tab: son parte de la
+              asignación del ciclo, junto al estado, no un anexo aparte. */}
+          <button
+            onClick={() => setEditando(v => (v === 'grupos' ? null : 'grupos'))}
+            className="rounded-lg border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold text-neutral-600 transition hover:bg-neutral-50"
+          >
+            {detalle.grupos.length
+              ? `Grupos ${detalle.grupos.map(g => g.grupo).join(', ')}`
+              : 'Asignar grupos'}
+          </button>
+          <button
+            onClick={() => setEditando(v => (v === 'estado' ? null : 'estado'))}
+            title="Cambiar el estado del ciclo"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide transition hover:opacity-80 ${c.chip}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${c.punto}`} />
+            {detalle.estadoNombre ?? 'Sin estado'}
+          </button>
+        </div>
       </header>
+
+      {editando === 'estado' && (
+        <CambiarEstado
+          detalle={detalle}
+          setToast={setToast}
+          onRecargar={onRecargar}
+          onCerrar={() => setEditando(null)}
+        />
+      )}
+      {editando === 'grupos' && (
+        <EditarGrupos
+          detalle={detalle}
+          setToast={setToast}
+          onRecargar={onRecargar}
+          onCerrar={() => setEditando(null)}
+        />
+      )}
 
       {detalle.estadoNegativo && detalle.motivoNoParticipa && (
         <p className="border-b border-red-100 bg-red-50/60 px-5 py-2.5 text-[12px] text-red-800">

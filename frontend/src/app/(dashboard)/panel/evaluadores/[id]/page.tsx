@@ -8,6 +8,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { TrayectoriaEvaluador } from '@/components/evaluadores/trayectoria-evaluador'
 import { AuditoriaEvaluador } from '@/components/evaluadores/auditoria-evaluador'
+import { VisorFicha } from '@/components/evaluadores/visor-ficha'
 import {
   ArrowLeft, Award, Briefcase, ChevronRight, Download, Eye, FileText,
   GraduationCap, History, IdCard, Loader2, Paperclip, Pencil, PowerOff, Save, Settings2,
@@ -91,7 +92,7 @@ export default function FichaEvaluadorPage() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const [confirmDesactivar, setConfirmDesactivar] = useState(false)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
-  const [descargandoFicha, setDescargandoFicha] = useState(false)
+  const [verFicha, setVerFicha] = useState(false)
 
   const cargar = async () => {
     setLoading(true)
@@ -174,23 +175,15 @@ export default function FichaEvaluadorPage() {
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-2">
+            {/* Abre el visor en vez de descargar de una: se pedía poder MIRAR
+                la ficha sin bajarla al disco. Descargar e imprimir quedan
+                dentro del visor, así que no se pierde nada. */}
             <button
-              onClick={() => {
-                setDescargandoFicha(true)
-                descargarArchivoConNombreDelServidor(
-                  `/evaluadores/${evaluadorId}/ficha.pdf`,
-                  `ficha_evaluador_${ficha.identificacion ?? evaluadorId}.pdf`,
-                  // La ficha recorre toda la trayectoria y embebe la foto.
-                  60_000,
-                )
-                  .catch(() => setToast({ tipo: 'error', msg: 'No se pudo generar la ficha PDF' }))
-                  .finally(() => setDescargandoFicha(false))
-              }}
-              disabled={descargandoFicha}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-semibold rounded-xl backdrop-blur-sm transition disabled:opacity-50"
+              onClick={() => setVerFicha(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-semibold rounded-xl backdrop-blur-sm transition"
             >
-              {descargandoFicha ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-              Ficha PDF
+              <FileText size={13} />
+              Ver ficha
             </button>
             {ficha.activo === 1 ? (
               <button
@@ -308,6 +301,15 @@ export default function FichaEvaluadorPage() {
         textoConfirmar="Desactivar"
         cargando={cambiandoEstado}
       />
+
+      {verFicha && (
+        <VisorFicha
+          evaluadorId={evaluadorId}
+          nombre={fullName}
+          identificacion={ficha.identificacion}
+          onCerrar={() => setVerFicha(false)}
+        />
+      )}
     </div>
   )
 }

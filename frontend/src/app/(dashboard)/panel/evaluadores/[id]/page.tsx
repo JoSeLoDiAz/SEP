@@ -1040,6 +1040,9 @@ interface Participacion {
   /** Ids para poder preseleccionar lo que ya estaba al corregir el ciclo. */
   convocatoriaId: number | null
   areaId: number | null
+  /** El backend siempre los devolvió; el detalle desplegado los muestra. */
+  estadoNombre?: string | null
+  motivoNoParticipa?: string | null
   mesa: string | null
   equipoEvaluador: string | null
   dinamizadorPersonaId: number | null
@@ -1070,6 +1073,9 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [eliminando, setEliminando] = useState<number | null>(null)
   /** Si tiene valor, el formulario está corrigiendo esa participación. */
   const [editandoId, setEditandoId] = useState<number | null>(null)
+  /** Cuál fila está desplegada. Solo una a la vez: con seis años, tener
+   *  varias abiertas convierte la lista en un muro. */
+  const [expandido, setExpandido] = useState<number | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1115,6 +1121,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
    */
   function editar(p: Participacion) {
     setEditandoId(p.participacionId)
+    setExpandido(p.participacionId)
     setAnio(String(p.anio))
     setPeriodo(p.periodo ?? '')
     setRolId(p.rolEvaluadorId != null ? String(p.rolEvaluadorId) : '')
@@ -1183,14 +1190,11 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
 
-  return (
-    <Section titulo={`Historial de participaciones (${items.length})`} accion={
-      <button onClick={() => setAgregar(v => !v)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
-        <Settings2 size={12} />
-        {agregar ? 'Cerrar' : 'Agregar'}
-      </button>
-    }>
-      {agregar && (
+  // El mismo formulario sirve para agregar arriba y para corregir dentro
+  // de la fila. Se guarda en una constante y no en un componente aparte:
+  // un componente anidado se vuelve a montar en cada tecla y el cursor se
+  // sale del campo a media palabra.
+  const formulario = (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div><label className={label}>Año *</label><input value={anio} onChange={e => setAnio(e.target.value)} className={input} /></div>
           <div><label className={label}>Periodo</label><input value={periodo} onChange={e => setPeriodo(e.target.value)} placeholder="1 / 2" className={input} /></div>
@@ -1298,7 +1302,16 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
             </button>
           </div>
         </div>
-      )}
+  )
+
+  return (
+    <Section titulo={`Historial de participaciones (${items.length})`} accion={
+      <button onClick={() => setAgregar(v => !v)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
+        <Settings2 size={12} />
+        {agregar ? 'Cerrar' : 'Agregar'}
+      </button>
+    }>
+      {agregar && !editandoId && formulario}
 
       {loading ? (
         <p className="px-5 py-6 text-sm text-neutral-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin" />Cargando...</p>
@@ -1306,46 +1319,111 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
         <p className="px-5 py-8 text-center text-sm text-neutral-400">Sin participaciones registradas</p>
       ) : (
         <ul className="divide-y divide-neutral-100">
-          {items.map(p => (
-            <li key={p.participacionId} className="px-5 py-3 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-lg bg-[#00304D]/5 text-[#00304D] flex items-center justify-center shrink-0 font-bold">
-                {p.anio}{p.periodo ? `-${p.periodo}` : ''}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold text-neutral-800">{p.rolNombre || '— Sin rol —'}</span>
-                  {p.procesoNombre && (
-                    <span className="text-[11px] font-semibold text-[#00304D] bg-[#00304D]/10 px-1.5 py-0.5 rounded">
-                      {p.procesoNombre}{p.procesoRevocado ? ' · REVOCADO' : ''}
+          {items.map(p => {
+            const abierto = expandido === p.participacionId
+            const corrigiendo = editandoId === p.participacionId
+            // Los nombres no vienen en el listado, solo los identificadores;
+            // se resuelven contra los catálogos que ya están cargados.
+            const conv = convocatorias.find(c => c.id === p.convocatoriaId)
+            const area = areas.find(a => a.id === p.areaId)
+            const detalle: Array<[string, string | null]> = [
+              ['Convocatoria', conv ? conv.nombre : null],
+              ['Proceso', p.procesoNombre],
+              ['Área', area ? area.nombre : null],
+              ['Modalidad', p.modalidadPart],
+              ['Mesa', p.mesa],
+              ['Equipo evaluador', p.equipoEvaluador],
+              ['Dinamizó', p.dinamizadorNombre],
+              ['Estado', p.estadoNombre ?? null],
+            ]
+            return (
+              <li key={p.participacionId}>
+                {/* La cabecera entera abre y cierra: un blanco de clic grande
+                    se acierta a la primera, y el año deja de ser solo adorno. */}
+                <div className="flex items-center gap-3 px-5 py-3">
+                  <button
+                    onClick={() => setExpandido(v => (v === p.participacionId ? null : p.participacionId))}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    aria-expanded={abierto}
+                  >
+                    <ChevronRight
+                      size={16}
+                      className={`shrink-0 text-neutral-400 transition-transform ${abierto ? 'rotate-90' : ''}`}
+                    />
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[#00304D]/5 font-bold text-[#00304D]">
+                      {p.anio}{p.periodo ? `-${p.periodo}` : ''}
                     </span>
-                  )}
-                  {p.modalidadPart && (
-                    <span className="text-[11px] font-semibold text-cyan-700 bg-cyan-100 px-1.5 py-0.5 rounded">{p.modalidadPart}</span>
-                  )}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-bold text-neutral-800">{p.rolNombre || '— Sin rol —'}</span>
+                        {p.procesoNombre && (
+                          <span className="rounded bg-[#00304D]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#00304D]">
+                            {p.procesoNombre}{p.procesoRevocado ? ' · REVOCADO' : ''}
+                          </span>
+                        )}
+                        {p.modalidadPart && (
+                          <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[11px] font-semibold text-cyan-700">
+                            {p.modalidadPart}
+                          </span>
+                        )}
+                      </span>
+                      {!abierto && (
+                        <span className="mt-0.5 block truncate text-[11px] text-neutral-500">
+                          {[p.mesa && `Mesa: ${p.mesa}`, p.equipoEvaluador && `Equipo: ${p.equipoEvaluador}`]
+                            .filter(Boolean).join(' · ') || '—'}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => eliminar(p.participacionId)}
+                    disabled={eliminando === p.participacionId}
+                    title="Eliminar la participación y todo lo del año"
+                    className="shrink-0 rounded-lg p-2 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                  >
+                    {eliminando === p.participacionId
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Trash2 size={14} />}
+                  </button>
                 </div>
-                <p className="text-[11px] text-neutral-500 mt-0.5">
-                  {p.mesa && <>Mesa: {p.mesa} · </>}
-                  {p.equipoEvaluador && <>Equipo: {p.equipoEvaluador}</>}
-                  {!p.mesa && !p.equipoEvaluador && '—'}
-                </p>
-              </div>
-              <button
-                onClick={() => editar(p)}
-                title="Corregir esta participación"
-                className="p-2 text-neutral-400 hover:text-[#00304D] hover:bg-neutral-100 rounded-lg transition"
-              >
-                <Pencil size={14} />
-              </button>
-              <button
-                onClick={() => eliminar(p.participacionId)}
-                disabled={eliminando === p.participacionId}
-                title="Eliminar la participación y todo lo del año"
-                className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
-              >
-                {eliminando === p.participacionId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-              </button>
-            </li>
-          ))}
+
+                {abierto && !corrigiendo && (
+                  <div className="border-t border-neutral-100 bg-neutral-50/50 px-5 py-4 pl-14">
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+                      {detalle.map(([k, v]) => (
+                        <div key={k}>
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">{k}</dt>
+                          <dd className="text-[13px] text-neutral-800">{v || '—'}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {p.motivoNoParticipa && (
+                      <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-800">
+                        <strong>Motivo:</strong> {p.motivoNoParticipa}
+                      </p>
+                    )}
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={() => editar(p)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-50"
+                      >
+                        <Pencil size={13} /> Editar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Corregir pasa AQUÍ, en la fila, y no en un formulario arriba:
+                    con seis años en la lista, editar el de 2022 y que el
+                    formulario aparezca fuera de la vista es perder el hilo. */}
+                {corrigiendo && (
+                  <div className="border-t border-neutral-100">
+                    {formulario}
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </Section>

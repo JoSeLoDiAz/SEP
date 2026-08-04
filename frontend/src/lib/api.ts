@@ -22,6 +22,21 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
+  // Al subir un archivo hay que SOLTAR el Content-Type, no ponerlo.
+  //
+  // El `application/json` de arriba es un valor por defecto de la instancia y
+  // se pega a todas las peticiones, incluidas las de FormData. Ahí el
+  // navegador tiene que escribir él mismo el encabezado, porque solo él sabe
+  // el `boundary` que separa las partes; con el nuestro encima, el backend
+  // recibe un cuerpo que no puede partir y responde "adjunta el archivo",
+  // aunque el archivo iba.
+  //
+  // Cada subida venía acordándose de sobrescribirlo a mano. Ponerlo aquí
+  // quita esa trampa: la que se olvide ya no se rompe.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  }
   return config
 })
 

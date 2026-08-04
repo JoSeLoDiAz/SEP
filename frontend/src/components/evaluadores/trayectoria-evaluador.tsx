@@ -8,6 +8,7 @@ import {
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
   Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const PRIMARY = '#00304D'
@@ -34,6 +35,8 @@ interface Participacion {
   estadoNegativo: boolean
   estadoSugerido: string
   convocatoriaNombre: string | null
+  /** Hace falta para enlazar a la matriz, que se arma por ciclo. */
+  convocatoriaId?: number | null
   /** Notas de corte del ciclo. Sin ellas nada puede marcarse aprobado. */
   corteCurso?: number | null
   cortePrueba?: number | null
@@ -1955,7 +1958,37 @@ function TabRetroalimentacion({ detalle }: { detalle: Detalle }) {
     )
   }
   if (r.recibidas === 0 && r.asignadas === 0) {
-    return <Vacio texto="Todavía no se ha generado la matriz de retroalimentación para este ciclo." />
+    // Decir "no se ha generado" sin decir dónde generarla deja al gestor
+    // buscando un botón que no está en esta pantalla: la matriz se arma para
+    // TODO el ciclo de una vez, no evaluador por evaluador, y por eso vive en
+    // la convocatoria. Se enlaza en vez de repetir el botón aquí.
+    return (
+      <div className="px-5 py-8 text-center">
+        <MessageSquareQuote size={26} className="mx-auto text-neutral-300" />
+        <p className="mt-3 text-[13px] font-semibold text-neutral-600">
+          Todavía no se ha generado la matriz de este ciclo
+        </p>
+        <p className="mx-auto mt-1 max-w-md text-[12px] text-neutral-500">
+          La matriz se arma para todo el ciclo de una vez —define quién evalúa a quién—, así que
+          no se genera desde aquí sino desde la convocatoria.
+        </p>
+        {detalle.convocatoriaId ? (
+          <Link
+            href={`/panel/evaluadores/convocatorias/${detalle.convocatoriaId}/matriz`}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90"
+            style={{ backgroundColor: INSTITUTIONAL }}
+          >
+            <MessageSquareQuote size={15} />
+            Ir a la retroalimentación del ciclo
+          </Link>
+        ) : (
+          <p className="mt-4 text-[12px] text-amber-700">
+            Este ciclo no está atado a una convocatoria, así que no puede entrar en la matriz.
+            Corrija la participación desde &quot;Historial de participaciones&quot;.
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { extensionesDeTipoDocEval } from './formatos-correo'
+import { esTipoDocDelAnio, extensionesDeTipoDocEval } from './formatos-correo'
 
 export interface CatalogoItem { id: number; nombre: string; activo: number }
 
@@ -392,6 +392,9 @@ export class CatalogosEvaluadorService {
       // .msg y que el servidor se lo rechace después. Es la misma fuente que
       // valida la subida, para que no puedan discrepar.
       extensiones: extensionesDeTipoDocEval(r.codigo),
+      // Marca los que pertenecen a un ciclo. La pantalla general no los
+      // ofrece: cargarlos ahí los deja sin año y el hito no enciende.
+      esDelAnio: esTipoDocDelAnio(r.codigo),
       orden: Number(r.orden),
       activo: Number(r.activo) === 1,
     }))

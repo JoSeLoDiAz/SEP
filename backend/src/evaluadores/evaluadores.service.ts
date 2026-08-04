@@ -1718,8 +1718,36 @@ export class EvaluadoresService {
    * cliente. Es lo que enciende el hito del checklist, y dejarlo en manos de
    * quien digita significaría que un descuido cambia el estado del ciclo.
    */
+  /**
+   * Los puntajes van de 0 a 100 y la columna es NUMBER(5,2).
+   *
+   * Se valida aquí y no solo en la pantalla porque el error de Oracle no dice
+   * qué campo se pasó: llegó un 26450 donde los puntajes reales van de 36 a 46
+   * y la respuesta fue un 500 mudo. Diciéndolo antes, el mensaje nombra el
+   * campo y el rango esperado.
+   */
+  private validarPuntajes(dto: Partial<PruebaDto>) {
+    const revisar = (valor: unknown, campo: string) => {
+      if (valor == null || valor === '') return
+      const n = Number(valor)
+      if (!Number.isFinite(n)) throw new BadRequestException(`"${campo}" tiene que ser un número`)
+      if (n < 0 || n > 100) {
+        throw new BadRequestException(
+          `"${campo}" va de 0 a 100 y se envió ${n}. Revise si sobra algún dígito.`,
+        )
+      }
+    }
+    revisar(dto.puntajeMayor, 'Puntaje mayor')
+    revisar(dto.puntajeMinimo, 'Puntaje mínimo')
+
+    if (dto.intentos != null && (Number(dto.intentos) < 0 || Number(dto.intentos) > 99)) {
+      throw new BadRequestException('"Intentos" va de 0 a 99')
+    }
+  }
+
   async crearPrueba(evaluadorId: number, dto: PruebaDto) {
     if (!dto.anio) throw new BadRequestException('Año requerido')
+    this.validarPuntajes(dto)
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
@@ -1818,6 +1846,7 @@ export class EvaluadoresService {
   }
 
   async actualizarPrueba(pruebaId: number, dto: Partial<PruebaDto>) {
+    this.validarPuntajes(dto)
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
     if (!ok[0]) throw new NotFoundException('Prueba no encontrada')
 

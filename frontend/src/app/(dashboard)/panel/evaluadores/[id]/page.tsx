@@ -1965,6 +1965,14 @@ interface Prueba {
   observacion: string | null
 }
 
+/**
+ * Tope del puntaje. Es el de la columna, NUMBER(5,2): pasarse daba un 500 sin
+ * decir qué campo. Se escribió un 26450 donde los puntajes reales van de 36 a
+ * 46, así que la validación aquí ahorra el viaje y explica el orden de
+ * magnitud esperado.
+ */
+const MAX_PUNTAJE = 100
+
 function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
   const [items, setItems] = useState<Prueba[]>([])
   // La prueba pertenece a un ciclo, no solo a un año: un evaluador puede tener
@@ -2009,6 +2017,9 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
 
   async function crear() {
     if (!anio.trim()) return setToast({ tipo: 'error', msg: 'Año requerido' })
+    if (puntaje && (Number(puntaje) < 0 || Number(puntaje) > MAX_PUNTAJE)) {
+      return setToast({ tipo: 'error', msg: `El puntaje va de 0 a ${MAX_PUNTAJE}` })
+    }
     setCreando(true)
     try {
       await api.post(`/evaluadores/${evaluadorId}/pruebas`, {
@@ -2084,7 +2095,20 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
           <div><label className={label}>Año *</label><input value={anio} onChange={e => setAnio(e.target.value)} className={input} /></div>
           <div><label className={label}>Periodo</label><input value={periodo} onChange={e => setPeriodo(e.target.value)} className={input} /></div>
           <div><label className={label}>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
-          <div><label className={label}>Puntaje mayor</label><input type="number" step="0.01" value={puntaje} onChange={e => setPuntaje(e.target.value)} className={input} /></div>
+          <div>
+            <label className={label}>Puntaje mayor</label>
+            <input
+              type="number" step="0.01" min={0} max={MAX_PUNTAJE}
+              value={puntaje}
+              onChange={e => setPuntaje(e.target.value)}
+              className={input}
+            />
+            {puntaje && Number(puntaje) > MAX_PUNTAJE && (
+              <p className="mt-1 text-[11px] text-red-700">
+                El puntaje va de 0 a {MAX_PUNTAJE}. ¿Sobra algún dígito?
+              </p>
+            )}
+          </div>
           <div><label className={label}>Intentos</label><input type="number" value={intentos} onChange={e => setIntentos(e.target.value)} className={input} /></div>
           <div className="col-span-2 sm:col-span-3 flex items-end justify-end">
             <button onClick={crear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>

@@ -20,6 +20,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { UploadErrorFilter } from './common/filters/upload-error.filter'
+import { OracleErrorFilter } from './common/filters/oracle-error.filter'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
@@ -36,8 +37,10 @@ async function bootstrap() {
     }),
   )
 
-  // Traduce a español errores de multer (uploads que exceden límites).
-  app.useGlobalFilters(new UploadErrorFilter())
+  // El de Oracle va PRIMERO en la lista y por eso se aplica de último: Nest
+  // recorre los filtros al revés, así que el de multer atrapa lo suyo y el de
+  // Oracle recoge todo lo demás en vez de dejarlo salir como 500 mudo.
+  app.useGlobalFilters(new OracleErrorFilter(), new UploadErrorFilter())
 
   app.enableCors({
     origin: [

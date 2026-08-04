@@ -1721,6 +1721,124 @@ function TabFormacion({
   )
 }
 
+/**
+ * Registrar a mano un proyecto que no está en el SEP.
+ *
+ * Pasa de verdad: la Cámara de Comercio de Cartagena no existe en la tabla de
+ * empresas, y los proyectos anteriores al módulo nunca se importaron. Sin esto,
+ * una evaluación que sí ocurrió no se podía dejar registrada, y el hito de
+ * proyectos quedaba apagado para siempre.
+ *
+ * Queda marcado como "Histórico" —no apunta a ningún proyecto del sistema— para
+ * que en la ficha se distinga de los que sí están cargados y nadie los confunda.
+ */
+function ManualProyecto({
+  participacionId, sugerido, setToast, onRecargar,
+}: {
+  participacionId: number
+  sugerido: string
+  setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onRecargar: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [razonSocial, setRazonSocial] = useState('')
+  const [nit, setNit] = useState('')
+  const [nombreProyecto, setNombreProyecto] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
+  const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  function abrir() {
+    // Lo que ya escribió en el buscador es casi siempre la empresa: se
+    // arrastra para que no lo teclee dos veces.
+    if (!abierto && !razonSocial) setRazonSocial(sugerido.trim())
+    setAbierto(v => !v)
+  }
+
+  async function guardar() {
+    if (!razonSocial.trim() && !nombreProyecto.trim()) {
+      return setToast({ tipo: 'error', msg: 'Escriba al menos el proponente o el nombre del proyecto' })
+    }
+    if (nit.trim() && !/^[\d.\-\s]{5,20}$/.test(nit.trim())) {
+      return setToast({ tipo: 'error', msg: 'El NIT solo lleva números, puntos o guiones' })
+    }
+    setGuardando(true)
+    try {
+      await api.post(`/evaluadores/participaciones/${participacionId}/proyectos`, {
+        razonSocial: razonSocial.trim() || null,
+        nit: nit.trim() || null,
+        nombreProyecto: nombreProyecto.trim() || null,
+      })
+      setToast({ tipo: 'success', msg: 'Proyecto registrado a mano' })
+      setAbierto(false); setRazonSocial(''); setNit(''); setNombreProyecto('')
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo registrar el proyecto') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-dashed border-neutral-200 pt-3">
+      <button
+        onClick={abrir}
+        className="text-[11px] font-semibold text-[#00304D] underline underline-offset-2 transition hover:opacity-70"
+      >
+        {abierto ? 'Cancelar' : '¿No está en la lista? Regístrelo a mano'}
+      </button>
+
+      {abierto && (
+        <div className="mt-2 grid grid-cols-1 gap-3 rounded-xl bg-white p-3 ring-1 ring-neutral-200 sm:grid-cols-3">
+          <div className="sm:col-span-2">
+            {/* "Proponente" y no "empresa": es como se llama en el resto del
+                SEP a quien presenta el proyecto, y es la palabra con la que
+                la gestora lo tiene en la cabeza al transcribirlo. */}
+            <label className={label}>Proponente *</label>
+            <input
+              value={razonSocial}
+              onChange={e => setRazonSocial(e.target.value)}
+              placeholder="Cámara de Comercio de…"
+              maxLength={300}
+              className={input}
+            />
+          </div>
+          <div>
+            <label className={label}>NIT</label>
+            <input value={nit} onChange={e => setNit(e.target.value)} maxLength={20} className={input} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>Nombre o código del proyecto</label>
+            <input
+              value={nombreProyecto}
+              onChange={e => setNombreProyecto(e.target.value)}
+              maxLength={300}
+              className={input}
+            />
+          </div>
+          <div className="flex items-end justify-end">
+            <button
+              onClick={guardar}
+              disabled={guardando}
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: INSTITUTIONAL }}
+            >
+              {guardando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+              Registrar
+            </button>
+          </div>
+          <p className="text-[11px] text-neutral-400 sm:col-span-3">
+            Queda marcado como <strong>Histórico</strong>: no apunta a un proyecto del SEP, así que
+            se distingue de los que sí están cargados. Úselo solo cuando el proyecto de verdad no
+            exista en el sistema.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Proyectos evaluados ────────────────────────────────────────────────── */
 
 const ORIGEN_PROYECTO: Record<string, { texto: string; clase: string }> = {
@@ -1856,7 +1974,7 @@ function TabProyectos({
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="Filtrar por empresa o NIT..."
+            placeholder="Filtrar por proponente o NIT..."
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
           />
 
@@ -1868,6 +1986,21 @@ function TabProyectos({
 
           {!buscando && resp?.motivo && (
             <p className="mt-3 text-[12px] text-amber-800">{resp.motivo}</p>
+          )}
+
+          {/* No todo proyecto evaluado está cargado en el SEP: los de años
+              anteriores al módulo, y los que sencillamente nunca se
+              importaron. El backend siempre aceptó registrarlos a mano —los
+              marca como "histórico"— pero la pantalla solo dejaba escoger de
+              la lista, así que esa evaluación no había forma de dejarla
+              registrada. */}
+          {!buscando && (
+            <ManualProyecto
+              participacionId={pid}
+              sugerido={busqueda}
+              setToast={setToast}
+              onRecargar={onRecargar}
+            />
           )}
 
           {!buscando && resp && resp.items.length > 0 && (

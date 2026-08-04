@@ -42,6 +42,25 @@ export function extensionesDeTipoDocEval(codigo: string | null | undefined): str
 }
 
 /**
+ * Tipos que pertenecen a UN AÑO, no al evaluador.
+ *
+ * La autorización del jefe, el acuerdo de confidencialidad y el certificado
+ * de participación son distintos en cada ciclo: el jefe autoriza participar en
+ * esa convocatoria, el acuerdo se firma por año, y el certificado es de ese
+ * año. Cargarlos sueltos los deja apareciendo en todos los años del evaluador
+ * y sin encender el hito que les corresponde.
+ *
+ * La pantalla general de Documentos usa esto para NO ofrecerlos: tenerlos en
+ * dos sitios era la causa de que todo terminara cargado en el lugar
+ * equivocado.
+ */
+export const TIPOS_DOC_DEL_ANIO = ['AUTORIZACION', 'CONFIDENCIALIDAD', 'CERTIFICADO_PARTICIPACION']
+
+export function esTipoDocDelAnio(codigo: string | null | undefined): boolean {
+  return TIPOS_DOC_DEL_ANIO.includes((codigo ?? '').trim().toUpperCase())
+}
+
+/**
  * Puerta laxa por MIME, antes de la validación real por extensión.
  *
  * No es descuido: Outlook manda los .msg como `application/vnd.ms-outlook` o

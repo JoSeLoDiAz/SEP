@@ -2046,6 +2046,8 @@ interface TipoDocEvalCat {
   /** Qué formatos acepta este tipo, del catálogo. El correo de autorización
    *  recibe .msg/.eml/.html; la cédula y los soportes, solo PDF. */
   extensiones?: string[]
+  /** Pertenece a un ciclo, no al evaluador: se carga dentro del año. */
+  esDelAnio?: boolean
   orden?: number
   activo?: boolean
 }
@@ -2253,16 +2255,27 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className={requiereAnio ? '' : 'sm:col-span-2'}>
             <label className={label}>Tipo de documento *</label>
+            {/* Los tipos del ciclo no se ofrecen aquí. Ofrecerlos en dos
+                sitios fue justamente lo que hizo que todo terminara cargado
+                sin año: el archivo entra igual pero queda como permanente,
+                se ve repetido en todos los años y el hito no enciende. */}
             <select
               value={tipoSel}
               onChange={e => setTipoSel(e.target.value)}
               className={input}
             >
               <option value="">— Selecciona un tipo —</option>
-              {tipos.map(t => (
+              {tipos.filter(t => !t.esDelAnio).map(t => (
                 <option key={t.id} value={String(t.id)}>{t.nombre}</option>
               ))}
             </select>
+            {tipos.some(t => t.esDelAnio) && (
+              <p className="mt-1 text-[11px] text-neutral-500">
+                El correo de autorización, el acuerdo de confidencialidad y el certificado de
+                participación se cargan <strong>dentro del año</strong>, en Trayectoria, porque
+                cada ciclo tiene el suyo.
+              </p>
+            )}
           </div>
           {requiereAnio && (
             <div>

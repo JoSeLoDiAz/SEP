@@ -1018,6 +1018,15 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
 // ── Sección PARTICIPACIONES ────────────────────────────────────────────────────
 
 interface Cat { id: number; nombre: string }
+/**
+ * Tope del equipo evaluador y de la mesa.
+ *
+ * Es el de la columna. Antes eran 120 y no alcanzaban para la lista de
+ * nombres, así que la v44 los lleva a 500; mientras esa migración no corra en
+ * un entorno, el backend responde diciendo el campo y cuánto sobra.
+ */
+const MAX_EQUIPO = 500
+
 interface Participacion {
   participacionId: number
   anio: number
@@ -1261,7 +1270,27 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
             </label>
           </div>
           <div className="sm:col-span-2"><label className={label}>Mesa</label><input value={mesa} onChange={e => setMesa(e.target.value)} className={input} /></div>
-          <div className="col-span-2 sm:col-span-4"><label className={label}>Equipo evaluador</label><input value={equipo} onChange={e => setEquipo(e.target.value)} className={input} /></div>
+          {/* Aquí se escribe la lista de quienes componen el equipo, no una
+              etiqueta corta, así que el contador evita llegar al tope y que el
+              servidor rechace el guardado después de llenar todo el resto. */}
+          <div className="col-span-2 sm:col-span-4">
+            <label className={label}>Equipo evaluador</label>
+            <input
+              value={equipo}
+              onChange={e => setEquipo(e.target.value)}
+              maxLength={MAX_EQUIPO}
+              placeholder="Nombres de quienes lo integran, separados por coma"
+              className={input}
+            />
+            {equipo.length > MAX_EQUIPO * 0.8 && (
+              <p className={`mt-1 text-[11px] ${
+                equipo.length >= MAX_EQUIPO ? 'text-red-700' : 'text-neutral-500'
+              }`}>
+                {equipo.length} de {MAX_EQUIPO} caracteres
+                {equipo.length >= MAX_EQUIPO && ' — llegó al límite'}
+              </p>
+            )}
+          </div>
           <div className="col-span-2 sm:col-span-4 flex justify-end">
             <button onClick={crear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>
               {creando ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}

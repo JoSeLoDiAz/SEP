@@ -962,8 +962,18 @@ function BloqueAutorizacion({
           <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-600">
             Autorización del jefe
           </p>
+          {/* Se nombra el año y la convocatoria —que lleva el programa— en vez
+              de pedirlos en un desplegable: el ciclo ya está escogido al estar
+              en esta pantalla, y ofrecer elegirlo otra vez permitiría adjuntar
+              el correo de 2025 estando parado en 2026, que es justo el enredo
+              que se quiere evitar. */}
           <p className="text-[11px] text-neutral-400">
-            Quién autorizó a este evaluador a participar en el ciclo, y el correo que lo prueba.
+            Quién autorizó a este evaluador a participar en{' '}
+            <strong className="text-neutral-500">
+              {detalle.anio}{detalle.periodo ? `-${detalle.periodo}` : ''}
+              {detalle.convocatoriaNombre ? ` · ${detalle.convocatoriaNombre}` : ''}
+            </strong>
+            , y el correo que lo prueba.
           </p>
         </div>
         {!a && (
@@ -1190,7 +1200,12 @@ function SubirDocumentoDelAnio({
             Documentos de este año
           </p>
           <p className="text-[11px] text-neutral-400">
-            El acuerdo de confidencialidad y demás soportes que pertenecen al ciclo {detalle.anio}.
+            El acuerdo de confidencialidad y demás soportes de{' '}
+            <strong className="text-neutral-500">
+              {detalle.anio}{detalle.periodo ? `-${detalle.periodo}` : ''}
+              {detalle.convocatoriaNombre ? ` · ${detalle.convocatoriaNombre}` : ''}
+            </strong>
+            .
           </p>
         </div>
         <button
@@ -1245,7 +1260,7 @@ function SubirDocumentoDelAnio({
               style={{ backgroundColor: INSTITUTIONAL }}
             >
               {subiendo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-              Cargar en el ciclo {detalle.anio}
+              Cargar en {detalle.anio}{detalle.periodo ? `-${detalle.periodo}` : ''}
             </button>
           </div>
         </div>

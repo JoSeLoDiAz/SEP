@@ -384,9 +384,14 @@ export class CicloService {
     const evaluadorId = await this.evaluadorDe(participacionId)
 
     const nombre = dto.nombreProyecto?.trim() || null
-    if (!dto.proyectoId && !dto.guardadoId && !nombre) {
+    const razon = dto.razonSocial?.trim() || null
+    // La empresa basta para identificarlo. En este módulo el proyecto SE
+    // reconoce por la empresa —PROYECTONOMBRE viene vacío en la práctica—, así
+    // que exigir un nombre obligaba a inventarlo para poder registrar una
+    // evaluación real de un proyecto que no está cargado en el SEP.
+    if (!dto.proyectoId && !dto.guardadoId && !nombre && !razon) {
       throw new BadRequestException(
-        'Indique el proyecto: seleccione uno del sistema o escriba al menos el nombre.',
+        'Indique el proyecto: seleccione uno del sistema, o escriba al menos el proponente.',
       )
     }
 
@@ -412,24 +417,40 @@ export class CicloService {
     )
     const id = Number(seq[0].NEXTVAL)
 
-    await this.dataSource.query(
-      `INSERT INTO EVALUADORPARTPROYECTO
-         (PARTPROYECTOID, PARTICIPACIONID, PROYECTOID, GUARDADOID, NIT, RAZONSOCIAL,
-          NOMBREPROYECTO, PUNTAJEOTORGADO, FECHAEVALUACION, OBSERVACIONES, USUARIOCREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, TO_DATE(:9,'YYYY-MM-DD'), :10, :11)`,
-      [
-        id, participacionId,
-        dto.proyectoId ?? null,
-        dto.guardadoId ?? null,
-        dto.nit?.trim() || null,
-        dto.razonSocial?.trim() || null,
-        nombre,
-        dto.puntajeOtorgado ?? null,
-        dto.fechaEvaluacion?.slice(0, 10) || null,
-        dto.observaciones?.trim() || null,
-        ctx.usuarioEmail,
-      ],
-    )
+    try {
+      await this.dataSource.query(
+        `INSERT INTO EVALUADORPARTPROYECTO
+           (PARTPROYECTOID, PARTICIPACIONID, PROYECTOID, GUARDADOID, NIT, RAZONSOCIAL,
+            NOMBREPROYECTO, PUNTAJEOTORGADO, FECHAEVALUACION, OBSERVACIONES, USUARIOCREACION)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, TO_DATE(:9,'YYYY-MM-DD'), :10, :11)`,
+        [
+          id, participacionId,
+          dto.proyectoId ?? null,
+          dto.guardadoId ?? null,
+          dto.nit?.trim() || null,
+          razon,
+          nombre,
+          dto.puntajeOtorgado ?? null,
+          dto.fechaEvaluacion?.slice(0, 10) || null,
+          dto.observaciones?.trim() || null,
+          ctx.usuarioEmail,
+        ],
+      )
+    } catch (e) {
+      // CK_PARTPROY_REF exige PROYECTOID, GUARDADOID o NOMBREPROYECTO: se
+      // escribió antes de que existiera el registro a mano, y no contempla que
+      // el proponente por sí solo ya identifica el proyecto. La v42 la relaja.
+      //
+      // Mientras esa migración no se corra, esto responde con lo que hay que
+      // hacer en vez de con un error 500 que no le dice nada a nadie.
+      if (String((e as Error)?.message ?? '').includes('ORA-02290')) {
+        throw new BadRequestException(
+          'Escriba también el nombre o código del proyecto (por ejemplo BPRO-FCE-2026). ' +
+          'Con solo el proponente no se puede guardar todavía.',
+        )
+      }
+      throw e
+    }
 
     await this.auditoria.registrar({
       tabla: 'EVALUADORPARTPROYECTO', operacion: 'INSERT', registroId: id,

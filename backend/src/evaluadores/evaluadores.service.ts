@@ -1001,6 +1001,12 @@ export class EvaluadoresService {
               TRIM(es.NOMBRE)            AS "estadoNombre",
               NVL(es.ESNEGATIVO, 0)      AS "estadoNegativo",
               TRIM(pa.MOTIVONOPARTICIPA) AS "motivoNoParticipa",
+              -- Los identificadores hacen falta para poder CORREGIR la
+              -- participación: sin ellos el formulario de edición no puede
+              -- dejar preseleccionado lo que ya estaba, y el gestor tendría
+              -- que volver a escoger convocatoria y área a ciegas.
+              pa.CONVOCATORIAID          AS "convocatoriaId",
+              pa.AREAID                  AS "areaId",
               TRIM(pa.MESA)              AS "mesa",
               TRIM(pa.EQUIPOEVALUADOR)   AS "equipoEvaluador",
               pa.DINAMIZADORPERSONAID    AS "dinamizadorPersonaId",

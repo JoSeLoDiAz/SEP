@@ -1028,6 +1028,9 @@ interface Participacion {
   procesoId: number | null
   procesoNombre: string | null
   procesoRevocado: boolean
+  /** Ids para poder preseleccionar lo que ya estaba al corregir el ciclo. */
+  convocatoriaId: number | null
+  areaId: number | null
   mesa: string | null
   equipoEvaluador: string | null
   dinamizadorPersonaId: number | null
@@ -1056,6 +1059,8 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [equipo, setEquipo] = useState('')
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  /** Si tiene valor, el formulario está corrigiendo esa participación. */
+  const [editandoId, setEditandoId] = useState<number | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1085,32 +1090,69 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   }
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
+  function limpiarForm() {
+    setEditandoId(null)
+    setAnio(new Date().getFullYear().toString())
+    setPeriodo(''); setRolId(''); setModalidad(''); setProcId(''); setConvId(''); setAreaId('')
+    setRevocado(false); setMesa(''); setEquipo('')
+  }
+
+  /**
+   * Abre el mismo formulario, pero con los datos puestos.
+   *
+   * Editar faltaba: solo se podía registrar y borrar, así que corregir un rol
+   * o una mesa obligaba a borrar la participación entera — y con ella se iban
+   * los documentos del año, las pruebas y el certificado.
+   */
+  function editar(p: Participacion) {
+    setEditandoId(p.participacionId)
+    setAnio(String(p.anio))
+    setPeriodo(p.periodo ?? '')
+    setRolId(p.rolEvaluadorId != null ? String(p.rolEvaluadorId) : '')
+    setModalidad(p.modalidadPart ?? '')
+    setProcId(p.procesoId != null ? String(p.procesoId) : '')
+    setConvId(p.convocatoriaId != null ? String(p.convocatoriaId) : '')
+    setAreaId(p.areaId != null ? String(p.areaId) : '')
+    setRevocado(Boolean(p.procesoRevocado))
+    setMesa(p.mesa ?? '')
+    setEquipo(p.equipoEvaluador ?? '')
+    setAgregar(true)
+  }
+
   async function crear() {
     if (!anio.trim()) return setToast({ tipo: 'error', msg: 'Año requerido' })
     setCreando(true)
+    const cuerpo = {
+      anio: Number(anio),
+      periodo: periodo || null,
+      rolEvaluadorId: rolId ? Number(rolId) : null,
+      modalidadPart: modalidad || null,
+      procesoId: procId ? Number(procId) : null,
+      // Sin convocatoria el ciclo queda huérfano: no hereda la invitación, no
+      // entra en la matriz de retroalimentación y no se puede certificar,
+      // porque la habilitación de certificados vive en la convocatoria.
+      convocatoriaId: convId ? Number(convId) : null,
+      areaId: areaId ? Number(areaId) : null,
+      procesoRevocado: revocado,
+      mesa: mesa || null,
+      equipoEvaluador: equipo || null,
+    }
     try {
-      await api.post(`/evaluadores/${evaluadorId}/participaciones`, {
-        anio: Number(anio),
-        periodo: periodo || null,
-        rolEvaluadorId: rolId ? Number(rolId) : null,
-        modalidadPart: modalidad || null,
-        procesoId: procId ? Number(procId) : null,
-        // Sin convocatoria el ciclo queda huérfano: no hereda la invitación, no
-        // entra en la matriz de retroalimentación y no se puede certificar,
-        // porque la habilitación de certificados vive en la convocatoria.
-        convocatoriaId: convId ? Number(convId) : null,
-        areaId: areaId ? Number(areaId) : null,
-        procesoRevocado: revocado,
-        mesa: mesa || null,
-        equipoEvaluador: equipo || null,
-      })
-      setToast({ tipo: 'success', msg: 'Participación agregada' })
+      if (editandoId) {
+        await api.put(`/evaluadores/participaciones/${editandoId}`, cuerpo)
+        setToast({ tipo: 'success', msg: 'Participación actualizada' })
+      } else {
+        await api.post(`/evaluadores/${evaluadorId}/participaciones`, cuerpo)
+        setToast({ tipo: 'success', msg: 'Participación agregada' })
+      }
       setAgregar(false)
-      setPeriodo(''); setRolId(''); setModalidad(''); setProcId(''); setConvId(''); setAreaId('')
-      setRevocado(false); setMesa(''); setEquipo('')
+      limpiarForm()
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
+      setToast({
+        tipo: 'error',
+        msg: manejarError(err, editandoId ? 'No se pudo actualizar' : 'No se pudo agregar'),
+      })
     } finally {
       setCreando(false)
     }
@@ -1223,7 +1265,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
           <div className="col-span-2 sm:col-span-4 flex justify-end">
             <button onClick={crear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>
               {creando ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Guardar participación
+              {editandoId ? 'Guardar cambios' : 'Guardar participación'}
             </button>
           </div>
         </div>
@@ -1259,8 +1301,16 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
                 </p>
               </div>
               <button
+                onClick={() => editar(p)}
+                title="Corregir esta participación"
+                className="p-2 text-neutral-400 hover:text-[#00304D] hover:bg-neutral-100 rounded-lg transition"
+              >
+                <Pencil size={14} />
+              </button>
+              <button
                 onClick={() => eliminar(p.participacionId)}
                 disabled={eliminando === p.participacionId}
+                title="Eliminar la participación y todo lo del año"
                 className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
               >
                 {eliminando === p.participacionId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}

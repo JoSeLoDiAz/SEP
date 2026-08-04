@@ -8,6 +8,18 @@ import {
 } from '../common/crypto/usuario-clave'
 import { AuditoriaService } from './auditoria.service'
 import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
+import { traducirValorLargo } from '../common/db/errores'
+
+/**
+ * Cómo se llaman en pantalla las columnas del ciclo, para que un "valor
+ * demasiado grande" diga el nombre del campo y no el de la columna.
+ */
+const CAMPOS_PARTICIPACION: Record<string, string> = {
+  MESA: 'Mesa',
+  EQUIPOEVALUADOR: 'Equipo evaluador',
+  MOTIVONOPARTICIPA: 'Motivo',
+  PERIODO: 'Periodo',
+}
 
 /** PERFIL.PERFILID 9 = EVALUADORGFCE. Es el perfil con el que entra al SEP. */
 const PERFIL_EVALUADOR = 9
@@ -1069,8 +1081,9 @@ export class EvaluadoresService {
     // El checklist irá sugiriendo el avance a medida que se carguen los datos.
     const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
 
-    await this.dataSource.query(
-      `INSERT INTO EVALUADORPARTICIPACION
+    try {
+      await this.dataSource.query(
+        `INSERT INTO EVALUADORPARTICIPACION
          (PARTICIPACIONID, EVALUADORID, ANIO, PERIODO, ROLEVALUADORID, MODALIDADPARTID,
           PROCESOID, ESTADOPARTID, CONVOCATORIAID, AREAID, ESTRANSVERSAL,
           MESA, EQUIPOEVALUADOR,
@@ -1092,8 +1105,14 @@ export class EvaluadoresService {
         dto.retroalimentacion?.trim() || null,
         dto.observaciones?.trim() || null,
         dto.usuarioEmail ?? null,
-      ],
-    )
+        ],
+      )
+    } catch (e) {
+      // Un campo de más largo salía como "Internal server error", sin decir
+      // cuál. El equipo evaluador es una lista de nombres y se pasa fácil.
+      traducirValorLargo(e, CAMPOS_PARTICIPACION)
+      throw e
+    }
     return { participacionId: id, message: 'Participación creada' }
   }
 
@@ -1144,10 +1163,17 @@ export class EvaluadoresService {
 
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(participacionId)
-    await this.dataSource.query(
-      `UPDATE EVALUADORPARTICIPACION SET ${sets.join(', ')} WHERE PARTICIPACIONID = :${params.length}`,
-      params,
-    )
+    try {
+      await this.dataSource.query(
+        `UPDATE EVALUADORPARTICIPACION SET ${sets.join(', ')} WHERE PARTICIPACIONID = :${params.length}`,
+        params,
+      )
+    } catch (e) {
+      // Igual que al crear: sin esto, corregir el equipo evaluador respondía
+      // "Internal server error" y no había forma de saber qué campo sobraba.
+      traducirValorLargo(e, CAMPOS_PARTICIPACION)
+      throw e
+    }
     return { message: 'Participación actualizada' }
   }
 

@@ -7,10 +7,16 @@
 #   ./docker/desplegar.sh estado     qué hay levantado y desde cuándo
 #   ./docker/desplegar.sh logs       sigue los logs del backend
 #
-# Por qué un script y no los comandos sueltos: nginx se recarga en caliente,
-# pero SOLO si la configuración es válida. Recargar una config rota deja el
-# proxy caído y con él todo el sitio, no solo lo que se estaba cambiando. Aquí
-# `nginx -t` corre siempre antes del reload y aborta si falla.
+# Por qué un script y no los comandos sueltos, y por qué NO basta con
+# `docker compose up -d --build`:
+#
+#   1. nginx resuelve `backend:3000` y `frontend:4000` UNA sola vez, al
+#      arrancar. Al reconstruir, docker les da una IP nueva y nginx se queda
+#      apuntando a la vieja: el sitio contesta 502 hasta que se recargue. Es un
+#      502 que engaña, porque `docker compose ps` muestra todo "Up".
+#   2. nginx se recarga en caliente, pero SOLO si la configuración es válida.
+#      Recargar una rota deja el proxy caído y con él todo el sitio. Aquí
+#      `nginx -t` corre siempre antes del reload y aborta si falla.
 #
 # Ejecutar desde la raíz del proyecto (donde está docker-compose.yml).
 # ──────────────────────────────────────────────────────────────────────────

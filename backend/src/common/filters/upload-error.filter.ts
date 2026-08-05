@@ -13,6 +13,11 @@ import type { Response } from 'express'
 export class UploadErrorFilter implements ExceptionFilter {
   catch(exception: HttpException, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>()
+
+    // Igual que en el filtro de Oracle: sobre una respuesta ya enviada no se
+    // escribe. Hacerlo lanza ERR_HTTP_HEADERS_SENT y corta lo que iba saliendo.
+    if (response.headersSent) return
+
     const status = exception.getStatus()
     const orig = exception.getResponse()
 

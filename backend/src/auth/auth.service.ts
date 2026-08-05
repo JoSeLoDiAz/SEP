@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   BadRequestException,
   ConflictException,
@@ -81,6 +82,8 @@ const PERFIL_ROLES: Record<number, string> = {
 
 @Injectable()
 export class AuthService {
+  private readonly log = new Logger(AuthService.name)
+
   // Tokens de restablecimiento en memoria (TTL 30 min)
   private readonly resetTokens = new Map<string, ResetToken>()
 
@@ -160,6 +163,21 @@ export class AuthService {
    * Verifica un token de Cloudflare Turnstile contra la API de Cloudflare.
    * Si TURNSTILE_SECRET no está configurado en .env, se permite el login
    * (modo desarrollo / testing). En produccion siempre debe estar.
+   *
+   * Si a Cloudflare NO SE LLEGA, se deja pasar y se anota en el log.
+   *
+   * Es una decisión deliberada, y conviene entenderla. El captcha no autentica
+   * a nadie: solo estorba a los robots que prueban contraseñas en masa. La
+   * contraseña se sigue verificando igual, esté Cloudflare o no. Cuando este
+   * servidor no alcanzaba a Cloudflare, en cambio, NADIE podía entrar — ni con
+   * su contraseña correcta— y la pantalla solo decía "Error al verificar el
+   * captcha", que no le dice a quien lo lee que el problema es de red y no
+   * suyo. Un rato sin filtro de robots es mucho menos grave que la aplicación
+   * entera cerrada; y si la red de la entidad vuelve a cortar la salida, la
+   * gente sigue trabajando.
+   *
+   * Lo que NO se deja pasar es un captcha que Cloudflare rechaza: eso sí es
+   * una respuesta, y significa que el token no vale.
    */
   private async verifyCaptcha(token?: string): Promise<void> {
     const secret = process.env.TURNSTILE_SECRET
@@ -170,20 +188,42 @@ export class AuthService {
     if (!token) {
       throw new UnauthorizedException('Falta validación de captcha')
     }
-    try {
-      const body = new URLSearchParams({ secret, response: token })
-      const res = await fetch(
-        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-        { method: 'POST', body },
-      )
-      const data = (await res.json()) as { success: boolean; 'error-codes'?: string[] }
-      if (!data.success) {
-        throw new UnauthorizedException('Captcha inválido o expirado')
+
+    let ultimoFallo: unknown = null
+
+    // Dos intentos: un tropiezo puntual de red no debe costarle el login a
+    // nadie. Con tope de tiempo, o una salida bloqueada deja la petición
+    // colgada hasta que el navegador se cansa.
+    for (let intento = 1; intento <= 2; intento++) {
+      try {
+        const body = new URLSearchParams({ secret, response: token })
+        const res = await fetch(
+          'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+          { method: 'POST', body, signal: AbortSignal.timeout(8_000) },
+        )
+        const data = (await res.json()) as { success: boolean; 'error-codes'?: string[] }
+        if (!data.success) {
+          // Cloudflare contestó y dijo que no. Aquí no se insiste ni se perdona.
+          this.log.warn(`Captcha rechazado: ${JSON.stringify(data['error-codes'] ?? [])}`)
+          throw new UnauthorizedException('Captcha inválido o expirado')
+        }
+        return
+      } catch (e) {
+        if (e instanceof UnauthorizedException) throw e
+        ultimoFallo = e
       }
-    } catch (e) {
-      if (e instanceof UnauthorizedException) throw e
-      throw new UnauthorizedException('Error al verificar el captcha')
     }
+
+    // Se registra el motivo REAL. Antes se descartaba, y desde fuera el fallo
+    // de red y el captcha vencido eran indistinguibles: para saber cuál era
+    // hubo que medir el tamaño de la respuesta en el log de nginx.
+    const causa = (ultimoFallo as { cause?: { code?: string } })?.cause?.code
+      ?? (ultimoFallo as Error)?.message ?? String(ultimoFallo)
+    this.log.error(
+      `No se pudo consultar a Cloudflare para validar el captcha (${causa}). ` +
+      'Se permite el ingreso; la contraseña sí se verifica. Revisar la salida a ' +
+      'challenges.cloudflare.com desde este servidor.',
+    )
   }
 
   async tiposDocumento(para: 'persona' | 'empresa') {

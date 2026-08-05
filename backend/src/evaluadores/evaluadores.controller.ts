@@ -31,10 +31,20 @@ const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
-const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
-const MAX_FOTO_BYTES = 8 * 1024 * 1024 // 8 MB
-// Los .msg de Outlook con adjuntos pesan bastante más que un PDF suelto.
-const MAX_EVIDENCIA_BYTES = 20 * 1024 * 1024 // 20 MB
+/**
+ * Ocho megas, para TODO lo que se suba: PDFs, fotos y correos.
+ *
+ * Un solo número a propósito. Antes la evidencia del ciclo aceptaba 20 MB y
+ * todo lo demás 8, y como el mensaje de error dice "el máximo permitido es
+ * 8 MB", el mismo correo entraba por una pantalla y era rechazado por otra
+ * con un límite que no era el suyo. Con un único tope no hay nada que
+ * explicar y el mensaje siempre dice la verdad.
+ *
+ * Lo cargado hoy cabe de sobra: el archivo más pesado de la base es de
+ * 1,73 MB. Un .msg con adjuntos que no quepa se guarda sin ellos, o se
+ * imprime a PDF.
+ */
+const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // 8 MB
 
 @ApiTags('evaluadores')
 @Controller('evaluadores')
@@ -543,7 +553,7 @@ export class EvaluadoresController {
 
   @Post(':id/foto')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_FOTO_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype.startsWith('image/'), 'Solo imágenes (JPG, PNG)'),
   }))
   subirFoto(
@@ -686,7 +696,7 @@ export class EvaluadoresController {
 
   @Post(':id/hoja-vida')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   subirHV(
@@ -714,7 +724,7 @@ export class EvaluadoresController {
 
   @Post(':id/estudios')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearEstudio(
@@ -763,7 +773,7 @@ export class EvaluadoresController {
 
   @Post(':id/experiencia')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearExperiencia(
@@ -812,7 +822,7 @@ export class EvaluadoresController {
 
   @Post(':id/tic')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   crearTic(
@@ -913,7 +923,7 @@ export class EvaluadoresController {
   // Sin filtro de tipo: lo valida el service contra las extensiones de correo.
   // El filtro va igual, para que el nombre del .msg no llegue con la tilde rota.
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_EVIDENCIA_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroSoloNombre,
   }))
   subirEvidenciaAprobacion(
@@ -967,7 +977,7 @@ export class EvaluadoresController {
 
   @Post('capacitaciones/:cid/certificado')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
   }))
   subirCertificadoCapacitacion(
@@ -1107,7 +1117,7 @@ export class EvaluadoresController {
 
   @Post(':id/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
-    limits: { fileSize: MAX_PDF_BYTES },
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
     // Puerta laxa: aquí no se sabe todavía de qué tipo es el documento, y hay
     // tipos que son correos (.msg, .eml, .html…). Quién puede subir qué lo
     // decide el service contra las extensiones declaradas en el catálogo, que

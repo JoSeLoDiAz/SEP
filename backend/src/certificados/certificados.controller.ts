@@ -3,6 +3,7 @@ import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import type { Response } from 'express'
 import { CertificadosService } from './certificados.service'
 import { CertificadoService } from '../evaluadores/certificado.service'
+import { contentDisposition } from '../common/text/nombre-archivo'
 
 @ApiTags('certificados')
 @Controller('certificados')
@@ -42,7 +43,7 @@ export class CertificadosController {
     const { buffer, nombre } = await this.evaluadores.getPdf(certificadoId)
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="${encodeURIComponent(nombre)}"`,
+      'Content-Disposition': contentDisposition(nombre, true),
       'Content-Length': buffer.length,
     })
     res.end(buffer)

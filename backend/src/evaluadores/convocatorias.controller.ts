@@ -16,6 +16,7 @@ import {
 import type { MulterFile } from './evaluadores.service'
 import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
 import { filtroArchivo } from './subida-archivo'
+import { contentDisposition } from '../common/text/nombre-archivo'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
@@ -174,8 +175,7 @@ export class ConvocatoriasController {
     // Sanitizamos "double quotes" del ASCII.
     res.setHeader(
       'Content-Disposition',
-      `${ejecutable ? 'attachment' : 'inline'}; filename="${nombreFinal.replace(/"/g, '')}"` +
-      `; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+      contentDisposition(nombreFinal, !ejecutable),
     )
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)
@@ -195,7 +195,7 @@ export class ConvocatoriasController {
     // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+      contentDisposition(nombreFinal, false),
     )
     res.end(buffer)
   }

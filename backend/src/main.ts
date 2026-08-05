@@ -83,6 +83,18 @@ async function bootstrap() {
   const configService = app.get(ConfigService)
   const port = configService.get<number>('BACKEND_PORT', 4000)
 
+  // Node cierra una conexión inactiva a los 5 segundos. nginx, que reutiliza
+  // conexiones contra este proceso, las mantiene hasta 60 — así que llegaba a
+  // mandar una petición por una conexión que Node estaba cerrando en ese mismo
+  // instante, y nginx lo veía como "upstream prematurely closed connection".
+  // Quien esperaba el archivo recibía un 200 con el cuerpo a medias.
+  //
+  // La regla es que este lado aguante MÁS que el proxy, nunca menos. 75 y 80
+  // segundos dejan margen sobre los 60 de nginx.
+  const server = app.getHttpServer()
+  server.keepAliveTimeout = 75_000
+  server.headersTimeout = 80_000
+
   await app.listen(port)
   console.log(`🚀 SEP API corriendo en puerto ${port}`)
   console.log(`📚 Swagger: http://localhost:${port}/docs`)

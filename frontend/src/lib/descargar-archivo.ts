@@ -1,14 +1,48 @@
 import api from '@/lib/api'
 
-/** Descarga un archivo del backend (con el JWT del interceptor) y lo abre en
- *  una pestaña nueva para previsualización (PDF). El blob se revoca tras un
- *  pequeño delay para no romper el visor del navegador. */
-export async function abrirArchivo(url: string): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob' })
-  const blob = new Blob([res.data as Blob], { type: (res.data as Blob).type || 'application/pdf' })
-  const objectUrl = URL.createObjectURL(blob)
-  window.open(objectUrl, '_blank', 'noopener,noreferrer')
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+/**
+ * Abre un archivo del backend en una pestaña nueva.
+ *
+ * La pestaña se abre ANTES de pedir el archivo, y por eso vacía. No es un
+ * rodeo: el navegador solo permite abrir ventanas mientras sigue en curso el
+ * clic que las pidió, y para cuando el archivo llega —medio segundo después—
+ * ese permiso ya se perdió. Haciéndolo al revés, el bloqueador de ventanas
+ * emergentes tumbaba la pestaña y la pantalla decía "No se pudo abrir el
+ * documento" con el archivo intacto en el servidor. Fallaba de a ratos, y en
+ * unos equipos sí y en otros no, según la configuración del navegador.
+ *
+ * Si aun así no se pudo abrir —hay quien tiene las ventanas bloqueadas del
+ * todo— el archivo se descarga, que es mejor que no darle nada a quien
+ * hizo clic.
+ */
+export async function abrirArchivo(url: string, nombreSugerido?: string): Promise<void> {
+  // Dentro del gesto: esto es lo que el navegador sí permite.
+  const pestana = window.open('about:blank', '_blank')
+
+  try {
+    const res = await api.get(url, { responseType: 'blob' })
+    const blob = new Blob([res.data as Blob], { type: (res.data as Blob).type || 'application/pdf' })
+    const objectUrl = URL.createObjectURL(blob)
+
+    if (pestana && !pestana.closed) {
+      pestana.location.href = objectUrl
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      return
+    }
+
+    // Sin pestaña: se descarga en vez de dejar el clic sin respuesta.
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = nombreSugerido || 'documento'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 5_000)
+  } catch (err) {
+    // La pestaña en blanco no se puede quedar ahí si la descarga falló.
+    if (pestana && !pestana.closed) pestana.close()
+    throw err
+  }
 }
 
 /** Descarga un archivo del backend (con JWT) y lo guarda con el nombre dado. */

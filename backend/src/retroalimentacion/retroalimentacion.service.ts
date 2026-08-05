@@ -65,7 +65,9 @@ export class RetroalimentacionService {
     )
     if (!plantilla[0]) {
       throw new NotFoundException(
-        'No existe la plantilla base del instrumento. Verificar el seed de la migración v33.',
+        'No existe la plantilla base del instrumento, que es de donde se copian ' +
+        'las preguntas al abrir el ciclo. Hay que reponerla en la base de datos ' +
+        'con docs/migraciones/v49_replantilla_retroalimentacion.sql.',
       )
     }
 

@@ -19,8 +19,9 @@
 --   · TODOS los ciclos: participaciones, documentos, pruebas, cursos,
 --     aprobaciones, grupos, proyectos evaluados y certificados
 --   · TODAS las convocatorias del banco con sus documentos
---   · TODA la retroalimentación: formularios, preguntas, asignaciones,
---     respuestas, sesiones y sugerencias
+--   · La retroalimentación del año: el instrumento clonado a cada
+--     convocatoria con sus preguntas, asignaciones, respuestas, sesiones y
+--     sugerencias — pero NO la plantilla base (ver abajo)
 --   · Las cuentas de acceso cuyo ÚNICO perfil es el 9 (evaluador)
 --
 -- Qué NO borra, y por qué:
@@ -34,6 +35,11 @@
 --     entera lo dejaría sin el acceso que usa para lo demás.
 --   · Los catálogos (roles, procesos, tipos de documento, firmas): son
 --     configuración, no datos de prueba.
+--   · La plantilla base de retroalimentación — la que no tiene convocatoria.
+--     También es catálogo: es de donde el backend clona el instrumento al
+--     abrir un ciclo. Antes se borraba con todo lo demás, y después la matriz
+--     de cualquier año respondía "No existe la plantilla base del
+--     instrumento" hasta resembrarla a mano.
 --
 -- Idempotente: correrlo dos veces no falla ni borra de más.
 -- Ejecutar como SEPLOCAL en SQL Developer.
@@ -57,8 +63,14 @@ DECLARE
     'DELETE FROM RETROASIGNACION',
     'DELETE FROM RETROSUGERENCIA',
     'DELETE FROM RETROSESION',
-    'DELETE FROM RETROPREGUNTA',
-    'DELETE FROM RETROFORMULARIO',
+    -- La plantilla base (la que no tiene convocatoria) NO se toca: es
+    -- catálogo, no dato de evaluadores. Es de donde el backend clona el
+    -- instrumento al abrir un ciclo, y sin ella la matriz de cualquier año
+    -- responde "No existe la plantilla base del instrumento". Borrarla obliga
+    -- a resembrarla a mano; se borran solo las copias de cada convocatoria.
+    'DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID IN
+       (SELECT RETROFORMULARIOID FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NOT NULL)',
+    'DELETE FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NOT NULL',
 
     -- ── Lo que cuelga del ciclo ─────────────────────────────────────────
     'DELETE FROM EVALUADORCERTIFICADO',
@@ -131,7 +143,9 @@ DECLARE
     'EVALUADORPARTALCANCE', 'EVALUADORPARTGRUPO', 'EVALUADORPARTICIPACION',
     'EVALUADORPARTPROYECTO', 'EVALUADORPRUEBA', 'EVALUADORTIC',
     'CONVOCATORIADOCUMENTO',
-    'RETROASIGNACION', 'RETROFORMULARIO', 'RETROPREGUNTA', 'RETRORESPUESTA',
+    -- RETROFORMULARIO y RETROPREGUNTA no van aquí: deben quedar con la
+    -- plantilla base dentro. Se revisan aparte, más abajo.
+    'RETROASIGNACION', 'RETRORESPUESTA',
     'RETRORESPUESTAITEM', 'RETROSESION', 'RETROSUGERENCIA'
   );
   v_n NUMBER;
@@ -144,6 +158,19 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE(RPAD(v_tablas(i), 26) || LPAD(v_n, 6));
     IF v_n > 0 THEN v_sucias := v_sucias + 1; END IF;
   END LOOP;
+
+  -- De la retroalimentación no debe quedar ninguna copia de convocatoria...
+  SELECT COUNT(*) INTO v_n FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NOT NULL;
+  DBMS_OUTPUT.PUT_LINE(RPAD('RETROFORMULARIO (del año)', 26) || LPAD(v_n, 6));
+  IF v_n > 0 THEN v_sucias := v_sucias + 1; END IF;
+
+  -- ...y la plantilla base sí tiene que seguir ahí, o la matriz no abre.
+  SELECT COUNT(*) INTO v_n FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NULL AND ACTIVO = 1;
+  DBMS_OUTPUT.PUT_LINE(RPAD('RETROFORMULARIO (plantilla)', 26) || LPAD(v_n, 6));
+  IF v_n = 0 THEN
+    RAISE_APPLICATION_ERROR(-20041,
+      'Se perdio la plantilla base del instrumento. Correr v49_replantilla_retroalimentacion.sql.');
+  END IF;
 
   SELECT COUNT(*) INTO v_perfil FROM USUARIOPERFIL WHERE PERFILID = 9;
   DBMS_OUTPUT.PUT_LINE(RPAD('USUARIOPERFIL (perfil 9)', 26) || LPAD(v_perfil, 6));

@@ -11,6 +11,7 @@ import {
 import { AuditoriaService } from './auditoria.service'
 import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
+import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
 
 /**
@@ -230,6 +231,31 @@ export interface MulterFile {
 @Injectable()
 export class EvaluadoresService {
   private readonly log = new Logger(EvaluadoresService.name)
+
+  /** Se apaga en cuanto Oracle diga que la columna de miniaturas no está, para
+   *  no repetir la misma consulta fallida con cada foto de cada pantalla. */
+  private hayColumnaMiniatura = true
+
+  /**
+   * ¿Falló porque falta EVALUADORFOTOMINI? Entonces la v50 no se ha corrido y
+   * se sigue trabajando con la foto original, que es como funcionaba antes.
+   *
+   * En este proyecto el código llega al servidor antes que las migraciones —
+   * son dos pasos distintos y a veces media un día. Que las fotos dejaran de
+   * verse, o de poder cargarse, por una columna que todavía no está sería un
+   * daño mucho mayor que el que esa columna vino a arreglar.
+   */
+  private faltaLaColumnaMiniatura(e: unknown): boolean {
+    if (!/ORA-00904/.test((e as Error)?.message ?? '')) return false
+    if (this.hayColumnaMiniatura) {
+      this.hayColumnaMiniatura = false
+      this.log.warn(
+        'Falta la columna EVALUADORFOTOMINI: las fotos van sin achicar. ' +
+        'Correr docs/migraciones/v50_miniatura_foto_evaluador.sql.',
+      )
+    }
+    return true
+  }
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -976,11 +1002,28 @@ export class EvaluadoresService {
     // coinciden, guardar el anunciado deja un Content-Type que no case con
     // los bytes y el navegador se niega a dibujarla.
     const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
+
+    // La miniatura se guarda junto con la original, en el mismo UPDATE: así no
+    // hay un instante en que la foto sea nueva y la miniatura sea la anterior.
+    if (this.hayColumnaMiniatura) {
+      const mini = await miniaturaDeFoto(file.buffer)
+      try {
+        await this.dataSource.query(
+          `UPDATE EVALUADOR
+              SET EVALUADORFOTO = :1, EVALUADORFOTOMIME = :2,
+                  EVALUADORFOTONOMBRE = :3, EVALUADORFOTOMINI = :4
+            WHERE EVALUADORID = :5`,
+          [file.buffer, mimeReal, nombre, mini, evaluadorId],
+        )
+        return { message: 'Foto actualizada', size: file.size, mime: mimeReal, nombre }
+      } catch (e) {
+        if (!this.faltaLaColumnaMiniatura(e)) throw e
+      }
+    }
+
     await this.dataSource.query(
       `UPDATE EVALUADOR
-          SET EVALUADORFOTO = :1,
-              EVALUADORFOTOMIME = :2,
-              EVALUADORFOTONOMBRE = :3
+          SET EVALUADORFOTO = :1, EVALUADORFOTOMIME = :2, EVALUADORFOTONOMBRE = :3
         WHERE EVALUADORID = :4`,
       [file.buffer, mimeReal, nombre, evaluadorId],
     )
@@ -1027,12 +1070,77 @@ export class EvaluadoresService {
     return { buffer, mime: r.mime || 'image/jpeg', nombre: r.nombre ?? null }
   }
 
+  /**
+   * La foto en tamaño de pantalla. Es la que pide el banco y la ficha del
+   * evaluador; la original queda para descargar y para el PDF.
+   *
+   * Si la fila todavía no tiene miniatura —las cargadas antes de la v50— se
+   * genera aquí y se guarda, de modo que solo la primera visita paga el
+   * trabajo. Nadie tiene que volver a subir nada ni correr ningún script.
+   */
+  async getFotoMiniatura(evaluadorId: number): Promise<{ buffer: Buffer; mime: string; nombre: string | null }> {
+    // Si la v50 todavía no se ha corrido, la columna no existe y aquí no hay
+    // nada que hacer más que servir la original. El código suele llegar al
+    // servidor antes que las migraciones, y una foto pesada se sigue viendo:
+    // que no se vea NINGUNA por una columna que falta sería mucho peor.
+    if (!this.hayColumnaMiniatura) return this.getFoto(evaluadorId)
+
+    let rows: Array<{ mini: Buffer | null; nombre: string | null }>
+    try {
+      rows = await this.dataSource.query(
+        `SELECT EVALUADORFOTOMINI AS "mini", EVALUADORFOTONOMBRE AS "nombre"
+           FROM EVALUADOR WHERE EVALUADORID = :1`,
+        [evaluadorId],
+      )
+    } catch (e) {
+      if (!this.faltaLaColumnaMiniatura(e)) throw e
+      return this.getFoto(evaluadorId)
+    }
+
+    const mini = rows[0]?.mini
+    if (mini && mini.length > 0) {
+      return { buffer: mini, mime: 'image/jpeg', nombre: rows[0].nombre ?? null }
+    }
+
+    // Sin miniatura: se parte de la original, que ya viene validada.
+    const original = await this.getFoto(evaluadorId)
+    const generada = await miniaturaDeFoto(original.buffer)
+    if (!generada) return original  // no se pudo achicar: sirve la de siempre
+
+    try {
+      await this.dataSource.query(
+        `UPDATE EVALUADOR SET EVALUADORFOTOMINI = :1 WHERE EVALUADORID = :2`,
+        [generada, evaluadorId],
+      )
+    } catch (e) {
+      // Guardarla es una optimización, no el objetivo: si el UPDATE falla se
+      // sirve igual la miniatura y solo se paga el trabajo otra vez. La
+      // pantalla no se entera.
+      this.log.warn(`No se pudo guardar la miniatura del evaluador ${evaluadorId}: ${(e as Error).message}`)
+    }
+
+    return { buffer: generada, mime: 'image/jpeg', nombre: original.nombre }
+  }
+
   async borrarFoto(evaluadorId: number) {
+    if (this.hayColumnaMiniatura) {
+      try {
+        await this.dataSource.query(
+          `UPDATE EVALUADOR
+              SET EVALUADORFOTO = NULL, EVALUADORFOTOMIME = NULL,
+                  EVALUADORFOTONOMBRE = NULL, EVALUADORFOTOMINI = NULL
+            WHERE EVALUADORID = :1`,
+          [evaluadorId],
+        )
+        return { message: 'Foto eliminada' }
+      } catch (e) {
+        if (!this.faltaLaColumnaMiniatura(e)) throw e
+      }
+    }
+
     await this.dataSource.query(
       `UPDATE EVALUADOR
-          SET EVALUADORFOTO = NULL,
-              EVALUADORFOTOMIME = NULL,
-              EVALUADORFOTONOMBRE = NULL
+          SET EVALUADORFOTO = NULL, EVALUADORFOTOMIME = NULL, EVALUADORFOTONOMBRE = NULL
         WHERE EVALUADORID = :1`,
       [evaluadorId],
     )

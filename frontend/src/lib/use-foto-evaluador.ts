@@ -1,4 +1,5 @@
 import api from '@/lib/api'
+import { encolarFoto } from '@/lib/cola-fotos'
 import { useEffect, useState } from 'react'
 
 /**
@@ -11,6 +12,10 @@ import { useEffect, useState } from 'react'
  * alguien recargara la página — y como la pantalla entonces muestra "Sube una
  * foto de tipo carné", parecía que el evaluador no tenía foto cuando sí la
  * tenía, con el riesgo de que alguien la volviera a cargar encima.
+ *
+ * La descarga va por una fila (ver cola-fotos): las tarjetas del banco se
+ * dibujan de arriba abajo y encolan en ese orden, así que las fotos aparecen
+ * en el mismo orden en vez de competir todas contra el servidor a la vez.
  */
 export function useFotoEvaluador(evaluadorId: number, tieneFoto: boolean): string | null {
   const [src, setSrc] = useState<string | null>(null)
@@ -38,7 +43,9 @@ export function useFotoEvaluador(evaluadorId: number, tieneFoto: boolean): strin
           setSrc(null)
         })
 
-    void pedir(1)
+    // Si la tarjeta se fue de pantalla antes de que llegara su turno, se salta
+    // sin gastar el turno: no tiene sentido bajar una foto que ya nadie mira.
+    encolarFoto(() => pedir(1), () => cancelado)
 
     return () => {
       cancelado = true

@@ -22,6 +22,7 @@ import { CertificadoService } from './certificado.service'
 import { FichaPdfService } from './ficha-pdf.service'
 import { ReportesEvaluadorService } from './reportes.service'
 import type { AprobacionDto, CapacitacionDto, PartProyectoDto } from './ciclo.service'
+import { contentDisposition } from '../common/text/nombre-archivo'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
@@ -81,10 +82,7 @@ export class EvaluadoresController {
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader(
       'Content-Disposition',
-      enLinea
-        ? `inline; filename="${encodeURIComponent(limpio)}"`
-        // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
-        : `attachment; filename="${limpio.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(limpio)}`,
+      contentDisposition(limpio, enLinea),
     )
     res.end(buffer)
   }
@@ -452,7 +450,7 @@ export class EvaluadoresController {
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${nombre}"; filename*=UTF-8''${encodeURIComponent(nombre)}`,
+      contentDisposition(nombre, false),
     )
     res.end(buffer)
   }
@@ -612,7 +610,7 @@ export class EvaluadoresController {
     // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+      contentDisposition(nombreFinal, false),
     )
     res.end(buffer)
   }
@@ -744,7 +742,7 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getEstudioArchivo(sid)
     res.setHeader('Content-Type', mime)
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombre)}"`)
+    res.setHeader('Content-Disposition', contentDisposition(nombre, true))
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)
   }
@@ -793,7 +791,7 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getExperienciaArchivo(eid)
     res.setHeader('Content-Type', mime)
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombre)}"`)
+    res.setHeader('Content-Disposition', contentDisposition(nombre, true))
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)
   }
@@ -842,7 +840,7 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getTicArchivo(tid)
     res.setHeader('Content-Type', mime)
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombre)}"`)
+    res.setHeader('Content-Disposition', contentDisposition(nombre, true))
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)
   }
@@ -1171,7 +1169,7 @@ export class EvaluadoresController {
     // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${nombreFinal.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(nombreFinal)}`,
+      contentDisposition(nombreFinal, false),
     )
     res.end(buffer)
   }

@@ -1,4 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException, ConflictException, Injectable, Logger, NotFoundException,
+} from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { aTitleCase } from '../common/text/title-case'
@@ -8,6 +10,7 @@ import {
 } from '../common/crypto/usuario-clave'
 import { AuditoriaService } from './auditoria.service'
 import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
+import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { traducirValorLargo } from '../common/db/errores'
 
 /**
@@ -226,6 +229,8 @@ export interface MulterFile {
 
 @Injectable()
 export class EvaluadoresService {
+  private readonly log = new Logger(EvaluadoresService.name)
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditoria: AuditoriaService,
@@ -367,7 +372,10 @@ export class EvaluadoresService {
       cond.push(filtros.sinCedula ? `NOT ${tieneCedula}` : tieneCedula)
     }
     if (filtros.sinFoto != null) {
-      cond.push(filtros.sinFoto ? 'e.EVALUADORFOTO IS NULL' : 'e.EVALUADORFOTO IS NOT NULL')
+      // Mismo criterio que la columna "tieneFoto": una foto vacía cuenta como
+      // que no hay foto, para que el filtro la encuentre y se pueda recargar.
+      const conFoto = 'NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0'
+      cond.push(filtros.sinFoto ? `NOT (${conFoto})` : conFoto)
     }
 
     if (filtros.pruebaVigente != null) {
@@ -397,7 +405,13 @@ export class EvaluadoresService {
               TRIM(e.EVALUADORPROFESION)     AS "profesion",
               e.EVALUADORACTIVO              AS "activo",
               TRIM(r.REGIONALNOMBRE)         AS "regionalNombre",
-              CASE WHEN e.EVALUADORFOTO IS NULL THEN 0 ELSE 1 END AS "tieneFoto",
+              -- Se exigen BYTES, no solo que la columna no sea nula. Una foto
+              -- que se guardó a medias deja un BLOB vacío: con IS NOT NULL
+              -- la tarjeta decía que sí tenía foto, no salía el chip "SIN
+              -- FOTO", y aun así no se veía nada. Quedaba invisible para el
+              -- filtro de "sin foto", que es justo donde había que buscarla.
+              CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
+                   THEN 1 ELSE 0 END          AS "tieneFoto",
               (SELECT COUNT(*) FROM EVALUADORPARTICIPACION pa
                 WHERE pa.EVALUADORID = e.EVALUADORID)            AS "totalCiclos",
               (SELECT MAX(pa.ANIO) FROM EVALUADORPARTICIPACION pa
@@ -506,7 +520,9 @@ export class EvaluadoresService {
               TRIM(e.EVALUADORJEFECARGO)      AS "jefeCargo",
               e.EVALUADORMUNICIPIOID          AS "municipioId",
               e.EVALUADORACTIVO               AS "activo",
-              CASE WHEN e.EVALUADORFOTO IS NULL THEN 0 ELSE 1 END AS "tieneFoto",
+              -- Igual que en el listado: sin bytes no hay foto que mostrar.
+              CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
+                   THEN 1 ELSE 0 END           AS "tieneFoto",
               TRIM(p.PERSONAIDENTIFICACION)   AS "identificacion",
               p.TIPODOCUMENTOIDENTIDADID      AS "tipoDocumentoIdentidadId",
               TRIM(p.PERSONANOMBRES)          AS "nombres",
@@ -939,7 +955,26 @@ export class EvaluadoresService {
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
-    // Nombre original del archivo (limitado a 255 chars por el schema).
+    // Se revisa el CONTENIDO antes de guardar. Un archivo vacío, o uno que
+    // por dentro no es una imagen, se guardaba igual: la ficha decía que el
+    // evaluador tenía foto y en pantalla no aparecía nada. Es preferible que
+    // falle aquí, con el motivo a la vista de quien está cargando.
+    if (file.buffer.length === 0) {
+      throw new BadRequestException(
+        'El archivo llegó vacío. Revisa que la imagen abra en tu equipo y vuelve a cargarla.',
+      )
+    }
+    const mimeReal = mimeRealDeImagen(file.buffer)
+    if (!mimeReal) {
+      throw new BadRequestException(
+        'El archivo no es una imagen (JPG, PNG, GIF, BMP o WebP). ' +
+        'Si le cambiaste la extensión a mano, vuelve a exportarla como JPG o PNG.',
+      )
+    }
+
+    // Manda lo que dice el contenido, no lo que anuncia el navegador: si no
+    // coinciden, guardar el anunciado deja un Content-Type que no case con
+    // los bytes y el navegador se niega a dibujarla.
     const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
     await this.dataSource.query(
       `UPDATE EVALUADOR
@@ -947,9 +982,9 @@ export class EvaluadoresService {
               EVALUADORFOTOMIME = :2,
               EVALUADORFOTONOMBRE = :3
         WHERE EVALUADORID = :4`,
-      [file.buffer, file.mimetype, nombre, evaluadorId],
+      [file.buffer, mimeReal, nombre, evaluadorId],
     )
-    return { message: 'Foto actualizada', size: file.size, mime: file.mimetype, nombre }
+    return { message: 'Foto actualizada', size: file.size, mime: mimeReal, nombre }
   }
 
   async getFoto(evaluadorId: number): Promise<{ buffer: Buffer; mime: string; nombre: string | null }> {
@@ -967,6 +1002,28 @@ export class EvaluadoresService {
     const r = rows[0]
     if (!r || !r.foto) throw new NotFoundException('Foto no encontrada')
     const buffer = await this.lobToBuffer(r.foto)
+
+    // Devolver 200 con cero bytes es la peor respuesta posible: el navegador
+    // no dibuja nada, no hay error que mostrar, y la pantalla queda igual que
+    // si el evaluador nunca hubiera tenido foto. Un 404 con motivo sí se ve.
+    if (buffer.length === 0) {
+      this.log.warn(`Evaluador ${evaluadorId}: la foto está en la BD pero vacía (0 bytes)`)
+      throw new NotFoundException(
+        'La foto quedó guardada vacía. Vuelve a cargarla desde el perfil del evaluador.',
+      )
+    }
+
+    // Si lo guardado no empieza como una imagen, el navegador tampoco la va a
+    // dibujar. Se sirve igual —puede ser un formato que no conozcamos— pero
+    // queda en el log con qué llegó, que es lo que hace falta para saberlo.
+    if (!empiezaComoImagen(buffer)) {
+      this.log.warn(
+        `Evaluador ${evaluadorId}: la foto no parece una imagen ` +
+        `(mime=${r.mime ?? 'sin mime'}, ${buffer.length} bytes, ` +
+        `empieza por ${buffer.subarray(0, 4).toString('hex').toUpperCase()})`,
+      )
+    }
+
     return { buffer, mime: r.mime || 'image/jpeg', nombre: r.nombre ?? null }
   }
 

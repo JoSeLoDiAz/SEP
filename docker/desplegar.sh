@@ -61,6 +61,25 @@ case "${1:-todo}" in
     ;;
 
   todo)
+    # Este servidor NO llega a registry.npmjs.org: el puerto 443 ni siquiera
+    # abre (github, debian y google sí, así que es un bloqueo específico de los
+    # registros de paquetes). Mientras pnpm-lock.yaml y los package.json no
+    # cambien da igual, porque docker reutiliza la capa del `pnpm install`.
+    # Pero en cuanto se agregue o suba una dependencia, esa capa se invalida y
+    # el build muere aquí — con un error de corepack que no dice nada de red.
+    # Más vale avisarlo antes de esperar el build entero.
+    if ! curl -fsS --max-time 8 https://registry.npmjs.org/pnpm >/dev/null 2>&1; then
+      if ! git diff --quiet HEAD@{1} HEAD -- pnpm-lock.yaml '*/package.json' package.json 2>/dev/null; then
+        rojo "✖ Cambiaron las dependencias y este servidor no llega a npm."
+        echo "  El build fallará en 'corepack prepare'. Opciones:"
+        echo "    · Pedir a la red que habilite registry.npmjs.org, o"
+        echo "    · Construir la imagen donde sí haya salida y traerla:"
+        echo "        docker save seplocal-backend | ssh sepadmin@este-host docker load"
+        exit 1
+      fi
+      echo "  (sin salida a npm; se reutilizan las capas de dependencias ya construidas)"
+    fi
+
     azul "→ Reconstruyendo backend y frontend"
     dc up -d --build
 

@@ -5,7 +5,7 @@ import type { MulterFile } from './evaluadores.service'
 
 // Tope de tamaño por archivo adjunto a la convocatoria (20 MB). Se aplica
 // tanto en el interceptor multer como en la validación defensiva del service.
-export const MAX_CONV_DOC_BYTES = 20 * 1024 * 1024
+export const MAX_CONV_DOC_BYTES = 8 * 1024 * 1024
 
 // Extensiones que el catálogo puede declarar por defecto. Sólo se usan como
 // fallback si el catálogo trae la cadena vacía — el flujo real lee la lista

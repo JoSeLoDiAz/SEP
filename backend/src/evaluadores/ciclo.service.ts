@@ -51,7 +51,7 @@ export interface CtxUsuario {
 }
 
 /** Tope de la evidencia de aprobación. Los .msg con adjuntos pesan más que un PDF. */
-const MAX_EVIDENCIA_BYTES = 20 * 1024 * 1024
+const MAX_EVIDENCIA_BYTES = 8 * 1024 * 1024
 
 /**
  * La evidencia es un correo, y cada quien lo guarda con lo que tiene: Outlook
@@ -763,7 +763,7 @@ export class CicloService {
   private validarEvidencia(file: MulterFile) {
     if (!file) throw new BadRequestException('Archivo requerido')
     if (file.size > MAX_EVIDENCIA_BYTES) {
-      throw new BadRequestException('La evidencia supera los 20 MB')
+      throw new BadRequestException('La evidencia supera los 8 MB')
     }
     const nombre = (file.originalname ?? '').toLowerCase()
     const extOk = EVIDENCIA_EXTENSIONES.some(ext => nombre.endsWith(ext))

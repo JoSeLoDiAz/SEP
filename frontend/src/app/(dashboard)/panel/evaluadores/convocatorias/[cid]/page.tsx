@@ -603,8 +603,8 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
       setToast({ tipo: 'error', msg: 'Adjunta un archivo' })
       return
     }
-    if (archivo.size > 20 * 1024 * 1024) {
-      setToast({ tipo: 'error', msg: 'El archivo supera los 20 MB' })
+    if (archivo.size > 8 * 1024 * 1024) {
+      setToast({ tipo: 'error', msg: 'El archivo supera los 8 MB' })
       return
     }
     setSubiendo(true)
@@ -739,7 +739,7 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
             />
           </div>
           <div className="sm:col-span-2">
-            <label className={label}>Archivo * (máximo 20 MB)</label>
+            <label className={label}>Archivo * (máximo 8 MB)</label>
             <input
               ref={fileRef}
               type="file"

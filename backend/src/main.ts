@@ -9,9 +9,25 @@ process.env.TZ = 'UTC'
 // para extraer el contenido hay que envolver con DBMS_LOB.SUBSTR(col, 4000, 1)
 // que revienta con ORA-06502 cuando el texto tiene caracteres multibyte
 // (tildes, ñ) que exceden 4000 bytes en el buffer VARCHAR2.
+//
+// Y los BLOB como Buffer completos, por la misma razón de fondo pero con una
+// consecuencia peor. Un BLOB llega como un stream que hay que leer DESPUÉS de
+// que la consulta terminó — y para entonces TypeORM ya devolvió la conexión al
+// pool. Mientras el archivo quepa en el prefetch del driver (16 KB) los datos
+// vienen con la fila y no se nota; por encima de eso hacen falta más viajes
+// contra esa misma conexión, y si otra petición ya se la llevó, la lectura
+// falla a mitad. Es una carrera: depende del tamaño del archivo, de cuántas
+// peticiones haya a la vez y de cuánto tarde la red contra la base. Por eso se
+// caía siempre la foto más pesada de la pantalla, y siempre la misma, mientras
+// las demás se veían bien. Pedirlos como Buffer los trae enteros con la fila y
+// no queda nada que leer después.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const oracledb = require('oracledb') as { fetchAsString: number[]; CLOB: number }
+const oracledb = require('oracledb') as {
+  fetchAsString: number[]; CLOB: number
+  fetchAsBuffer: number[]; BLOB: number
+}
 oracledb.fetchAsString = [oracledb.CLOB]
+oracledb.fetchAsBuffer = [oracledb.BLOB]
 
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'

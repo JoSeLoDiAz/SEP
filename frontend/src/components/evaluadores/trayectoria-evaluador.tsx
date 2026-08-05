@@ -924,13 +924,13 @@ function BloqueAutorizacion({
   }
 
   /** Lo mismo que acepta el backend en esta ruta (MAX_EVIDENCIA_BYTES). */
-  const MAX_EVIDENCIA_MB = 20
+  const MAX_EVIDENCIA_MB = 8
 
   async function subirEvidencia(archivo: File) {
     if (!a) return
 
     // Se mira el tamaño ANTES de mandarlo. Un .msg con presentaciones adjuntas
-    // pasa de 20 MB sin esfuerzo, y sin esta comprobación se subía entero para
+    // pasa de 8 MB sin esfuerzo, y sin esta comprobación se subía entero para
     // que el servidor lo rechazara al final: minutos de espera y un mensaje
     // que no decía qué había pasado. Aquí es inmediato y dice qué hacer.
     const mb = archivo.size / (1024 * 1024)

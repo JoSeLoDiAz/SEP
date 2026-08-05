@@ -2247,7 +2247,12 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
   useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
 
   const tipoSeleccionado = tipos.find(t => String(t.id) === tipoSel)
+  // Los dos van atados a un año concreto: el certificado es de una vigencia, y
+  // la experiencia en proyectos sirve para acreditar CUÁNDO se evaluó. Sin el
+  // año quedan varios archivos iguales en la lista —"Proyectos 1", "Proyectos
+  // 2"— sin forma de saber a qué convocatoria corresponde cada uno.
   const requiereAnio = tipoSeleccionado?.codigo === 'CERTIFICADO_PARTICIPACION'
+    || tipoSeleccionado?.codigo === 'EXPERIENCIA_PROYECTOS'
   const maxAnio = new Date().getFullYear() + 1
 
   function resetForm() {

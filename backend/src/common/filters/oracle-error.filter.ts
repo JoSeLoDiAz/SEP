@@ -27,6 +27,20 @@ export class OracleErrorFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<Response>()
 
+    // Si la respuesta ya salió, no hay nada que contestar: solo se anota.
+    //
+    // Intentar mandar el JSON encima lanzaba ERR_HTTP_HEADERS_SENT dentro del
+    // propio filtro, y esa segunda excepción mataba la conexión a medio envío.
+    // Con un archivo grande el navegador se quedaba con un 200 y el cuerpo
+    // cortado. Callarse aquí deja que lo que ya iba en camino termine de salir.
+    if (res.headersSent) {
+      this.log.error(
+        'Error después de haber respondido; la respuesta sigue su curso: ' +
+        ((exception as Error)?.stack ?? String(exception)),
+      )
+      return
+    }
+
     // Las HttpException ya llevan su mensaje pensado: no se tocan.
     if (exception instanceof HttpException) {
       const status = exception.getStatus()

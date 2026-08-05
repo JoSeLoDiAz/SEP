@@ -53,6 +53,14 @@ export class RetroalimentacionService {
    * El clon es deliberado: si el instrumento del año apuntara a la plantilla,
    * editar una pregunta reescribiría el histórico de todos los años
    * anteriores. Cada ciclo se queda con su propia copia congelada.
+   *
+   * Puede entrar dos veces a la vez y no pasa nada. La pantalla de la matriz
+   * pide el avance y la vista previa en paralelo, y las dos acaban aquí: en un
+   * ciclo estrenado ninguna encuentra instrumento, las dos lo clonan, y a la
+   * segunda el índice único le responde que ya existe. Se lee de nuevo y se
+   * devuelve el que ganó — que es lo que la pantalla necesita. Antes esa
+   * carrera tumbaba la matriz con "Ese registro ya existe", y bastaba insistir
+   * para que funcionara, porque a la segunda vuelta el instrumento ya estaba.
    */
   async getFormulario(convocatoriaId: number) {
     const existente = await this.buscarFormulario(convocatoriaId)
@@ -77,6 +85,28 @@ export class RetroalimentacionService {
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
 
+    try {
+      await this.clonarPlantilla(convocatoriaId, plantilla[0].id, conv[0])
+    } catch (e) {
+      // Si otra petición se adelantó, su instrumento sirve igual: es un clon
+      // de la misma plantilla. Solo se relanza el error si de verdad no quedó
+      // ninguno, que ya sería un fallo real y no una carrera.
+      const delOtro = await this.buscarFormulario(convocatoriaId)
+      if (!delOtro) throw e
+      return delOtro
+    }
+
+    const creado = await this.buscarFormulario(convocatoriaId)
+    if (!creado) throw new NotFoundException('No se pudo crear el instrumento de la convocatoria')
+    return creado
+  }
+
+  /** Copia la plantilla base hacia una convocatoria, en una sola transacción. */
+  private async clonarPlantilla(
+    convocatoriaId: number,
+    plantillaId: number,
+    conv: { anio: number; nombre: string },
+  ) {
     await this.dataSource.transaction(async m => {
       const seq: Array<{ NEXTVAL: number }> = await m.query(
         `SELECT RETROFORMULARIO_SEQ.NEXTVAL FROM dual`)
@@ -94,7 +124,7 @@ export class RetroalimentacionService {
                 ESCALAMIN, ESCALAMAX, DURACIONMINUTOS, RESULTADOANONIMO, 1, 0,
                 REGLASMATRIZ, ESCALAETIQUETAS, 'clon-plantilla'
            FROM RETROFORMULARIO WHERE RETROFORMULARIOID = :5`,
-        [nuevoId, convocatoriaId, conv[0].nombre, conv[0].anio, plantilla[0].id],
+        [nuevoId, convocatoriaId, conv.nombre, conv.anio, plantillaId],
       )
 
       // Sin ORDER BY: Oracle rechaza SEQ.NEXTVAL en un SELECT ordenado
@@ -105,13 +135,9 @@ export class RetroalimentacionService {
            (RETROPREGUNTAID, RETROFORMULARIOID, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN)
          SELECT RETROPREGUNTA_SEQ.NEXTVAL, :1, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN
            FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :2 AND ACTIVO = 1`,
-        [nuevoId, plantilla[0].id],
+        [nuevoId, plantillaId],
       )
     })
-
-    const creado = await this.buscarFormulario(convocatoriaId)
-    if (!creado) throw new NotFoundException('No se pudo crear el instrumento de la convocatoria')
-    return creado
   }
 
   /** Abre o cierra el diligenciamiento del ciclo. */

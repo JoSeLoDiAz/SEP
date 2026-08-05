@@ -569,9 +569,19 @@ export class EvaluadoresController {
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'private, max-age=300')
     // Expone el nombre para que el frontend lo pueda leer via CORS.
+    //
+    // Va dentro de un try porque el nombre lo puso quien subió el archivo, y
+    // basta una tilde mal codificada para que `encodeURIComponent` reviente o
+    // para que Node rechace la cabecera. Sin esto, un nombre raro tumba la
+    // respuesta entera: la foto está perfecta en la base y no se ve, que es
+    // de lo más difícil de diagnosticar. El nombre es un adorno; la imagen no.
     if (nombre) {
-      res.setHeader('X-Filename', encodeURIComponent(nombre))
-      res.setHeader('Access-Control-Expose-Headers', 'X-Filename')
+      try {
+        res.setHeader('X-Filename', encodeURIComponent(nombre))
+        res.setHeader('Access-Control-Expose-Headers', 'X-Filename')
+      } catch {
+        /* sin nombre, pero con foto */
+      }
     }
     res.end(buffer)
   }

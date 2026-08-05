@@ -557,6 +557,15 @@ export class EvaluadoresController {
     return this.service.subirFoto(id, file)
   }
 
+  /**
+   * La foto para VER en pantalla: va la miniatura, no la original.
+   *
+   * En las tarjetas del banco el retrato mide unos 100 píxeles, y mandar el
+   * archivo de 280 KB para eso hacía que una sola página bajara más de 2 MB
+   * — y que la foto más pesada se cortara a medio camino cuando la red no
+   * acompañaba. Para descargarla o imprimirla está `/foto/descargar`, que sí
+   * entrega el archivo tal como se subió.
+   */
   @Get(':id/foto')
   async getFoto(
     @CurrentUser() user: JwtUser,
@@ -564,7 +573,7 @@ export class EvaluadoresController {
     @Res() res: Response,
   ) {
     this.exigirGestion(user)
-    const { buffer, mime, nombre } = await this.service.getFoto(id)
+    const { buffer, mime, nombre } = await this.service.getFotoMiniatura(id)
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'private, max-age=300')

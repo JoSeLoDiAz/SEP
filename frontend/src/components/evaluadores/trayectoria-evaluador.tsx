@@ -923,8 +923,27 @@ function BloqueAutorizacion({
     }
   }
 
+  /** Lo mismo que acepta el backend en esta ruta (MAX_EVIDENCIA_BYTES). */
+  const MAX_EVIDENCIA_MB = 20
+
   async function subirEvidencia(archivo: File) {
     if (!a) return
+
+    // Se mira el tamaño ANTES de mandarlo. Un .msg con presentaciones adjuntas
+    // pasa de 20 MB sin esfuerzo, y sin esta comprobación se subía entero para
+    // que el servidor lo rechazara al final: minutos de espera y un mensaje
+    // que no decía qué había pasado. Aquí es inmediato y dice qué hacer.
+    const mb = archivo.size / (1024 * 1024)
+    if (mb > MAX_EVIDENCIA_MB) {
+      setToast({
+        tipo: 'error',
+        msg: `El correo pesa ${mb.toFixed(1)} MB y el máximo son ${MAX_EVIDENCIA_MB} MB. ` +
+          'Guárdelo sin los adjuntos, o imprímalo a PDF.',
+      })
+      if (archivoRef.current) archivoRef.current.value = ''
+      return
+    }
+
     setSubiendo(true)
     try {
       const fd = new FormData()

@@ -37,6 +37,30 @@ api.interceptors.request.use((config) => {
   if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
     delete config.headers['Content-Type']
   }
+
+  // Los archivos necesitan más de 15 segundos, y no es negociable.
+  //
+  // Ese límite es sensato para una consulta, pero se aplicaba también al
+  // subir y al descargar. Un correo .msg de 18 MB —que el backend acepta
+  // hasta 20— tarda varios minutos por una conexión de oficina: a los 15
+  // segundos exactos el navegador abortaba, y como la petición se corta antes
+  // de llegar al servidor, no hay respuesta que leer y el mensaje que salía
+  // era el genérico. Quien lo intentaba veía fallar la carga sin saber por
+  // qué, y volvía a intentarlo con el mismo resultado.
+  //
+  // Se reconoce el caso por la forma de la petición, no por la ruta: si lleva
+  // un FormData va un archivo dentro, y si espera un blob viene uno de vuelta.
+  // Así ninguna pantalla nueva tiene que acordarse de nada.
+  // Se usa Math.max y no una asignación: para cuando corre el interceptor,
+  // axios ya fusionó el timeout de la instancia, así que preguntar si viene
+  // vacío no sirve —siempre trae los 15 s—, y asignar a secas pisaría el
+  // valor mayor que alguna pantalla haya pedido a propósito.
+  const llevaArchivo = typeof FormData !== 'undefined' && config.data instanceof FormData
+  const traeArchivo = config.responseType === 'blob'
+  if (llevaArchivo || traeArchivo) {
+    config.timeout = Math.max(config.timeout ?? 0, 10 * 60_000)
+  }
+
   return config
 })
 

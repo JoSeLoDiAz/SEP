@@ -1071,6 +1071,10 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [revocado, setRevocado] = useState(false)
   const [mesa, setMesa] = useState('')
   const [equipo, setEquipo] = useState('')
+  // Quien dinamizó la mesa. Va en texto libre, como el equipo: no siempre está
+  // registrado en el SEP, y exigir que lo estuviera dejaba el campo vacío —
+  // llevaba 0 de 102 participaciones sin llenar por no tener dónde ponerlo.
+  const [dinamizador, setDinamizador] = useState('')
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
   /** Si tiene valor, el formulario está corrigiendo esa participación. */
@@ -1111,7 +1115,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
     setEditandoId(null)
     setAnio(new Date().getFullYear().toString())
     setPeriodo(''); setRolId(''); setModalidad(''); setProcId(''); setConvId(''); setAreaId('')
-    setRevocado(false); setMesa(''); setEquipo('')
+    setRevocado(false); setMesa(''); setEquipo(''); setDinamizador('')
   }
 
   /**
@@ -1134,6 +1138,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
     setRevocado(Boolean(p.procesoRevocado))
     setMesa(p.mesa ?? '')
     setEquipo(p.equipoEvaluador ?? '')
+    setDinamizador(p.dinamizadorNombre ?? '')
     setAgregar(true)
   }
 
@@ -1154,6 +1159,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
       procesoRevocado: revocado,
       mesa: mesa || null,
       equipoEvaluador: equipo || null,
+      dinamizador: dinamizador.trim() || null,
     }
     try {
       if (editandoId) {
@@ -1279,6 +1285,16 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
           {/* Aquí se escribe la lista de quienes componen el equipo, no una
               etiqueta corta, así que el contador evita llegar al tope y que el
               servidor rechace el guardado después de llenar todo el resto. */}
+          <div className="col-span-2 sm:col-span-2">
+            <label className={label}>Dinamizó</label>
+            <input
+              value={dinamizador}
+              onChange={e => setDinamizador(e.target.value)}
+              maxLength={500}
+              placeholder="Nombre de quien dinamizó la mesa"
+              className={input}
+            />
+          </div>
           <div className="col-span-2 sm:col-span-4">
             <label className={label}>Equipo evaluador</label>
             <input

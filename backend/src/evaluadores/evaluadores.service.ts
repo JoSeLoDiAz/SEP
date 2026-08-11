@@ -1902,8 +1902,10 @@ export class EvaluadoresService {
         )
       }
     }
-    revisar(dto.puntajeMayor, 'Puntaje mayor')
+    revisar(dto.puntajeMayor, 'Puntaje')
     revisar(dto.puntajeMinimo, 'Puntaje mínimo')
+    // El porcentaje es un porcentaje: 0 a 100, mismo rango.
+    revisar(dto.efectividad, 'Porcentaje')
 
     if (dto.intentos != null && (Number(dto.intentos) < 0 || Number(dto.intentos) > 99)) {
       throw new BadRequestException('"Intentos" va de 0 a 99')

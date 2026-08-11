@@ -9,6 +9,9 @@ import { ConvocatoriasService } from './convocatorias.service'
 import { EvaluadoresController } from './evaluadores.controller'
 import { EvaluadoresService } from './evaluadores.service'
 import { FichaPdfService } from './ficha-pdf.service'
+import { MiExpedienteController } from './mi-expediente.controller'
+import { MiExpedienteGuard } from './mi-expediente.guard'
+import { MiExpedienteService } from './mi-expediente.service'
 import { ReportesEvaluadorService } from './reportes.service'
 import { VerificacionController } from './verificacion.controller'
 import { TrayectoriaService } from './trayectoria.service'
@@ -20,7 +23,12 @@ import { TrayectoriaService } from './trayectoria.service'
   // y hace reventar el ParseIntPipe con 400. Registrando primero el controller
   // más específico, sus rutas ganan. (Express 5 usa path-to-regexp v8, que ya
   // no admite restringir el parámetro con regex inline tipo `:id(\\d+)`.)
-  controllers: [ConvocatoriasController, EvaluadoresController, VerificacionController],
+  // `MiExpedienteController` cuelga de `/mi-expediente`, no de `/evaluadores`,
+  // asi que el orden le da igual. Va primero por costumbre.
+  controllers: [
+    MiExpedienteController, ConvocatoriasController, EvaluadoresController,
+    VerificacionController,
+  ],
   providers: [
     EvaluadoresService,
     CatalogosEvaluadorService,
@@ -31,6 +39,8 @@ import { TrayectoriaService } from './trayectoria.service'
     CertificadoService,
     ReportesEvaluadorService,
     FichaPdfService,
+    MiExpedienteService,
+    MiExpedienteGuard,
   ],
   // `AuditoriaService`: el módulo de retroalimentación (fase D) también escribe
   // en el log. `CertificadoService`: la página pública de certificados sirve el

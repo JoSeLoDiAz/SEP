@@ -21,6 +21,7 @@ import { traducirValorLargo } from '../common/db/errores'
 const CAMPOS_PARTICIPACION: Record<string, string> = {
   MESA: 'Mesa',
   EQUIPOEVALUADOR: 'Equipo evaluador',
+  DINAMIZADOR: 'Dinamizó',
   MOTIVONOPARTICIPA: 'Motivo',
   PERIODO: 'Periodo',
 }
@@ -101,6 +102,9 @@ export interface ParticipacionDto {
   procesoRevocado?: boolean
   mesa?: string | null
   equipoEvaluador?: string | null
+  /** Quién dinamizó la mesa, en texto libre. No siempre está registrado. */
+  dinamizador?: string | null
+  /** @deprecated Sustituido por `dinamizador`. Se conserva por las filas viejas. */
   dinamizadorPersonaId?: number | null
   retroalimentacion?: string | null
   observaciones?: string | null
@@ -245,6 +249,50 @@ export class EvaluadoresService {
    * verse, o de poder cargarse, por una columna que todavía no está sería un
    * daño mucho mayor que el que esa columna vino a arreglar.
    */
+  /** null = todavia no se ha mirado. Ver `columnaDinamizador()`. */
+  private columnaDinamizadorPresente: boolean | null = null
+
+  /**
+   * ¿Falló porque falta EVALUADORPARTICIPACION.DINAMIZADOR?
+   *
+   * El código llega al servidor antes que las migraciones —son dos pasos y a
+   * veces media un día—, y sin esto guardar CUALQUIER participación reventaría
+   * con un error de Oracle que no menciona la columna nueva. El campo es un
+   * añadido; que su ausencia impidiera registrar un ciclo sería un daño
+   * bastante mayor que el que vino a resolver.
+   */
+  private faltaLaColumnaDinamizador(e: unknown): boolean {
+    if (!/ORA-00904/.test((e as Error)?.message ?? '')) return false
+    this.columnaDinamizadorPresente = false
+    this.log.warn(
+      'Falta la columna DINAMIZADOR: las participaciones se guardan sin ese ' +
+      'dato. Correr docs/migraciones/v51_dinamizador_texto.sql.',
+    )
+    return true
+  }
+
+  /**
+   * ¿Existe ya EVALUADORPARTICIPACION.DINAMIZADOR?
+   *
+   * Se le pregunta al diccionario, no a un error. Una bandera que solo se
+   * apagara al fallar se queda apagada para siempre: si el proceso arranca
+   * antes de que se corra la migración —que es lo normal, porque el código
+   * llega primero— el campo seguiría sin guardarse aunque la columna ya
+   * estuviera, y habría que acordarse de reiniciar el servidor. Así se entera
+   * solo. Cuando la respuesta es que sí, se recuerda y no se vuelve a
+   * preguntar; mientras sea que no, la consulta es de diccionario y cuesta
+   * nada.
+   */
+  private async columnaDinamizador(): Promise<boolean> {
+    if (this.columnaDinamizadorPresente === true) return true
+    const filas: Array<{ n: number }> = await this.dataSource.query(
+      `SELECT COUNT(*) AS "n" FROM ALL_TAB_COLUMNS
+        WHERE TABLE_NAME = 'EVALUADORPARTICIPACION' AND COLUMN_NAME = 'DINAMIZADOR'`,
+    )
+    this.columnaDinamizadorPresente = Number(filas[0]?.n ?? 0) > 0
+    return this.columnaDinamizadorPresente
+  }
+
   private faltaLaColumnaMiniatura(e: unknown): boolean {
     if (!/ORA-00904/.test((e as Error)?.message ?? '')) return false
     if (this.hayColumnaMiniatura) {
@@ -1161,8 +1209,25 @@ export class EvaluadoresService {
   // ║ Participaciones                                                       ║
   // ╚══════════════════════════════════════════════════════════════════════╝
 
-  async listarParticipaciones(evaluadorId: number) {
-    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+  async listarParticipaciones(evaluadorId: number): Promise<Array<Record<string, unknown>>> {
+    let rows: Array<Record<string, unknown>>
+    try {
+      rows = await this.consultarParticipaciones(evaluadorId, await this.columnaDinamizador())
+    } catch (e) {
+      // La consulta también nombra DINAMIZADOR. Si la v51 no se ha corrido,
+      // revienta ANTES de que el INSERT pudiera enterarse, así que el aviso
+      // tiene que estar también aquí — si no, la pantalla del evaluador se
+      // queda en blanco con un 500 mudo.
+      if (!this.faltaLaColumnaDinamizador(e)) throw e
+      rows = await this.consultarParticipaciones(evaluadorId, false)
+    }
+    return this.mapearParticipaciones(rows)
+  }
+
+  private async consultarParticipaciones(
+    evaluadorId: number, conDinamizador: boolean,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.dataSource.query(
       `SELECT pa.PARTICIPACIONID         AS "participacionId",
               pa.ANIO                    AS "anio",
               TRIM(pa.PERIODO)           AS "periodo",
@@ -1187,7 +1252,23 @@ export class EvaluadoresService {
               TRIM(pa.MESA)              AS "mesa",
               TRIM(pa.EQUIPOEVALUADOR)   AS "equipoEvaluador",
               pa.DINAMIZADORPERSONAID    AS "dinamizadorPersonaId",
-              TRIM(d.PERSONANOMBRES) || ' ' || TRIM(d.PERSONAPRIMERAPELLIDO) AS "dinamizadorNombre"
+              -- El texto libre manda; si está vacío se cae al nombre de la
+              -- persona enlazada, para que las filas anteriores a la v51 se
+              -- sigan viendo igual.
+              -- El TRIM de fuera no es adorno: sin dinamizador, concatenar dos
+              -- nombres nulos deja " ", y un espacio es "algo" para la pantalla
+              -- —pintaba la fila "Dinamizó" en blanco—. En Oracle, TRIM de
+              -- solo espacios ya devuelve nulo, así que basta con eso; NULLIF
+              -- con '' daría ORA-12704, porque los nombres son NVARCHAR2 y esa
+              -- comilla vacía es VARCHAR2.
+              -- TO_NCHAR: DINAMIZADOR es VARCHAR2 —como MESA y EQUIPOEVALUADOR—
+              -- y los nombres de PERSONA son NVARCHAR2. Mezclarlos en un
+              -- COALESCE da ORA-12704 y tumba la pantalla entera del evaluador.
+              ${conDinamizador
+                ? `TRIM(COALESCE(TO_NCHAR(pa.DINAMIZADOR),
+                     TRIM(d.PERSONANOMBRES) || ' ' || TRIM(d.PERSONAPRIMERAPELLIDO)))`
+                : `TRIM(TRIM(d.PERSONANOMBRES) || ' ' || TRIM(d.PERSONAPRIMERAPELLIDO))`}
+                                         AS "dinamizadorNombre"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN ROLEVALUADOR        r  ON r.ROLEVALUADORID  = pa.ROLEVALUADORID
          LEFT JOIN PROCESOEVAL         pe ON pe.PROCESOID      = pa.PROCESOID
@@ -1198,6 +1279,9 @@ export class EvaluadoresService {
         ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC`,
       [evaluadorId],
     )
+  }
+
+  private mapearParticipaciones(rows: Array<Record<string, unknown>>) {
     return rows.map(r => ({
       ...r,
       participacionId: Number(r.participacionId),
@@ -1232,7 +1316,9 @@ export class EvaluadoresService {
     return rows[0] ? Number(rows[0].id) : null
   }
 
-  async crearParticipacion(evaluadorId: number, dto: ParticipacionDto) {
+  async crearParticipacion(
+    evaluadorId: number, dto: ParticipacionDto,
+  ): Promise<{ participacionId: number; message: string }> {
     if (!dto.anio) throw new BadRequestException('Año requerido')
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
@@ -1246,14 +1332,17 @@ export class EvaluadoresService {
     // El checklist irá sugiriendo el avance a medida que se carguen los datos.
     const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
 
+    // La columna DINAMIZADOR es de la v51. Si todavía no está, se inserta sin
+    // ella en vez de dejar al gestor sin poder registrar el ciclo.
+    const conDinamizador = await this.columnaDinamizador()
     try {
       await this.dataSource.query(
         `INSERT INTO EVALUADORPARTICIPACION
          (PARTICIPACIONID, EVALUADORID, ANIO, PERIODO, ROLEVALUADORID, MODALIDADPARTID,
           PROCESOID, ESTADOPARTID, CONVOCATORIAID, AREAID, ESTRANSVERSAL,
-          MESA, EQUIPOEVALUADOR,
+          MESA, EQUIPOEVALUADOR,${conDinamizador ? ' DINAMIZADOR,' : ''}
           DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES, USUARIOCREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13,${conDinamizador ? ' :14, :15, :16, :17, :18' : ' :14, :15, :16, :17'})`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -1266,6 +1355,7 @@ export class EvaluadoresService {
         dto.esTransversal ? 1 : 0,
         dto.mesa?.trim() || null,
         dto.equipoEvaluador?.trim() || null,
+        ...(conDinamizador ? [dto.dinamizador?.trim() || null] : []),
         dto.dinamizadorPersonaId ?? null,
         dto.retroalimentacion?.trim() || null,
         dto.observaciones?.trim() || null,
@@ -1273,6 +1363,10 @@ export class EvaluadoresService {
         ],
       )
     } catch (e) {
+      // Falta la v51: se reintenta sin el campo nuevo, una sola vez.
+      if (conDinamizador && this.faltaLaColumnaDinamizador(e)) {
+        return this.crearParticipacion(evaluadorId, dto)
+      }
       // Un campo de más largo salía como "Internal server error", sin decir
       // cuál. El equipo evaluador es una lista de nombres y se pasa fácil.
       traducirValorLargo(e, CAMPOS_PARTICIPACION)
@@ -1299,6 +1393,7 @@ export class EvaluadoresService {
       ['esTransversal',        'ESTRANSVERSAL',         v => (v ? 1 : 0)],
       ['mesa',                 'MESA',                  v => (v as string)?.trim() || null],
       ['equipoEvaluador',      'EQUIPOEVALUADOR',       v => (v as string)?.trim() || null],
+      ['dinamizador',          'DINAMIZADOR',           v => (v as string)?.trim() || null],
       ['dinamizadorPersonaId', 'DINAMIZADORPERSONAID',  v => v ?? null],
       ['retroalimentacion',    'RETROALIMENTACION',     v => (v as string)?.trim() || null],
       ['observaciones',        'OBSERVACIONES',         v => (v as string)?.trim() || null],

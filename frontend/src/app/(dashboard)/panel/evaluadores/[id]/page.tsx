@@ -1990,6 +1990,10 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   const [fecha, setFecha] = useState('')
   const [puntaje, setPuntaje] = useState('')
   const [intentos, setIntentos] = useState('')
+  // La mayoría de las pruebas se califican sobre 100, así que el porcentaje es
+  // el dato que la gente tiene a mano y el que compara entre convocatorias.
+  // La columna EFECTIVIDAD ya existía en la base; solo faltaba pedirla.
+  const [porcentaje, setPorcentaje] = useState('')
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
 
@@ -2030,12 +2034,13 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
         participacionId: participacionId ? Number(participacionId) : null,
         fechaPresentacion: fecha || null,
         puntajeMayor: puntaje ? Number(puntaje) : null,
+        efectividad: porcentaje ? Number(porcentaje) : null,
         intentos: intentos ? Number(intentos) : null,
       })
       setToast({ tipo: 'success', msg: 'Prueba registrada' })
       setAgregar(false)
       setParticipacionId('')
-      setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos('')
+      setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos(''); setPorcentaje('')
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
@@ -2098,7 +2103,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
           <div><label className={label}>Periodo</label><input value={periodo} onChange={e => setPeriodo(e.target.value)} className={input} /></div>
           <div><label className={label}>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
           <div>
-            <label className={label}>Puntaje mayor</label>
+            <label className={label}>Puntaje</label>
             <input
               type="number" step="0.01" min={0} max={MAX_PUNTAJE}
               value={puntaje}
@@ -2109,6 +2114,21 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
               <p className="mt-1 text-[11px] text-red-700">
                 El puntaje va de 0 a {MAX_PUNTAJE}. ¿Sobra algún dígito?
               </p>
+            )}
+          </div>
+          <div>
+            <label className={label}>Porcentaje del puntaje</label>
+            <div className="relative">
+              <input
+                type="number" step="0.01" min={0} max={100}
+                value={porcentaje}
+                onChange={e => setPorcentaje(e.target.value)}
+                className={`${input} pr-7`}
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-neutral-400">%</span>
+            </div>
+            {porcentaje && (Number(porcentaje) < 0 || Number(porcentaje) > 100) && (
+              <p className="mt-1 text-[11px] text-red-700">El porcentaje va de 0 a 100.</p>
             )}
           </div>
           <div><label className={label}>Intentos</label><input type="number" value={intentos} onChange={e => setIntentos(e.target.value)} className={input} /></div>
@@ -2137,6 +2157,11 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
                   <span className="text-sm font-bold text-neutral-800">
                     {p.puntajeMayor != null ? `Puntaje ${p.puntajeMayor}` : '— Sin puntaje —'}
                   </span>
+                  {p.efectividad != null && (
+                    <span className="rounded-full bg-[#00304D]/5 px-2 py-0.5 text-[11px] font-semibold text-[#00304D]">
+                      {p.efectividad}%
+                    </span>
+                  )}
                   {p.fechaPresentacion && (
                     <span className="text-[11px] text-neutral-500">{new Date(p.fechaPresentacion).toLocaleDateString('es-CO')}</span>
                   )}
@@ -2268,6 +2293,25 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
     resetForm()
   }
 
+  /**
+   * Abre el formulario ya con el tipo del chip que esté puesto.
+   *
+   * Sin esto, el chip filtraba la lista pero no decía nada del formulario: se
+   * escogía "Acuerdo de confidencialidad", se abría a cargar, y el desplegable
+   * solo ofrecía "Experiencia laboral en proyectos" —porque los del año se
+   * cargan en Trayectoria—. Quien no leyera la nota subía el archivo igual y
+   * le quedaba con el tipo equivocado. Ahora, o el chip manda, o se dice que
+   * ese tipo no va aquí.
+   */
+  function abrirForm() {
+    const delChip = tipos.find(t => t.codigo === filtroCodigo && !t.esDelAnio)
+    if (delChip) setTipoSel(String(delChip.id))
+    setFormAbierto(true)
+  }
+
+  /** El chip puesto es de los que van dentro del año: aquí no se puede. */
+  const chipEsDelAnio = tipos.some(t => t.codigo === filtroCodigo && t.esDelAnio)
+
   async function subir() {
     if (!tipoSel) {
       setToast({ tipo: 'error', msg: 'Selecciona el tipo de documento' })
@@ -2339,7 +2383,7 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
       titulo={`Documentos personales (${items.length})`}
       accion={
         <button
-          onClick={() => { if (formAbierto) cerrarForm(); else setFormAbierto(true) }}
+          onClick={() => { if (formAbierto) cerrarForm(); else abrirForm() }}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90"
           style={{ backgroundColor: PRIMARY }}
         >
@@ -2380,6 +2424,13 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
               title={t.nombre}
             >
               {t.nombre}
+              {/* Los del año se marcan en el propio chip: así la lista explica
+                  sola por qué unos se cargan aquí y otros no. */}
+              {t.esDelAnio && (
+                <span className={`text-[9px] font-bold uppercase tracking-wide ${activo ? 'text-white/70' : 'text-neutral-400'}`}>
+                  del año
+                </span>
+              )}
               <span className={`px-1.5 py-px rounded-full text-[10px] ${activo ? 'bg-white/25' : 'bg-neutral-100'}`}>
                 {conteoPorTipo[t.codigo] ?? 0}
               </span>
@@ -2389,7 +2440,24 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
       </div>
 
       {/* Formulario colapsable */}
-      {formAbierto && (
+      {formAbierto && chipEsDelAnio && (
+        /* Se dice ANTES de enseñar el formulario. Un aviso debajo de un
+           desplegable que ya ofrece otra cosa llega tarde: para cuando se lee,
+           el archivo ya se subió con el tipo que no era. */
+        <div className="px-5 py-4 bg-amber-50/70 border-b border-amber-100">
+          <p className="text-[12px] font-semibold text-amber-900">
+            Ese documento se carga dentro del año, no aquí.
+          </p>
+          <p className="mt-1 text-[11px] text-amber-800">
+            El correo de autorización, el acuerdo de confidencialidad y el certificado de
+            participación pertenecen a un ciclo concreto. Ve a la pestaña{' '}
+            <strong>Trayectoria</strong>, abre el año y cárgalo en{' '}
+            <strong>Documentos de este año</strong>. Aquí quedaría suelto, repetido en todos
+            los años, y el hito del ciclo no se encendería.
+          </p>
+        </div>
+      )}
+      {formAbierto && !chipEsDelAnio && (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className={requiereAnio ? '' : 'sm:col-span-2'}>
             <label className={label}>Tipo de documento *</label>

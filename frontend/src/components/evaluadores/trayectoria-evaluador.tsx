@@ -1299,6 +1299,23 @@ function TabDocumentos({
   onRecargar: () => void
 }) {
   const { propios, heredados, permanentes } = detalle.documentos
+  const [porBorrar, setPorBorrar] = useState<Documento | null>(null)
+  const [borrando, setBorrando] = useState(false)
+
+  async function borrar() {
+    if (!porBorrar) return
+    setBorrando(true)
+    try {
+      await api.delete(`/evaluadores/documentos/${porBorrar.documentoId}`)
+      setToast({ tipo: 'success', msg: 'Documento eliminado' })
+      setPorBorrar(null)
+      onRecargar()
+    } catch (err) {
+      setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo eliminar el documento') })
+    } finally {
+      setBorrando(false)
+    }
+  }
 
   return (
     <div className="flex flex-col divide-y divide-neutral-100">
@@ -1315,6 +1332,7 @@ function TabDocumentos({
         docs={propios}
         rutaBase="/evaluadores/documentos"
         setToast={setToast}
+        onBorrar={setPorBorrar}
       />
       <BloqueDocs
         titulo={`Heredados de la convocatoria${detalle.convocatoriaNombre ? ` · ${detalle.convocatoriaNombre}` : ''}`}
@@ -1329,19 +1347,47 @@ function TabDocumentos({
         docs={permanentes}
         rutaBase="/evaluadores/documentos"
         setToast={setToast}
+        onBorrar={setPorBorrar}
+      />
+
+      <ConfirmModal
+        open={!!porBorrar}
+        tipo="delete"
+        titulo="Eliminar documento"
+        mensaje={
+          porBorrar
+            ? `Se va a eliminar "${porBorrar.descripcion || porBorrar.archivoNombre || porBorrar.tipoNombre}". El archivo no se puede recuperar.`
+            : ''
+        }
+        textoConfirmar="Eliminar"
+        cargando={borrando}
+        onConfirm={borrar}
+        onClose={() => setPorBorrar(null)}
       />
     </div>
   )
 }
 
+/**
+ * Lista un grupo de documentos del ciclo.
+ *
+ * `onBorrar` solo llega en los grupos donde borrar tiene sentido: los que se
+ * cargan para ESTE evaluador. Los heredados son un archivo único de la
+ * convocatoria, compartido por todo el equipo, y se administran desde
+ * Convocatorias — un botón de eliminar aquí borraria el documento de todos.
+ *
+ * Antes no había ninguno, y quien se equivocaba de archivo no tenía forma de
+ * deshacerlo desde la pantalla: había que pedirlo por WhatsApp.
+ */
 function BloqueDocs({
-  titulo, ayuda, docs, rutaBase, setToast,
+  titulo, ayuda, docs, rutaBase, setToast, onBorrar,
 }: {
   titulo: string
   ayuda: string
   docs: Documento[]
   rutaBase: string
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  onBorrar?: (d: Documento) => void
 }) {
   if (!docs.length) return null
 
@@ -1373,6 +1419,15 @@ function BloqueDocs({
               nombreFallback={d.archivoNombre || `${d.tipoCodigo}.pdf`}
               setToast={setToast}
             />
+            {onBorrar && (
+              <button
+                onClick={() => onBorrar(d)}
+                title="Eliminar este documento"
+                className="shrink-0 rounded-lg border border-neutral-200 p-1.5 text-neutral-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </li>
         ))}
       </ul>

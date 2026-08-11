@@ -6,7 +6,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   AlertTriangle, Award, BadgeCheck, Briefcase, CalendarDays, Check, CheckCircle2,
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
-  Loader2, MessageSquareQuote, Paperclip, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
+  Loader2, MessageSquareQuote, Paperclip, Pencil, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -98,6 +98,9 @@ interface Detalle extends Participacion {
     capacitacionId: number; nombre: string; plataforma: string | null
     horas: number | null; calificacion: number | null; calificacionMinima: number | null
     aprobado: boolean; tieneArchivo: boolean
+    // Los devuelve el backend desde siempre; sin declararlos, al corregir un
+    // curso se enviaban vacíos y se perdían las fechas y las observaciones.
+    fechaInicio: string | null; fechaFin: string | null; observaciones: string | null
   }>
   pruebas: Array<{
     pruebaId: number; anio: number; puntajeMayor: number | null
@@ -1493,21 +1496,32 @@ function BotonesArchivo({
  * la nota de corte del ciclo. Ponerlo aquí permitiría marcar aprobado a quien
  * no llegó al corte, que es justo lo que la nota de corte existe para evitar.
  */
+/**
+ * Registra un curso, o corrige uno ya registrado.
+ *
+ * `editando` llega cuando se pulsa el lápiz de una fila. Antes solo se podía
+ * crear y borrar: una nota mal digitada obligaba a eliminar el curso y
+ * volverlo a escribir entero, con su certificado. El backend ya aceptaba la
+ * corrección (PUT /capacitaciones/:cid); solo faltaba ofrecerla.
+ */
 function FormularioCurso({
-  detalle, setToast, onRecargar, onCerrar,
+  detalle, setToast, onRecargar, onCerrar, editando,
 }: {
   detalle: Detalle
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
   onRecargar: () => void
   onCerrar: () => void
+  editando?: Detalle['capacitaciones'][number] | null
 }) {
-  const [nombre, setNombre] = useState('')
-  const [plataforma, setPlataforma] = useState('')
-  const [horas, setHoras] = useState('')
-  const [fechaInicio, setFechaInicio] = useState('')
-  const [fechaFin, setFechaFin] = useState('')
-  const [calificacion, setCalificacion] = useState('')
-  const [observaciones, setObservaciones] = useState('')
+  const soloFecha = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '')
+  const [nombre, setNombre] = useState(editando?.nombre ?? '')
+  const [plataforma, setPlataforma] = useState(editando?.plataforma ?? '')
+  const [horas, setHoras] = useState(editando?.horas != null ? String(editando.horas) : '')
+  const [fechaInicio, setFechaInicio] = useState(soloFecha(editando?.fechaInicio))
+  const [fechaFin, setFechaFin] = useState(soloFecha(editando?.fechaFin))
+  const [calificacion, setCalificacion] = useState(
+    editando?.calificacion != null ? String(editando.calificacion) : '')
+  const [observaciones, setObservaciones] = useState(editando?.observaciones ?? '')
   const [guardando, setGuardando] = useState(false)
 
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
@@ -1534,17 +1548,22 @@ function FormularioCurso({
     if (mal) return setToast({ tipo: 'error', msg: mal })
     setGuardando(true)
     try {
-      await api.post(`/evaluadores/participaciones/${detalle.participacionId}/capacitacion`, {
+      const datos = {
         nombre: nombre.trim(),
-        origen: 'EXTERNO',
         plataforma: plataforma.trim() || null,
         horas: horas ? Number(horas) : null,
         fechaInicio: fechaInicio || null,
         fechaFin: fechaFin || null,
         calificacion: calificacion ? Number(calificacion) : null,
         observaciones: observaciones.trim() || null,
-      })
-      setToast({ tipo: 'success', msg: 'Curso registrado' })
+      }
+      if (editando) {
+        await api.put(`/evaluadores/capacitaciones/${editando.capacitacionId}`, datos)
+      } else {
+        await api.post(`/evaluadores/participaciones/${detalle.participacionId}/capacitacion`,
+          { ...datos, origen: 'EXTERNO' })
+      }
+      setToast({ tipo: 'success', msg: editando ? 'Curso actualizado' : 'Curso registrado' })
       onCerrar()
       onRecargar()
     } catch (err) {
@@ -1642,6 +1661,7 @@ function TabFormacion({
   const [abierto, setAbierto] = useState(false)
   const [ocupado, setOcupado] = useState<number | null>(null)
   const [destino, setDestino] = useState<number | null>(null)
+  const [editando, setEditando] = useState<Detalle['capacitaciones'][number] | null>(null)
   const archivoRef = useRef<HTMLInputElement>(null)
 
   async function subirCertificado(capacitacionId: number, archivo: File) {
@@ -1696,10 +1716,12 @@ function TabFormacion({
 
         {abierto && (
           <FormularioCurso
+            key={editando?.capacitacionId ?? 'nuevo'}
             detalle={detalle}
             setToast={setToast}
             onRecargar={onRecargar}
-            onCerrar={() => setAbierto(false)}
+            onCerrar={() => { setAbierto(false); setEditando(null) }}
+            editando={editando}
           />
         )}
 
@@ -1722,7 +1744,10 @@ function TabFormacion({
           <ul className="flex flex-col gap-2">
             {detalle.capacitaciones.map(c => (
               <li key={c.capacitacionId} className="flex items-center gap-3 rounded-xl border border-neutral-100 px-3 py-2.5">
-                <Award size={16} className={c.aprobado ? 'text-emerald-600' : 'text-neutral-300'} />
+                <Award size={16} className={
+                  c.aprobado ? 'text-emerald-600'
+                    : c.calificacionMinima == null ? 'text-amber-500' : 'text-neutral-300'
+                } />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-medium text-neutral-800">{c.nombre}</p>
                   <p className="text-[11px] text-neutral-500">
@@ -1737,11 +1762,24 @@ function TabFormacion({
                     {c.calificacionMinima != null ? `mín. ${c.calificacionMinima}` : 'sin corte'}
                   </p>
                 </div>
-                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                  c.aprobado ? 'bg-emerald-100 text-emerald-700' : 'bg-neutral-100 text-neutral-500'
-                }`}>
-                  {c.aprobado ? 'Aprobado' : 'No aprobado'}
-                </span>
+                {/* Sin nota de corte no se puede decir "no aprobado": nadie ha
+                    reprobado nada, es que falta configurar el ciclo. Decirlo
+                    mal alarmaba a quien registraba el curso y la mandaba a
+                    buscar un error que no existia. */}
+                {c.calificacionMinima == null ? (
+                  <span
+                    title="Este ciclo no tiene calificación mínima. Se define en las reglas de la convocatoria."
+                    className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-800"
+                  >
+                    Falta la nota de corte
+                  </span>
+                ) : (
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                    c.aprobado ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {c.aprobado ? 'Aprobado' : 'No aprobado'}
+                  </span>
+                )}
                 {c.tieneArchivo ? (
                   <BotonesArchivo
                     verUrl={`/evaluadores/capacitaciones/${c.capacitacionId}/certificado`}
@@ -1761,6 +1799,13 @@ function TabFormacion({
                       : <Upload size={12} />}
                   </button>
                 )}
+                <button
+                  onClick={() => { setEditando(c); setAbierto(true) }}
+                  title="Corregir este curso"
+                  className="shrink-0 rounded-lg border border-neutral-200 p-1.5 text-neutral-400 transition hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700"
+                >
+                  <Pencil size={13} />
+                </button>
                 <button
                   onClick={() => eliminarCurso(c.capacitacionId)}
                   disabled={ocupado === c.capacitacionId}

@@ -15,6 +15,13 @@ import api from '@/lib/api'
  * todo— el archivo se descarga, que es mejor que no darle nada a quien
  * hizo clic.
  */
+/** Lo que un navegador sabe dibujar. Lo demás lo baja. */
+function sePuedeVerEnPestana(mime: string): boolean {
+  return mime.startsWith('image/')
+    || mime === 'application/pdf'
+    || mime.startsWith('text/plain')
+}
+
 export async function abrirArchivo(url: string, nombreSugerido?: string): Promise<void> {
   // Dentro del gesto: esto es lo que el navegador sí permite.
   const pestana = window.open('about:blank', '_blank')
@@ -23,6 +30,18 @@ export async function abrirArchivo(url: string, nombreSugerido?: string): Promis
     const res = await api.get(url, { responseType: 'blob' })
     const blob = new Blob([res.data as Blob], { type: (res.data as Blob).type || 'application/pdf' })
     const objectUrl = URL.createObjectURL(blob)
+
+    // Un .msg o un .xlsx no se pueden mostrar. Si se abren igual en la
+    // pestaña, el navegador los baja — y como la dirección de un blob no
+    // tiene nombre, los guarda llamándolos con su identificador interno:
+    // "04cfcda2-0097-4d6b-a368-ddb190d3cb66", sin extensión y sin forma de
+    // saber qué correo era. Aquí se bajan a propósito, con su nombre.
+    if (!sePuedeVerEnPestana(blob.type)) {
+      if (pestana && !pestana.closed) pestana.close()
+      URL.revokeObjectURL(objectUrl)
+      await descargarArchivoConNombreDelServidor(url, nombreSugerido || 'documento')
+      return
+    }
 
     if (pestana && !pestana.closed) {
       pestana.location.href = objectUrl

@@ -17,8 +17,6 @@ export class NecesidadesService {
     return empresa.empresaId
   }
 
-  // ── Lista diagnósticos ────────────────────────────────────────────────────
-
   async listar(email: string) {
     const empresaId = await this.getEmpresaId(email)
     const rows: Array<{
@@ -39,8 +37,6 @@ export class NecesidadesService {
     return rows.map((r, i) => ({ ...r, numero: i + 1 }))
   }
 
-  // ── Crear diagnóstico ─────────────────────────────────────────────────────
-
   async crear(email: string, usuarioId: number) {
     const empresaId = await this.getEmpresaId(email)
     await this.dataSource.query(
@@ -53,8 +49,6 @@ export class NecesidadesService {
     )
     return { message: 'Diagnóstico creado correctamente', necesidadId: Number(id) }
   }
-
-  // ── Eliminar diagnóstico ──────────────────────────────────────────────────
 
   async eliminar(necesidadId: number) {
     const [{ total }] = await this.dataSource.query(
@@ -77,8 +71,6 @@ export class NecesidadesService {
       `DELETE FROM NECESIDAD WHERE NECESIDADID = :1`, [necesidadId])
     return { message: 'Diagnóstico eliminado' }
   }
-
-  // ── Detalle de un diagnóstico ─────────────────────────────────────────────
 
   async getDiagnostico(necesidadId: number) {
     const [diag] = await this.dataSource.query(
@@ -121,8 +113,6 @@ export class NecesidadesService {
     return { ...diag, herramientas, necesidades }
   }
 
-  // ── Guardar sección diagnóstico ───────────────────────────────────────────
-
   async guardarDiagnostico(necesidadId: number, dto: {
     periodoI?: string | null
     herrOtra?: string | null
@@ -153,8 +143,6 @@ export class NecesidadesService {
     return { message: 'Diagnóstico guardado correctamente' }
   }
 
-  // ── Herramientas ──────────────────────────────────────────────────────────
-
   async getFuentesHerramienta() {
     return this.dataSource.query(
       `SELECT FUENTEHERRAMIENTAID AS "id", FUENTEHERRAMIENTANOMBRE AS "nombre"
@@ -182,8 +170,6 @@ export class NecesidadesService {
     )
     return { message: 'Herramienta eliminada' }
   }
-
-  // ── Necesidades de formación ──────────────────────────────────────────────
 
   async registrarNecesidadFormacion(necesidadId: number, nombre: string, benef: number, usuarioId: number) {
     const [{ total }] = await this.dataSource.query(
@@ -220,8 +206,6 @@ export class NecesidadesService {
     )
     return { message: 'Necesidad eliminada' }
   }
-
-  // ── Datos para reporte ────────────────────────────────────────────────────
 
   async getReporte(necesidadId: number) {
     const [diag] = await this.dataSource.query(
@@ -269,7 +253,6 @@ export class NecesidadesService {
     )
     if (!diag) throw new NotFoundException('Diagnóstico no encontrado')
 
-    // Campos de análisis desde EMPRESA usando el FK EMPRESANECESIDADID
     const [analisis] = await this.dataSource.query(
       `SELECT EMPRESAOBJETO        AS "objeto",
               EMPRESAPRODUCTOS     AS "productos",

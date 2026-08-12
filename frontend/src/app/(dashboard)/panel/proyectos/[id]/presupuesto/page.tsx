@@ -13,8 +13,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Fragment, useCallback, useEffect, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface AfRow {
   afId: number; numero: number; nombre: string
   beneficiarios: number
@@ -31,7 +29,6 @@ interface RubroDetalle {
   porcSena: number; porcEspecie: number; porcDinero: number
 }
 
-// Etiqueta de unidades según el caso del rubro (mismo patrón que rubros/page.tsx)
 function unidadesLabel(r: RubroDetalle): string {
   if (r.caso === 8) {
     if (r.numHoras > 0 && r.beneficiarios > 0) return `${r.numHoras}h × ${r.beneficiarios} benef.`
@@ -46,7 +43,6 @@ function unidadesLabel(r: RubroDetalle): string {
   return '—'
 }
 
-// Valor unitario = totalRubro / cantidad de unidades (detecta por campo poblado)
 function valorUnidad(r: RubroDetalle): number | null {
   if (!r.totalRubro || r.totalRubro <= 0) return null
   if (r.numHoras > 0 && r.beneficiarios > 0) return r.totalRubro / (r.numHoras * r.beneficiarios)
@@ -102,13 +98,9 @@ interface PresupuestoData {
   fechaRegistro: string | null
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n ?? 0)
 const pct = (n: number) => `${Number(n ?? 0).toFixed(2)}%`
-
-// ══════════════════════════════════════════════════════════════════════════════
 
 interface ProyectoMeta {
   estado: number | null
@@ -127,11 +119,7 @@ export default function PresupuestoProyectoPage() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const [toastK, setToastK] = useState(0)
 
-  // Edición permitida:
-  //   - Estado 0 (Sin Confirmar) requiere convocatoria abierta.
-  //   - Estado 2 (Subsanación / Reversado) SIEMPRE es editable, incluso con
-  //     convocatoria cerrada — el SENA reversó al proponente para que corrija.
-  // Los estados 1 (Confirmado), 3 (Aprobado) y 4 (Rechazado) son de solo lectura.
+  // estado 2 (subsanación) sigue editable aunque la convocatoria esté cerrada
   const editable = proyectoMeta
     ? Number(proyectoMeta.estado) === 2
       || (Number(proyectoMeta.estado) === 0 && proyectoMeta.convocatoriaEstado !== 0)
@@ -148,7 +136,7 @@ export default function PresupuestoProyectoPage() {
             ? 'La convocatoria está cerrada. El presupuesto es de solo lectura.'
             : ''
 
-  // Expansión por AF: detalle de rubros (excluye R09 GO y R015 Transferencia)
+  // el endpoint de rubros ya excluye R09 (GO) y R015 (transferencia)
   const [expandedAfId, setExpandedAfId] = useState<number | null>(null)
   const [rubrosCache, setRubrosCache] = useState<Record<number, RubroDetalle[]>>({})
   const [loadingRubros, setLoadingRubros] = useState<number | null>(null)
@@ -213,7 +201,6 @@ export default function PresupuestoProyectoPage() {
     }
   }
 
-  // Estilos compartidos
   const card = 'bg-white rounded-2xl border border-neutral-200 shadow-sm'
   const statBox = 'rounded-xl bg-neutral-50 border border-neutral-100 px-3 py-2.5 text-center'
 
@@ -233,7 +220,6 @@ export default function PresupuestoProyectoPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* Header */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <PiggyBank size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -253,10 +239,8 @@ export default function PresupuestoProyectoPage() {
         )}
       </div>
 
-      {/* Menú (uniforme) */}
       <ProyectoTabs proyectoId={proyectoId} active="presupuesto" />
 
-      {/* Banner de solo lectura */}
       {!editable && motivoNoEditable && (
         <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800">
           <span className="text-lg">🔒</span>
@@ -264,7 +248,6 @@ export default function PresupuestoProyectoPage() {
         </div>
       )}
 
-      {/* Errores de validación */}
       {errores.length > 0 && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 flex flex-col gap-3">
           <div className="flex items-center gap-2 text-red-700 font-semibold text-sm">
@@ -404,7 +387,6 @@ export default function PresupuestoProyectoPage() {
           </div>
         )}
 
-        {/* Totales generales de AFs */}
         <div className="p-5 border-t border-neutral-100">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Total General de las Acciones de Formación</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -629,7 +611,6 @@ export default function PresupuestoProyectoPage() {
         </div>
       </div>
 
-      {/* Espaciador */}
       <div className="flex justify-end">
         <Link href={`/panel/proyectos/${proyectoId}`}
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">

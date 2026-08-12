@@ -3,13 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
 
-/** Modalidades de formación:
- *  1 = Presencial   → CRONOGRAMAPRESENCIAL · HORASPRESENCIALES · UT (PP+TP)
- *  2 = PAT          → CRONOGRAMAPRESENCIAL · HORASPAT          · UT (PPAT+TPAT)
- *  3 = Híbrida      → CRONOGRAMAPRESENCIAL · HORASHIBRIDAS     · UT (PHib+THib)
- *  4 = Virtual      → CRONOGRAMAVIRTUAL    · HORASVIRTUALES    · UT (PV+TV)
- *  Las modalidades 1/2/3 usan la MISMA tabla CRONOGRAMAPRESENCIAL.
- *  Solo 4 va a CRONOGRAMAVIRTUAL. */
+// modalidades 1, 2 y 3 graban en CRONOGRAMAPRESENCIAL; solo la 4 va a CRONOGRAMAVIRTUAL
 type Modalidad = 1 | 2 | 3 | 4
 
 const MAX_SESIONES = 20
@@ -18,7 +12,6 @@ const MAX_SESIONES = 20
 export class CertificacionService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Bloquea escrituras si el convenio no está en ejecución. */
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
@@ -33,8 +26,6 @@ export class CertificacionService {
     }
   }
 
-  /** Cabecera para la pantalla de Certificación: AF, grupo, modalidad,
-   *  tipo de evento, horas totales por modalidad. */
   async getCabecera(proyectoId: number, afGrupoId: number) {
     const [row] = await this.ds.query(
       `SELECT g.AFGRUPOID                              AS "afGrupoId",
@@ -54,7 +45,6 @@ export class CertificacionService {
     )
     if (!row) throw new NotFoundException('Grupo no encontrado en este proyecto.')
 
-    // Horas totales del AF según modalidad — suma sobre UNIDADTEMATICA.
     const modalidadId = Number(row.modalidadId) as Modalidad
     const colP = this.colHorasPracticas(modalidadId)
     const colT = this.colHorasTeoricas(modalidadId)
@@ -68,7 +58,6 @@ export class CertificacionService {
       totalHoras = Number(tot?.h) || 0
     }
 
-    // Estado del convenio (para que el front sepa si gatear el botón Guardar).
     const [conv] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
         WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
@@ -81,7 +70,6 @@ export class CertificacionService {
     }
   }
 
-  /** Columnas de horas (prácticas/teóricas) de UNIDADTEMATICA por modalidad. */
   private colHorasPracticas(mod: Modalidad): string | null {
     switch (mod) {
       case 1: return 'UNIDADTEMATICAHORASPP'
@@ -101,8 +89,6 @@ export class CertificacionService {
     }
   }
 
-  /** Unidades Temáticas del AF (para el combobox). Devuelve también el total
-   *  de horas de cada UT por modalidad y si ya tiene sesiones en el cronograma. */
   async listarUnidades(proyectoId: number, afGrupoId: number) {
     const cab = await this.getCabecera(proyectoId, afGrupoId)
     const modalidadId = Number(cab.modalidadId) as Modalidad
@@ -136,13 +122,10 @@ export class CertificacionService {
     }))
   }
 
-  /** Sesiones del cronograma para (grupo, UT) según modalidad. Cada sesión
-   *  tiene su `maxHoras` (CRONOGRAMA*NUMHORAS) que es el tope de input para
-   *  cada beneficiario en esa sesión. */
+  // maxHoras de cada sesión es el tope de horas que se le puede cargar a un beneficiario ahí
   async listarSesiones(proyectoId: number, afGrupoId: number, utId: number) {
     const cab = await this.getCabecera(proyectoId, afGrupoId)
     const modalidadId = Number(cab.modalidadId) as Modalidad
-    // Cronograma de (afGrupoId, utId).
     const [cr] = await this.ds.query(
       `SELECT CRONOGRAMAID AS "cronogramaId"
          FROM CRONOGRAMA WHERE AFGRUPOID = :1 AND UNIDADTEMATICAID = :2
@@ -173,9 +156,7 @@ export class CertificacionService {
     return rows.map(r => ({ ...r, maxHoras: Number(r.maxHoras) }))
   }
 
-  /** Beneficiarios del grupo con sus UTHoras (para la UT seleccionada). */
   async listarBeneficiarios(proyectoId: number, afGrupoId: number, utId: number) {
-    // Validar pertenencia.
     const [g] = await this.ds.query(
       `SELECT g.AFGRUPOID AS "id"
          FROM AFGRUPO g
@@ -235,10 +216,7 @@ export class CertificacionService {
     })
   }
 
-  /** Guarda/actualiza las UTHORAS de un beneficiario en una UT.
-   *  Valida que cada hora ingresada ≤ maxHoras de su sesión, y que el total
-   *  no supere las horas totales de la UT (por modalidad). Luego recalcula
-   *  el total y % de cumplimiento sobre AFGRUPOBENEFICIARIO. */
+  // upsert en UTHORAS y recálculo de los acumulados en AFGRUPOBENEFICIARIO
   async guardarHoras(
     proyectoId: number,
     afGrupoId: number,
@@ -251,7 +229,6 @@ export class CertificacionService {
     const cab = await this.getCabecera(proyectoId, afGrupoId)
     const modalidadId = Number(cab.modalidadId) as Modalidad
 
-    // Validar que la persona pertenece al grupo (y está ACTIVA).
     const [agb] = await this.ds.query(
       `SELECT AFGRUPOBENEFICIARIOID AS "id" FROM AFGRUPOBENEFICIARIO
         WHERE AFGRUPOID = :1 AND PERSONAID = :2
@@ -261,7 +238,6 @@ export class CertificacionService {
     )
     if (!agb) throw new BadRequestException('La persona no está activa en este grupo.')
 
-    // Validar contra sesiones del cronograma.
     const sesiones = await this.listarSesiones(proyectoId, afGrupoId, utId)
     if (sesiones.length === 0) {
       throw new BadRequestException('El cronograma no tiene sesiones registradas para esta UT.')
@@ -281,7 +257,6 @@ export class CertificacionService {
       }
     }
 
-    // Validar total de la UT contra horas totales del UT (modalidad-específico).
     const colP = this.colHorasPracticas(modalidadId)
     const colT = this.colHorasTeoricas(modalidadId)
     let maxUtHoras = 0
@@ -299,7 +274,6 @@ export class CertificacionService {
       )
     }
 
-    // Upsert UTHORAS.
     const [exist] = await this.ds.query(
       `SELECT UTHORASID AS "id" FROM UTHORAS
         WHERE AFGRUPOID = :1 AND PERSONAID = :2 AND UNIDADTEMATICAID = :3
@@ -331,8 +305,6 @@ export class CertificacionService {
       )
     }
 
-    // Recalcular acumulados en AFGRUPOBENEFICIARIO.
-    // Suma de UTHORASTOTAL de todas las UTs del AF (este beneficiario en este grupo).
     const [agg] = await this.ds.query(
       `SELECT NVL(SUM(u.UTHORASTOTAL), 0) AS "horas"
          FROM UTHORAS u
@@ -347,11 +319,9 @@ export class CertificacionService {
     const pct = totalHorasAF > 0
       ? Math.min(100, Math.round((horasPersonaAF / totalHorasAF) * 100))
       : 0
-    // CERTIFICA = SI si % >= 80, NO si menor. (Regla común; el SENA suele
-    // exigir 80% de asistencia mínima para certificar.)
+    // el SENA exige 80% de asistencia mínima para certificar
     const certifica = pct >= 80 ? 'SI' : 'NO'
 
-    // Mapear a la columna correcta de HORAS* según modalidad.
     const horasCol = ({
       1: 'HORASPRESENCIALES',
       2: 'HORASPAT',
@@ -378,12 +348,7 @@ export class CertificacionService {
     }
   }
 
-  /** Certificación masiva: para cada beneficiario ACTIVO del grupo que aún no
-   *  tenga horas registradas en esta UT (o las tenga en 0), le asigna las
-   *  horas máximas de cada sesión del cronograma. NO sobrescribe filas con
-   *  horas ya editadas manualmente (preserva totalHoras > 0).
-   *
-   *  Devuelve `{ actualizados, omitidos, sinSesiones, mensaje }`. */
+  // asigna las horas máximas del cronograma a los activos que aún no tienen horas cargadas
   async certificarMasivo(proyectoId: number, afGrupoId: number, utId: number): Promise<{
     actualizados: number; omitidos: number; sinSesiones?: boolean; mensaje: string
   }> {
@@ -392,7 +357,6 @@ export class CertificacionService {
     const cab = await this.getCabecera(proyectoId, afGrupoId)
     const modalidadId = Number(cab.modalidadId) as Modalidad
 
-    // Sesiones del cronograma para esta (grupo, UT).
     const sesiones = await this.listarSesiones(proyectoId, afGrupoId, utId)
     if (sesiones.length === 0) {
       return {
@@ -400,14 +364,12 @@ export class CertificacionService {
         mensaje: 'El cronograma no tiene sesiones registradas para esta UT.',
       }
     }
-    // Horas máximas por sesión, en orden — alineado a MAX_SESIONES (relleno con 0).
     const maxHoras: number[] = Array(MAX_SESIONES).fill(0)
     for (let i = 0; i < Math.min(sesiones.length, MAX_SESIONES); i++) {
       maxHoras[i] = Number(sesiones[i].maxHoras) || 0
     }
     const totalSesion = maxHoras.reduce((a, b) => a + b, 0)
 
-    // Horas totales de la UT (modalidad-específico) — para validar contra el max.
     const colP = this.colHorasPracticas(modalidadId)
     const colT = this.colHorasTeoricas(modalidadId)
     let maxUtHoras = 0
@@ -418,10 +380,8 @@ export class CertificacionService {
       )
       maxUtHoras = Number(u?.h) || 0
     }
-    // Asignamos hasta lo que tope la UT (no más).
     const totalAplicar = maxUtHoras > 0 ? Math.min(totalSesion, maxUtHoras) : totalSesion
 
-    // Beneficiarios activos del grupo.
     const benefs: Array<{ personaId: number }> = await this.ds.query(
       `SELECT PERSONAID AS "personaId" FROM AFGRUPOBENEFICIARIO
         WHERE AFGRUPOID = :1 AND TRIM(AFGRUPOBENEESTADO) = 'ACTIVO'
@@ -443,7 +403,6 @@ export class CertificacionService {
     const bindsIns = Array.from({ length: MAX_SESIONES }, (_, i) => `:${i + 5}`).join(', ')
 
     for (const b of benefs) {
-      // ¿Ya tiene UTHoras para esta UT?
       const [exist] = await this.ds.query(
         `SELECT UTHORASID AS "id", NVL(UTHORASTOTAL, 0) AS "total"
            FROM UTHORAS
@@ -452,7 +411,6 @@ export class CertificacionService {
         [afGrupoId, b.personaId, utId],
       )
       if (exist && Number(exist.total) > 0) {
-        // Ya tiene horas registradas: NO sobrescribir.
         omitidos++
         continue
       }
@@ -478,7 +436,6 @@ export class CertificacionService {
         )
       }
 
-      // Recalcular totales del beneficiario en AFGRUPOBENEFICIARIO.
       const [agg] = await this.ds.query(
         `SELECT NVL(SUM(u.UTHORASTOTAL), 0) AS "horas"
            FROM UTHORAS u
@@ -513,16 +470,10 @@ export class CertificacionService {
     return { actualizados, omitidos, mensaje }
   }
 
-  // ── Reporte de Asistencia ─────────────────────────────────────────────────
-
-  /** Estructura ricamente armada para la pantalla "Reporte de asistencia":
-   *  cabecera con info del convenio/director/AF, lista de UTs con número de
-   *  sesiones (para columnas dinámicas) y beneficiarios con sus horas por UT. */
   async getReporteAsistencia(proyectoId: number, afGrupoId: number) {
     const cab = await this.getCabecera(proyectoId, afGrupoId)
     const modalidadId = Number(cab.modalidadId) as Modalidad
 
-    // ── Datos extra del header (programa, convocatoria, convenio, director).
     const [extra] = await this.ds.query(
       `SELECT TRIM(e.EMPRESARAZONSOCIAL)                 AS "empresaRazonSocial",
               TRIM(cv.CONVENIOSNUMERO)                   AS "convenioNumero",
@@ -539,9 +490,7 @@ export class CertificacionService {
       [proyectoId],
     )
 
-    // ── Director activo del proyecto.
-    //  Trim por columna (NCHAR padea con espacios) y luego concatenar.
-    //  Literales con N'' para que el charset nacional coincida y evitar ORA-12704.
+    // literales N'' y TRIM por columna: los nombres son NCHAR y sin eso revienta con ORA-12704
     const [dir] = await this.ds.query(
       `SELECT UPPER(
                 TRIM(p.PERSONANOMBRES) || N' ' ||
@@ -558,7 +507,6 @@ export class CertificacionService {
       [proyectoId],
     )
 
-    // ── Plataforma/Link/Fecha inicio: del primer cronograma del grupo.
     let plataforma: string | null = null
     let linkAsistencia: string | null = null
     let fechaInicio: string | null = null
@@ -594,7 +542,6 @@ export class CertificacionService {
       fechaInicio = c?.fechaInicio ?? null
     }
 
-    // ── UTs del AF (ordenadas por número) con su número de sesiones del cronograma.
     const utsRaw: Array<{ utId: number; numero: number; nombre: string; numSesiones: number }> = await this.ds.query(
       `SELECT ut.UNIDADTEMATICAID AS "utId",
               ut.UNIDADTEMATICANUMERO AS "numero",
@@ -617,7 +564,6 @@ export class CertificacionService {
     const totalSesionesAF = unidades.reduce((a, u) => a + u.numSesiones, 0)
     const totalHorasAF = Number(cab.totalHoras) || 0
 
-    // ── Beneficiarios activos con sus UTHoras por UT (todas las UTs).
     const cols = Array.from({ length: MAX_SESIONES }, (_, i) => `NVL(u.UTHORAS${i + 1}, 0) AS "h${i + 1}"`).join(',\n              ')
     type Row = Record<string, unknown>
     const rows: Row[] = await this.ds.query(
@@ -653,7 +599,7 @@ export class CertificacionService {
       [afGrupoId],
     )
 
-    /** Agrupa filas por persona: una persona puede tener varias filas (una por UT). */
+    // el query trae una fila por persona y UT, hay que agruparlas
     type Beneficiario = {
       personaId: number
       nombreCompleto: string
@@ -702,7 +648,6 @@ export class CertificacionService {
         b.totalHoras += Number(r.utTotal) || 0
       }
     }
-    // Calcular % avance por persona y sortear por nombre.
     const beneficiarios = Array.from(porPersona.values())
       .map((b, i) => ({
         ...b,
@@ -714,7 +659,6 @@ export class CertificacionService {
       .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto))
       .map((b, i) => ({ ...b, nro: i + 1 }))
 
-    // Título del formato según modalidad.
     const formato = ({
       1: 'F2.2 LISTADO DE ASISTENCIA PARA LAS ACCIONES DE FORMACIÓN PRESENCIAL',
       2: 'F2.1 LISTADO DE ASISTENCIA PARA LAS ACCIONES DE FORMACIÓN PRESENCIAL ASISTIDA POR TECNOLOGÍAS - PAT',
@@ -743,12 +687,7 @@ export class CertificacionService {
     }
   }
 
-  /** Genera el Excel del Reporte de Asistencia con el MISMO layout del SEP
-   *  legacy (formato F2.x/F3.1): cabecera oficial (filas 1-4 merged A:V),
-   *  bloque de campos (filas 5-8 con merges fijos y celdas con fill azul
-   *  corporativo #00304D + texto blanco bold), separador (fila 9), encabezado
-   *  de tabla (fila 10) y datos desde fila 11. Usa ExcelJS para soportar
-   *  estilos (fill, font, border, alignment) que SheetJS community no expone. */
+  // replica el layout del SEP legacy; va con ExcelJS porque SheetJS community no expone estilos
   async exportarAsistenciaExcel(proyectoId: number, afGrupoId: number): Promise<{ buffer: Buffer; filename: string }> {
     const rep = await this.getReporteAsistencia(proyectoId, afGrupoId)
     const cab = rep.cabecera
@@ -759,7 +698,6 @@ export class CertificacionService {
     const sheetName = `ASISTENCIA - ${(cab.afNombre ?? 'AF').replace(/[:*?[\]/\\]/g, '').slice(0, 25)}`
     const ws = wb.addWorksheet(sheetName)
 
-    // ── Colores y estilo helpers ─────────────────────────────────────────────
     const COLOR_FILL = '00304D'         // azul corporativo SEP
     const COLOR_NOTE = '8AC8A3'         // verde nota interventoría
     const fillLabel = (): ExcelJS.FillPattern => ({
@@ -774,8 +712,6 @@ export class CertificacionService {
     const thin: Partial<ExcelJS.Border> = { style: 'thin', color: { argb: 'FFCCCCCC' } }
     const borderAll: Partial<ExcelJS.Borders> = { top: thin, bottom: thin, left: thin, right: thin }
 
-    /** Aplica fill azul + texto blanco bold + centrado + bordes a un rango merged.
-     *  El valor se setea solo en la primera celda del rango. */
     function setLabel(range: string, value: string | number) {
       ws.mergeCells(range)
       const cell = ws.getCell(range.split(':')[0])
@@ -785,7 +721,6 @@ export class CertificacionService {
       cell.alignment = center
       cell.border = borderAll
     }
-    /** Texto plano (valor) en un rango merged. */
     function setValue(range: string, value: string | number, opts?: { align?: 'left' | 'center'; bold?: boolean }) {
       ws.mergeCells(range)
       const cell = ws.getCell(range.split(':')[0])
@@ -804,7 +739,7 @@ export class CertificacionService {
       cell.border = borderAll
     }
 
-    // ── Calcular ancho de tabla (columnas dinámicas por UT × sesión) ─────────
+    // la tabla lleva una columna por cada sesión de cada UT
     const headersFijos = [
       'N°',
       'NOMBRES Y APELLIDOS:',
@@ -829,12 +764,11 @@ export class CertificacionService {
     headers.push('TOTAL HORAS DE FORMACIÓN:', '% AVANCE:', 'CERTIFICA:')
     const totalCols = headers.length
 
-    // El layout legacy fija 22 columnas (A..V) para el bloque de cabecera.
-    // Si la tabla tiene >22 columnas, expandimos el header al ancho real.
+    // el layout legacy fija 22 columnas (A..V) para el bloque de cabecera
     const headerLastCol = Math.max(22, totalCols)
     const lastColLetter = ws.getColumn(headerLastCol).letter
 
-    // ── Filas 1-4: TÍTULOS GENERALES (merged A:lastCol, fill blanco, bold, 18pt) ─
+    // filas 1-4: títulos generales
     const tituloLineas = [
       'SERVICIO NACIONAL DE APRENDIZAJE',
       'DIRECCIÓN DEL SISTEMA NACIONAL DE FORMACIÓN PARA EL TRABAJO',
@@ -850,14 +784,12 @@ export class CertificacionService {
       c.font = { size: i === 3 ? 14 : 16, bold: true }
     }
 
-    // ── Filas 5-8: Bloque de campos (label/value) ────────────────────────────
-    // Fila 5
+    // filas 5-8: bloque de campos
     setLabel('A5:C5', 'NOMBRE DEL CONVENIO:')
     setValue('D5:F5', (cab.empresaRazonSocial ?? '').toUpperCase(), { align: 'left' })
     setLabel('G5:I5', 'NOMBRE DEL DIRECTOR DE PROYECTO:')
     setValue('J5:V5', (cab.director ?? '').toUpperCase(), { align: 'left' })
 
-    // Fila 6
     setLabel('A6:C6', 'NÚMERO DE CONVENIO')
     setValue('D6:F6', (cab.convenioNumero ?? '').toUpperCase(), { align: 'left' })
     setLabel('G6:I6', 'NÚMERO DE HORAS TOTALES AF')
@@ -868,7 +800,6 @@ export class CertificacionService {
     setValue('R6:S6', cab.fechaCorte)
     setNote('T6:V6', 'Tiempo de entrega a la interventoría: Dentro de los cinco (5) días hábiles')
 
-    // Fila 7
     setLabel('A7:C7', 'NOMBRE DEL PROVEEDOR DE LA FORMACIÓN:')
     setValue('D7:F7', (cab.plataforma ?? '').toUpperCase(), { align: 'left' })
     setLabel('G7:I7', 'TIPO DE EVENTO:')
@@ -879,7 +810,7 @@ export class CertificacionService {
     setValue('R7:S7', Number(cab.grupoNumero) || 0)
     setNote('T7:V7', 'siguientes a la finalización de cada grupo por acción de formación.')
 
-    // Fila 8 — el legacy parte A8:C8 para "PROVEEDOR DE LA AF:" y D8 (single) para valor.
+    // en la fila 8 el legacy deja D8 sin merge para el valor
     setLabel('A8:C8', Number(cab.modalidadId) === 4 ? 'PROVEEDOR DE LA AF:' : 'PLATAFORMA USADA:')
     const cellD8 = ws.getCell('D8')
     cellD8.value = (cab.plataforma ?? '').toUpperCase()
@@ -890,10 +821,10 @@ export class CertificacionService {
     setLabel('I8:J8', 'NOMBRE ACCIÓN DE FORMACIÓN:')
     setValue('K8:V8', (cab.afNombre ?? '').toUpperCase(), { align: 'left' })
 
-    // Fila 9 — separador vacío
+    // fila 9: separador vacío
     ws.mergeCells(`A9:${lastColLetter}9`)
 
-    // ── Fila 10: cabecera de la tabla ────────────────────────────────────────
+    // fila 10: cabecera de la tabla
     headers.forEach((h, i) => {
       const cell = ws.getCell(10, i + 1)
       cell.value = h
@@ -904,7 +835,7 @@ export class CertificacionService {
     })
     ws.getRow(10).height = 38
 
-    // ── Filas 11+: beneficiarios ─────────────────────────────────────────────
+    // filas 11+: beneficiarios
     rep.beneficiarios.forEach((b, idx) => {
       const r = 11 + idx
       const row = ws.getRow(r)
@@ -936,7 +867,6 @@ export class CertificacionService {
       })
     })
 
-    // ── Anchos de columna ────────────────────────────────────────────────────
     ws.getColumn(1).width = 5      // N°
     ws.getColumn(2).width = 32     // Nombres
     ws.getColumn(3).width = 14     // Tipo doc
@@ -947,8 +877,6 @@ export class CertificacionService {
     ws.getColumn(8).width = 16     // Municipio
     ws.getColumn(9).width = 16     // Transferencia
     ws.getColumn(10).width = 22    // Perfil
-    // Columnas UT × sesión — ancho proporcional a la longitud del nombre
-    // (mín 14, máx 32). El header se ajusta con wrapText.
     let col = 11
     for (const u of ordenUTs) {
       const w = Math.max(14, Math.min(32, Math.ceil(u.nombre.length / 2) + 8))
@@ -961,7 +889,6 @@ export class CertificacionService {
     ws.getColumn(col + 1).width = 12 // % avance
     ws.getColumn(col + 2).width = 12 // Certifica
 
-    // Freeze de las dos primeras columnas + filas de cabecera.
     ws.views = [{ state: 'frozen', xSplit: 2, ySplit: 10 }]
 
     const arrayBuffer = await wb.xlsx.writeBuffer()

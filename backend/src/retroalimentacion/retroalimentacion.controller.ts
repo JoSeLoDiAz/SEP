@@ -17,17 +17,7 @@ const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
-/**
- * Retroalimentación 360°.
- *
- * Dos audiencias en un mismo controller:
- *   - el evaluador, que solo ve y contesta LO SUYO (`mi-ciclo`, `sesion`);
- *   - la gestión, que arma la matriz y lee los resultados del ciclo.
- *
- * Ningún endpoint del lado del evaluador recibe su `participacionId` por
- * parámetro: se resuelve siempre desde el JWT. Si se aceptara del cliente,
- * cualquiera podría contestar en nombre de otro cambiando un número.
- */
+// el participacionId del evaluador nunca llega por parámetro: sale del JWT
 @ApiTags('retroalimentacion')
 @Controller('retroalimentacion')
 @UseGuards(JwtAuthGuard)
@@ -49,7 +39,6 @@ export class RetroalimentacionController {
     return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
   }
 
-  /** El ciclo abierto del usuario logueado, o 403 si no tiene ninguno. */
   private async miParticipacion(user: JwtUser): Promise<number> {
     const ciclo = await this.service.miCiclo(user.email)
     if (!ciclo) {
@@ -61,7 +50,7 @@ export class RetroalimentacionController {
     return ciclo.participacionId
   }
 
-  // ── Lado del evaluador ─────────────────────────────────────────────────
+  // lado del evaluador
 
   @Get('mi-ciclo')
   @ApiOperation({ summary: 'Ciclo abierto del usuario logueado (rol, área, convocatoria)' })
@@ -109,7 +98,7 @@ export class RetroalimentacionController {
     return this.service.enviarSesion(sid, await this.miParticipacion(user), body)
   }
 
-  // ── Gestión del ciclo ──────────────────────────────────────────────────
+  // gestión del ciclo
 
   @Get('convocatorias/:cid/formulario')
   @ApiOperation({ summary: 'Instrumento de la convocatoria (lo clona de la plantilla la primera vez)' })

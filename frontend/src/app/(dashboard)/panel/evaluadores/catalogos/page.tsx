@@ -70,14 +70,7 @@ function CatalogoBloque({
   const [accion, setAccion] = useState<number | null>(null)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
 
-  /**
-   * Consultar los catálogos lo puede hacer quien gestiona el banco; MODIFICARLOS
-   * es solo del administrador (el backend usa `exigirAdmin` en los POST y PUT).
-   *
-   * Sin este gate la pantalla se veía completa y solo fallaba al guardar, con un
-   * 403 que no explica nada. Se ocultan los controles de escritura en vez de
-   * dejar que la gestora descubra el límite chocándose con él.
-   */
+  // el backend exige admin en POST y PUT: se ocultan los controles de escritura
   const puedeEditar = isAdmin(getSepUsuario()?.perfilId ?? 0)
 
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
@@ -149,7 +142,6 @@ function CatalogoBloque({
         <p className="text-[11px] text-neutral-500 mt-0.5">{descripcion}</p>
       </header>
 
-      {/* Formulario agregar — solo administrador */}
       {puedeEditar ? (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 flex flex-wrap gap-2 items-center">
           <input

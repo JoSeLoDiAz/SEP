@@ -4,15 +4,8 @@ import { useState } from 'react'
 import { Search, Download, AlertCircle, Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 
-// ── Tipos ──────────────────────────────────────────────────────────
 type Modo = 'persona' | 'codigo'
 
-/**
- * Una fila puede venir de dos orígenes: la participación como beneficiario de
- * una acción de formación, o la participación como evaluador de una
- * convocatoria. Los campos son genéricos porque las columnas son las mismas;
- * `tipo` solo cambia la etiqueta y el color.
- */
 interface CertificadoRow {
   consecutivo: number
   tipo: 'BENEFICIARIO' | 'EVALUADOR'
@@ -35,7 +28,6 @@ const TIPOS_DOCUMENTO = [
   { value: 'NIT', label: 'NIT' },
 ]
 
-// ── Helpers ────────────────────────────────────────────────────────
 function Alert({ message, type }: { message: string; type: 'error' | 'info' }) {
   return (
     <div className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium
@@ -63,17 +55,13 @@ function ResultsTable({ rows, onDescargar }: { rows: CertificadoRow[]; onDescarg
         <tbody>
           {rows.map((row, i) => (
             <tr
-              // El id no basta como key: los dos orígenes numeran por separado
-              // y un beneficiario y un evaluador pueden compartir el mismo id.
+              // el id no basta como key: beneficiario y evaluador pueden repetirlo
               key={`${row.tipo}-${row.urlPdf}`}
               className={`border-t border-neutral-100 ${i % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}`}
             >
               <td className="px-4 py-3 text-neutral-600">{row.consecutivo}</td>
               <td className="px-4 py-3">
-                {/* Celeste y no cerulean: `cerulean-50` es casi neutro y el
-                    distintivo se leía como gris junto al verde del
-                    beneficiario, que es justo la distinción que debe saltar.
-                    Ojo: la paleta cerulean solo define 50/500/700. */}
+                {/* celeste y no cerulean: esa paleta solo define 50/500/700 */}
                 <span className={`inline-block px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
                   row.tipo === 'EVALUADOR'
                     ? 'bg-celeste-50 text-celeste-700 border border-celeste-500/40'
@@ -107,18 +95,14 @@ function ResultsTable({ rows, onDescargar }: { rows: CertificadoRow[]; onDescarg
   )
 }
 
-// ── Componente principal ───────────────────────────────────────────
 export function CertificadosForm() {
   const [modo, setModo] = useState<Modo>('persona')
 
-  // Modo persona
   const [tipoDoc, setTipoDoc]   = useState('CC')
   const [numDoc,  setNumDoc]    = useState('')
 
-  // Modo código
   const [codigo, setCodigo] = useState('')
 
-  // Estado general
   const [loading, setLoading]   = useState(false)
   const [alerta,  setAlerta]    = useState<{ msg: string; tipo: 'error' | 'info' } | null>(null)
   const [resultados, setResultados] = useState<CertificadoRow[] | null>(null)
@@ -139,7 +123,6 @@ export function CertificadosForm() {
     setAlerta(null)
     setResultados(null)
 
-    // Validaciones
     if (modo === 'persona') {
       if (!tipoDoc)       return setAlerta({ msg: 'Debe seleccionar un Tipo de identificación', tipo: 'error' })
       if (!numDoc.trim()) return setAlerta({ msg: 'Número de identificación vacío', tipo: 'error' })
@@ -169,16 +152,13 @@ export function CertificadosForm() {
   }
 
   function descargar(row: CertificadoRow) {
-    // Reutilizamos la baseURL de axios: en dev apunta a http://localhost:4000
-    // (sin /api), en prod queda en /api proxied por nginx.
-    // La ruta la arma el backend porque cada tipo de certificado tiene la suya.
+    // baseURL de axios: en dev es localhost:4000 sin /api, en prod /api tras nginx
     const base = api.defaults.baseURL ?? ''
     window.open(`${base}${row.urlPdf}`, '_blank', 'noopener,noreferrer')
   }
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Botones de modo */}
       <div className="flex gap-3 justify-center flex-wrap">
         <button
           onClick={() => switchModo('persona')}
@@ -200,7 +180,6 @@ export function CertificadosForm() {
         </button>
       </div>
 
-      {/* Descripción */}
       <p className="text-center text-sm text-neutral-500">
         En este espacio podrá descargar sus certificados de participación en los eventos del GGPC,
         como beneficiario de una acción de formación o como evaluador del banco de evaluadores.
@@ -208,7 +187,6 @@ export function CertificadosForm() {
 
       <div className="h-px bg-neutral-200" />
 
-      {/* Formulario condicional */}
       {modo === 'persona' ? (
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1.5 flex-1 min-w-[200px]">
@@ -249,7 +227,6 @@ export function CertificadosForm() {
         </div>
       )}
 
-      {/* Botón buscar */}
       <div className="flex justify-center">
         <button
           onClick={buscar}
@@ -261,10 +238,8 @@ export function CertificadosForm() {
         </button>
       </div>
 
-      {/* Alerta */}
       {alerta && <Alert message={alerta.msg} type={alerta.tipo} />}
 
-      {/* Resultados */}
       {resultados && (
         <ResultsTable rows={resultados} onDescargar={descargar} />
       )}

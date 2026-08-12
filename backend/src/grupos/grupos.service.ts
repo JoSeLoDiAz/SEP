@@ -3,19 +3,12 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
 
-/** Servicio para "Grupos por Acción de Formación".
- *  Una AF tiene N grupos (AFGRUPO); cada grupo tiene:
- *   - cupos por departamento/ciudad (AFGRUPOCOBERTURA)
- *   - beneficiarios asociados (AFGRUPOBENEFICIARIO con estado ACTIVO)
- *   - estado de validación de la interventoría
- */
+// grupos por acción de formación: cupos, beneficiarios y validación de interventoría
 @Injectable()
 export class GruposService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Verifica que el proyecto tenga convenio. Solo lo usamos como gate suave
-   *  para que el frontend reciba un mensaje claro si el proyecto no está
-   *  habilitado. La lectura no requiere "EN EJECUCIÓN". */
+  // gate suave: la lectura no exige convenio EN EJECUCIÓN
   private async assertProyectoConConvenio(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT 1 AS "x" FROM CONVENIOS WHERE PROYECTOID = :1 FETCH FIRST 1 ROW ONLY`,
@@ -24,7 +17,6 @@ export class GruposService {
     if (!row) throw new BadRequestException('Este proyecto no tiene convenio.')
   }
 
-  /** Acciones de formación del proyecto para el combobox. */
   async listarAcciones(proyectoId: number) {
     await this.assertProyectoConConvenio(proyectoId)
     return this.ds.query(
@@ -39,11 +31,8 @@ export class GruposService {
     )
   }
 
-  /** Grupos de una AF con cupos (sumando AFGRUPOCOBERTURABENEF) y conteo de
-   *  beneficiarios activos. Es la data que pinta las cards de la página. */
   async listarGruposDeAF(proyectoId: number, afId: number) {
     await this.assertProyectoConConvenio(proyectoId)
-    // Validar que la AF pertenezca al proyecto.
     const [af] = await this.ds.query(
       `SELECT ACCIONFORMACIONID AS "afId" FROM ACCIONFORMACION
         WHERE ACCIONFORMACIONID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
@@ -87,11 +76,8 @@ export class GruposService {
     }))
   }
 
-  /** Beneficiarios asociados a un grupo (ACTIVOS y/o INACTIVOS según filtro).
-   *  Se usa en el modal "Ver beneficiarios" desde una card de grupo. */
   async listarBeneficiariosGrupo(proyectoId: number, afGrupoId: number) {
     await this.assertProyectoConConvenio(proyectoId)
-    // Validar pertenencia.
     const [g] = await this.ds.query(
       `SELECT g.AFGRUPOID AS "id"
          FROM AFGRUPO g
@@ -139,7 +125,6 @@ export class GruposService {
     }))
   }
 
-  /** Cobertura por departamento/ciudad del grupo + justificación del cupo. */
   async getCoberturaGrupo(proyectoId: number, afGrupoId: number) {
     await this.assertProyectoConConvenio(proyectoId)
     const [g] = await this.ds.query(
@@ -180,16 +165,10 @@ export class GruposService {
     }
   }
 
-  /** Limpia filas duplicadas en AFGRUPOBENEFICIARIO por (PERSONAID, AFGRUPOID).
-   *  Para cada par duplicado, conservamos la fila preferida:
-   *   - Si hay alguna ACTIVO → conservamos la de mayor id ACTIVO.
-   *   - Si no, la de mayor id (más reciente).
-   *  Las demás se eliminan físicamente (eran datos basura del legacy).
-   *  Devuelve el conteo de filas eliminadas. */
+  // borra físicamente duplicados (persona, grupo) que dejó el legacy; conserva el ACTIVO más reciente
   async limpiarDuplicados(proyectoId: number): Promise<{ eliminadas: number }> {
     await this.assertProyectoConConvenio(proyectoId)
 
-    // Encontrar los grupos del proyecto.
     const grupos: Array<{ afGrupoId: number }> = await this.ds.query(
       `SELECT g.AFGRUPOID AS "afGrupoId"
          FROM AFGRUPO g
@@ -202,7 +181,6 @@ export class GruposService {
     const idsGrupos = grupos.map(g => Number(g.afGrupoId))
     const placeholders = idsGrupos.map((_, i) => `:${i + 1}`).join(',')
 
-    // Buscar todos los (PERSONAID, AFGRUPOID) con más de una fila.
     const dups: Array<{ personaId: number; afGrupoId: number; cnt: number }> = await this.ds.query(
       `SELECT PERSONAID AS "personaId",
               AFGRUPOID AS "afGrupoId",
@@ -216,8 +194,6 @@ export class GruposService {
 
     let eliminadas = 0
     for (const d of dups) {
-      // Filas del par, ordenadas para que la "preferida" (mayor id ACTIVO o
-      // mayor id) quede de primera. Las siguientes las borramos.
       const filas: Array<{ id: number; estado: string | null }> = await this.ds.query(
         `SELECT AFGRUPOBENEFICIARIOID AS "id",
                 TRIM(AFGRUPOBENEESTADO) AS "estado"
@@ -227,7 +203,6 @@ export class GruposService {
                    AFGRUPOBENEFICIARIOID DESC`,
         [Number(d.personaId), Number(d.afGrupoId)],
       )
-      // La primera fila se conserva. Borrar el resto.
       const aEliminar = filas.slice(1).map(f => Number(f.id))
       for (const id of aEliminar) {
         await this.ds.query(
@@ -240,12 +215,7 @@ export class GruposService {
     return { eliminadas }
   }
 
-  /** Cambia el estado de un beneficiario en un grupo (ACTIVO ↔ RETIRADO).
-   *  Reglas al ACTIVAR:
-   *   - El convenio del proyecto debe estar EN EJECUCIÓN.
-   *   - La persona no puede estar activa en otro grupo de la misma AF.
-   *   - El 5% de beneficiarios repetidos del proyecto no se debe superar
-   *     (mismo cálculo que en "asociar"). */
+  // activar exige convenio en ejecución, un solo grupo por AF y no pasar el 5% de repetidos
   async cambiarEstadoBeneficiario(
     proyectoId: number,
     afGrupoBeneficiarioId: number,
@@ -254,7 +224,6 @@ export class GruposService {
     if (!['ACTIVO', 'RETIRADO'].includes(nuevoEstado)) {
       throw new BadRequestException('Estado inválido. Debe ser ACTIVO o RETIRADO.')
     }
-    // Resolver la asociación + proyecto + AF.
     const [row] = await this.ds.query(
       `SELECT agb.AFGRUPOBENEFICIARIOID            AS "id",
               agb.PERSONAID                        AS "personaId",
@@ -274,7 +243,6 @@ export class GruposService {
     )
     if (!row) throw new NotFoundException('Asociación no encontrada en este proyecto.')
 
-    // Bloqueo si el convenio no está en ejecución.
     const [conv] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
         WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
@@ -286,14 +254,11 @@ export class GruposService {
       )
     }
 
-    // Si ya está en el estado solicitado, devolvemos sin cambios.
     if ((row.estadoActual ?? '').toUpperCase() === nuevoEstado) {
       return { mensaje: `La asociación ya estaba ${nuevoEstado}.`, estado: nuevoEstado }
     }
 
-    // Validaciones extra cuando se ACTIVA.
     if (nuevoEstado === 'ACTIVO') {
-      // 1) No puede haber OTRO grupo activo de la misma AF para esta persona.
       const [otro] = await this.ds.query(
         `SELECT agb.AFGRUPOBENEFICIARIOID AS "id",
                 g2.AFGRUPONUMERO          AS "grupoNumero"
@@ -313,7 +278,6 @@ export class GruposService {
         )
       }
 
-      // 2) Regla del 5% (solo aplica si la persona ya estaba en alguna AF).
       const conteos: Array<{ personaId: number; afsDistintas: number }> = await this.ds.query(
         `SELECT agb.PERSONAID                       AS "personaId",
                 COUNT(DISTINCT af.ACCIONFORMACIONID) AS "afsDistintas"
@@ -352,10 +316,6 @@ export class GruposService {
     }
   }
 
-  /** Exporta a Excel un libro con UNA hoja "Beneficiarios" (39 columnas)
-   *  replicando exactamente el reporte legacy `PReporteCertificados`:
-   *  cabeceras en MAYÚSCULAS, mismo orden de columnas, todos los valores
-   *  uppercase excepto correo. Hace todo en un único SELECT con joins. */
   async exportarGruposExcel(proyectoId: number): Promise<Buffer> {
     await this.assertProyectoConConvenio(proyectoId)
 
@@ -428,7 +388,7 @@ export class GruposService {
       [proyectoId],
     )
 
-    // Orden y cabeceras EXACTOS del reporte legacy `PReporteCertificados`.
+    // orden y textos exactos del reporte legacy PReporteCertificados
     const headers = [
       'NO.', 'NOMBRE EMPRESA', 'NUMERO DE CONVENIO', 'MODALIDAD DE PARTICIPACION',
       'ACCION DE FORMACION', 'MODALIDAD DE FORMACION', 'TIPO EVENTO', 'GRUPO',
@@ -442,8 +402,6 @@ export class GruposService {
       'HORAS HIBRIDAS', 'HORAS VIRTUALES', 'HORAS PAT', 'HORAS PRESENCIALES',
       'ESTADO', 'ESTADO INTERVENTORIA',
     ]
-    // Construye una fila plana del beneficiario en el orden de `headers`.
-    // El estado se normaliza: cualquier valor != 'ACTIVO' → 'INACTIVO'.
     function toFila(b: Record<string, unknown>, nro: number): Array<string | number> {
       const estadoRaw = (b.estadoBeneficiario as string | null) ?? ''
       const estado = estadoRaw.trim().toUpperCase() === 'ACTIVO' ? 'ACTIVO' : 'INACTIVO'
@@ -490,7 +448,6 @@ export class GruposService {
       ]
     }
 
-    // Partición Activos / Inactivos manteniendo la numeración independiente.
     const filasActivos: Array<Array<string | number>> = [headers]
     const filasInactivos: Array<Array<string | number>> = [headers]
     let nroA = 0, nroI = 0
@@ -500,18 +457,19 @@ export class GruposService {
       else          { nroI++; filasInactivos.push(toFila(b, nroI)) }
     }
 
+    // mismo orden que headers
     const colWidths = [
-      { wch: 5 },  { wch: 28 }, { wch: 22 }, { wch: 22 },            // No, Empresa, Convenio, ModalidadPart
-      { wch: 35 }, { wch: 22 }, { wch: 14 }, { wch: 6 },             // AF, ModalidadForm, TipoEvento, Grupo
-      { wch: 24 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 18 }, // Doc, Identif, Nombres, Apellidos
-      { wch: 14 }, { wch: 8 },  { wch: 12 }, { wch: 6 }, { wch: 22 }, // Género, Estrato, FechaN, Edad, Rango
-      { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 18 },             // Celular, Correo, Depto, Municipio
-      { wch: 20 }, { wch: 28 }, { wch: 22 },                          // Barrio, Dirección, Caracterización
-      { wch: 14 }, { wch: 22 }, { wch: 30 },                          // Transf, Perfil, Empresa
-      { wch: 50 }, { wch: 14 }, { wch: 14 },                          // Tamaño, Nivel, Antiguedad
-      { wch: 12 }, { wch: 10 },                                       // %, Certifica
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },             // Horas
-      { wch: 12 }, { wch: 18 },                                       // Estado, Interventoría
+      { wch: 5 },  { wch: 28 }, { wch: 22 }, { wch: 22 },
+      { wch: 35 }, { wch: 22 }, { wch: 14 }, { wch: 6 },
+      { wch: 24 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 18 },
+      { wch: 14 }, { wch: 8 },  { wch: 12 }, { wch: 6 }, { wch: 22 },
+      { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 18 },
+      { wch: 20 }, { wch: 28 }, { wch: 22 },
+      { wch: 14 }, { wch: 22 }, { wch: 30 },
+      { wch: 50 }, { wch: 14 }, { wch: 14 },
+      { wch: 12 }, { wch: 10 },
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 12 }, { wch: 18 },
     ]
     const wb = XLSX.utils.book_new()
     const wsA = XLSX.utils.aoa_to_sheet(filasActivos)
@@ -520,7 +478,7 @@ export class GruposService {
     ;(wsI as { [k: string]: unknown })['!cols'] = colWidths
     XLSX.utils.book_append_sheet(wb, wsA, 'Activos')
     XLSX.utils.book_append_sheet(wb, wsI, 'Inactivos')
-    // `compression: true` reduce el tamaño del .xlsx ~50× usando ZIP/deflate.
+    // compression: true baja el .xlsx ~50x
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true }) as Buffer
   }
 }

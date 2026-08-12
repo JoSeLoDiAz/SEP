@@ -167,12 +167,25 @@ export function ReglasDelCiclo({
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className={etiqueta}>Puntaje mínimo de la prueba (0 a 100)</label>
-              <input
-                type="number" min={0} max={100} value={puntaje}
-                onChange={e => setPuntaje(e.target.value)}
-                placeholder="Ej. 80" className={control}
-              />
+              {/* Es un PORCENTAJE, no un puntaje. El puntaje bruto depende de
+                  cuántas preguntas trajo el examen —40 sobre 50 no es lo mismo
+                  que 40 sobre 100—, así que compararlo contra un corte fijo no
+                  significa lo mismo de un año a otro. Ya había una prueba con
+                  corte 70 medida contra un puntaje de 41 y marcada como no
+                  aprobada, cuando ese 41 sobre 50 era un 82 % y sí pasaba. */}
+              <label className={etiqueta}>Porcentaje mínimo para pasar la prueba</label>
+              <div className="relative">
+                <input
+                  type="number" min={0} max={100} step="0.01" value={puntaje}
+                  onChange={e => setPuntaje(e.target.value)}
+                  placeholder="Ej. 80" className={`${control} pr-8`}
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-neutral-400">%</span>
+              </div>
+              <p className="mt-1 text-[11px] text-neutral-500">
+                Se compara contra el <strong>porcentaje</strong> de la prueba, no contra el
+                puntaje. Una prueba sin porcentaje queda sin evaluar.
+              </p>
             </div>
             <div>
               <label className={etiqueta}>Calificación mínima del curso (0 a 5)</label>

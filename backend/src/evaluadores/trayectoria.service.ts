@@ -136,7 +136,17 @@ export class TrayectoriaService {
     const anioActual = new Date().getFullYear()
     const aprobada = ultimaPrueba ? this.esPruebaAprobada(ultimaPrueba) : false
 
+    // El recorrido año por año, para la franja de la ficha.
+    //
+    // Un solo dato —la última prueba, el promedio de retroalimentación— no
+    // basta para decidir si se vuelve a convocar a alguien: no dice si mejoró,
+    // si lleva años pasando, ni si ese promedio bajo viene de un año suelto.
+    // Se pidió expresamente ver la prueba de 2021 a 2026 y la
+    // retroalimentación de 2024 a 2026.
+    const recorrido = await this.recorridoPorAnio(evaluadorId)
+
     return {
+      recorrido,
       aniosParticipados: Number(r.aniosParticipados ?? 0),
       totalParticipaciones: Number(r.totalParticipaciones ?? 0),
       primerAnio: r.primerAnio != null ? Number(r.primerAnio) : null,
@@ -435,6 +445,65 @@ export class TrayectoriaService {
     if (tiene('CURSO')) return ESTADO.EN_FORMACION
     if (tiene('AUTORIZACION')) return ESTADO.AUTORIZADO
     return ESTADO.POSTULADO
+  }
+
+  /**
+   * Un renglón por año con lo que hace falta para decidir: la prueba y la
+   * retroalimentación.
+   *
+   * Se parte de los AÑOS EN QUE PARTICIPÓ, no de los años en que hay prueba.
+   * Así los huecos se ven: un año en el que estuvo en el banco y no presentó
+   * prueba aparece vacío, que es justamente lo que hay que notar. Si se
+   * listaran solo los años con datos, ese año simplemente no existiría.
+   */
+  private async recorridoPorAnio(evaluadorId: number) {
+    // `bindRepetido` porque el id aparece seis veces: Oracle numera los binds
+    // por posición y repetirlos a mano es la forma más fácil de desalinearlos.
+    const { sql, params } = bindRepetido(
+      `SELECT a.ANIO AS "anio",
+              (SELECT pr.EFECTIVIDAD FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
+                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "porcentaje",
+              (SELECT pr.PUNTAJEMAYOR FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
+                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "puntaje",
+              (SELECT pr.PUNTAJEMINIMO FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
+                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "minimo",
+              (SELECT pr.APROBADA FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
+                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "aprobada",
+              (SELECT ROUND(AVG(rr.PROMEDIO), 2)
+                 FROM RETRORESPUESTA rr
+                 JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
+                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "retro"
+         FROM (SELECT DISTINCT pa.ANIO
+                 FROM EVALUADORPARTICIPACION pa
+                WHERE pa.EVALUADORID = :ev) a
+        ORDER BY a.ANIO`,
+      'ev', evaluadorId,
+    )
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(sql, params)
+
+    return filas.map(f => ({
+      anio: Number(f.anio),
+      porcentaje: f.porcentaje != null ? Number(f.porcentaje) : null,
+      puntaje: f.puntaje != null ? Number(f.puntaje) : null,
+      // null = SIN EVALUAR, y no es lo mismo que reprobada.
+      //
+      // De las 66 pruebas cargadas, 64 no tienen porcentaje ni nota de corte:
+      // se registraron cuando la aprobación aún no se calculaba. Marcarlas en
+      // rojo como "no aprobada" sería afirmar algo que nadie comprobó, sobre
+      // gente que probablemente sí pasó — y encima en la pantalla que se usa
+      // para decidir a quién se vuelve a convocar. Solo se decide cuando hay
+      // con qué: un aprobado explícito, o porcentaje y corte.
+      pruebaAprobada: f.aprobada != null
+        ? Number(f.aprobada) === 1
+        : (f.porcentaje != null && f.minimo != null
+            ? Number(f.porcentaje) >= Number(f.minimo)
+            : null),
+      retro: f.retro != null ? Number(f.retro) : null,
+    }))
   }
 
   private esPruebaAprobada(p: Record<string, unknown>): boolean {

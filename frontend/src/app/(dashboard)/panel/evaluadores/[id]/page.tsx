@@ -1969,6 +1969,8 @@ function ListadoConArchivos({
 
 interface Prueba {
   pruebaId: number
+  /** Ciclo al que pertenece, o null si es una prueba suelta. */
+  participacionId: number | null
   anio: number
   periodo: string | null
   fechaPresentacion: string | null
@@ -2010,6 +2012,10 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   // el dato que la gente tiene a mano y el que compara entre convocatorias.
   // La columna EFECTIVIDAD ya existía en la base; solo faltaba pedirla.
   const [porcentaje, setPorcentaje] = useState('')
+  // Cuál se está corrigiendo. Antes solo se podía crear y borrar: un puntaje
+  // mal digitado obligaba a eliminar la prueba y volverla a escribir entera.
+  // El backend ya aceptaba la corrección (PUT /pruebas/:pid).
+  const [editandoId, setEditandoId] = useState<number | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
 
@@ -2044,7 +2050,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
     }
     setCreando(true)
     try {
-      await api.post(`/evaluadores/${evaluadorId}/pruebas`, {
+      const datos = {
         anio: Number(anio),
         periodo: periodo || null,
         participacionId: participacionId ? Number(participacionId) : null,
@@ -2052,17 +2058,37 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
         puntajeMayor: puntaje ? Number(puntaje) : null,
         efectividad: porcentaje ? Number(porcentaje) : null,
         intentos: intentos ? Number(intentos) : null,
-      })
-      setToast({ tipo: 'success', msg: 'Prueba registrada' })
+      }
+      if (editandoId != null) await api.put(`/evaluadores/pruebas/${editandoId}`, datos)
+      else await api.post(`/evaluadores/${evaluadorId}/pruebas`, datos)
+      setToast({ tipo: 'success', msg: editandoId != null ? 'Prueba actualizada' : 'Prueba registrada' })
       setAgregar(false)
-      setParticipacionId('')
-      setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos(''); setPorcentaje('')
+      limpiar()
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
     } finally {
       setCreando(false)
     }
+  }
+
+  /** Lleva la prueba al formulario para corregirla. */
+  function editar(p: Prueba) {
+    setEditandoId(p.pruebaId)
+    setParticipacionId(p.participacionId != null ? String(p.participacionId) : '')
+    setAnio(String(p.anio))
+    setPeriodo(p.periodo ?? '')
+    setFecha(p.fechaPresentacion ? String(p.fechaPresentacion).slice(0, 10) : '')
+    setPuntaje(p.puntajeMayor != null ? String(p.puntajeMayor) : '')
+    setPorcentaje(p.efectividad != null ? String(p.efectividad) : '')
+    setIntentos(p.intentos != null ? String(p.intentos) : '')
+    setAgregar(true)
+  }
+
+  function limpiar() {
+    setEditandoId(null)
+    setParticipacionId('')
+    setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos(''); setPorcentaje('')
   }
 
   async function eliminar(pid: number) {
@@ -2151,7 +2177,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
           <div className="col-span-2 sm:col-span-3 flex items-end justify-end">
             <button onClick={crear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>
               {creando ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Guardar prueba
+              {editandoId != null ? 'Guardar cambios' : 'Guardar prueba'}
             </button>
           </div>
         </div>
@@ -2186,6 +2212,13 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
                   {[p.periodo && `Periodo ${p.periodo}`, p.intentos != null && `${p.intentos} intentos`, p.totalTiempo].filter(Boolean).join(' · ') || '—'}
                 </p>
               </div>
+              <button
+                onClick={() => editar(p)}
+                title="Corregir esta prueba"
+                className="p-2 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 rounded-lg transition"
+              >
+                <Pencil size={14} />
+              </button>
               <button onClick={() => eliminar(p.pruebaId)} disabled={eliminando === p.pruebaId} className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
                 {eliminando === p.pruebaId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               </button>

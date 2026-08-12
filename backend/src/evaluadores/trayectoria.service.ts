@@ -473,10 +473,26 @@ export class TrayectoriaService {
               (SELECT pr.APROBADA FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
                 ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "aprobada",
+              -- Cuántas veces la presentó. Se pidió expresamente: "aprobado
+              -- 88 %, 2 intentos" dice mucho más que solo el porcentaje.
+              (SELECT pr.INTENTOS FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
+                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "intentos",
               (SELECT ROUND(AVG(rr.PROMEDIO), 2)
                  FROM RETRORESPUESTA rr
                  JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
-                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "retro"
+                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "retro",
+              -- La pregunta 10 es "¿Recomendaría la participación de esta
+              -- persona en futuros procesos?". Se pidió expresamente verla
+              -- suelta: es la que responde de un vistazo si vale la pena
+              -- volver a convocar, y queda enterrada en el promedio de las
+              -- doce. Va aparte, con su propio número.
+              (SELECT ROUND(AVG(ri.CALIFICACION), 2)
+                 FROM RETRORESPUESTAITEM ri
+                 JOIN RETRORESPUESTA rr ON rr.RETRORESPUESTAID = ri.RETRORESPUESTAID
+                 JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
+                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO
+                  AND ri.PREGUNTANUMERO = 10)                        AS "recomendado"
          FROM (SELECT DISTINCT pa.ANIO
                  FROM EVALUADORPARTICIPACION pa
                 WHERE pa.EVALUADORID = :ev) a
@@ -489,6 +505,7 @@ export class TrayectoriaService {
       anio: Number(f.anio),
       porcentaje: f.porcentaje != null ? Number(f.porcentaje) : null,
       puntaje: f.puntaje != null ? Number(f.puntaje) : null,
+      intentos: f.intentos != null ? Number(f.intentos) : null,
       // null = SIN EVALUAR, y no es lo mismo que reprobada.
       //
       // De las 66 pruebas cargadas, 64 no tienen porcentaje ni nota de corte:
@@ -503,6 +520,7 @@ export class TrayectoriaService {
             ? Number(f.porcentaje) >= Number(f.minimo)
             : null),
       retro: f.retro != null ? Number(f.retro) : null,
+      recomendado: f.recomendado != null ? Number(f.recomendado) : null,
     }))
   }
 

@@ -52,15 +52,6 @@ interface RegionalCat { id: number; nombre: string }
 interface CentroCat { id: number; nombre: string }
 interface CiudadCat { id: number; ciudad: string; depto: string }
 
-/**
- * La ficha pasó de 7 tabs planos a 4 con jerarquía. El criterio es qué cambia
- * año a año y qué no:
- *
- *   Trayectoria → todo lo temporal (ciclos, hitos, documentos del año)
- *   Perfil      → lo atemporal (datos, HV, estudios, TIC, experiencia)
- *   Documentos  → archivos personales permanentes
- *   Auditoría   → registro de cambios; solo coordinación y admin
- */
 type TabId = 'trayectoria' | 'perfil' | 'documentos' | 'auditoria'
 type PerfilSubTab = 'datos' | 'estudios' | 'tic' | 'experiencia'
 
@@ -175,9 +166,6 @@ export default function FichaEvaluadorPage() {
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-2">
-            {/* Abre el visor en vez de descargar de una: se pedía poder MIRAR
-                la ficha sin bajarla al disco. Descargar e imprimir quedan
-                dentro del visor, así que no se pierde nada. */}
             <button
               onClick={() => setVerFicha(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-semibold rounded-xl backdrop-blur-sm transition"
@@ -233,19 +221,14 @@ export default function FichaEvaluadorPage() {
         })}
       </div>
 
-      {/* ── Trayectoria: la vista por año + los editores que la alimentan ── */}
       {tab === 'trayectoria' && (
         <>
           <TrayectoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} />
-          {/* El rail es de lectura; el alta y baja de ciclos y pruebas sigue
-              aquí abajo para no perder funcionalidad mientras se construyen
-              los formularios inline del panel del año. */}
           <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} />
           <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} />
         </>
       )}
 
-      {/* ── Perfil: lo atemporal, con sub-tabs ── */}
       {tab === 'perfil' && (
         <>
           <div className="flex gap-1 overflow-x-auto rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-sm">
@@ -314,8 +297,6 @@ export default function FichaEvaluadorPage() {
   )
 }
 
-// ── Helpers UI ─────────────────────────────────────────────────────────────────
-
 type Toast = { tipo: 'success' | 'error'; msg: string }
 type SetToast = (t: Toast | null) => void
 
@@ -334,8 +315,6 @@ function Section({ titulo, children, accion }: { titulo: string; children: React
 function manejarError(err: unknown, fallback: string): string {
   return (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
 }
-
-// ── Sección DATOS ──────────────────────────────────────────────────────────────
 
 function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: () => void; setToast: SetToast }) {
   const [editando, setEditando] = useState(false)
@@ -358,7 +337,6 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
   const [emailInst, setEmailInst] = useState(ficha.emailInstitucional ?? '')
   const [celular, setCelular] = useState(ficha.celular ?? '')
 
-  // Catálogos Regional / Centro
   const [regionales, setRegionales] = useState<RegionalCat[]>([])
   const [centros, setCentros] = useState<CentroCat[]>([])
   const [cargandoCentros, setCargandoCentros] = useState(false)
@@ -480,7 +458,6 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
   return (
     <Section titulo="Editar datos del evaluador">
       <div className="px-5 py-4 flex flex-col gap-5">
-        {/* Datos personales */}
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos personales</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -498,7 +475,6 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
           </div>
         </div>
 
-        {/* Datos del banco */}
         <div className="border-t border-neutral-100 pt-5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos del banco</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -597,8 +573,6 @@ function Dato({ label, valor, mono, multiline }: { label: string; valor: string 
   )
 }
 
-// ── MunicipioAutocomplete ──────────────────────────────────────────────────────
-
 function MunicipioAutocomplete({
   value,
   initialLabel,
@@ -616,7 +590,6 @@ function MunicipioAutocomplete({
   const [abierto, setAbierto] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
-  // Cierra el desplegable al hacer click fuera
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
@@ -627,7 +600,7 @@ function MunicipioAutocomplete({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  // Debounce búsqueda + AbortController (evita race conditions con respuestas obsoletas)
+  // el abort descarta respuestas viejas que llegan después de la última tecla
   useEffect(() => {
     const q = texto.trim()
     if (q.length < 2) {
@@ -635,7 +608,7 @@ function MunicipioAutocomplete({
       setBuscando(false)
       return
     }
-    // No relanzar la búsqueda si el texto coincide con el ítem ya seleccionado
+    // ya elegido: no rebuscar lo mismo
     if (value != null && q === initialLabel.trim()) {
       setResultados([])
       return
@@ -681,7 +654,7 @@ function MunicipioAutocomplete({
           onChange={e => {
             setTexto(e.target.value)
             setAbierto(true)
-            // Si el usuario edita el texto, invalidamos el municipioId hasta que elija uno
+            // al editar el texto el id deja de valer hasta que elija otro
             if (value != null) onChange(null)
           }}
           onFocus={() => setAbierto(true)}
@@ -727,8 +700,6 @@ function MunicipioAutocomplete({
     </div>
   )
 }
-
-// ── Sección FOTO ───────────────────────────────────────────────────────────────
 
 function SeccionFoto({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: () => void; setToast: SetToast }) {
   const [subiendo, setSubiendo] = useState(false)
@@ -826,8 +797,6 @@ function SeccionFoto({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: 
     </Section>
   )
 }
-
-// ── Sección CÉDULA ─────────────────────────────────────────────────────────────
 
 interface DocEvaluador {
   documentoId: number
@@ -1017,16 +986,8 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
   )
 }
 
-// ── Sección PARTICIPACIONES ────────────────────────────────────────────────────
-
 interface Cat { id: number; nombre: string }
-/**
- * Tope del equipo evaluador y de la mesa.
- *
- * Es el de la columna. Antes eran 120 y no alcanzaban para la lista de
- * nombres, así que la v44 los lleva a 500; mientras esa migración no corra en
- * un entorno, el backend responde diciendo el campo y cuánto sobra.
- */
+// 500 = tope de la columna en BD (migración v44)
 const MAX_EQUIPO = 500
 
 interface Participacion {
@@ -1039,10 +1000,8 @@ interface Participacion {
   procesoId: number | null
   procesoNombre: string | null
   procesoRevocado: boolean
-  /** Ids para poder preseleccionar lo que ya estaba al corregir el ciclo. */
   convocatoriaId: number | null
   areaId: number | null
-  /** El backend siempre los devolvió; el detalle desplegado los muestra. */
   estadoNombre?: string | null
   motivoNoParticipa?: string | null
   mesa: string | null
@@ -1071,16 +1030,11 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const [revocado, setRevocado] = useState(false)
   const [mesa, setMesa] = useState('')
   const [equipo, setEquipo] = useState('')
-  // Quien dinamizó la mesa. Va en texto libre, como el equipo: no siempre está
-  // registrado en el SEP, y exigir que lo estuviera dejaba el campo vacío —
-  // llevaba 0 de 102 participaciones sin llenar por no tener dónde ponerlo.
+  // texto libre: quien dinamizó no siempre está registrado en el SEP
   const [dinamizador, setDinamizador] = useState('')
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
-  /** Si tiene valor, el formulario está corrigiendo esa participación. */
   const [editandoId, setEditandoId] = useState<number | null>(null)
-  /** Cuál fila está desplegada. Solo una a la vez: con seis años, tener
-   *  varias abiertas convierte la lista en un muro. */
   const [expandido, setExpandido] = useState<number | null>(null)
 
   async function cargar() {
@@ -1091,10 +1045,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/roles`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/procesos`),
         api.get<{ id: number; nombre: string }[]>(`/evaluadores/catalogos/areas`),
-        // A diferencia de los catálogos, este endpoint viene paginado: devuelve
-        // { items, total, page, limit }, no el arreglo pelado. Se pide el tope
-        // de página porque esto llena un desplegable, no una tabla — con el
-        // valor por defecto se quedarían convocatorias fuera sin avisar.
+        // este endpoint viene paginado: devuelve { items, ... }, no el arreglo pelado
         api.get<{ items: Array<{ id: number; nombre: string; anio: number; periodo: string | null }> }>(
           `/evaluadores/convocatorias`, { params: { limit: 100 } }),
       ])
@@ -1118,13 +1069,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
     setRevocado(false); setMesa(''); setEquipo(''); setDinamizador('')
   }
 
-  /**
-   * Abre el mismo formulario, pero con los datos puestos.
-   *
-   * Editar faltaba: solo se podía registrar y borrar, así que corregir un rol
-   * o una mesa obligaba a borrar la participación entera — y con ella se iban
-   * los documentos del año, las pruebas y el certificado.
-   */
   function editar(p: Participacion) {
     setEditandoId(p.participacionId)
     setExpandido(p.participacionId)
@@ -1151,9 +1095,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
       rolEvaluadorId: rolId ? Number(rolId) : null,
       modalidadPart: modalidad || null,
       procesoId: procId ? Number(procId) : null,
-      // Sin convocatoria el ciclo queda huérfano: no hereda la invitación, no
-      // entra en la matriz de retroalimentación y no se puede certificar,
-      // porque la habilitación de certificados vive en la convocatoria.
       convocatoriaId: convId ? Number(convId) : null,
       areaId: areaId ? Number(areaId) : null,
       procesoRevocado: revocado,
@@ -1198,10 +1139,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
 
-  // El mismo formulario sirve para agregar arriba y para corregir dentro
-  // de la fila. Se guarda en una constante y no en un componente aparte:
-  // un componente anidado se vuelve a montar en cada tecla y el cursor se
-  // sale del campo a media palabra.
+  // constante y no componente: uno anidado se remonta en cada tecla y pierde el foco
   const formulario = (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div><label className={label}>Año *</label><input value={anio} onChange={e => setAnio(e.target.value)} className={input} /></div>
@@ -1235,8 +1173,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
               value={convId}
               onChange={e => {
                 setConvId(e.target.value)
-                // El año y el período salen de la convocatoria: tenerlos que
-                // repetir a mano es la forma más fácil de que no cuadren.
                 const c = convocatorias.find(x => String(x.id) === e.target.value)
                 if (c) { setAnio(String(c.anio)); if (c.periodo) setPeriodo(c.periodo) }
               }}
@@ -1249,10 +1185,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
                 </option>
               ))}
             </select>
-            {/* Sin ninguna convocatoria abierta, el aviso de arriba no ayuda:
-                dice qué se pierde pero no qué hacer, y el desplegable está
-                vacío aunque el campo se marque obligatorio. Se manda al sitio
-                donde se resuelve. */}
             {convocatorias.length === 0 ? (
               <p className="mt-1 text-[11px] text-amber-700">
                 Todavía no hay ninguna convocatoria del banco.{' '}
@@ -1282,9 +1214,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
             </label>
           </div>
           <div className="sm:col-span-2"><label className={label}>Mesa</label><input value={mesa} onChange={e => setMesa(e.target.value)} className={input} /></div>
-          {/* Aquí se escribe la lista de quienes componen el equipo, no una
-              etiqueta corta, así que el contador evita llegar al tope y que el
-              servidor rechace el guardado después de llenar todo el resto. */}
           <div className="col-span-2 sm:col-span-2">
             <label className={label}>Dinamizó</label>
             <input
@@ -1340,8 +1269,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
           {items.map(p => {
             const abierto = expandido === p.participacionId
             const corrigiendo = editandoId === p.participacionId
-            // Los nombres no vienen en el listado, solo los identificadores;
-            // se resuelven contra los catálogos que ya están cargados.
+            // el listado trae solo ids: los nombres salen de los catálogos ya cargados
             const conv = convocatorias.find(c => c.id === p.convocatoriaId)
             const area = areas.find(a => a.id === p.areaId)
             const detalle: Array<[string, string | null]> = [
@@ -1356,8 +1284,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
             ]
             return (
               <li key={p.participacionId}>
-                {/* La cabecera entera abre y cierra: un blanco de clic grande
-                    se acierta a la primera, y el año deja de ser solo adorno. */}
                 <div className="flex items-center gap-3 px-5 py-3">
                   <button
                     onClick={() => setExpandido(v => (v === p.participacionId ? null : p.participacionId))}
@@ -1431,9 +1357,6 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
                   </div>
                 )}
 
-                {/* Corregir pasa AQUÍ, en la fila, y no en un formulario arriba:
-                    con seis años en la lista, editar el de 2022 y que el
-                    formulario aparezca fuera de la vista es perder el hilo. */}
                 {corrigiendo && (
                   <div className="border-t border-neutral-100">
                     {formulario}
@@ -1448,8 +1371,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
   )
 }
 
-// ── Sección HOJA DE VIDA (1:1 con el evaluador) ────────────────────────────────
-
+// una sola hoja de vida por evaluador
 interface HV {
   estudioId: number
   archivoNombre: string | null
@@ -1583,8 +1505,7 @@ function SeccionHV({ evaluadorId, setToast }: { evaluadorId: number; setToast: S
   )
 }
 
-// ── Sección genérica con archivos: ESTUDIOS / EXPERIENCIA / TIC ────────────────
-
+// estudios, experiencia y tic comparten ListadoConArchivos
 interface Estudio { estudioId: number; tipoEstudio: string | null; titulo: string | null; institucion: string | null; fechaGrado: string | null; archivoNombre: string | null; tieneArchivo: boolean }
 interface Experiencia { experienciaId: number; cargo: string | null; entidad: string | null; fechaInicio: string | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean }
 interface Tic { ticId: number; tipoEvento: string | null; nombre: string; horas: number | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean }
@@ -1965,11 +1886,9 @@ function ListadoConArchivos({
   )
 }
 
-// ── Sección PRUEBAS ────────────────────────────────────────────────────────────
-
 interface Prueba {
   pruebaId: number
-  /** Ciclo al que pertenece, o null si es una prueba suelta. */
+  /** null = prueba suelta, sin ciclo */
   participacionId: number | null
   anio: number
   periodo: string | null
@@ -1985,20 +1904,12 @@ interface Prueba {
   observacion: string | null
 }
 
-/**
- * Tope del puntaje. Es el de la columna, NUMBER(5,2): pasarse daba un 500 sin
- * decir qué campo. Se escribió un 26450 donde los puntajes reales van de 36 a
- * 46, así que la validación aquí ahorra el viaje y explica el orden de
- * magnitud esperado.
- */
+// pasarse de aquí revienta la columna NUMBER(5,2) con un 500 sin detalle
 const MAX_PUNTAJE = 100
 
 function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
   const [items, setItems] = useState<Prueba[]>([])
-  // La prueba pertenece a un ciclo, no solo a un año: un evaluador puede tener
-  // dos en el mismo año (por ejemplo FEEC en el 01 y FCE en el 02). El backend
-  // se niega a adivinar —pondría la prueba en el ciclo equivocado y encendería
-  // un hito que no corresponde—, así que hay que decírselo desde aquí.
+  // puede haber dos ciclos en el mismo año; el backend no adivina a cuál va la prueba
   const [ciclos, setCiclos] = useState<Participacion[]>([])
   const [participacionId, setParticipacionId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -2008,13 +1919,8 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   const [fecha, setFecha] = useState('')
   const [puntaje, setPuntaje] = useState('')
   const [intentos, setIntentos] = useState('')
-  // La mayoría de las pruebas se califican sobre 100, así que el porcentaje es
-  // el dato que la gente tiene a mano y el que compara entre convocatorias.
-  // La columna EFECTIVIDAD ya existía en la base; solo faltaba pedirla.
+  // va a la columna EFECTIVIDAD
   const [porcentaje, setPorcentaje] = useState('')
-  // Cuál se está corrigiendo. Antes solo se podía crear y borrar: un puntaje
-  // mal digitado obligaba a eliminar la prueba y volverla a escribir entera.
-  // El backend ya aceptaba la corrección (PUT /pruebas/:pid).
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
@@ -2035,7 +1941,6 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
     }
   }
 
-  /** Al escoger el ciclo, el año y el periodo salen de él: son los suyos. */
   function elegirCiclo(valor: string) {
     setParticipacionId(valor)
     const c = ciclos.find(x => String(x.participacionId) === valor)
@@ -2072,7 +1977,6 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
     }
   }
 
-  /** Lleva la prueba al formulario para corregirla. */
   function editar(p: Prueba) {
     setEditandoId(p.pruebaId)
     setParticipacionId(p.participacionId != null ? String(p.participacionId) : '')
@@ -2107,8 +2011,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
 
-  // Con un solo ciclo ese año el backend lo ata solo; con dos o más exige que
-  // se diga cuál, y hasta ahora la pantalla no tenía cómo decirlo.
+  // con un solo ciclo ese año el backend lo ata solo; con dos o más exige elegir
   const mismosAnio = ciclos.filter(c => String(c.anio) === anio.trim()).length
   const ambiguo = mismosAnio > 1 && !participacionId
 
@@ -2230,8 +2133,6 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
   )
 }
 
-// ── Sección DOCUMENTOS ─────────────────────────────────────────────────────────
-
 interface DocumentoItem {
   documentoId: number
   evaluadorId: number
@@ -2250,19 +2151,17 @@ interface TipoDocEvalCat {
   codigo: string
   nombre: string
   admiteMultiple?: boolean
-  /** Qué formatos acepta este tipo, del catálogo. El correo de autorización
-   *  recibe .msg/.eml/.html; la cédula y los soportes, solo PDF. */
+  /** del catálogo: el correo admite .msg/.eml/.html; el resto solo pdf */
   extensiones?: string[]
-  /** Pertenece a un ciclo, no al evaluador: se carga dentro del año. */
+  /** el documento es del ciclo, no del evaluador */
   esDelAnio?: boolean
   orden?: number
   activo?: boolean
 }
 
-/** Extensiones por defecto cuando el catálogo no dice nada: como era antes. */
+/** fallback si el catálogo no trae extensiones */
 const EXT_POR_DEFECTO = ['pdf']
 
-/** `accept` del selector de archivo y texto de la etiqueta, desde el catálogo. */
 function formatosDe(tipo: TipoDocEvalCat | undefined) {
   const exts = tipo?.extensiones?.length ? tipo.extensiones : EXT_POR_DEFECTO
   return {
@@ -2271,8 +2170,7 @@ function formatosDe(tipo: TipoDocEvalCat | undefined) {
   }
 }
 
-// Tailwind JIT necesita las clases literales presentes en el source; por eso
-// declaramos aquí también la variante hover para que se compile en el CSS final.
+// Tailwind JIT solo compila clases literales: por eso el hover va escrito aquí
 const DOC_CHIP_COLORS: Record<string, { bg: string; text: string; border: string; hoverBg: string }> = {
   AUTORIZACION:             { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',   hoverBg: 'hover:bg-blue-100'   },
   CONFIDENCIALIDAD:         { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', hoverBg: 'hover:bg-purple-100' },
@@ -2321,10 +2219,6 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
   useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
 
   const tipoSeleccionado = tipos.find(t => String(t.id) === tipoSel)
-  // Los dos van atados a un año concreto: el certificado es de una vigencia, y
-  // la experiencia en proyectos sirve para acreditar CUÁNDO se evaluó. Sin el
-  // año quedan varios archivos iguales en la lista —"Proyectos 1", "Proyectos
-  // 2"— sin forma de saber a qué convocatoria corresponde cada uno.
   const requiereAnio = tipoSeleccionado?.codigo === 'CERTIFICADO_PARTICIPACION'
     || tipoSeleccionado?.codigo === 'EXPERIENCIA_PROYECTOS'
   const maxAnio = new Date().getFullYear() + 1
@@ -2342,23 +2236,13 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
     resetForm()
   }
 
-  /**
-   * Abre el formulario ya con el tipo del chip que esté puesto.
-   *
-   * Sin esto, el chip filtraba la lista pero no decía nada del formulario: se
-   * escogía "Acuerdo de confidencialidad", se abría a cargar, y el desplegable
-   * solo ofrecía "Experiencia laboral en proyectos" —porque los del año se
-   * cargan en Trayectoria—. Quien no leyera la nota subía el archivo igual y
-   * le quedaba con el tipo equivocado. Ahora, o el chip manda, o se dice que
-   * ese tipo no va aquí.
-   */
+  // abre el formulario con el tipo del chip que esté puesto
   function abrirForm() {
     const delChip = tipos.find(t => t.codigo === filtroCodigo && !t.esDelAnio)
     if (delChip) setTipoSel(String(delChip.id))
     setFormAbierto(true)
   }
 
-  /** El chip puesto es de los que van dentro del año: aquí no se puede. */
   const chipEsDelAnio = tipos.some(t => t.codigo === filtroCodigo && t.esDelAnio)
 
   async function subir() {
@@ -2473,8 +2357,6 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
               title={t.nombre}
             >
               {t.nombre}
-              {/* Los del año se marcan en el propio chip: así la lista explica
-                  sola por qué unos se cargan aquí y otros no. */}
               {t.esDelAnio && (
                 <span className={`text-[9px] font-bold uppercase tracking-wide ${activo ? 'text-white/70' : 'text-neutral-400'}`}>
                   del año
@@ -2490,9 +2372,6 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
 
       {/* Formulario colapsable */}
       {formAbierto && chipEsDelAnio && (
-        /* Se dice ANTES de enseñar el formulario. Un aviso debajo de un
-           desplegable que ya ofrece otra cosa llega tarde: para cuando se lee,
-           el archivo ya se subió con el tipo que no era. */
         <div className="px-5 py-4 bg-amber-50/70 border-b border-amber-100">
           <p className="text-[12px] font-semibold text-amber-900">
             Ese documento se carga dentro del año, no aquí.
@@ -2501,11 +2380,6 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
             El correo de autorización, el acuerdo de confidencialidad y el certificado de
             participación pertenecen a un ciclo concreto, así que se cargan dentro de su año.
           </p>
-          {/* Los pasos, con los nombres EXACTOS de lo que se ve en pantalla.
-              Decir "abre el año" no bastaba: el año se abre pulsándolo en la
-              línea de tiempo de la izquierda, y quien no lo sabía leía el
-              aviso como "no se puede" y se quedaba sin cargar los años
-              anteriores. */}
           <ol className="mt-2 ml-4 list-decimal space-y-0.5 text-[11px] text-amber-800">
             <li>Entra a la pestaña <strong>Trayectoria</strong>.</li>
             <li>
@@ -2528,10 +2402,7 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className={requiereAnio ? '' : 'sm:col-span-2'}>
             <label className={label}>Tipo de documento *</label>
-            {/* Los tipos del ciclo no se ofrecen aquí. Ofrecerlos en dos
-                sitios fue justamente lo que hizo que todo terminara cargado
-                sin año: el archivo entra igual pero queda como permanente,
-                se ve repetido en todos los años y el hito no enciende. */}
+            {/* los tipos del ciclo no se ofrecen aquí: se cargan en Trayectoria */}
             <select
               value={tipoSel}
               onChange={e => setTipoSel(e.target.value)}
@@ -2575,9 +2446,6 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
             />
           </div>
           <div className="sm:col-span-2">
-            {/* Los formatos salen del tipo elegido, no fijos: el apartado se
-                llama "Correo de autorización" y hasta ahora solo dejaba
-                escoger PDF, así que había que convertir el correo antes. */}
             <label className={label}>
               Archivo {formatosDe(tipoSeleccionado).etiqueta} * (máximo 8 MB)
             </label>

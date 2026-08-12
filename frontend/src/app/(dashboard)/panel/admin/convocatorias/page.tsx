@@ -12,8 +12,6 @@ import {
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Convocatoria {
   id: number
   nombre: string
@@ -63,8 +61,6 @@ const FORM_DEFAULTS: FormConvocatoria = {
   programaId: '21',
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function fmtCop(v: number) {
   if (!Number.isFinite(v)) return '$0'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
@@ -78,12 +74,10 @@ function fmtFecha(d: string | null) {
 }
 
 function toIsoDate(v: string) {
-  // input type="date" devuelve "YYYY-MM-DD"; lo convertimos a ISO con hora 12:00 local
+  // hora 12:00 local: evita que el cambio de zona corra el día
   if (!v) return null
   return `${v}T12:00:00`
 }
-
-// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ConvocatoriasAdminPage() {
   const [data, setData] = useState<Convocatoria[] | null>(null)
@@ -91,7 +85,6 @@ export default function ConvocatoriasAdminPage() {
   const [error, setError] = useState(false)
   const [busqueda, setBusqueda] = useState('')
 
-  // Toast
   const toastKey = useRef(0)
   const [toastK2, setToastK2] = useState(0)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error' | 'warning'; titulo: string; msg: string } | null>(null)
@@ -101,7 +94,6 @@ export default function ConvocatoriasAdminPage() {
     setToastK2(toastKey.current)
   }
 
-  // Modales
   const [crearOpen, setCrearOpen] = useState(false)
   const [creando, setCreando] = useState(false)
   const [formCrear, setFormCrear] = useState<FormConvocatoria>(FORM_DEFAULTS)
@@ -111,15 +103,12 @@ export default function ConvocatoriasAdminPage() {
   const [guardando, setGuardando] = useState(false)
   const [formEditar, setFormEditar] = useState<FormConvocatoria>(FORM_DEFAULTS)
 
-  // Confirm: cambio de estado / ocultar / publicar
   const [accionOpen, setAccionOpen] = useState(false)
   const [accion, setAccion] = useState<null | {
     tipo: 'cerrar' | 'abrir' | 'ocultar' | 'mostrar' | 'publicar' | 'despublicar'
     convocatoria: Convocatoria
   }>(null)
   const [ejecutando, setEjecutando] = useState(false)
-
-  // ── Cargar ────────────────────────────────────────────────────────────────
 
   async function cargar() {
     try {
@@ -136,8 +125,6 @@ export default function ConvocatoriasAdminPage() {
     document.title = 'Gestión de Convocatorias | SEP'
     cargar()
   }, [])
-
-  // ── Crear ─────────────────────────────────────────────────────────────────
 
   function abrirCrear() {
     setFormCrear(FORM_DEFAULTS)
@@ -164,8 +151,6 @@ export default function ConvocatoriasAdminPage() {
       showToast('error', 'No se pudo crear', e?.response?.data?.message ?? 'Error inesperado.')
     } finally { setCreando(false) }
   }
-
-  // ── Editar ────────────────────────────────────────────────────────────────
 
   function abrirEditar(cv: Convocatoria) {
     setEditandoId(cv.id)
@@ -204,8 +189,6 @@ export default function ConvocatoriasAdminPage() {
     } finally { setGuardando(false) }
   }
 
-  // ── Acciones (cerrar/abrir/ocultar/publicar) ──────────────────────────────
-
   function abrirAccion(tipo: typeof accion extends null ? never : NonNullable<typeof accion>['tipo'], cv: Convocatoria) {
     setAccion({ tipo, convocatoria: cv })
     setAccionOpen(true)
@@ -240,8 +223,6 @@ export default function ConvocatoriasAdminPage() {
     } finally { setEjecutando(false) }
   }
 
-  // ── Filtros ───────────────────────────────────────────────────────────────
-
   const visibles = useMemo(() => {
     if (!data) return []
     const q = busqueda.trim().toLowerCase()
@@ -252,8 +233,6 @@ export default function ConvocatoriasAdminPage() {
       String(c.id).includes(q),
     )
   }, [data, busqueda])
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -401,8 +380,6 @@ export default function ConvocatoriasAdminPage() {
     </div>
   )
 }
-
-// ── Card de convocatoria ──────────────────────────────────────────────────────
 
 function ConvocatoriaCard({
   cv, onEditar, onAccion,
@@ -575,8 +552,6 @@ function Stat({ label, value, color }: { label: string; value: number; color: 'n
   )
 }
 
-// ── Form fields compartidos crear/editar ──────────────────────────────────────
-
 function ConvocatoriaFormFields({
   form, setForm,
 }: {
@@ -657,8 +632,6 @@ function ConvocatoriaFormFields({
     </div>
   )
 }
-
-// ── Modal de confirmación de acciones ─────────────────────────────────────────
 
 function ConfirmAccionModal({
   accion, ejecutando, onCancel, onConfirm,

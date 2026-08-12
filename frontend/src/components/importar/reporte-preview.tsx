@@ -1,12 +1,6 @@
 'use client'
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ Reporte de VISTA PREVIA del proyecto — se arma directamente desde el       ║
-// ║ Excel formulador parseado (PreviewImportacion), SIN necesidad de importar  ║
-// ║ el proyecto a la BD. Muestra TODA la información del formulario con una     ║
-// ║ interfaz moderna y lista para imprimir / exportar a PDF. No incluye el      ║
-// ║ bloque de versión (PRY-XXXX-Vn) porque el proyecto aún no existe.           ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// reporte del proyecto armado desde el excel parseado, sin importarlo a la bd
 
 import { useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -20,10 +14,9 @@ import type {
   ExcelAFConDetalle, ExcelDiagnostico, ExcelRubro, PreviewImportacion,
 } from '@/lib/types/importar-proyecto'
 
-// ── Marca ───────────────────────────────────────────────────────────────────
 const NAVY = '#00304D'
 
-// ── Helpers de formato ──────────────────────────────────────────────────────
+// helpers de formato
 function txt(v: unknown): string | null {
   if (v === null || v === undefined) return null
   const s = String(v).trim()
@@ -41,7 +34,7 @@ function pct(v: number): string {
 const pctOf = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0)
 const n0 = (x: number | null | undefined) => x ?? 0
 
-// Excel guarda las fechas como número de serie (p. ej. 46185). Lo pasamos a dd/mm/aaaa.
+// excel guarda las fechas como número de serie, no como fecha
 function fmtFechaExcel(v: unknown): string | null {
   const s = txt(v)
   if (!s) return null
@@ -57,23 +50,20 @@ function fmtFechaExcel(v: unknown): string | null {
   return s
 }
 
-// Muestra el número o "NO APLICA" (categorías "si aplica" del formulario).
 const aplicaNum = (v: number | null | undefined) => (n0(v) > 0 ? fmtNum(v) : 'NO APLICA')
 
-// Desplazamiento suave a una sección por id (funciona dentro del <main> con scroll).
 function scrollToId(id: string) {
   if (typeof document !== 'undefined') document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// ── Finanzas por AF (calculadas desde los rubros del Excel) ──────────────────
+// finanzas por AF, calculadas desde los rubros del excel
 const codeOf = (r: ExcelRubro) => (r.idRubro ?? '').trim()
 const nameOf = (r: ExcelRubro) => (r.nombreRubro ?? '').trim()
 const esGO = (r: ExcelRubro) => /^R0?9(\D|$)/i.test(codeOf(r)) || /GASTOS\s+DE\s+OPERACI/i.test(nameOf(r))
 const esTransferencia = (r: ExcelRubro) =>
   /^R0?15(\D|$)/i.test(codeOf(r)) || /TRANSFERENCIA\s+DE\s+CONOCIMIENTO/i.test(nameOf(r))
 
-// Caso especial SENA: TALLER - PUESTO DE TRABAJO REAL usa SIEMPRE 8 horas para el
-// cálculo de valor hora × beneficiario (independiente de las horas por grupo).
+// puesto de trabajo real: el valor hora × beneficiario usa 8 horas fijas, no las del grupo
 const esPuestoTrabajo = (evento: string | null | undefined) => /puesto\s*de\s*trabajo/i.test(txt(evento) ?? '')
 
 interface Bloque { cofSena: number; especie: number; dinero: number; total: number }
@@ -86,8 +76,7 @@ const sumBloque = (rs: ExcelRubro[]): Bloque => ({
 
 function finanzasAF(af: ExcelAFConDetalle) {
   const normales = af.rubros.filter(r => !esGO(r) && !esTransferencia(r))
-  // GO (R09) y transferencia (R015): agregamos TODAS las coincidencias (igual que
-  // el backend, que usa filter) por si una AF trae más de un rubro de ese tipo.
+  // una AF puede traer más de un rubro de GO o de transferencia
   const gosRubros = af.rubros.filter(esGO)
   const transRubros = af.rubros.filter(esTransferencia)
   const presupuestoAF = sumBloque(normales)
@@ -100,8 +89,7 @@ function finanzasAF(af: ExcelAFConDetalle) {
   const benefGrupo = n0(af.beneficiariosPresenciales) + n0(af.beneficiariosSincronicos)
   const totalBenef = grupos * benefGrupo
   const totalHoras = n0(af.horasPorGrupo) * grupos
-  // Valor hora × beneficiario: numerador = AF + G.O. (excluye transferencia).
-  // Puesto de trabajo real → 8 horas fijas.
+  // el valor hora × beneficiario excluye la transferencia
   const esPuesto = esPuestoTrabajo(af.eventoFormacion)
   const horasCalc = esPuesto ? 8 : n0(af.horasPorGrupo)
   const den = horasCalc * totalBenef
@@ -113,12 +101,10 @@ function finanzasAF(af: ExcelAFConDetalle) {
   }
 }
 
-// "Unidades" de un rubro para la columna resumen (horas / páginas / benef / días).
 function unidades(r: ExcelRubro): number {
   return n0(r.numHoras) || n0(r.numPaginasUnidades) || n0(r.numBeneficiarios) || n0(r.numDias) || 0
 }
 
-// Valor unitario del rubro = total / (la magnitud que aplique).
 function valorUnidad(r: ExcelRubro): number | null {
   const total = n0(r.totalRubro)
   const horas = n0(r.numHoras)
@@ -134,7 +120,7 @@ function valorUnidad(r: ExcelRubro): number | null {
   return null
 }
 
-// ── Primitivas de presentación ──────────────────────────────────────────────
+// primitivas de presentación
 
 function Section({
   icon: Icon, title, subtitle, id, children, tone = 'navy',
@@ -224,8 +210,7 @@ function TableWrap({ children, minW = 560 }: { children: React.ReactNode; minW?:
 const thCls = 'border-b border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-neutral-600'
 const tdCls = 'border-b border-neutral-100 px-3 py-2 align-top text-neutral-800'
 
-// Tabla reutilizable Cof SENA / Especie / Dinero (valor + %) + Total. El % de cada
-// bucket se calcula sobre el total de SU PROPIA fila (Cof + Especie + Dinero = 100%).
+// el % de cada bucket se calcula sobre el total de su propia fila
 interface BucketRow { label: string; cofSena: number; especie: number; dinero: number; total: number; strong?: boolean }
 function BucketTable({ concepto, rows, minW = 720 }: { concepto: string; rows: BucketRow[]; minW?: number }) {
   return (
@@ -286,7 +271,7 @@ function Kpi({ icon: Icon, label, value, sub, accent = 'green', money = false }:
     <div className="avoid-break flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-3.5 shadow-sm">
       <span className={`grid h-10 w-10 flex-shrink-0 place-items-center rounded-lg ${styles[accent]}`}><Icon size={18} /></span>
       <div className="min-w-0">
-        {/* Los importes van en letra más pequeña y sin truncar para no cortar cifras largas. */}
+        {/* los importes no se truncan para no cortar cifras largas */}
         <p className={`font-extrabold leading-tight text-neutral-900 ${money ? 'break-words text-[13px]' : 'truncate text-[15px]'}`}>{value}</p>
         <p className="truncate text-[11px] font-medium text-neutral-500">{label}</p>
         {sub && <p className="truncate text-[11px] font-semibold text-green-600">{sub}</p>}
@@ -311,8 +296,7 @@ function MoneyMini({ label, value, tone = 'neutral' }: { label: string; value: n
   )
 }
 
-// Enlace "volver / ir a…". Es un <a href="#id"> real para que funcione también en
-// el PDF (Chrome lo convierte en enlace interno clicable); en pantalla hace scroll suave.
+// <a> real para que el enlace siga siendo clicable en el PDF; en pantalla hace scroll suave
 function NavBtn({ targetId, children }: { targetId: string; children: React.ReactNode }) {
   return (
     <a
@@ -325,7 +309,7 @@ function NavBtn({ targetId, children }: { targetId: string; children: React.Reac
   )
 }
 
-// ── Detalle completo de una Acción de Formación ─────────────────────────────
+// detalle completo de una acción de formación
 
 function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
   const f = finanzasAF(af)
@@ -334,7 +318,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
   const esHibrida = /h[íi]brid/i.test(modalidad ?? '')
   const labelSinc = esHibrida ? 'Beneficiarios sincrónicos / grupo' : 'Beneficiarios virtuales / grupo'
 
-  // Presupuesto de la AF (subtotal rubros + G.O. + transferencia + total).
   const go = f.go ?? { cofSena: 0, especie: 0, dinero: 0, total: 0 }
   const tr = f.transferencia ?? { cofSena: 0, especie: 0, dinero: 0, total: 0, beneficiarios: 0 }
   const pctBenefTransf = pctOf(tr.beneficiarios, f.totalBenef)
@@ -347,7 +330,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
 
   return (
     <section id={`af-${af.consecutivo}`} className="scroll-mt-24 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-      {/* Cabecera de la AF */}
       <div className="flex items-start gap-3 px-5 py-4 text-white" style={{ backgroundColor: NAVY }}>
         <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl bg-white/15 text-base font-extrabold">{af.consecutivo}</span>
         <div className="min-w-0 flex-1">
@@ -370,7 +352,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
       </div>
 
       <div className="space-y-6 p-5">
-        {/* Información de la AF */}
         <div>
           <SubHeader icon={Info}>Información de la acción de formación</SubHeader>
           <FieldGrid cols={3}>
@@ -387,7 +368,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           {(f.esPuesto || txt(af.justificacionTallerPuesto)) && <LongText label="Justificación (formación en el puesto de trabajo)" value={af.justificacionTallerPuesto} />}
         </div>
 
-        {/* Datos del evento */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={CalendarDays}>Datos del evento</SubHeader>
           <FieldGrid cols={3}>
@@ -397,7 +377,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </FieldGrid>
         </div>
 
-        {/* Grupos y beneficiarios */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Users2}>Grupos y beneficiarios</SubHeader>
           <FieldGrid cols={4}>
@@ -410,7 +389,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </FieldGrid>
         </div>
 
-        {/* Perfil de los beneficiarios */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={UserCheck}>Perfil de los beneficiarios</SubHeader>
           <div className="space-y-4">
@@ -455,7 +433,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </div>
         </div>
 
-        {/* Sectores y subsectores */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Layers}>Sectores y subsectores del beneficiario</SubHeader>
           <div className="space-y-4">
@@ -467,7 +444,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </div>
         </div>
 
-        {/* Unidades temáticas */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Notebook}>Unidades temáticas de la acción de formación ({af.uts.length})</SubHeader>
           {af.uts.length === 0
@@ -517,7 +493,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
               </div>}
         </div>
 
-        {/* Alineación y resultados */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Compass}>Alineación de la acción de formación</SubHeader>
           <FieldGrid cols={2}>
@@ -532,7 +507,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </div>
         </div>
 
-        {/* Cobertura */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={MapPin}>Cobertura — lugares de ejecución ({af.cobertura.length} grupo{af.cobertura.length === 1 ? '' : 's'})</SubHeader>
           {af.cobertura.length === 0
@@ -573,7 +547,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
               </div>}
         </div>
 
-        {/* Material de formación */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Package}>Material de formación</SubHeader>
           <FieldGrid cols={3}>
@@ -589,7 +562,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
           </FieldGrid>
         </div>
 
-        {/* Rubros del presupuesto */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={Receipt}>Rubros del presupuesto de la acción de formación</SubHeader>
           {f.normales.length === 0
@@ -662,7 +634,6 @@ function AfDetalle({ af, index }: { af: ExcelAFConDetalle; index: number }) {
               </div>}
         </div>
 
-        {/* Presupuesto total de la AF (AF + G.O. + transferencia) */}
         <div className="border-t border-neutral-100 pt-4">
           <SubHeader icon={TrendingUp}>Presupuesto total de la acción de formación</SubHeader>
           <BucketTable concepto="Concepto" rows={presuRows} />
@@ -708,7 +679,6 @@ function ImpactoList({ titulo, items }: { titulo: string; items: string[] }) {
   )
 }
 
-// ── Diagnóstico ─────────────────────────────────────────────────────────────
 function DiagnosticoCard({ d }: { d: ExcelDiagnostico }) {
   const herr = d.herramientas.filter(h => txt(h.nombre))
   const fecha = fmtFechaExcel(d.fecha)
@@ -741,7 +711,7 @@ function DiagnosticoCard({ d }: { d: ExcelDiagnostico }) {
   )
 }
 
-// ── Componente principal ────────────────────────────────────────────────────
+// componente principal
 
 export function ReportePreview({ preview, onVolver }: { preview: PreviewImportacion; onVolver: () => void }) {
   const { basicos: b, generalidades: g, contactos: c, proyecto, afs, diagnosticos, necesidades } = preview
@@ -749,7 +719,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
 
   const [afQuery, setAfQuery] = useState('')
 
-  // KPIs de cabecera y totales del proyecto.
   const kpis = useMemo(() => {
     const beneficiarios = pres.beneficiarios || afs.reduce((s, af) => s + finanzasAF(af).totalBenef, 0)
     const totalUTs = afs.reduce((s, af) => s + af.uts.length, 0)
@@ -757,7 +726,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
     return { beneficiarios, totalUTs, pctSena }
   }, [afs, pres])
 
-  // Plan operativo (fila por AF).
   const plan = useMemo(() => afs.map(af => ({ af, f: finanzasAF(af) })), [afs])
   const planTot = useMemo(() => ({
     grupos: plan.reduce((s, p) => s + p.f.grupos, 0),
@@ -768,17 +736,15 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
     total: plan.reduce((s, p) => s + p.f.totales.total, 0),
   }), [plan])
 
-  // Buckets de transferencia agregados desde los rubros R015 de todas las AF
-  // (pres solo trae el valor y los beneficiarios, no el desglose cof/contrapartida).
+  // pres solo trae el valor de transferencia, no el desglose cof/contrapartida
   const transBuckets = useMemo(() => plan.reduce((acc, p) => {
     const t = p.f.transferencia
     if (t) { acc.cofSena += t.cofSena; acc.especie += t.especie; acc.dinero += t.dinero; acc.total += t.total }
     return acc
   }, { cofSena: 0, especie: 0, dinero: 0, total: 0 }), [plan])
 
-  // Resumen de rubros del proyecto (agrupado por código+nombre).
   const resumenRubros = useMemo(() => {
-    // Se agrupa por rubro; el número (id) NO se muestra, solo se usa para ordenar 1,2,3…
+    // el id del rubro no se muestra, solo sirve para ordenar
     const map = new Map<string, { orden: number; nombre: string; cofSena: number; especie: number; dinero: number; total: number }>()
     for (const af of afs) for (const r of af.rubros) {
       const key = `${codeOf(r).toUpperCase()}|${nameOf(r).toUpperCase()}`
@@ -795,7 +761,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
     return [...map.values()].sort((a, x) => a.orden - x.orden)
   }, [afs])
 
-  // Presupuesto general.
   const topeGO = pres.valorAFs > 200_000_000 ? 10 : 16
   const pctGO = pres.valorAFs > 0 ? (pres.gastosOperacion / pres.valorAFs) * 100 : 0
   const baseTransf = pres.valorAFs + pres.gastosOperacion
@@ -805,8 +770,7 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
   const pctTotEspecie = pres.valorTotal > 0 ? (pres.contrapartidaEspecie / pres.valorTotal) * 100 : 0
   const pctTotDinero = pres.valorTotal > 0 ? (pres.contrapartidaDinero / pres.valorTotal) * 100 : 0
 
-  // Filas de las tablas del presupuesto general.
-  // El total de las AF (sin GO ni transferencia) = suma de subtotales de rubros AF.
+  // filas de las tablas del presupuesto general
   const afOnly = plan.reduce((acc, p) => {
     acc.cofSena += p.f.presupuestoAF.cofSena; acc.especie += p.f.presupuestoAF.especie
     acc.dinero += p.f.presupuestoAF.dinero; acc.total += p.f.presupuestoAF.total
@@ -823,10 +787,7 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
   const goRows: BucketRow[] = [
     { label: 'Gastos de operación (R09)', cofSena: pres.gastosOpCofinSena, especie: pres.gastosOpContraEspecie, dinero: pres.gastosOpContraDinero, total: pres.gastosOperacion, strong: true },
   ]
-  // La fila de transferencia debe ser internamente consistente (Cof + Especie + Dinero = Total)
-  // para que los % de la fila sumen 100%. Si los rubros R015 traen desglose lo usamos tal cual;
-  // si no se detectaron pero el presupuesto sí trae el valor, lo llevamos a contrapartida en
-  // dinero (así lo registra el backend, la transferencia se paga desde contrapartida en dinero).
+  // sin desglose en los rubros R015, la transferencia va a contrapartida en dinero (así la registra el backend)
   const transRows: BucketRow[] = [
     transBuckets.total > 0
       ? { label: 'Transferencia de conocimiento (R015)', cofSena: transBuckets.cofSena, especie: transBuckets.especie, dinero: transBuckets.dinero, total: transBuckets.total, strong: true }
@@ -859,7 +820,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
     <div className="reporte-preview min-h-screen bg-neutral-50">
       <PrintStyles />
 
-      {/* Barra de acciones (no se imprime) */}
       <div className="no-print sticky top-0 z-30 border-b border-neutral-200 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <button onClick={onVolver} className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-sm font-semibold text-neutral-700 transition-colors hover:bg-neutral-50">
@@ -873,7 +833,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
       </div>
 
       <div className="reporte-doc mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
-        {/* Portada */}
         <div id="inicio-proyecto" className="avoid-break scroll-mt-24 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
           <div className="px-6 py-8 text-center text-white" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, #0a4e78 100%)` }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -893,7 +852,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             </div>
           </div>
 
-          {/* KPIs */}
           <div className="grid grid-cols-2 gap-3 p-5 lg:grid-cols-4">
             <Kpi icon={BookOpen} label="Acciones de formación" value={fmtNum(afs.length)} sub={`${fmtNum(kpis.totalUTs)} unidades temáticas`} accent="navy" />
             <Kpi icon={Users2} label="Beneficiarios totales" value={fmtNum(kpis.beneficiarios)} accent="violet" />
@@ -902,7 +860,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           </div>
         </div>
 
-        {/* 1. Datos generales de la entidad proponente */}
         <Section icon={Building2} title="Datos generales de la entidad proponente" subtitle="Organización proponente del proyecto">
           <FieldGrid cols={3}>
             <Field label="Razón social" value={txt(b.razonSocial)} />
@@ -927,7 +884,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           <div className="mt-4"><Chips label="Mesas sectoriales" items={[b.mesa1, b.mesa2, b.mesa3]} /></div>
         </Section>
 
-        {/* 2. Contactos */}
         <Section icon={UserCircle2} title="Datos de contacto" subtitle="Representante legal y contactos del proyecto">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <ContactoBloque titulo="Representante legal" c={c.representanteLegal} />
@@ -936,7 +892,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           </div>
         </Section>
 
-        {/* 3. Generalidades */}
         <Section icon={Briefcase} title="Generalidades de la entidad proponente">
           <LongText label="Objeto social de la organización" value={g.objetoSocial} />
           <LongText label="Productos y/o servicios ofrecidos y mercado" value={g.productosServicios} />
@@ -958,7 +913,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           <LongText label="Interacciones con otros actores" value={g.interacciones} />
         </Section>
 
-        {/* 4. Diagnóstico de necesidades */}
         {diagnosticos.length > 0 && (
           <Section icon={ClipboardList} title="Diagnóstico de necesidades de formación" subtitle={`${diagnosticos.length} diagnóstico(s)`}>
             <div className="space-y-3">
@@ -967,7 +921,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           </Section>
         )}
 
-        {/* 5. Necesidades / problemas detectados */}
         {necesidades.length > 0 && (
           <Section icon={Target} title="Necesidades o problemas puntuales detectados" subtitle={`${necesidades.length} necesidad(es)`}>
             <TableWrap>
@@ -991,12 +944,10 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           </Section>
         )}
 
-        {/* 6. Objetivo general */}
         <Section icon={FolderKanban} title="Objetivo general del proyecto">
           <LongText label="Objetivo general del proyecto" value={g.objetivoProyecto} />
         </Section>
 
-        {/* 7. Plan operativo + navegador de AF */}
         <Section icon={Activity} title="Plan operativo del proyecto de formación" subtitle="Resumen de las acciones de formación">
           <div className="wide-table -mx-1 overflow-x-auto rounded-xl border border-neutral-200">
             <table className="w-full min-w-[900px] border-collapse text-[12.5px]">
@@ -1065,7 +1016,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             Las columnas de valor incluyen Acción de Formación + Gastos de Operación + Transferencia. Valor hora × beneficiario = (Valor AF + G.O.) / (N.º beneficiarios × horas por grupo). En puesto de trabajo real se usan 8 horas.
           </p>
 
-          {/* Navegador / buscador de AF */}
           <div id="lista-afs" className="mt-5 scroll-mt-24 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-[13px] font-bold text-neutral-900" style={{ color: NAVY }}>Ir a una acción de formación</p>
@@ -1097,16 +1047,13 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
           </div>
         </Section>
 
-        {/* 8. Detalle por AF */}
         <div className="flex items-center gap-3 pt-1">
           <span className="grid h-9 w-9 place-items-center rounded-lg text-white" style={{ backgroundColor: NAVY }}><GraduationCap size={18} /></span>
           <h2 className="text-lg font-extrabold text-neutral-900" style={{ color: NAVY }}>Acciones de formación — detalle completo</h2>
         </div>
         {afs.map((af, i) => <AfDetalle key={af.consecutivo} af={af} index={i} />)}
 
-        {/* 9. Presupuesto general del proyecto */}
         <Section icon={Wallet} title="Presupuesto del proyecto" subtitle="Consolidado financiero de la formulación" tone="green">
-          {/* Presupuesto total (con G.O. y transferencia) */}
           <div className="overflow-hidden rounded-xl text-white" style={{ backgroundColor: NAVY }}>
             <div className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-3">
               <TotalCell label="Valor total del proyecto" value={fmtCop(pres.valorTotal)} big />
@@ -1118,13 +1065,11 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             </div>
           </div>
 
-          {/* Solo las AF (sin G.O. ni transferencia) */}
           <div className="mt-5">
             <SubHeader icon={BookOpen}>Acciones de formación (sin G.O. ni transferencia)</SubHeader>
             <BucketTable concepto="Acción de formación" rows={afsRows} />
           </div>
 
-          {/* Solo gastos de operación */}
           <div className="mt-5">
             <SubHeader icon={FileText}>Gastos de operación</SubHeader>
             <BucketTable concepto="Concepto" rows={goRows} minW={640} />
@@ -1133,7 +1078,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             </p>
           </div>
 
-          {/* Transferencia de conocimiento */}
           <div className="mt-5">
             <SubHeader icon={Coins}>Transferencia de conocimiento</SubHeader>
             <div className="mb-2 flex flex-wrap gap-2">
@@ -1144,13 +1088,11 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             <BucketTable concepto="Concepto" rows={transRows} minW={640} />
           </div>
 
-          {/* Sumas generales */}
           <div className="mt-5">
             <SubHeader icon={Wallet}>Sumas generales del proyecto</SubHeader>
             <BucketTable concepto="Concepto" rows={totalRows} minW={640} />
           </div>
 
-          {/* Resumen de rubros */}
           {resumenRubros.length > 0 && (
             <div className="mt-5">
               <SubHeader icon={ListChecks}>Resumen de rubros del proyecto</SubHeader>
@@ -1158,7 +1100,6 @@ export function ReportePreview({ preview, onVolver }: { preview: PreviewImportac
             </div>
           )}
 
-          {/* Ir al inicio del proyecto */}
           <div className="mt-6 flex justify-center">
             <a
               href="#inicio-proyecto"
@@ -1202,26 +1143,21 @@ function TotalCell({ label, value, sub, big }: { label: string; value: string; s
   )
 }
 
-// ── Estilos de impresión ────────────────────────────────────────────────────
 function PrintStyles() {
   return (
     <style>{`
       @media print {
         @page { size: letter; margin: 8mm; }
         aside, header, nav, .no-print { display: none !important; }
-        /* El layout del panel encierra el contenido en un contenedor con alto fijo
-           (h-screen) y overflow, lo que recorta la impresión a una sola página.
-           Lo neutralizamos para que el reporte completo pagine. */
+        /* el h-screen + overflow del layout recorta la impresión a una sola página */
         html, body { height: auto !important; overflow: visible !important; }
         .h-screen.overflow-hidden { height: auto !important; overflow: visible !important; }
         .flex.flex-col.flex-1.min-w-0.overflow-hidden { height: auto !important; overflow: visible !important; }
         main.overflow-y-auto, main.flex-1 { height: auto !important; max-height: none !important; overflow: visible !important; flex: none !important; }
-        /* Conservar TODOS los rellenos de color (tarjetas oscuras, badges, barras). */
         .reporte-preview, .reporte-preview * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         .reporte-preview { background: #fff !important; min-height: 0 !important; }
         .reporte-doc { max-width: 100% !important; padding: 0 !important; gap: 10px !important; }
-        /* En modo oscuro las reglas globales invierten bg/text con !important; al
-           imprimir las devolvemos a claro para que el papel salga legible. */
+        /* en modo oscuro las reglas globales invierten bg/text con !important */
         html[data-dark-mode="true"] .reporte-preview,
         html[data-dark-mode="true"] .reporte-preview .bg-white { background: #fff !important; }
         html[data-dark-mode="true"] .reporte-preview .bg-neutral-50 { background: #fafafa !important; }
@@ -1230,21 +1166,15 @@ function PrintStyles() {
         html[data-dark-mode="true"] .reporte-preview .text-neutral-700 { color: #404040 !important; }
         html[data-dark-mode="true"] .reporte-preview .text-neutral-600 { color: #525252 !important; }
         html[data-dark-mode="true"] .reporte-preview .text-neutral-500 { color: #737373 !important; }
-        /* Paginación: solo mantenemos juntas las tarjetas pequeñas y las filas de
-           tabla; las secciones y el detalle de AF fluyen entre páginas para no dejar
-           hojas casi vacías (antes generaban cientos de páginas en blanco). */
-        /* Solo mantenemos juntas las tarjetas pequeñas. Las filas de tabla PUEDEN
-           partirse entre páginas: si una justificación es más alta que la hoja,
-           forzarla a no partirse dejaba media página en blanco (cientos de hojas). */
+        /* las filas deben poder partirse: si no, una justificación alta deja hojas casi vacías */
         .avoid-break { break-inside: avoid; page-break-inside: avoid; }
         .section-bar { break-after: avoid; page-break-after: avoid; }
         thead { display: table-header-group; } /* la cabecera se repite en cada página */
         tr, td, th { break-inside: auto !important; page-break-inside: auto !important; }
-        /* Las tablas anchas deben caber COMPLETAS en la hoja (sin recortes a la derecha). */
+        /* las tablas anchas deben caber completas en la hoja, sin recortes a la derecha */
         .table-wrap, .wide-table { overflow: visible !important; border: 0 !important; }
         .table-wrap table, .wide-table table { min-width: 0 !important; width: 100% !important; table-layout: fixed !important; font-size: 6pt !important; }
         .table-wrap th, .table-wrap td, .wide-table th, .wide-table td { overflow-wrap: anywhere !important; word-break: break-word !important; white-space: normal !important; padding: 1.5px 4px !important; vertical-align: top; }
-        /* Las CIFRAS (dinero) y los % nunca se parten: van en un solo renglón. */
         .table-wrap tbody .text-right, .wide-table tbody .text-right { white-space: nowrap !important; word-break: keep-all !important; overflow-wrap: normal !important; }
         section { box-shadow: none !important; }
       }

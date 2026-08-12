@@ -18,12 +18,7 @@ interface Acceso {
   usuarioId: number | null
   /** Solo viene si se creó una cuenta nueva. Se muestra una única vez. */
   claveInicial: string | null
-  /**
-   * El correo con el que quedó la cuenta. Lo decide el backend y NO tiene por
-   * qué ser el que se tecleó aquí: las cuentas del SEP son institucionales, y
-   * si la persona ya entraba al sistema se reusa la suya. El login compara
-   * exacto, así que mostrar otro correo deja al evaluador sin poder entrar.
-   */
+  /** Lo decide el backend: puede no ser el que se tecleó aquí. */
   email: string | null
   detalle: string
 }
@@ -103,7 +98,7 @@ export default function NuevoEvaluadorPage() {
   useEffect(() => {
     if (regionalId == null) {
       setCentros([])
-      setCentroId(null)   // R8: al limpiar regional, resetear el centro elegido
+      setCentroId(null)
       return
     }
     setCargandoCentros(true)
@@ -132,7 +127,6 @@ export default function NuevoEvaluadorPage() {
         return
       }
       const p = res.data.persona!
-      // Precarga campos PERSONA
       setNombres(p.nombres ?? '')
       setPrimerApellido(p.primerApellido ?? '')
       setSegundoApellido(p.segundoApellido ?? '')
@@ -194,27 +188,20 @@ export default function NuevoEvaluadorPage() {
       })
       const acceso = res.data.acceso
       if (acceso?.claveInicial) {
-        // La clave solo existe en esta respuesta: si redirigimos, se pierde y
-        // el evaluador se queda sin poder entrar. Se muestra y el gestor
-        // decide cuándo continuar.
+        // La clave solo existe en esta respuesta: si redirigimos, se pierde.
         setCredenciales({
           evaluadorId: res.data.evaluadorId,
-          // El correo que devuelve el backend, no el que se tecleó: es el que
-          // de verdad quedó en la cuenta y el único con el que se puede entrar.
+          // El correo del backend, no el tecleado: es el único que sirve para entrar.
           email: acceso.email ?? emailInstitucional.trim().toLowerCase(),
           clave: acceso.claveInicial,
           detalle: acceso.detalle,
         })
         return
       }
-      // Sin clave nueva la gestora igual necesita saber qué pasó y con qué
-      // correo entra la persona; antes solo decía "Evaluador creado".
       setToast({
         tipo: 'success',
         msg: acceso?.detalle ?? 'Evaluador creado',
       })
-      // 3,5 s: el mensaje ahora dice con qué correo entra la persona, y con
-      // 900 ms no daba tiempo de leerlo antes de que la pantalla cambiara.
       setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 3500)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
@@ -228,8 +215,7 @@ export default function NuevoEvaluadorPage() {
   const input = 'w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40 disabled:bg-neutral-50 disabled:text-neutral-500'
   const textarea = `${input} resize-y`
 
-  // Pantalla de credenciales: reemplaza el formulario en vez de superponerse,
-  // para que no haya forma de salir sin haber visto la clave.
+  // Reemplaza el formulario: no hay forma de salir sin ver la clave.
   if (credenciales) {
     const copiar = async () => {
       try {
@@ -335,7 +321,6 @@ export default function NuevoEvaluadorPage() {
       </Link>
 
       <form onSubmit={handleSubmit} className="bg-white border border-neutral-200 rounded-2xl p-6 flex flex-col gap-6 shadow-sm">
-        {/* Búsqueda previa */}
         <section>
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Buscar persona</p>
           <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-3 items-end">
@@ -391,7 +376,6 @@ export default function NuevoEvaluadorPage() {
           )}
         </section>
 
-        {/* Datos personales */}
         <section className="border-t border-neutral-100 pt-5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos personales</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -442,7 +426,6 @@ export default function NuevoEvaluadorPage() {
           </div>
         </section>
 
-        {/* Datos del banco */}
         <section className="border-t border-neutral-100 pt-5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[#00304D] mb-3">Datos del banco de evaluadores</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -550,8 +533,6 @@ export default function NuevoEvaluadorPage() {
     </div>
   )
 }
-
-// ── MunicipioAutocomplete ──────────────────────────────────────────────────────
 
 function MunicipioAutocomplete({
   value,

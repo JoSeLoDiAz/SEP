@@ -9,8 +9,6 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
-// ── Tipos ─────────────────────────────────────────────────────────────────────
-
 interface Fuente       { id: number; nombre: string }
 interface Herramienta  { id: number; herramienta: string; muestra: number }
 interface NecFormacion { id: number; numero: number; nombre: string; beneficiarios: number }
@@ -27,8 +25,6 @@ interface Diagnostico {
   herramientas: Herramienta[]
   necesidades: NecFormacion[]
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const inputCls    = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D] transition bg-white'
 const selectCls   = inputCls + ' appearance-none cursor-pointer'
@@ -64,8 +60,6 @@ function Field({ label, req, hint, children }: {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 export default function DetalleDiagnosticoPage() {
   const { id } = useParams<{ id: string }>()
   const router  = useRouter()
@@ -76,7 +70,6 @@ export default function DetalleDiagnosticoPage() {
   const [diag,      setDiag]      = useState<Diagnostico | null>(null)
   const [fuentes,   setFuentes]   = useState<Fuente[]>([])
 
-  // ── Campos diagnóstico ────────────────────────────────────────────────────
   const [periodoI,      setPeriodoI]      = useState('')
   const [herrOtra,      setHerrOtra]      = useState('')
   const [herrCreacion,  setHerrCreacion]  = useState('0')
@@ -84,26 +77,21 @@ export default function DetalleDiagnosticoPage() {
   const [herrDescrip,   setHerrDescrip]   = useState('')
   const [herrResultados,setHerrResultados]= useState('')
 
-  // ── Herramienta nueva ─────────────────────────────────────────────────────
   const [fuenteSelId, setFuenteSelId] = useState(0)
   const [muestra,     setMuestra]     = useState('')
   const [agHerr,      setAgHerr]      = useState(false)
 
-  // ── Necesidad formación ───────────────────────────────────────────────────
   const [nfNombre, setNfNombre] = useState('')
   const [nfBenef,  setNfBenef]  = useState('')
   const [agNf,     setAgNf]     = useState(false)
 
-  // ── Editar necesidad ──────────────────────────────────────────────────────
   const [editNf, setEditNf] = useState<NecFormacion | null>(null)
   const [editNombre, setEditNombre] = useState('')
   const [editBenef,  setEditBenef]  = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
-  // ── Modal eliminar ────────────────────────────────────────────────────────
   const [modalDel, setModalDel] = useState<{ tipo: 'herr' | 'nf'; id: number } | null>(null)
 
-  // ── Toast ─────────────────────────────────────────────────────────────────
   const [toast,    setToast]    = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const toastKey   = useRef(0)
   const [toastKey2,setToastKey2]= useState(0)
@@ -113,8 +101,6 @@ export default function DetalleDiagnosticoPage() {
     setToast({ tipo, msg })
     setToastKey2(toastKey.current)
   }
-
-  // ── Carga inicial ─────────────────────────────────────────────────────────
 
   async function cargar() {
     try {
@@ -144,8 +130,6 @@ export default function DetalleDiagnosticoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Guardar diagnóstico ───────────────────────────────────────────────────
-
   async function guardarDiagnostico() {
     if (!herrDescrip.trim() || !herrResultados.trim()) {
       showToast('error', 'La descripción y el resumen de resultados son obligatorios')
@@ -169,8 +153,6 @@ export default function DetalleDiagnosticoPage() {
       setGuardando(false)
     }
   }
-
-  // ── Herramientas ──────────────────────────────────────────────────────────
 
   async function agregarHerramienta() {
     if (!fuenteSelId || !muestra) {
@@ -201,8 +183,6 @@ export default function DetalleDiagnosticoPage() {
       showToast('error', 'Error al eliminar')
     }
   }
-
-  // ── Necesidades de formación ──────────────────────────────────────────────
 
   async function agregarNecesidad() {
     if (!nfNombre.trim() || !nfBenef) {
@@ -263,8 +243,6 @@ export default function DetalleDiagnosticoPage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   if (loading) return (
     <div className="flex justify-center py-24">
       <Loader2 size={32} className="animate-spin text-[#00304D]" />
@@ -279,7 +257,6 @@ export default function DetalleDiagnosticoPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* Modal eliminar */}
       <Modal open={!!modalDel} onClose={() => setModalDel(null)}>
         <div className="flex flex-col items-center gap-4 p-2">
           <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
@@ -304,7 +281,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </Modal>
 
-      {/* Modal editar necesidad */}
       {editNf && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 flex flex-col gap-4">
@@ -333,7 +309,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ClipboardList size={22} className="text-white" />
@@ -353,9 +328,7 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </div>
 
-      {/* ── Diagnóstico de necesidades ──────────────────────────────────── */}
       <SectionCard title="Aplicación Diagnóstico de Necesidades de Formación" color="#00304D">
-        {/* Herramientas utilizadas */}
         <div className="flex flex-col gap-4 mb-6">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
             Herramientas y Muestra Poblacional
@@ -431,7 +404,6 @@ export default function DetalleDiagnosticoPage() {
           )}
         </div>
 
-        {/* Campos del diagnóstico */}
         <div className="flex flex-col gap-4 border-t border-neutral-100 pt-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Fecha de diagnóstico" req>
@@ -490,7 +462,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </SectionCard>
 
-      {/* ── Necesidades de formación detectadas ────────────────────────── */}
       <SectionCard title="Necesidades de Formación Detectadas">
         <p className="text-xs text-neutral-500 mb-4 leading-relaxed">
           A continuación podrá registrar la necesidad detectada y el número de posibles beneficiarios.
@@ -517,7 +488,6 @@ export default function DetalleDiagnosticoPage() {
           </div>
         </div>
 
-        {/* Lista de necesidades registradas */}
         {diag && diag.necesidades.length > 0 && (
           <>
             {/* Desktop */}

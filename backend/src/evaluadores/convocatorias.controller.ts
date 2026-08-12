@@ -20,17 +20,13 @@ import { contentDisposition } from '../common/text/nombre-archivo'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
-// Duplicados de evaluadores.controller — se mantienen sincronizados para no
-// forzar un import de otro archivo que aún puede evolucionar en paralelo.
+// duplicados de evaluadores.controller: se mantienen sincronizados a mano
 const PERFIL_ADMIN = 1
 const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
-// Mimes aceptados en la subida de documentos de convocatoria. Puerta laxa a
-// propósito: los correos llegan con mimes distintos según el navegador y el
-// cliente de correo (ver formatos-correo), así que quien decide de verdad es
-// el service, contra las extensiones declaradas en TIPODOCUMENTOCONV.
+// puerta laxa: quien valida de verdad es el service, contra las extensiones de TIPODOCUMENTOCONV
 const MIMES_CONVOCATORIA = new Set<string>([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -50,8 +46,6 @@ export class ConvocatoriasController {
       throw new ForbiddenException('No tiene permisos para gestionar convocatorias del banco de evaluadores')
     }
   }
-
-  // ── Listado / Ficha ────────────────────────────────────────────────────
 
   @Get()
   @ApiOperation({ summary: 'Listado paginado de convocatorias del banco de evaluadores' })
@@ -116,8 +110,6 @@ export class ConvocatoriasController {
     return this.service.cambiarEstado(cid, Boolean(dto?.activo))
   }
 
-  // ── Documentos ─────────────────────────────────────────────────────────
-
   @Get(':cid/documentos')
   @ApiOperation({ summary: 'Listado de documentos de la convocatoria (filtrable por código de tipo)' })
   listarDocumentos(
@@ -132,10 +124,7 @@ export class ConvocatoriasController {
   @Post(':cid/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_CONV_DOC_BYTES },
-    // Validación laxa por MIME — el service refina contra las extensiones
-    // declaradas en el catálogo del tipo. El filtro compartido, además,
-    // corrige el nombre: la invitación llega como "Invitación Equipo
-    // Evaluador.pdf" y se guardaba con la tilde rota.
+    // el filtro compartido además arregla el nombre: multer entrega las tildes rotas
     fileFilter: filtroArchivo(
       f => MIMES_CONVOCATORIA.has(f.mimetype),
       'Tipo de archivo no soportado. Se aceptan PDF, XLSX, XLS y correos (.msg, .eml, .html, .mht)'),
@@ -164,15 +153,11 @@ export class ConvocatoriasController {
     const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
     const nombreFinal = (nombre ?? '').trim() || `documento_${docId}`
 
-    // La invitación puede venir como .html o .mht. Servir eso en línea lo
-    // ejecutaría en el dominio del SEP y el token está en localStorage, así
-    // que un correo preparado bastaría para robar la sesión. Esos se fuerzan
-    // a descarga; el PDF sigue abriéndose en el visor como siempre.
+    // html/mht en línea correría en el dominio del SEP y el token vive en localStorage: se fuerzan a descarga
     const ejecutable = seEjecutaEnElNavegador(nombreFinal, mime)
     res.setHeader('Content-Type', ejecutable ? 'application/octet-stream' : mime)
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    // filename + filename* (RFC 5987) para preservar UTF-8 en el nombre.
-    // Sanitizamos "double quotes" del ASCII.
+    // filename* (RFC 5987) preserva UTF-8 en el nombre
     res.setHeader(
       'Content-Disposition',
       contentDisposition(nombreFinal, !ejecutable),
@@ -192,7 +177,7 @@ export class ConvocatoriasController {
     const nombreFinal = nombre?.trim() || `documento_${docId}`
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
-    // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
+    // filename* (RFC 5987) preserva UTF-8 en el nombre
     res.setHeader(
       'Content-Disposition',
       contentDisposition(nombreFinal, false),

@@ -3,32 +3,14 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
 
-/**
- * Reporte Excel de la retroalimentación de un ciclo.
- *
- * Port de `controllers/eval/reporte.js` (FormularioInscripcionGGPC), que la
- * coordinación ya usa. Se conservan las 7 hojas y su orden porque la gente
- * sabe dónde mirar; lo que cambia es de dónde salen los datos.
- *
- *   1. Distribución        — quién evalúa a quién y en qué estado va
- *   2. Consolidado         — promedio por persona y por pregunta
- *   3. Detalle por par     — una fila por (evaluador, evaluado) con sus notas
- *   4. Comentarios         — texto abierto por persona evaluada
- *   5. Sugerencias         — respuestas sobre el proceso, sin firma
- *   6. Progreso y tiempos  — avance de diligenciamiento y minutos empleados
- *   7. Matriz cruzada      — tabla evaluador × evaluado con el promedio
- *
- * El anonimato del instrumento NO aplica aquí: este reporte es para
- * coordinación y administración, que son justamente quienes deben poder
- * auditar. El control está en el endpoint, no en el archivo.
- */
+// reporte excel de la retroalimentación de un ciclo: 7 hojas, orden fijo.
 
 const NAVY = 'FF00304D'
 const VERDE = 'FF39A900'
 const GRIS = 'FFF2F2F2'
 const BLANCO = 'FFFFFFFF'
 
-/** Verde → amarillo → rojo según qué tan cerca esté del máximo de la escala. */
+// verde → amarillo → rojo según cercanía al máximo de la escala.
 function colorPromedio(valor: number | null, max: number): string | null {
   if (valor == null) return null
   const pct = valor / max
@@ -86,9 +68,7 @@ export class RetroReporteService {
     return { buffer, nombre }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Hojas                                                                 ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // hojas
 
   private hojaDistribucion(wb: ExcelJS.Workbook, asignaciones: Asignacion[]) {
     const s = wb.addWorksheet('1. Distribución', { views: [{ state: 'frozen', ySplit: 1 }] })
@@ -126,7 +106,6 @@ export class RetroReporteService {
       ['Promedio', 11], ['Recibidas', 11],
     ])
 
-    // items → promedio por (evaluado, pregunta) en una sola pasada.
     const acumulado = new Map<string, { suma: number; n: number }>()
     for (const i of items) {
       if (i.calificacion == null) continue
@@ -169,8 +148,7 @@ export class RetroReporteService {
       }
     }
 
-    // La leyenda de las preguntas va al pie: los encabezados P1..P10 no caben
-    // con el texto completo y sin la leyenda el reporte no se entiende solo.
+    // leyenda al pie: en el encabezado P1..P10 no cabe el texto de la pregunta.
     s.addRow([])
     const titulo = s.addRow(['Preguntas de la escala'])
     titulo.font = { bold: true, color: { argb: NAVY } }
@@ -230,8 +208,7 @@ export class RetroReporteService {
   private hojaSugerencias(wb: ExcelJS.Workbook, sugerencias: Sugerencia[]) {
     const s = wb.addWorksheet('5. Sugerencias', { views: [{ state: 'frozen', ySplit: 1 }] })
     this.encabezado(s, [['Origen', 28], ['Fecha', 18], ['Sugerencia para el proceso', 110]])
-    // Sin nombre a propósito: la sugerencia es sobre el proceso y se responde
-    // con más franqueza cuando no queda firmada.
+    // sin nombre a propósito: la sugerencia no va firmada.
     if (sugerencias.length === 0) s.addRow(['(Sin sugerencias registradas)'])
     for (const g of sugerencias) {
       const fila = s.addRow([g.origen, this.fecha(g.fecha), g.texto])
@@ -288,8 +265,7 @@ export class RetroReporteService {
   ) {
     const s = wb.addWorksheet('7. Matriz cruzada', { views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }] })
 
-    // Filas = quien califica, columnas = a quién. La celda es el promedio que
-    // esa persona le puso a la otra; vacío significa que no le tocaba.
+    // filas = evaluador, columnas = evaluado; vacío = no le tocaba.
     const cabecera = ['Evaluador \\ Evaluado', ...participantes.map(p => p.nombre)]
     const fh = s.addRow(cabecera)
     fh.eachCell(c => {
@@ -328,9 +304,7 @@ export class RetroReporteService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Estilos                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // estilos
 
   private encabezado(s: ExcelJS.Worksheet, columnas: Array<[string, number]>) {
     s.columns = columnas.map(([header, width]) => ({ header, width }))
@@ -363,9 +337,7 @@ export class RetroReporteService {
     return d.toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Consultas                                                             ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // consultas
 
   private async participantes(convocatoriaId: number): Promise<Participante[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -535,8 +507,6 @@ export class RetroReporteService {
     }))
   }
 }
-
-// ── Formas internas ─────────────────────────────────────────────────────────
 
 interface Participante {
   participacionId: number; nombre: string; email: string | null

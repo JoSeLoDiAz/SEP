@@ -1,23 +1,4 @@
-/**
- * Helper para consultas Oracle que necesitan el MISMO valor en varios sitios.
- *
- * El driver `oracledb` cuenta cada aparición de un placeholder como un bind
- * independiente: escribir `:1` ocho veces y pasar un solo valor falla con
- * `NJS-098: 8 bind placeholders were used but 1 bind values were provided`.
- * No reutiliza el valor aunque el número se repita.
- *
- * Numerar a mano funciona pero se rompe en silencio en cuanto alguien agrega
- * o quita una subconsulta. Aquí se escribe un token con nombre y el helper lo
- * numera en orden de aparición y repite el valor tantas veces como haga falta.
- *
- * @example
- *   const { sql, params } = bindRepetido(
- *     `SELECT (SELECT COUNT(*) FROM A WHERE ID = :ev) AS a,
- *             (SELECT COUNT(*) FROM B WHERE ID = :ev) AS b FROM DUAL`,
- *     'ev', evaluadorId,
- *   )
- *   await dataSource.query(sql, params)   // → ':1' y ':2', params [id, id]
- */
+// oracledb cuenta cada aparición del placeholder como un bind distinto, no reutiliza el valor
 export function bindRepetido(
   plantilla: string,
   token: string,
@@ -29,14 +10,7 @@ export function bindRepetido(
   return { sql, params: Array(n - desde).fill(valor) }
 }
 
-/**
- * Versión para varios tokens. Los numera en el orden en que aparecen en el
- * texto, no en el orden del objeto — que es lo que exige el bind posicional.
- *
- * @example
- *   bindsRepetidos(`... :pid ... :anio ... :pid ...`, { pid: 7, anio: 2025 })
- *   // → ':1 ... :2 ... :3', params [7, 2025, 7]
- */
+// numera por orden de aparición en el texto, no por orden del objeto: lo exige el bind posicional
 export function bindsRepetidos(
   plantilla: string,
   valores: Record<string, unknown>,
@@ -53,14 +27,7 @@ export function bindsRepetidos(
   return { sql, params }
 }
 
-/**
- * Parte una lista de ids en bloques que quepan en un `IN (...)`.
- *
- * Oracle rechaza con `ORA-01795` una lista literal de más de 1000 elementos.
- * Es un límite que no aparece en desarrollo —con 40 evaluadores nunca se toca—
- * y revienta el día que el banco crece. Quien consulta por ids debe recorrer
- * los bloques y concatenar resultados.
- */
+// ORA-01795: Oracle no acepta más de 1000 elementos en un IN (...)
 export function enBloques<T>(ids: T[], tam = 900): T[][] {
   if (ids.length <= tam) return ids.length ? [ids] : []
   const bloques: T[][] = []

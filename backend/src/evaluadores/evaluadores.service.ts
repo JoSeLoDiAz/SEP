@@ -215,7 +215,7 @@ export interface EvaluadorListaItem {
  */
 const PRUEBA_VIGENTE = `EXISTS (
   SELECT 1 FROM (
-    SELECT pr.APROBADA, pr.PUNTAJEMAYOR, pr.PUNTAJEMINIMO, pr.ANIO,
+    SELECT pr.APROBADA, pr.EFECTIVIDAD, pr.PUNTAJEMINIMO, pr.ANIO,
            ROW_NUMBER() OVER (ORDER BY pr.ANIO DESC, pr.PRUEBAID DESC) AS rn
       FROM EVALUADORPRUEBA pr
      WHERE pr.EVALUADORID = e.EVALUADORID
@@ -223,7 +223,7 @@ const PRUEBA_VIGENTE = `EXISTS (
    WHERE u.rn = 1
      AND u.ANIO >= EXTRACT(YEAR FROM SYSDATE) - 1
      AND (u.APROBADA = 1
-          OR (u.PUNTAJEMINIMO IS NOT NULL AND u.PUNTAJEMAYOR >= u.PUNTAJEMINIMO)))`
+          OR (u.PUNTAJEMINIMO IS NOT NULL AND u.EFECTIVIDAD >= u.PUNTAJEMINIMO)))`
 
 export interface MulterFile {
   originalname: string
@@ -2011,6 +2011,25 @@ export class EvaluadoresService {
     }
   }
 
+  /**
+   * ¿Aprobó la prueba? Se decide por el PORCENTAJE, no por el puntaje bruto.
+   *
+   * El puntaje depende de cuántas preguntas trajo el examen —40 sobre 50 no es
+   * lo mismo que 40 sobre 100— así que compararlo contra un corte fijo no
+   * significa nada de un año a otro. Ya había una fila con corte 70 medida
+   * contra un puntaje de 41 y marcada como no aprobada: el 41 era sobre 50,
+   * o sea un 82 %, y sí pasaba.
+   *
+   * Sin porcentaje no se decide: queda en nulo, que la pantalla muestra como
+   * "sin evaluar". Es preferible a inventar un aprobado o un reprobado.
+   */
+  private derivarAprobada(
+    efectividad: number | null | undefined, minimo: number | null | undefined,
+  ): boolean | null {
+    if (efectividad == null || minimo == null) return null
+    return Number(efectividad) >= Number(minimo)
+  }
+
   async crearPrueba(evaluadorId: number, dto: PruebaDto) {
     if (!dto.anio) throw new BadRequestException('Año requerido')
     this.validarPuntajes(dto)
@@ -2019,9 +2038,7 @@ export class EvaluadoresService {
 
     const ciclo = await this.resolverCicloDePrueba(evaluadorId, dto)
     const minimo = dto.puntajeMinimo ?? ciclo.puntajeMinimo
-    const aprobada = dto.puntajeMayor != null && minimo != null
-      ? Number(dto.puntajeMayor) >= Number(minimo)
-      : null
+    const aprobada = this.derivarAprobada(dto.efectividad, minimo)
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
       `SELECT EVALUADORPRUEBA_SEQ.NEXTVAL FROM dual`,
@@ -2056,8 +2073,13 @@ export class EvaluadoresService {
       participacionId: ciclo.participacionId,
       puntajeMinimo: minimo ?? null,
       aprobada,
+      // Se dice CUÁL de los dos falta. "Sin nota de corte" cuando lo que
+      // faltaba era el porcentaje mandaba a revisar la convocatoria, que
+      // estaba bien.
       message: aprobada == null
-        ? 'Prueba registrada (sin nota de corte definida, no se puede determinar si aprobó)'
+        ? (dto.efectividad == null
+            ? 'Prueba registrada — falta el porcentaje, así que queda sin evaluar'
+            : 'Prueba registrada — el ciclo no tiene porcentaje mínimo, así que queda sin evaluar')
         : `Prueba registrada — ${aprobada ? 'aprobada' : 'no aprobada'}`,
     }
   }
@@ -2139,12 +2161,32 @@ export class EvaluadoresService {
       }
     }
     if (sets.length === 0) return { message: 'Sin cambios' }
+
+    // APROBADA se recalcula SIEMPRE, no solo si vino en el cuerpo. Es un dato
+    // derivado: si se corrige el porcentaje y el aprobado se quedara con el
+    // valor anterior, el hito del ciclo estaría diciendo lo contrario de lo
+    // que muestra la nota, y nadie lo notaría hasta certificar.
+    const actual: Array<{ efectividad: number | null; minimo: number | null }> =
+      await this.dataSource.query(
+        `SELECT EFECTIVIDAD AS "efectividad", PUNTAJEMINIMO AS "minimo"
+           FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
+    const efectividad = dto.efectividad !== undefined ? dto.efectividad : actual[0]?.efectividad
+    const minimo = dto.puntajeMinimo !== undefined ? dto.puntajeMinimo : actual[0]?.minimo
+    const aprobada = this.derivarAprobada(efectividad, minimo)
+    params.push(aprobada == null ? null : (aprobada ? 1 : 0))
+    sets.push(`APROBADA = :${params.length}`)
+
     params.push(pruebaId)
     await this.dataSource.query(
       `UPDATE EVALUADORPRUEBA SET ${sets.join(', ')} WHERE PRUEBAID = :${params.length}`,
       params,
     )
-    return { message: 'Prueba actualizada' }
+    return {
+      message: aprobada == null
+        ? 'Prueba actualizada — sin porcentaje o sin corte, queda sin evaluar'
+        : `Prueba actualizada — ${aprobada ? 'aprobada' : 'no aprobada'}`,
+      aprobada,
+    }
   }
 
   async eliminarPrueba(pruebaId: number) {

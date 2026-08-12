@@ -14,10 +14,7 @@ import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
 
-/**
- * Cómo se llaman en pantalla las columnas del ciclo, para que un "valor
- * demasiado grande" diga el nombre del campo y no el de la columna.
- */
+/** Nombre de pantalla de cada columna, para el error de "valor demasiado grande". */
 const CAMPOS_PARTICIPACION: Record<string, string> = {
   MESA: 'Mesa',
   EQUIPOEVALUADOR: 'Equipo evaluador',
@@ -54,10 +51,7 @@ export interface EvaluadorCrearDto {
   jefeEmail?: string
   jefeCargo?: string
   municipioId?: number
-  /**
-   * Clave de acceso al SEP. Si no viene, se genera una y se devuelve UNA sola
-   * vez en la respuesta para que el gestor se la entregue al evaluador.
-   */
+  /** Si no viene, se genera y se devuelve una sola vez en la respuesta. */
   claveInicial?: string
 }
 
@@ -76,7 +70,7 @@ export interface EvaluadorActualizarDto {
   jefeEmail?: string | null
   jefeCargo?: string | null
   municipioId?: number | null
-  // PERSONA (opcional — si vienen, se actualizan en la fila PERSONA asociada)
+  // PERSONA (opcional)
   nombres?: string
   primerApellido?: string
   segundoApellido?: string | null
@@ -201,18 +195,7 @@ export interface EvaluadorListaItem {
   ciclos: CicloResumido[]
 }
 
-/**
- * "Prueba vigente" — un solo predicado para el filtro y para el flag.
- *
- * Mira **la última** prueba del evaluador, no cualquiera de los últimos dos
- * años. La diferencia no es cosmética: quien aprobó en 2025 y reprobó en 2026
- * NO está vigente, y con el `EXISTS` suelto que había antes salía como si lo
- * estuviera — la tarjeta y la sábana decían "Sí" mientras la ficha decía "No".
- *
- * Es el mismo criterio de `TrayectoriaService.getResumen`, expresado en SQL.
- * Correlaciona por `e.EVALUADORID`, así que solo sirve dentro de una consulta
- * que tenga a `EVALUADOR` con el alias `e`.
- */
+/** Mira la ÚLTIMA prueba. Correlaciona por `e.EVALUADORID`: exige el alias `e`. */
 const PRUEBA_VIGENTE = `EXISTS (
   SELECT 1 FROM (
     SELECT pr.APROBADA, pr.EFECTIVIDAD, pr.PUNTAJEMINIMO, pr.ANIO,
@@ -236,31 +219,13 @@ export interface MulterFile {
 export class EvaluadoresService {
   private readonly log = new Logger(EvaluadoresService.name)
 
-  /** Se apaga en cuanto Oracle diga que la columna de miniaturas no está, para
-   *  no repetir la misma consulta fallida con cada foto de cada pantalla. */
+  /** Se apaga si Oracle dice que EVALUADORFOTOMINI no existe (v50 sin correr). */
   private hayColumnaMiniatura = true
 
-  /**
-   * ¿Falló porque falta EVALUADORFOTOMINI? Entonces la v50 no se ha corrido y
-   * se sigue trabajando con la foto original, que es como funcionaba antes.
-   *
-   * En este proyecto el código llega al servidor antes que las migraciones —
-   * son dos pasos distintos y a veces media un día. Que las fotos dejaran de
-   * verse, o de poder cargarse, por una columna que todavía no está sería un
-   * daño mucho mayor que el que esa columna vino a arreglar.
-   */
   /** null = todavia no se ha mirado. Ver `columnaDinamizador()`. */
   private columnaDinamizadorPresente: boolean | null = null
 
-  /**
-   * ¿Falló porque falta EVALUADORPARTICIPACION.DINAMIZADOR?
-   *
-   * El código llega al servidor antes que las migraciones —son dos pasos y a
-   * veces media un día—, y sin esto guardar CUALQUIER participación reventaría
-   * con un error de Oracle que no menciona la columna nueva. El campo es un
-   * añadido; que su ausencia impidiera registrar un ciclo sería un daño
-   * bastante mayor que el que vino a resolver.
-   */
+  /** ORA-00904 aquí = falta EVALUADORPARTICIPACION.DINAMIZADOR (v51 sin correr). */
   private faltaLaColumnaDinamizador(e: unknown): boolean {
     if (!/ORA-00904/.test((e as Error)?.message ?? '')) return false
     this.columnaDinamizadorPresente = false
@@ -271,18 +236,7 @@ export class EvaluadoresService {
     return true
   }
 
-  /**
-   * ¿Existe ya EVALUADORPARTICIPACION.DINAMIZADOR?
-   *
-   * Se le pregunta al diccionario, no a un error. Una bandera que solo se
-   * apagara al fallar se queda apagada para siempre: si el proceso arranca
-   * antes de que se corra la migración —que es lo normal, porque el código
-   * llega primero— el campo seguiría sin guardarse aunque la columna ya
-   * estuviera, y habría que acordarse de reiniciar el servidor. Así se entera
-   * solo. Cuando la respuesta es que sí, se recuerda y no se vuelve a
-   * preguntar; mientras sea que no, la consulta es de diccionario y cuesta
-   * nada.
-   */
+  /** Se pregunta al diccionario, no a un error: la migración puede correrse con el proceso arriba. */
   private async columnaDinamizador(): Promise<boolean> {
     if (this.columnaDinamizadorPresente === true) return true
     const filas: Array<{ n: number }> = await this.dataSource.query(
@@ -310,9 +264,7 @@ export class EvaluadoresService {
     private readonly auditoria: AuditoriaService,
   ) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Búsqueda previa (al crear)                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Búsqueda previa (al crear)
 
   async buscarPorDocumento(tipoDocumentoIdentidadId: number, identificacion: string) {
     const id = (identificacion ?? '').trim()
@@ -359,38 +311,23 @@ export class EvaluadoresService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Listado / Ficha                                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Listado / Ficha
 
-  /**
-   * Listado del banco con los filtros que la operación necesita.
-   *
-   * Cada tarjeta trae los últimos años del evaluador y sus alertas, porque el
-   * uso real no es "buscar a Fulano" sino "quiénes están listos", "a quién le
-   * falta la cédula", "quiénes participaron en 2025". Sin eso, decidir a quién
-   * invitar obliga a abrir fichas una por una.
-   */
+  /** Listado del banco: cada tarjeta trae sus últimos años y sus alertas. */
   async listar(
     busqueda: string, page = 1, limit = 20, filtros: EvaluadorFiltros = {},
     topePagina = 100,
   ) {
     const q = (busqueda ?? '').trim()
-    // `page` y `limit` son los ÚNICOS valores que se interpolan en el SQL en
-    // vez de ir por bind (Oracle no admite bind en OFFSET/FETCH). Un `NaN` se
-    // imprimiría literalmente como el texto "NaN" y reventaría con ORA-00933:
-    // `?limit=abc` daba un 500. `entero()` los deja siempre en un entero seguro.
+    // page y limit se interpolan: Oracle no admite bind en OFFSET/FETCH.
     const entero = (v: unknown, porDefecto: number) => {
       const n = Math.trunc(Number(v))
       return Number.isFinite(n) ? n : porDefecto
     }
     const pagina = Math.max(1, entero(page, 1))
-    // El tope existe para que un `?limit=99999` desde el navegador no arrastre
-    // el banco entero. La exportación a Excel sí necesita pasarse de 100, y lo
-    // hace subiendo `topePagina` explícitamente — nunca desde la query string.
+    // El tope solo se sube desde el servidor (`topePagina`), nunca por query string.
     const tamPag = Math.min(entero(topePagina, 100), Math.max(1, entero(limit, 20)))
-    // Números ≥ 1e21 se serializan en notación exponencial ("2e+21"), que
-    // tampoco es SQL válido; el tope corta eso antes de llegar a la consulta.
+    // Un número ≥ 1e21 se interpolaría como "2e+21" y no es SQL válido.
     const offset = Math.min((pagina - 1) * tamPag, 1_000_000)
 
     const params: unknown[] = []
@@ -400,15 +337,9 @@ export class EvaluadoresService {
     cond.push(filtros.incluirInactivos ? '1 = 1' : 'e.EVALUADORACTIVO = 1')
 
     if (q) {
-      // Se escapan los comodines: si alguien teclea "%" no debe convertirse
-      // en "trae todo".
+      // Se escapan los comodines: un "%" tecleado no debe traer todo.
       const like = `%${q.toUpperCase().replace(/([%_\\])/g, '\\$1')}%`
-      // ⚠️ PERSONANOMBRES y PERSONAPRIMERAPELLIDO son NCHAR(100) y NCHAR(20):
-      // Oracle los devuelve rellenos de espacios hasta el ancho fijo. Sin TRIM,
-      // concatenarlos produce "Ana<97 espacios> Ríos<15 espacios>" y buscar
-      // "Ana Ríos" no encontraba NADA — solo funcionaba buscar una palabra
-      // suelta. El apellido va con NVL porque un segundo apellido nulo
-      // anulaba la concatenación entera.
+      // Los nombres son NCHAR: vienen rellenos de espacios, sin TRIM la concatenación no matchea.
       const nombreCompleto = `TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO)`
         + ` || ' ' || TRIM(NVL(p.PERSONASEGUNDOAPELLIDO, ' '))`
       cond.push(`(UPPER(${nombreCompleto}) LIKE ${bind(like)} ESCAPE '\\'
@@ -418,8 +349,7 @@ export class EvaluadoresService {
     if (filtros.regionalId) cond.push(`e.REGIONALID = ${bind(filtros.regionalId)}`)
     if (filtros.centroId) cond.push(`e.CENTROID = ${bind(filtros.centroId)}`)
 
-    // Los filtros por ciclo se resuelven con EXISTS: un evaluador entra si
-    // ALGUNA de sus participaciones cumple, sin multiplicar filas por join.
+    // EXISTS y no join: basta con que ALGUNA participación cumpla, sin multiplicar filas.
     const condCiclo: string[] = []
     if (filtros.anio) condCiclo.push(`pa.ANIO = ${bind(filtros.anio)}`)
     if (filtros.procesoId) condCiclo.push(`pa.PROCESOID = ${bind(filtros.procesoId)}`)
@@ -434,11 +364,7 @@ export class EvaluadoresService {
                          WHERE pa.EVALUADORID = e.EVALUADORID AND ${condCiclo.join(' AND ')})`)
     }
 
-    // Los tres flags se comparan contra null, no por truthiness: `false`
-    // significa "solo los que SÍ la tienen", que es una pregunta legítima
-    // ("¿a quiénes ya les llegó la cédula?"). Tratándolo como truthy, un
-    // `?sinCedula=false` no filtraba nada y la sábana anunciaba en su cabecera
-    // un filtro que no había aplicado.
+    // Contra null, no por truthiness: `false` significa "solo los que SÍ la tienen".
     if (filtros.sinCedula != null) {
       const tieneCedula = `EXISTS (SELECT 1 FROM EVALUADORDOCUMENTO d
                                     JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
@@ -446,8 +372,7 @@ export class EvaluadoresService {
       cond.push(filtros.sinCedula ? `NOT ${tieneCedula}` : tieneCedula)
     }
     if (filtros.sinFoto != null) {
-      // Mismo criterio que la columna "tieneFoto": una foto vacía cuenta como
-      // que no hay foto, para que el filtro la encuentre y se pueda recargar.
+      // Mismo criterio que "tieneFoto": una foto vacía cuenta como que no hay foto.
       const conFoto = 'NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0'
       cond.push(filtros.sinFoto ? `NOT (${conFoto})` : conFoto)
     }
@@ -479,11 +404,7 @@ export class EvaluadoresService {
               TRIM(e.EVALUADORPROFESION)     AS "profesion",
               e.EVALUADORACTIVO              AS "activo",
               TRIM(r.REGIONALNOMBRE)         AS "regionalNombre",
-              -- Se exigen BYTES, no solo que la columna no sea nula. Una foto
-              -- que se guardó a medias deja un BLOB vacío: con IS NOT NULL
-              -- la tarjeta decía que sí tenía foto, no salía el chip "SIN
-              -- FOTO", y aun así no se veía nada. Quedaba invisible para el
-              -- filtro de "sin foto", que es justo donde había que buscarla.
+              -- Se exigen BYTES: una foto a medias deja un BLOB vacío, no nulo.
               CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
                    THEN 1 ELSE 0 END          AS "tieneFoto",
               (SELECT COUNT(*) FROM EVALUADORPARTICIPACION pa
@@ -513,8 +434,7 @@ export class EvaluadoresService {
       params,
     )
 
-    // Se arma campo por campo en vez de con spread: así el tipo de retorno es
-    // el contrato real de la tarjeta y no "lo que devolvió el SELECT".
+    // Campo por campo y no spread: el tipo de retorno es el contrato de la tarjeta.
     const texto = (v: unknown) => (v == null ? null : String(v))
     const items: EvaluadorListaItem[] = rows.map(r => ({
       evaluadorId: Number(r.evaluadorId),
@@ -538,17 +458,12 @@ export class EvaluadoresService {
       ciclos: [],
     }))
 
-    // Los chips de años se traen en UNA consulta para todos los de la página,
-    // en vez de una por tarjeta.
+    // Los chips de años: una consulta para toda la página, no una por tarjeta.
     if (items.length) {
       const porEvaluador = new Map<number, CicloResumido[]>()
       for (const bloque of enBloques(items.map(i => i.evaluadorId))) {
         const marcadores = bloque.map((_, i) => `:${i + 1}`).join(',')
-        // Nada impide dos participaciones del mismo año (p. ej. FCE p1 y FEEC
-        // p2), así que el desempate por PARTICIPACIONID no es adorno: sin él,
-        // cuál de los dos estados se pinta en el chip cambia entre recargas.
-        // El ORDER BY externo tampoco sobra — un SELECT sin él no garantiza
-        // el orden de llegada, y los chips salían desordenados.
+        // Puede haber dos ciclos del mismo año: sin el desempate el chip cambia entre recargas.
         const ciclos: Array<Record<string, unknown>> = await this.dataSource.query(
           `SELECT * FROM (
              SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
@@ -594,7 +509,7 @@ export class EvaluadoresService {
               TRIM(e.EVALUADORJEFECARGO)      AS "jefeCargo",
               e.EVALUADORMUNICIPIOID          AS "municipioId",
               e.EVALUADORACTIVO               AS "activo",
-              -- Igual que en el listado: sin bytes no hay foto que mostrar.
+              -- Sin bytes no hay foto que mostrar.
               CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
                    THEN 1 ELSE 0 END           AS "tieneFoto",
               TRIM(p.PERSONAIDENTIFICACION)   AS "identificacion",
@@ -643,9 +558,7 @@ export class EvaluadoresService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Crear / Actualizar / Desactivar                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Crear / Actualizar / Desactivar
 
   async crear(dto: EvaluadorCrearDto) {
     if (!dto.identificacion?.trim()) throw new BadRequestException('Identificación requerida')
@@ -662,7 +575,6 @@ export class EvaluadoresService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // Buscar PERSONA por identificación. Si existe, reusar; si no, crear.
       // TRIM porque PERSONAIDENTIFICACION es NCHAR(20) y rellena con espacios.
       let personaId: number
       const existente: Array<{ id: number }> = await qr.query(
@@ -671,7 +583,6 @@ export class EvaluadoresService {
       )
       if (existente[0]) {
         personaId = Number(existente[0].id)
-        // Verificar que no tenga ya un EVALUADOR activo
         const yaEval: Array<{ id: number }> = await qr.query(
           `SELECT EVALUADORID AS "id" FROM EVALUADOR WHERE PERSONAID = :1`,
           [personaId],
@@ -682,8 +593,7 @@ export class EvaluadoresService {
       } else {
         const seq: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
         personaId = Number(seq[0].NEXTVAL)
-        // Normalizar a Title Case para uniformar el banco (afecta solo nombres y apellidos —
-        // emails, identificación, celular y ciudad NO se tocan).
+        // Title Case solo en nombres y apellidos.
         const nombres = aTitleCase(dto.nombres) ?? ''
         const primerApellido = aTitleCase(dto.primerApellido) ?? ''
         const segundoApellido = aTitleCase(dto.segundoApellido) ?? ''
@@ -710,10 +620,7 @@ export class EvaluadoresService {
 
       const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL FROM dual`)
       const evaluadorId = Number(seqE[0].NEXTVAL)
-      // El jefe directo va en las tres columnas estructuradas de la v25.
-      // EVALUADORJEFEDIR, EVALUADORQUIENAPRUEBA y EVALUADOROTROSEST se
-      // dropearon en la v36: el aprobador vive ahora en EVALUADORAPROBACION
-      // (por ciclo) y los otros estudios en EVALUADORESTUDIO.
+      // EVALUADORJEFEDIR, EVALUADORQUIENAPRUEBA y EVALUADOROTROSEST se dropearon en la v36.
       await qr.query(
         `INSERT INTO EVALUADOR
            (EVALUADORID, PERSONAID, CENTROID, REGIONALID, EVALUADORCARGO, EVALUADORPROFESION,
@@ -734,15 +641,7 @@ export class EvaluadoresService {
         ],
       )
 
-      // La cuenta va en la MISMA transacción que el evaluador: si algo falla,
-      // no queda un evaluador sin acceso ni una cuenta sin evaluador.
-      //
-      // Con el correo INSTITUCIONAL, no con el personal. Las cuentas del SEP
-      // son institucionales: crearla con el gmail de la persona genera una
-      // segunda cuenta para alguien que ya entra con su correo @sena, y a
-      // partir de ahí tiene dos identidades y su historia queda partida.
-      // El personal solo se usa si no hay institucional, para no dejar sin
-      // acceso a un evaluador externo.
+      // Misma transacción que el evaluador, y con el correo institucional si lo hay.
       const acceso = await this.provisionarCuenta(qr, {
         email: ((dto.emailInstitucional ?? '').trim() || (dto.email ?? '').trim()).toLowerCase(),
         emailAlterno: (dto.email ?? '').trim().toLowerCase(),
@@ -765,22 +664,7 @@ export class EvaluadoresService {
     }
   }
 
-  /**
-   * Da acceso al SEP a la persona recién registrada como evaluadora.
-   *
-   * Desde que la retroalimentación vive dentro del SEP, el evaluador TIENE que
-   * poder entrar: si no, no hay forma de que diligencie. Esto reemplaza la
-   * decisión #9 del doc 00 ("el evaluador no inicia sesión"), que quedó
-   * obsoleta al absorber el módulo.
-   *
-   * Tres casos, y los tres importan:
-   *   - sin correo            → no se crea nada y se dice por qué
-   *   - la persona ya entra   → NO se toca su cuenta ni su clave; solo se le
-   *                             suma el perfil 9 (multirol). Es el caso de
-   *                             quien ya es Profesional de Seguimiento y
-   *                             además va a evaluar
-   *   - persona nueva         → cuenta nueva con perfil 9 predeterminado
-   */
+  /** Si la persona ya entra al SEP no se toca su clave: solo se le suma el perfil 9. */
   private async provisionarCuenta(
     qr: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
     datos: { email: string; emailAlterno?: string; claveInicial?: string },
@@ -789,11 +673,7 @@ export class EvaluadoresService {
     perfilAgregado: boolean
     usuarioId: number | null
     claveInicial: string | null
-    /**
-     * El correo con el que REALMENTE quedó la cuenta. Es lo que hay que
-     * entregarle al evaluador: el login compara exacto contra USUARIOEMAIL, así
-     * que mostrar otro correo en la pantalla de credenciales le impide entrar.
-     */
+    /** Con el que quedó la cuenta: el login compara exacto contra USUARIOEMAIL. */
     email: string | null
     detalle: string
   }> {
@@ -806,17 +686,12 @@ export class EvaluadoresService {
       }
     }
 
-    // Se busca por los DOS correos, no solo por el que se va a usar. Quien ya
-    // entra al SEP con su personal —o con una cuenta creada antes de que esto
-    // usara el institucional— no debe terminar con dos identidades: se le suma
-    // el perfil a la que ya tiene. Crear la segunda le partiría la historia y
-    // lo dejaría sin saber con cuál entrar.
+    // Por los DOS correos: quien ya entra con el personal no debe quedar con dos cuentas.
     const correos = [email, (datos.emailAlterno ?? '').trim().toLowerCase()]
       .filter(Boolean)
       .filter((c, i, a) => a.indexOf(c) === i)
     const marcadores = correos.map((_, i) => `:${i + 1}`).join(',')
-    // Se trae también el correo: si la cuenta ya existía puede estar bajo el
-    // personal, y ese —no el institucional— es el que la persona debe teclear.
+    // Se trae el correo porque la cuenta vieja puede estar bajo el personal.
     const existentes = (await qr.query(
       `SELECT USUARIOID AS "id", TRIM(USUARIOEMAIL) AS "email" FROM USUARIO
         WHERE LOWER(TRIM(USUARIOEMAIL)) IN (${marcadores})
@@ -852,8 +727,7 @@ export class EvaluadoresService {
         }
       }
 
-      // Perfil adicional, no predeterminado: no se le cambia la experiencia
-      // por defecto a alguien que ya usa el sistema para otra cosa.
+      // Perfil adicional, no predeterminado: ya usa el sistema para otra cosa.
       await qr.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
@@ -906,11 +780,7 @@ export class EvaluadoresService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // ── EVALUADOR ────────────────────────────────────────────────────────
-      // jefeNombre pasa por Title Case y jefeEmail por lowercase+trim.
-      // Los campos legacy (jefeDirecto, quienAprueba, otrosEstudios) ya no se
-      // mapean: sus columnas se dropearon en la v36. Si un cliente viejo los
-      // sigue enviando, se ignoran en silencio en vez de romper el guardado.
+      // EVALUADOR. Los campos legacy no se mapean: sus columnas se dropearon en la v36.
       const setsEval: string[] = []
       const paramsEval: unknown[] = []
       const mapEval: Array<[keyof EvaluadorActualizarDto, string]> = [
@@ -956,8 +826,7 @@ export class EvaluadoresService {
         )
       }
 
-      // ── PERSONA ──────────────────────────────────────────────────────────
-      // Los campos de nombre pasan por Title Case; los demás quedan tal cual (trim).
+      // PERSONA
       const CAMPOS_NOMBRE: ReadonlySet<keyof EvaluadorActualizarDto> = new Set([
         'nombres', 'primerApellido', 'segundoApellido',
       ])
@@ -1017,9 +886,7 @@ export class EvaluadoresService {
     return { message: activo ? 'Evaluador activado' : 'Evaluador desactivado' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Foto                                                                  ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Foto
 
   async subirFoto(evaluadorId: number, file: MulterFile) {
     if (!file?.buffer) throw new BadRequestException('Adjunta una imagen en el campo "archivo"')
@@ -1029,10 +896,7 @@ export class EvaluadoresService {
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
-    // Se revisa el CONTENIDO antes de guardar. Un archivo vacío, o uno que
-    // por dentro no es una imagen, se guardaba igual: la ficha decía que el
-    // evaluador tenía foto y en pantalla no aparecía nada. Es preferible que
-    // falle aquí, con el motivo a la vista de quien está cargando.
+    // Se revisa el contenido, no la extensión ni el mime que anuncia el navegador.
     if (file.buffer.length === 0) {
       throw new BadRequestException(
         'El archivo llegó vacío. Revisa que la imagen abra en tu equipo y vuelve a cargarla.',
@@ -1046,13 +910,9 @@ export class EvaluadoresService {
       )
     }
 
-    // Manda lo que dice el contenido, no lo que anuncia el navegador: si no
-    // coinciden, guardar el anunciado deja un Content-Type que no case con
-    // los bytes y el navegador se niega a dibujarla.
     const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
 
-    // La miniatura se guarda junto con la original, en el mismo UPDATE: así no
-    // hay un instante en que la foto sea nueva y la miniatura sea la anterior.
+    // Miniatura y original en el mismo UPDATE, para que nunca queden desparejas.
     if (this.hayColumnaMiniatura) {
       const mini = await miniaturaDeFoto(file.buffer)
       try {
@@ -1094,9 +954,7 @@ export class EvaluadoresService {
     if (!r || !r.foto) throw new NotFoundException('Foto no encontrada')
     const buffer = await this.lobToBuffer(r.foto)
 
-    // Devolver 200 con cero bytes es la peor respuesta posible: el navegador
-    // no dibuja nada, no hay error que mostrar, y la pantalla queda igual que
-    // si el evaluador nunca hubiera tenido foto. Un 404 con motivo sí se ve.
+    // Un 200 con cero bytes no se ve ni da error; un 404 con motivo sí.
     if (buffer.length === 0) {
       this.log.warn(`Evaluador ${evaluadorId}: la foto está en la BD pero vacía (0 bytes)`)
       throw new NotFoundException(
@@ -1104,9 +962,7 @@ export class EvaluadoresService {
       )
     }
 
-    // Si lo guardado no empieza como una imagen, el navegador tampoco la va a
-    // dibujar. Se sirve igual —puede ser un formato que no conozcamos— pero
-    // queda en el log con qué llegó, que es lo que hace falta para saberlo.
+    // Se sirve igual por si es un formato que no conocemos, pero queda en el log.
     if (!empiezaComoImagen(buffer)) {
       this.log.warn(
         `Evaluador ${evaluadorId}: la foto no parece una imagen ` +
@@ -1118,19 +974,9 @@ export class EvaluadoresService {
     return { buffer, mime: r.mime || 'image/jpeg', nombre: r.nombre ?? null }
   }
 
-  /**
-   * La foto en tamaño de pantalla. Es la que pide el banco y la ficha del
-   * evaluador; la original queda para descargar y para el PDF.
-   *
-   * Si la fila todavía no tiene miniatura —las cargadas antes de la v50— se
-   * genera aquí y se guarda, de modo que solo la primera visita paga el
-   * trabajo. Nadie tiene que volver a subir nada ni correr ningún script.
-   */
+  /** Foto en tamaño de pantalla. Si la fila no la tiene, se genera aquí y se guarda. */
   async getFotoMiniatura(evaluadorId: number): Promise<{ buffer: Buffer; mime: string; nombre: string | null }> {
-    // Si la v50 todavía no se ha corrido, la columna no existe y aquí no hay
-    // nada que hacer más que servir la original. El código suele llegar al
-    // servidor antes que las migraciones, y una foto pesada se sigue viendo:
-    // que no se vea NINGUNA por una columna que falta sería mucho peor.
+    // Sin la columna de la v50 no hay más que servir la original.
     if (!this.hayColumnaMiniatura) return this.getFoto(evaluadorId)
 
     let rows: Array<{ mini: Buffer | null; nombre: string | null }>
@@ -1161,9 +1007,7 @@ export class EvaluadoresService {
         [generada, evaluadorId],
       )
     } catch (e) {
-      // Guardarla es una optimización, no el objetivo: si el UPDATE falla se
-      // sirve igual la miniatura y solo se paga el trabajo otra vez. La
-      // pantalla no se entera.
+      // Guardarla es optimización: si falla, se vuelve a generar la próxima vez.
       this.log.warn(`No se pudo guardar la miniatura del evaluador ${evaluadorId}: ${(e as Error).message}`)
     }
 
@@ -1205,19 +1049,14 @@ export class EvaluadoresService {
     })
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Participaciones                                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Participaciones
 
   async listarParticipaciones(evaluadorId: number): Promise<Array<Record<string, unknown>>> {
     let rows: Array<Record<string, unknown>>
     try {
       rows = await this.consultarParticipaciones(evaluadorId, await this.columnaDinamizador())
     } catch (e) {
-      // La consulta también nombra DINAMIZADOR. Si la v51 no se ha corrido,
-      // revienta ANTES de que el INSERT pudiera enterarse, así que el aviso
-      // tiene que estar también aquí — si no, la pantalla del evaluador se
-      // queda en blanco con un 500 mudo.
+      // La consulta también nombra DINAMIZADOR, así que el reintento hace falta aquí.
       if (!this.faltaLaColumnaDinamizador(e)) throw e
       rows = await this.consultarParticipaciones(evaluadorId, false)
     }
@@ -1243,27 +1082,14 @@ export class EvaluadoresService {
               TRIM(es.NOMBRE)            AS "estadoNombre",
               NVL(es.ESNEGATIVO, 0)      AS "estadoNegativo",
               TRIM(pa.MOTIVONOPARTICIPA) AS "motivoNoParticipa",
-              -- Los identificadores hacen falta para poder CORREGIR la
-              -- participación: sin ellos el formulario de edición no puede
-              -- dejar preseleccionado lo que ya estaba, y el gestor tendría
-              -- que volver a escoger convocatoria y área a ciegas.
+              -- Los ids hacen falta para preseleccionar al editar.
               pa.CONVOCATORIAID          AS "convocatoriaId",
               pa.AREAID                  AS "areaId",
               TRIM(pa.MESA)              AS "mesa",
               TRIM(pa.EQUIPOEVALUADOR)   AS "equipoEvaluador",
               pa.DINAMIZADORPERSONAID    AS "dinamizadorPersonaId",
-              -- El texto libre manda; si está vacío se cae al nombre de la
-              -- persona enlazada, para que las filas anteriores a la v51 se
-              -- sigan viendo igual.
-              -- El TRIM de fuera no es adorno: sin dinamizador, concatenar dos
-              -- nombres nulos deja " ", y un espacio es "algo" para la pantalla
-              -- —pintaba la fila "Dinamizó" en blanco—. En Oracle, TRIM de
-              -- solo espacios ya devuelve nulo, así que basta con eso; NULLIF
-              -- con '' daría ORA-12704, porque los nombres son NVARCHAR2 y esa
-              -- comilla vacía es VARCHAR2.
-              -- TO_NCHAR: DINAMIZADOR es VARCHAR2 —como MESA y EQUIPOEVALUADOR—
-              -- y los nombres de PERSONA son NVARCHAR2. Mezclarlos en un
-              -- COALESCE da ORA-12704 y tumba la pantalla entera del evaluador.
+              -- TRIM externo: sin dinamizador la concatenación deja " " (NULLIF con '' daría ORA-12704)
+              -- TO_NCHAR: DINAMIZADOR es VARCHAR2 y los nombres NVARCHAR2
               ${conDinamizador
                 ? `TRIM(COALESCE(TO_NCHAR(pa.DINAMIZADOR),
                      TRIM(d.PERSONANOMBRES) || ' ' || TRIM(d.PERSONAPRIMERAPELLIDO)))`
@@ -1286,18 +1112,13 @@ export class EvaluadoresService {
       ...r,
       participacionId: Number(r.participacionId),
       anio: Number(r.anio),
-      // `procesoRevocado` era una bandera NUMBER(1) que se dropeó en la v36.
-      // Se deriva del estado para no romper a los clientes que aún la leen.
+      // La columna PROCESOREVOCADO se dropeó en la v36: se deriva del estado.
       procesoRevocado: r.estadoCodigo === 'REVOCADO',
       estadoNegativo: Number(r.estadoNegativo) === 1,
     }))
   }
 
-  /**
-   * Traduce el código de modalidad ('PRESENCIAL', 'PAT', 'VIRTUAL') al id del
-   * catálogo. El front sigue mandando el texto y no hay razón para obligarlo a
-   * conocer ids que cambian por entorno.
-   */
+  /** Código de modalidad → id del catálogo; los ids cambian por entorno. */
   private async idModalidad(codigo?: string | null): Promise<number | null> {
     const c = (codigo ?? '').trim().toUpperCase()
     if (!c) return null
@@ -1328,12 +1149,10 @@ export class EvaluadoresService {
     )
     const id = Number(seq[0].NEXTVAL)
 
-    // Un ciclo nuevo nace POSTULADO salvo que se pida revocarlo de entrada.
-    // El checklist irá sugiriendo el avance a medida que se carguen los datos.
+    // Nace POSTULADO salvo que se pida revocarlo de entrada.
     const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
 
-    // La columna DINAMIZADOR es de la v51. Si todavía no está, se inserta sin
-    // ella en vez de dejar al gestor sin poder registrar el ciclo.
+    // DINAMIZADOR es de la v51: si no está, se inserta sin ella.
     const conDinamizador = await this.columnaDinamizador()
     try {
       await this.dataSource.query(
@@ -1367,8 +1186,7 @@ export class EvaluadoresService {
       if (conDinamizador && this.faltaLaColumnaDinamizador(e)) {
         return this.crearParticipacion(evaluadorId, dto)
       }
-      // Un campo de más largo salía como "Internal server error", sin decir
-      // cuál. El equipo evaluador es una lista de nombres y se pasa fácil.
+      // Sin esto, un campo largo sale como "Internal server error" sin decir cuál.
       traducirValorLargo(e, CAMPOS_PARTICIPACION)
       throw e
     }
@@ -1405,16 +1223,13 @@ export class EvaluadoresService {
       }
     }
 
-    // La modalidad llega como código y hay que resolverla contra el catálogo,
-    // así que no cabe en el mapa declarativo de arriba.
+    // Fuera del mapa: la modalidad llega como código y hay que ir al catálogo.
     if (dto.modalidadPart !== undefined) {
       params.push(await this.idModalidad(dto.modalidadPart))
       sets.push(`MODALIDADPARTID = :${params.length}`)
     }
 
-    // `procesoRevocado` sobrevive como azúcar de compatibilidad: hoy mueve el
-    // estado en vez de una bandera propia. Para cualquier otro cambio de estado
-    // está cambiarEstadoParticipacion(), que además exige motivo y audita.
+    // Compatibilidad: mueve el estado. Lo demás va por cambiarEstadoParticipacion().
     if (dto.procesoRevocado !== undefined) {
       const estadoId = await this.idEstado(dto.procesoRevocado ? 'REVOCADO' : 'POSTULADO')
       params.push(estadoId)
@@ -1429,25 +1244,14 @@ export class EvaluadoresService {
         params,
       )
     } catch (e) {
-      // Igual que al crear: sin esto, corregir el equipo evaluador respondía
-      // "Internal server error" y no había forma de saber qué campo sobraba.
+      // Igual que al crear: si no, no se sabe qué campo se pasó de largo.
       traducirValorLargo(e, CAMPOS_PARTICIPACION)
       throw e
     }
     return { message: 'Participación actualizada' }
   }
 
-  /**
-   * Borra un ciclo. Desde la v34 cuelgan de la participación la aprobación, el
-   * curso, las pruebas, los documentos, los proyectos evaluados y toda la
-   * retroalimentación, así que un DELETE a secas reventaría con ORA-02292 —
-   * o peor, se llevaría la historia por delante si algún día se agregara
-   * ON DELETE CASCADE.
-   *
-   * Se cuenta primero lo que cuelga:
-   *   - vacío       → se borra sin más (corregir un alta reciente es rutina)
-   *   - con historia→ 409 pidiendo anular; solo el admin puede forzar
-   */
+  /** Si el ciclo tiene historia colgando responde 409; solo el admin puede forzar. */
   async eliminarParticipacion(
     participacionId: number,
     opciones: { forzar?: boolean; usuarioEmail?: string; usuarioPerfilId?: number } = {},
@@ -1462,11 +1266,7 @@ export class EvaluadoresService {
     const dependencias = await this.contarDependenciasParticipacion(participacionId)
     const conDatos = Object.entries(dependencias).filter(([, v]) => v > 0)
 
-    // Los certificados son el único caso que NO se puede forzar, ni siendo
-    // admin: `SEP_APP` no tiene DELETE sobre EVALUADORCERTIFICADO (v37) porque
-    // un documento oficial que ya circuló no debe poder desaparecer. Sin este
-    // chequeo, el borrado forzado reventaría con ORA-02292 a mitad de la
-    // transacción, después de haber borrado media historia del ciclo.
+    // No se puede forzar: SEP_APP no tiene DELETE sobre EVALUADORCERTIFICADO (v37).
     if ((dependencias['certificados'] ?? 0) > 0) {
       throw new ConflictException(
         `No se puede eliminar: el ciclo ${cabecera[0].anio} tiene certificados emitidos, ` +
@@ -1484,9 +1284,7 @@ export class EvaluadoresService {
 
     // Con forzar = true (admin) se limpian los hijos en orden de dependencia.
     if (conDatos.length > 0) {
-      // Ojo con los binds: oracledb cuenta cada aparición de un placeholder
-      // como un bind distinto, así que las condiciones sobre las dos puntas
-      // del par (evaluador/evaluado) llevan :1 y :2 con el valor repetido.
+      // oracledb cuenta cada aparición de un placeholder como un bind distinto.
       const par = [participacionId, participacionId]
       await this.dataSource.transaction(async manager => {
         await manager.query(
@@ -1514,8 +1312,7 @@ export class EvaluadoresService {
           `DELETE FROM EVALUADORPARTGRUPO WHERE PARTICIPACIONID = :1`, [participacionId])
         await manager.query(
           `DELETE FROM EVALUADORPARTALCANCE WHERE PARTICIPACIONID = :1`, [participacionId])
-        // Pruebas y documentos NO se borran: son del evaluador, no del ciclo.
-        // Se desatan para que sobrevivan como histórico suelto.
+        // Pruebas y documentos son del evaluador, no del ciclo: se desatan.
         await manager.query(
           `UPDATE EVALUADORPRUEBA SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = :1`, [participacionId])
         await manager.query(
@@ -1565,11 +1362,7 @@ export class EvaluadoresService {
     ) as Record<string, number>
   }
 
-  /**
-   * Cambia el estado del ciclo. Es la alternativa al borrado: anular sin
-   * perder nada. Los estados marcados ESNEGATIVO exigen motivo — un año
-   * cerrado en rojo sin explicación no le sirve a nadie que audite después.
-   */
+  /** Alternativa al borrado. Los estados ESNEGATIVO exigen motivo. */
   async cambiarEstadoParticipacion(
     participacionId: number,
     dto: { estadoCodigo: string; motivo?: string },
@@ -1628,9 +1421,7 @@ export class EvaluadoresService {
     return { message: `Estado cambiado a ${estados[0].nombre}` }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Hoja de vida (1:1 con el evaluador, separada de Estudios)             ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Hoja de vida (1:1 con el evaluador, separada de Estudios)
 
   private async getTipoEstudioHV(): Promise<number> {
     const rows: Array<{ id: number }> = await this.dataSource.query(
@@ -1705,9 +1496,7 @@ export class EvaluadoresService {
     return { message: 'Hoja de vida eliminada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Estudios (diplomas, certificados — excluye HV)                        ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Estudios (diplomas, certificados — excluye HV)
 
   async listarEstudios(evaluadorId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -1785,9 +1574,7 @@ export class EvaluadoresService {
     return { message: 'Estudio eliminado' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Experiencia laboral                                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Experiencia laboral
 
   async listarExperiencias(evaluadorId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -1856,9 +1643,7 @@ export class EvaluadoresService {
     return { message: 'Experiencia eliminada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ TIC                                                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // TIC
 
   async listarTics(evaluadorId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -1930,16 +1715,12 @@ export class EvaluadoresService {
     return { message: 'TIC eliminado' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Pruebas de conocimiento                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Pruebas de conocimiento
 
   async listarPruebas(evaluadorId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT PRUEBAID            AS "pruebaId",
-              -- Hace falta para poder CORREGIR una prueba sin desatarla de su
-              -- ciclo: el formulario tiene que saber cuál traía puesto, o al
-              -- guardar la mandaría a "prueba suelta" y apagaría el hito.
+              -- Hace falta para corregir una prueba sin desatarla del ciclo.
               PARTICIPACIONID     AS "participacionId",
               ANIO                AS "anio",
               TRIM(PERIODO)       AS "periodo",
@@ -1971,25 +1752,7 @@ export class EvaluadoresService {
     }))
   }
 
-  /**
-   * Registra una prueba de conocimiento.
-   *
-   * Se ata sola al ciclo del año y toma la nota de corte de la convocatoria,
-   * congelándola en la fila: si el año siguiente sube el corte, esta prueba
-   * sigue evaluándose contra el que estaba vigente cuando se presentó.
-   *
-   * `APROBADA` se deriva del puntaje contra el corte — nunca llega del
-   * cliente. Es lo que enciende el hito del checklist, y dejarlo en manos de
-   * quien digita significaría que un descuido cambia el estado del ciclo.
-   */
-  /**
-   * Los puntajes van de 0 a 100 y la columna es NUMBER(5,2).
-   *
-   * Se valida aquí y no solo en la pantalla porque el error de Oracle no dice
-   * qué campo se pasó: llegó un 26450 donde los puntajes reales van de 36 a 46
-   * y la respuesta fue un 500 mudo. Diciéndolo antes, el mensaje nombra el
-   * campo y el rango esperado.
-   */
+  /** 0 a 100: la columna es NUMBER(5,2) y el error de Oracle no dice qué campo se pasó. */
   private validarPuntajes(dto: Partial<PruebaDto>) {
     const revisar = (valor: unknown, campo: string) => {
       if (valor == null || valor === '') return
@@ -2003,7 +1766,6 @@ export class EvaluadoresService {
     }
     revisar(dto.puntajeMayor, 'Puntaje')
     revisar(dto.puntajeMinimo, 'Puntaje mínimo')
-    // El porcentaje es un porcentaje: 0 a 100, mismo rango.
     revisar(dto.efectividad, 'Porcentaje')
 
     if (dto.intentos != null && (Number(dto.intentos) < 0 || Number(dto.intentos) > 99)) {
@@ -2011,18 +1773,7 @@ export class EvaluadoresService {
     }
   }
 
-  /**
-   * ¿Aprobó la prueba? Se decide por el PORCENTAJE, no por el puntaje bruto.
-   *
-   * El puntaje depende de cuántas preguntas trajo el examen —40 sobre 50 no es
-   * lo mismo que 40 sobre 100— así que compararlo contra un corte fijo no
-   * significa nada de un año a otro. Ya había una fila con corte 70 medida
-   * contra un puntaje de 41 y marcada como no aprobada: el 41 era sobre 50,
-   * o sea un 82 %, y sí pasaba.
-   *
-   * Sin porcentaje no se decide: queda en nulo, que la pantalla muestra como
-   * "sin evaluar". Es preferible a inventar un aprobado o un reprobado.
-   */
+  /** Por el PORCENTAJE, no por el puntaje bruto: el puntaje depende del total de preguntas. */
   private derivarAprobada(
     efectividad: number | null | undefined, minimo: number | null | undefined,
   ): boolean | null {
@@ -2073,9 +1824,7 @@ export class EvaluadoresService {
       participacionId: ciclo.participacionId,
       puntajeMinimo: minimo ?? null,
       aprobada,
-      // Se dice CUÁL de los dos falta. "Sin nota de corte" cuando lo que
-      // faltaba era el porcentaje mandaba a revisar la convocatoria, que
-      // estaba bien.
+      // Se dice CUÁL de los dos falta.
       message: aprobada == null
         ? (dto.efectividad == null
             ? 'Prueba registrada — falta el porcentaje, así que queda sin evaluar'
@@ -2084,13 +1833,7 @@ export class EvaluadoresService {
     }
   }
 
-  /**
-   * Ubica el ciclo al que pertenece una prueba y el corte que le aplica.
-   *
-   * Si el evaluador tiene exactamente una participación ese año, se ata sola.
-   * Con dos (ej. FCE p1 y FEEC p2) hay que decir cuál: adivinar pondría la
-   * prueba en el ciclo equivocado y encendería un hito que no corresponde.
-   */
+  /** Ciclo y corte de una prueba. Con dos ciclos el mismo año hay que decir cuál. */
   private async resolverCicloDePrueba(
     evaluadorId: number, dto: PruebaDto,
   ): Promise<{ participacionId: number | null; puntajeMinimo: number | null }> {
@@ -2128,8 +1871,7 @@ export class EvaluadoresService {
         'Indique `participacionId` para saber a cuál pertenece la prueba.',
       )
     }
-    // Sin ciclo ese año: la prueba entra como histórico suelto, que es
-    // exactamente lo que pasa con el histórico 2021-2023.
+    // Sin ciclo ese año, la prueba entra como histórico suelto.
     return { participacionId: null, puntajeMinimo: null }
   }
 
@@ -2162,10 +1904,7 @@ export class EvaluadoresService {
     }
     if (sets.length === 0) return { message: 'Sin cambios' }
 
-    // APROBADA se recalcula SIEMPRE, no solo si vino en el cuerpo. Es un dato
-    // derivado: si se corrige el porcentaje y el aprobado se quedara con el
-    // valor anterior, el hito del ciclo estaría diciendo lo contrario de lo
-    // que muestra la nota, y nadie lo notaría hasta certificar.
+    // APROBADA se recalcula siempre: es derivado y el porcentaje pudo cambiar.
     const actual: Array<{ efectividad: number | null; minimo: number | null }> =
       await this.dataSource.query(
         `SELECT EFECTIVIDAD AS "efectividad", PUNTAJEMINIMO AS "minimo"
@@ -2194,10 +1933,7 @@ export class EvaluadoresService {
     return { message: 'Prueba eliminada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Documentos genéricos (cédula, autorización, confidencialidad, …)      ║
-  // ║ En Fase 1 solo se usa CEDULA — el modelo ya soporta el resto.         ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // Documentos genéricos (cédula, autorización, confidencialidad, …)
 
   private tipoCedulaCache: number | null = null
 
@@ -2216,15 +1952,7 @@ export class EvaluadoresService {
     return this.tipoCedulaCache
   }
 
-  /**
-   * Lista los documentos genéricos de un evaluador.
-   *
-   * @param opciones.tipoCodigo   Filtra por código de tipo (CEDULA, AUTORIZACION, …).
-   *                              Si viene, incluye ese tipo aunque `incluirCedula` sea false.
-   * @param opciones.incluirCedula Si es false (default), excluye el tipo CEDULA
-   *                               del listado — el frontend lo muestra en su propio card.
-   *                               Ignorado cuando `tipoCodigo` viene explícito.
-   */
+  /** Sin `tipoCodigo` se excluye CEDULA, que el front muestra en su propio card. */
   async listarDocumentos(
     evaluadorId: number,
     opciones: { tipoCodigo?: string; incluirCedula?: boolean } = {},
@@ -2237,7 +1965,6 @@ export class EvaluadoresService {
       params.push(filtroTipo.toUpperCase())
       conds.push(`UPPER(TRIM(t.CODIGO)) = :${params.length}`)
     } else if (!incluirCedula) {
-      // Sin filtro y sin flag explícito: escondemos la cédula, que vive en su propio card.
       conds.push(`UPPER(TRIM(t.CODIGO)) <> 'CEDULA'`)
     }
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -2290,10 +2017,7 @@ export class EvaluadoresService {
     if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
     const admiteMultiple = Number(tipo[0].admiteMultiple) === 1
 
-    // Los formatos dependen del tipo: el "Correo de autorización" recibe .msg,
-    // .eml o .html, mientras la cédula y los soportes siguen siendo PDF. Antes
-    // estaba fijo en PDF, y por eso no se podía adjuntar un correo en el
-    // apartado que se llama, precisamente, "Correo de autorización".
+    // Los formatos dependen del tipo: el correo de autorización recibe .msg, .eml o .html.
     const permitidas = extensionesDeTipoDocEval(tipo[0].codigo)
     const ext = extensionDe(file.originalname)
     if (!permitidas.includes(ext)) {
@@ -2316,8 +2040,7 @@ export class EvaluadoresService {
         )
       }
 
-      // ID por MAX+1 (no hay secuencia dedicada — la tabla es pequeña y los ids no
-      // se reciclan entre bases, así que el patrón es aceptable).
+      // ID por MAX+1: no hay secuencia dedicada para esta tabla.
       const seq: Array<{ NUEVO: number }> = await qr.query(
         `SELECT NVL(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM EVALUADORDOCUMENTO`,
       )
@@ -2325,10 +2048,7 @@ export class EvaluadoresService {
 
       const nombre = (file.originalname ?? '').toString().trim().slice(0, 255) || null
       await qr.query(
-        // PARTICIPACIONID decide si el documento es del año o permanente:
-        // con valor aparece en el ciclo (y enciende hitos como la
-        // confidencialidad); sin él queda como documento personal del
-        // evaluador, visible desde todos sus años.
+        // PARTICIPACIONID con valor = documento del ciclo; sin él, personal del evaluador.
         `INSERT INTO EVALUADORDOCUMENTO
            (DOCUMENTOID, EVALUADORID, TIPODOCUMENTOEVALID, DOCUMENTODESCRIPCION,
             ANIOREFERENCIA, PARTICIPACIONID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
@@ -2412,18 +2132,13 @@ export class EvaluadoresService {
     return { mensaje: 'Documento eliminado' }
   }
 
-  /**
-   * Shortcut de conveniencia: devuelve el documento CEDULA del evaluador si existe,
-   * o `null` si no. El front lo usa para decidir si mostrar "subir" o "ver".
-   */
   async getCedula(evaluadorId: number): Promise<{
     documentoId: number;
     archivoNombre: string | null;
     fechaCargue: Date;
   } | null> {
     const tipoId = await this.idTipoCedula()
-    // ROWNUM se aplica antes del ORDER BY en Oracle, por lo que hay que anidar
-    // el ORDER BY dentro de una subquery para quedarse con la fila más reciente.
+    // ROWNUM se aplica antes del ORDER BY: hay que anidar la subquery.
     const rows: Array<{ id: number; nombre: string | null; fecha: Date }> = await this.dataSource.query(
       `SELECT * FROM (
          SELECT DOCUMENTOID          AS "id",

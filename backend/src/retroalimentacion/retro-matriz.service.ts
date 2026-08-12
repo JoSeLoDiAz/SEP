@@ -2,26 +2,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-/**
- * Motor de la matriz de retroalimentación.
- *
- * Port 1:1 de `helpers/eval/matriz.js` del sistema FormularioInscripcionGGPC.
- * Las reglas vienen del correo del área y ya corrieron un ciclo real, así que
- * se conserva la lógica tal cual. Dos cambios respecto del original:
- *
- *   1. La unidad no es una persona sino una PARTICIPACIÓN. El rol, el área y
- *      los grupos son contexto del año, no atributos permanentes de la
- *      persona — que es justo lo que el rediseño por año vino a arreglar.
- *   2. Los mapas de grupos por área, que estaban hardcodeados, salen de
- *      `AREAEVALUACION.GRUPOSDEFECTO` y pueden sobrescribirse por convocatoria
- *      con `RETROFORMULARIO.REGLASMATRIZ`. Cambiar la topología de un año ya
- *      no exige desplegar.
- *
- * El servicio NO escribe: calcula y devuelve los pares. Persistirlos es
- * decisión de quien lo llama, y así el preview es gratis.
- */
+// matriz de retroalimentacion: calcula pares, no persiste
 
-/** Una participación vista por el motor. */
 export interface NodoMatriz {
   participacionId: number
   evaluadorId: number
@@ -36,7 +18,6 @@ export interface NodoMatriz {
 export interface Par {
   evaluadorParticipacionId: number
   evaluadoParticipacionId: number
-  /** Regla que produjo el par. Sirve para auditar y depurar la matriz. */
   motivo: string
 }
 
@@ -51,24 +32,12 @@ export interface ResultadoMatriz {
   }
 }
 
-/** Configuración de topología. Se puede sobrescribir por convocatoria. */
+// topologia; se sobrescribe con RETROFORMULARIO.REGLASMATRIZ
 export interface ReglasMatriz {
   gruposPorArea: Record<string, number[]>
-  /** Apoyos que un líder o analista técnico evalúa como "apoyos del grupo". */
   apoyosDeGrupo: string[]
-  /** Si es false, no se generan pares entre iguales del mismo rol y grupo. */
   peerEvaluation: boolean
-  /**
-   * Alcance forzado para transversales concretos, por si el registrado en
-   * `EVALUADORPARTALCANCE` quedó desactualizado y no da tiempo de corregirlo
-   * antes de generar.
-   *
-   * Es una válvula de escape, no el camino normal: lo correcto es arreglar el
-   * dato del año. El motor original resolvió esto con cinco nombres propios
-   * hardcodeados en el código; aquí vive en la configuración de la
-   * convocatoria para que un cambio de personas no obligue a desplegar y para
-   * que quede escrito de quién se está hablando.
-   */
+  // override si EVALUADORPARTALCANCE quedo desactualizado
   alcanceForzado: Array<{ nombreContiene: string; alcance: Array<{ area: string; roles: string[] }> }>
 }
 
@@ -76,8 +45,7 @@ const REGLAS_DEFECTO: ReglasMatriz = {
   gruposPorArea: { TECNICA: [1, 2, 3, 4, 5, 6], FINANCIERA: [7], JURIDICA: [8] },
   apoyosDeGrupo: ['APOYO_TECNICO', 'APOYO_PRESUPUESTAL', 'APOYO_JURIDICO'],
   peerEvaluation: true,
-  // Vacío a propósito: en SEP el alcance es dato por participación y por año,
-  // así que por defecto manda la base de datos.
+  // vacio a proposito: manda el alcance de la BD
   alcanceForzado: [],
 }
 
@@ -87,22 +55,13 @@ export class RetroMatrizService {
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Entrada principal                                                     ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Calcula todos los pares que deberían existir en una convocatoria.
-   * No persiste nada — el preview y la generación usan exactamente el mismo
-   * cálculo, así que lo que se ve en el preview es lo que se va a guardar.
-   */
   async calcular(convocatoriaId: number, reglasJson?: string | null): Promise<ResultadoMatriz> {
     const nodos = await this.cargarNodos(convocatoriaId)
     const reglas = this.resolverReglas(reglasJson)
     return this.calcularSobre(nodos, reglas)
   }
 
-  /** Separado de la carga para poder testear el algoritmo sin base de datos. */
+  // separado de la carga para testear sin BD
   calcularSobre(nodos: NodoMatriz[], reglas: ReglasMatriz = REGLAS_DEFECTO): ResultadoMatriz {
     const pares: Par[] = []
     const vistos = new Set<string>()
@@ -134,10 +93,7 @@ export class RetroMatrizService {
       nodos.filter(n => n.area === area && n.rol === 'LIDER')
 
     for (const p of nodos) {
-      // ── Transversales: alcance explícito {área, roles[]} ────────────────
-      // Matchea por área exacta O por participar en algún grupo del área. Lo
-      // segundo cubre al apoyo jurídico que tiene área JURIDICA pero trabaja
-      // en grupos técnicos: un transversal técnico también debe alcanzarlo.
+      // transversales: matchea por area o por grupo del area
       if (p.esTransversal) {
         for (const al of this.alcanceDe(p, reglas)) {
           const gruposArea = gruposDe(al.area)
@@ -151,11 +107,10 @@ export class RetroMatrizService {
         continue
       }
 
-      // ── Área técnica ────────────────────────────────────────────────────
+      // area tecnica
       if (p.area === 'TECNICA') {
         if (p.rol === 'LIDER') {
-          // Evalúa a TODOS los analistas y apoyos que participen en algún
-          // grupo técnico, sin importar su área nominal.
+          // basta con estar en un grupo tecnico, sin importar el area nominal
           for (const c of nodos) {
             if (c.rol !== 'ANALISTA' && !APOYOS.includes(c.rol)) continue
             if (c.grupos.some(g => GRUPOS_TECNICOS.includes(g))) {
@@ -179,11 +134,10 @@ export class RetroMatrizService {
             for (const c of conRolEnGrupo('EVALUADOR', g)) agregar(p, c, 'apoyo→evaluadores-de-su-grupo')
           }
         }
-        // APOYO_JURIDICO con área técnica no evalúa por esta vía (así está en
-        // el correo original); lo cubre el bloque de grupos técnicos de abajo.
+        // APOYO_JURIDICO no entra aqui: lo cubre el bloque de mas abajo
       }
 
-      // ── Área jurídica ───────────────────────────────────────────────────
+      // area juridica
       const gruposJuridica = gruposDe('JURIDICA')
       if (p.area === 'JURIDICA' && p.grupos.some(g => gruposJuridica.includes(g))) {
         const enArea = nodos.filter(
@@ -210,9 +164,7 @@ export class RetroMatrizService {
         }
       }
 
-      // ── Apoyo jurídico que además está en grupos técnicos ───────────────
-      // Caso real: un apoyo jurídico con grupos [1, 2, 8]. En sus grupos
-      // técnicos evalúa igual que cualquier otro apoyo del grupo.
+      // apoyo juridico en grupos tecnicos: evalua como cualquier apoyo del grupo
       if (p.rol === 'APOYO_JURIDICO') {
         for (const g of p.grupos.filter(g => GRUPOS_TECNICOS.includes(g))) {
           for (const c of conRolEnGrupo('ANALISTA', g)) agregar(p, c, 'apoyo-juridico→analista-grupo-tecnico')
@@ -220,9 +172,7 @@ export class RetroMatrizService {
         }
       }
 
-      // ── Área financiera ─────────────────────────────────────────────────
-      // Los "apoyos financieros" del correo son en la práctica apoyos
-      // presupuestales asignados al grupo financiero; se tratan igual.
+      // area financiera; APOYO_FINANCIERO y APOYO_PRESUPUESTAL van juntos
       const gruposFin = gruposDe('FINANCIERA')
       const enFinanciera = p.grupos.some(g => gruposFin.includes(g))
 
@@ -236,16 +186,12 @@ export class RetroMatrizService {
           if ((c.rol === 'APOYO_FINANCIERO' || c.rol === 'APOYO_PRESUPUESTAL') && enGrupoFin) {
             agregar(p, c, 'lider-financiera→apoyos')
           }
-          // Las líderes financieras también retroalimentan a los transversales
-          // de su área. El filtro de grupo NO aplica aquí: un transversal no
-          // pertenece a un grupo, y exigírselo lo dejaba fuera — era la causa
-          // de que a los transversales nadie los evaluara.
+          // sin filtro de grupo: un transversal no pertenece a ninguno
           if (c.esTransversal && c.area === 'FINANCIERA') {
             agregar(p, c, 'lider-financiera→transversales')
           }
         }
       }
-      // Simetría: los apoyos del grupo financiero evalúan a sus líderes.
       if ((p.rol === 'APOYO_FINANCIERO' || p.rol === 'APOYO_PRESUPUESTAL') && enFinanciera) {
         for (const c of nodos) {
           if (!c.grupos.some(g => gruposFin.includes(g))) continue
@@ -253,9 +199,7 @@ export class RetroMatrizService {
         }
       }
 
-      // ── Evaluación entre pares del mismo rol y grupo ────────────────────
-      // En un grupo con cuatro evaluadores, cada uno evalúa a los otros tres.
-      // No aplica a transversales: ellos ya tienen su alcance explícito.
+      // pares del mismo rol y grupo; los transversales ya salieron con continue
       if (reglas.peerEvaluation) {
         for (const g of p.grupos) {
           for (const c of nodos) {
@@ -285,14 +229,7 @@ export class RetroMatrizService {
     }
   }
 
-  /**
-   * Alcance efectivo de un transversal: el forzado en la configuración del
-   * ciclo si alguien lo puso, y si no el registrado en su participación.
-   *
-   * Se expone en el preview (`alcanceEfectivo`) para que quien genera vea con
-   * qué reglas va a salir la matriz ANTES de escribirla. Un override
-   * silencioso sería peor que el dato desactualizado que viene a corregir.
-   */
+  // gana el alcance forzado de las reglas; si no, el de la participacion
   alcanceDe(nodo: NodoMatriz, reglas: ReglasMatriz): Array<{ area: string; roles: string[] }> {
     const forzado = (reglas.alcanceForzado ?? []).find(f =>
       (nodo.nombre ?? '').toLowerCase().includes((f.nombreContiene ?? '').toLowerCase()) &&
@@ -305,17 +242,7 @@ export class RetroMatrizService {
     }))
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Carga de datos                                                        ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Participaciones de la convocatoria que entran a la matriz.
-   *
-   * Se excluyen los ciclos cerrados en negativo (declinó, no aprobó,
-   * revocado): asignarle pares a alguien que no participó genera trabajo
-   * imposible de completar y ensucia el reporte de avance.
-   */
+  // excluye los estados negativos (declino, no aprobo, revocado)
   async cargarNodos(convocatoriaId: number): Promise<NodoMatriz[]> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID  AS "participacionId",
@@ -356,8 +283,7 @@ export class RetroMatrizService {
         alcance: alcances.get(id) ?? [],
       }
     }).filter(n => {
-      // Sin rol no hay regla que aplicar. Se avisa en el log para que se note
-      // en el preview en vez de desaparecer sin explicación.
+      // sin rol no hay regla que aplicar
       if (!n.rol) this.logger.warn(`Participación ${n.participacionId} sin rol: queda fuera de la matriz`)
       return !!n.rol && ids.includes(n.participacionId)
     })
@@ -410,10 +336,7 @@ export class RetroMatrizService {
     return mapa
   }
 
-  /**
-   * Mezcla las reglas de la convocatoria con los valores por defecto. Un JSON
-   * inválido no debe tumbar la generación: se avisa y se usan los defectos.
-   */
+  // un JSON invalido no tumba la generacion: se cae a los defectos
   resolverReglas(json?: string | null): ReglasMatriz {
     if (!json?.trim()) return REGLAS_DEFECTO
     try {

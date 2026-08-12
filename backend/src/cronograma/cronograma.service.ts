@@ -7,11 +7,7 @@ import { PatchSesionPresencialDto } from './dto/patch-sesion-presencial.dto'
 import { PatchSesionVirtualDto } from './dto/patch-sesion-virtual.dto'
 import { UpsertCronogramaDto } from './dto/upsert-cronograma.dto'
 
-/** Una sesión/actividad se puede editar solo si NO está radicada o si
- *  interventoría la devolvió para corrección. Estados editables:
- *  null/'' (recién creada), 'PENDIENTE' (sin radicar), 'MODIFICAR'
- *  (devuelta para corregir). Cualquier otro estado ('RADICADO',
- *  'ACTUALIZADA', 'APROBADA', 'RECHAZADA', …) bloquea la edición. */
+// editable solo si esta sin radicar (PENDIENTE) o devuelta para corregir (MODIFICAR)
 function estadoBloqueaEdicion(estadoRadicado: string | null | undefined): boolean {
   const e = (estadoRadicado ?? '').trim().toUpperCase()
   return e !== '' && e !== 'PENDIENTE' && e !== 'MODIFICAR'
@@ -21,8 +17,7 @@ function estadoBloqueaEdicion(estadoRadicado: string | null | undefined): boolea
 export class CronogramaService {
   constructor(private readonly ds: DataSource) {}
 
-  /** Verifica que el convenio del proyecto esté EN EJECUCIÓN (estado=1).
-   *  Si no, bloquea la escritura. */
+  // CONVENIOSESTADO = 1 es "en ejecucion"
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
@@ -38,8 +33,6 @@ export class CronogramaService {
     }
   }
 
-  /** Resuelve el proyectoId a partir de un cronogramaId, valida estado del
-   *  convenio, y lanza si no está en ejecución. */
   private async assertConvenioActivoPorCronograma(cronogramaId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMA
@@ -50,7 +43,6 @@ export class CronogramaService {
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
-  /** Idem para sesión presencial. */
   private async assertConvenioActivoPorSesionPresencial(sesionId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT cr.PROYECTOID AS "proyectoId"
@@ -63,7 +55,6 @@ export class CronogramaService {
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
-  /** Idem para actividad virtual. */
   private async assertConvenioActivoPorSesionVirtual(actividadId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT cr.PROYECTOID AS "proyectoId"
@@ -76,7 +67,6 @@ export class CronogramaService {
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
-  /** Idem para radicado. */
   private async assertConvenioActivoPorRadicado(radicadoId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT cr.PROYECTOID AS "proyectoId"
@@ -85,13 +75,11 @@ export class CronogramaService {
         WHERE crr.CRONOGRAMARADICADOID = :1 FETCH FIRST 1 ROW ONLY`,
       [radicadoId],
     )
-    // Si la tabla se llama distinto o no podemos resolver, no bloqueamos
-    // (mejor permisivo que romper flujos legacy con nombres distintos).
+    // si no se resuelve el radicado no bloqueamos, para no romper flujos legacy
     if (row) await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
-  // ── Introspección (ALL_TAB_COLUMNS incluye sinónimos del schema) ───────────
-
+  // ALL_TAB_COLUMNS incluye los sinonimos del schema
   async describeTables() {
     const tables = ['CRONOGRAMA', 'CRONOGRAMAPRESENCIAL', 'CRONOGRAMAVIRTUAL']
     const result: Record<string, { column: string; type: string; nullable: string }[]> = {}
@@ -106,8 +94,6 @@ export class CronogramaService {
     }
     return result
   }
-
-  // ── AF list for proyecto ──────────────────────────────────────────────────
 
   async listarAcciones(proyectoId: number) {
     return this.ds.query(
@@ -132,8 +118,6 @@ export class CronogramaService {
     )
   }
 
-  // ── Grupos de una AF ──────────────────────────────────────────────────────
-
   async listarGrupos(afId: number) {
     const rows = await this.ds.query(
       `SELECT g.AFGRUPOID       AS "grupoId",
@@ -148,8 +132,6 @@ export class CronogramaService {
     )
     return rows.map((r: any) => ({ ...r, totalBenef: Number(r.totalBenef) }))
   }
-
-  // ── Unidades Temáticas de una AF ──────────────────────────────────────────
 
   async listarUnidades(afId: number) {
     return this.ds.query(
@@ -172,8 +154,6 @@ export class CronogramaService {
     )
   }
 
-  // ── Cronograma para grupo + UT ────────────────────────────────────────────
-
   async buscarCronograma(grupoId: number, utId: number) {
     return this.ds.query(
       `SELECT c.CRONOGRAMAID          AS "cronogramaId",
@@ -193,12 +173,7 @@ export class CronogramaService {
     )
   }
 
-  /** Todas las coberturas del grupo al que pertenece un cronograma.
-   *  - Las que tienen CIUDAD ('P') sirven para elegir el lugar de una
-   *    sesion presencial.
-   *  - Las que solo tienen DEPARTAMENTO ('S'/'V') se listan como cobertura
-   *    de las actividades virtuales / sincronicas.
-   *  El front filtra segun el caso (ciudadId != null o == null). */
+  // modalidad 'P' trae ciudad; 'S'/'V' solo departamento, y el front filtra por eso
   async coberturasDeGrupo(cronogramaId: number) {
     return this.ds.query(
       `SELECT cob.AFGRUPOCOBERTURAID         AS "coberturaId",
@@ -218,10 +193,7 @@ export class CronogramaService {
     )
   }
 
-  // ── Sesiones presenciales ─────────────────────────────────────────────────
-  // Nota: CRONOGRAMAPRESENCIALFECHAINICIO tiene 31 chars → Oracle trunca a
-  // CRONOGRAMAPRESENCIALFECHAINICI (30 chars, límite Oracle 11g).
-
+  // la columna quedo como CRONOGRAMAPRESENCIALFECHAINICI: Oracle 11g corta a 30 chars
   async sesionesPresenciales(cronogramaId: number) {
     const rows: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAPRESENCIALID           AS "sesionId",
@@ -271,8 +243,6 @@ export class CronogramaService {
     return rows.map(r => ({ ...r, capacitadorNombre: armarNombreCap(r) }))
   }
 
-  // ── Sesiones / actividades virtuales ─────────────────────────────────────
-
   async sesionesVirtuales(cronogramaId: number) {
     const rows: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAVIRTUALID                AS "actividadId",
@@ -314,10 +284,7 @@ export class CronogramaService {
     return rows.map(r => ({ ...r, capacitadorNombre: armarNombreCap(r) }))
   }
 
-  // ── Cabecera del cronograma: crear o actualizar (Fase 2) ─────────────────
-  // Solo edita fechas. # sesiones/actividades se incrementan automáticamente
-  // al agregar sesiones (Fase 3/4). El ID se calcula con MAX+1 dentro de tx.
-
+  // el ID sale de MAX+1 dentro de la transaccion: la tabla no tiene secuencia
   async upsertCronograma(proyectoId: number, dto: UpsertCronogramaDto) {
     await this.assertConvenioEnEjecucion(proyectoId)
     const fi = new Date(dto.fechaInicio)
@@ -380,9 +347,6 @@ export class CronogramaService {
     }
   }
 
-  // ── Catálogos para Fase 3 ────────────────────────────────────────────────
-
-  /** Capacitadores del proyecto que ya están aprobados (interventoría o transferencia). */
   async listarCapacitadoresAprobados(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID                AS "capacitadorId",
@@ -406,7 +370,6 @@ export class CronogramaService {
     )
   }
 
-  /** Perfiles (rubros) requeridos por una UT — sirve para popular el select del form. */
   async listarPerfilesUT(utId: number) {
     return this.ds.query(
       `SELECT pu.PERFILUTID            AS "perfilUTId",
@@ -421,11 +384,8 @@ export class CronogramaService {
     )
   }
 
-  // ── Sesión presencial: crear y eliminar (Fase 3) ─────────────────────────
-
   async agregarSesionPresencial(cronogramaId: number, dto: AgregarSesionPresencialDto) {
     await this.assertConvenioActivoPorCronograma(cronogramaId)
-    // Validación rápida de horas en JS (evita ida+vuelta a BD si está mal)
     const [hi, mi] = dto.horaInicio.split(':').map(Number)
     const [hf, mf] = dto.horaFin.split(':').map(Number)
     const minIni = hi * 60 + mi
@@ -442,7 +402,6 @@ export class CronogramaService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // 1. Cargar cronograma + UT (para validar fechas y total horas)
       const cronoRows: any[] = await qr.query(
         `SELECT c.CRONOGRAMAID                  AS "cronogramaId",
                 c.AFGRUPOID                     AS "grupoId",
@@ -464,13 +423,12 @@ export class CronogramaService {
       if (!cronoRows.length) throw new NotFoundException('Cronograma no encontrado.')
       const crono = cronoRows[0]
 
-      // 2. Total horas de la UT según modalidad de la AF
+      // modalidades: 1 presencial, 2 PAT, 3 hibrida, 4 virtual
       let totalUT = 0
       if (dto.modalidadId === 1) totalUT = Number(crono.horasPP) + Number(crono.horasTP)
       else if (dto.modalidadId === 2) totalUT = Number(crono.horasPPAT) + Number(crono.horasTPAT)
       else if (dto.modalidadId === 3) totalUT = Number(crono.horasPHib) + Number(crono.horasTHib)
 
-      // 3. Validar fecha dentro del rango cronograma (solo fecha, no hora)
       const fSesionStr = dto.fechaInicio.slice(0, 10)
       const fIniStr = new Date(crono.fechaInicio).toISOString().slice(0, 10)
       const fFinStr = new Date(crono.fechaFin).toISOString().slice(0, 10)
@@ -481,7 +439,6 @@ export class CronogramaService {
         throw new BadRequestException(`La fecha es posterior al cronograma (${fFinStr}).`)
       }
 
-      // 4. Capacitador del proyecto y aprobado
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
           WHERE CAPACITADORID = :1 AND PROYECTOID = :2
@@ -494,7 +451,6 @@ export class CronogramaService {
         throw new BadRequestException('El capacitador no pertenece al proyecto o no está aprobado.')
       }
 
-      // 5. Perfil válido para la UT
       const perfilCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
         [dto.perfilUTId, crono.utId],
@@ -503,7 +459,6 @@ export class CronogramaService {
         throw new BadRequestException('El perfil de capacitador no es válido para esta unidad temática.')
       }
 
-      // 6. Total horas registradas + nuevas no exceder lo de la UT
       const acumRows: any[] = await qr.query(
         `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
            FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
@@ -516,7 +471,6 @@ export class CronogramaService {
         )
       }
 
-      // 7. Convenio activo del proyecto + consecutivo para sigla
       const convRows: any[] = await qr.query(
         `SELECT CONVENIOSID AS "convId", NVL(CONVENIOSCRONOCONSECUTIVO, 0) AS "consec"
            FROM CONVENIOS
@@ -531,7 +485,6 @@ export class CronogramaService {
       const consecutivo = Number(convRows[0].consec) + 1
       const sigla = `CP${String(consecutivo).padStart(6, '0')}`
 
-      // 8. Próximo numSesion del cronograma
       const nsRows: any[] = await qr.query(
         `SELECT NVL(MAX(CRONOGRAMAPRESENCIALNUMSESION), 0) + 1 AS "next"
            FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
@@ -539,14 +492,11 @@ export class CronogramaService {
       )
       const numSesion = Number(nsRows[0].next)
 
-      // 9. Próximo CRONOGRAMAPRESENCIALID
       const idRows: any[] = await qr.query(
         `SELECT NVL(MAX(CRONOGRAMAPRESENCIALID), 0) + 1 AS "id" FROM CRONOGRAMAPRESENCIAL`,
       )
       const newId = Number(idRows[0].id)
 
-      // 10. AFGRUPOCOBERTURAID — el que envie el front (si pertenece al grupo)
-      //     o, por defecto, el primero del grupo.
       const covRows: any[] = await qr.query(
         `SELECT AFGRUPOCOBERTURAID AS "id" FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1 ORDER BY AFGRUPOCOBERTURAID`,
         [crono.grupoId],
@@ -556,15 +506,14 @@ export class CronogramaService {
         ? dto.coberturaId
         : (covIds[0] ?? 0)
 
-      // 11. Construir Date objects para Oracle (hora con base 1899-12-31, fecha local)
+      // Oracle guarda la hora sobre la fecha base 1899-12-31
       const fechaSesion = new Date(`${fSesionStr}T05:00:00.000Z`) // Colombia UTC-5
       const horaInicioDate = new Date(`1899-12-31T${dto.horaInicio}:00.000-05:00`)
       const horaFinDate = new Date(`1899-12-31T${dto.horaFin}:00.000-05:00`)
 
-      // 12. Tipo de capacitador según modalidad (PAT = NO APLICA)
+      // en PAT (modalidad 2) el capacitador no aplica
       const tipoCapacitador = dto.modalidadId === 2 ? 'NO APLICA' : 'CAPACITADOR NACIONAL'
 
-      // 13. INSERT
       await qr.query(
         `INSERT INTO CRONOGRAMAPRESENCIAL
            (CRONOGRAMAPRESENCIALID, CRONOGRAMAID, AFGRUPOCOBERTURAID,
@@ -598,7 +547,6 @@ export class CronogramaService {
         ],
       )
 
-      // 14. Actualizar contadores
       await qr.query(
         `UPDATE CRONOGRAMA SET CRONONUMSESIONES = NVL(CRONONUMSESIONES, 0) + 1
           WHERE CRONOGRAMAID = :1`,
@@ -660,7 +608,6 @@ export class CronogramaService {
 
   async actualizarSesionPresencial(sesionId: number, dto: AgregarSesionPresencialDto) {
     await this.assertConvenioActivoPorSesionPresencial(sesionId)
-    // Validación local
     const [hi, mi] = dto.horaInicio.split(':').map(Number)
     const [hf, mf] = dto.horaFin.split(':').map(Number)
     const minIni = hi * 60 + mi
@@ -673,7 +620,6 @@ export class CronogramaService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // 1. Cargar sesión actual + cronograma + UT
       const sesRows: any[] = await qr.query(
         `SELECT cp.CRONOGRAMAID                  AS "cronogramaId",
                 cp.CRONOGRAMAPRESENCIALNUMHORAS  AS "horasActuales",
@@ -702,20 +648,17 @@ export class CronogramaService {
         throw new BadRequestException('Esta sesión ya fue radicada; no se puede editar (espera a que interventoría la devuelva para corrección).')
       }
 
-      // 2. Total UT según modalidad
       let totalUT = 0
       if (dto.modalidadId === 1) totalUT = Number(ses.horasPP) + Number(ses.horasTP)
       else if (dto.modalidadId === 2) totalUT = Number(ses.horasPPAT) + Number(ses.horasTPAT)
       else if (dto.modalidadId === 3) totalUT = Number(ses.horasPHib) + Number(ses.horasTHib)
 
-      // 3. Validar fecha dentro del rango cronograma
       const fSesionStr = dto.fechaInicio.slice(0, 10)
       const fIniStr = new Date(ses.fechaInicio).toISOString().slice(0, 10)
       const fFinStr = new Date(ses.fechaFin).toISOString().slice(0, 10)
       if (fSesionStr < fIniStr) throw new BadRequestException(`La fecha es anterior al cronograma (${fIniStr}).`)
       if (fSesionStr > fFinStr) throw new BadRequestException(`La fecha es posterior al cronograma (${fFinStr}).`)
 
-      // 4. Capacitador aprobado
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
           WHERE CAPACITADORID = :1 AND PROYECTOID = :2
@@ -726,14 +669,12 @@ export class CronogramaService {
       )
       if (!capCheck.length) throw new BadRequestException('El capacitador no pertenece al proyecto o no está aprobado.')
 
-      // 5. Perfil válido
       const perfilCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
         [dto.perfilUTId, ses.utId],
       )
       if (!perfilCheck.length) throw new BadRequestException('El perfil no es válido para esta unidad temática.')
 
-      // 6. Total horas: restar las actuales y sumar las nuevas
       const acumRows: any[] = await qr.query(
         `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
            FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
@@ -746,14 +687,11 @@ export class CronogramaService {
         )
       }
 
-      // 7. Construir Date para Oracle
       const fechaSesion = new Date(`${fSesionStr}T05:00:00.000Z`)
       const horaInicioDate = new Date(`1899-12-31T${dto.horaInicio}:00.000-05:00`)
       const horaFinDate = new Date(`1899-12-31T${dto.horaFin}:00.000-05:00`)
       const tipoCapacitador = dto.modalidadId === 2 ? 'NO APLICA' : 'CAPACITADOR NACIONAL'
 
-      // 8. UPDATE — la sigla y el ID no cambian. AFGRUPOCOBERTURAID solo se
-      //    cambia si el front envia uno (NVL deja el actual si viene null).
       await qr.query(
         `UPDATE CRONOGRAMAPRESENCIAL
             SET CRONOGRAMAPRESENCIALNOMBRESESI = :1,
@@ -801,10 +739,7 @@ export class CronogramaService {
     }
   }
 
-  // ── Exportar cronograma del proyecto a Excel (Fase 4) ───────────────────
-
   async exportarCronogramaProyecto(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
-    // 1. Cabeceras (cronograma + AF + UT + grupo + convenio)
     const headers: any[] = await this.ds.query(
       `SELECT c.CRONOGRAMAID                   AS "cronogramaId",
               TRIM(conv.CONVENIOSNUMERO)       AS "convenio",
@@ -844,7 +779,6 @@ export class CronogramaService {
     const headerMap = new Map<number, any>()
     headers.forEach(h => headerMap.set(Number(h.cronogramaId), h))
 
-    // 2. Sesiones presenciales del proyecto
     const presenciales: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAID                       AS "cronogramaId",
               cp.CRONOGRAMAPRESENCIALID             AS "id",
@@ -882,7 +816,6 @@ export class CronogramaService {
       [proyectoId],
     )
 
-    // 3. Actividades virtuales del proyecto
     const virtuales: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAID                       AS "cronogramaId",
               cv.CRONOGRAMAVIRTUALID                AS "id",
@@ -918,10 +851,7 @@ export class CronogramaService {
       [proyectoId],
     )
 
-    // 4. Cache de capacitadores del proyecto.
-    // OJO: PERSONA.PERSONAIDENTIFICACION es N-charset; EMPRESA.EMPRESAIDENTIFICACION es NUMBER.
-    // Para evitar ORA-12704 (character set mismatch), traemos los campos por separado y
-    // los combinamos en JS.
+    // ORA-12704: PERSONAIDENTIFICACION es N-charset y EMPRESAIDENTIFICACION NUMBER, se unen en JS
     const caps: any[] = await this.ds.query(
       `SELECT c.CAPACITADORID                  AS "id",
               TRIM(c.CAPATIPO)                  AS "tipo",
@@ -956,7 +886,6 @@ export class CronogramaService {
       })
     })
 
-    // 5. Cache de perfiles del proyecto
     const perfiles: any[] = await this.ds.query(
       `SELECT pu.PERFILUTID AS "id", TRIM(r.RUBRONOMBRE) AS "nombre"
          FROM PERFILUT pu
@@ -969,13 +898,12 @@ export class CronogramaService {
     const perfilMap = new Map<number, string>()
     perfiles.forEach(p => perfilMap.set(Number(p.id), p.nombre || ''))
 
-    // 6. Helpers
     const fmtFecha = (d: any): string => {
       if (!d) return ''
       try {
         const dt = new Date(d)
         if (Number.isNaN(dt.getTime())) return ''
-        // 1899/1901 → vacío (placeholder Oracle)
+        // 1899/1901 es el placeholder de fecha vacia en Oracle
         if (dt.getUTCFullYear() < 1950) return ''
         return dt.toISOString().slice(0, 10)
       } catch { return '' }
@@ -999,7 +927,6 @@ export class CronogramaService {
       return perfilMap.get(n) ?? ''
     }
 
-    // 7. Construir filas
     const rows: any[] = []
     const all = [...presenciales, ...virtuales]
 
@@ -1059,13 +986,11 @@ export class CronogramaService {
       const h = headerMap.get(Number(ses.cronogramaId))
       if (h) rows.push(buildRow(h, ses))
     }
-    // Cronogramas sin sesiones también aparecen (1 fila vacía de sesión)
     for (const h of headers) {
       const tieneAlgo = all.some(s => Number(s.cronogramaId) === Number(h.cronogramaId))
       if (!tieneAlgo) rows.push(buildRow(h, null))
     }
 
-    // 8. Generar Excel
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Cronograma')
@@ -1074,8 +999,6 @@ export class CronogramaService {
     const safeName = empresaNombre.replace(/[^\w\d -]/g, '').trim().replace(/\s+/g, '_').slice(0, 50) || `proyecto-${proyectoId}`
     return { buffer, filename: `Cronograma_${safeName}.xlsx` }
   }
-
-  // ── Actividades virtuales: crear / actualizar / eliminar (Fase 4) ───────
 
   async agregarSesionVirtual(cronogramaId: number, dto: AgregarSesionVirtualDto) {
     await this.assertConvenioActivoPorCronograma(cronogramaId)
@@ -1090,7 +1013,6 @@ export class CronogramaService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // 1. Cargar cronograma + UT
       const cronoRows: any[] = await qr.query(
         `SELECT c.CRONOGRAMAID                  AS "cronogramaId",
                 c.AFGRUPOID                     AS "grupoId",
@@ -1110,18 +1032,15 @@ export class CronogramaService {
       if (!cronoRows.length) throw new NotFoundException('Cronograma no encontrado.')
       const crono = cronoRows[0]
 
-      // 2. Total UT según modalidad
       let totalUT = 0
       if (dto.modalidadId === 3) totalUT = Number(crono.horasPHib) + Number(crono.horasTHib)
       else if (dto.modalidadId === 4) totalUT = Number(crono.horasPV) + Number(crono.horasTV)
 
-      // 3. Validar fechas dentro del rango cronograma
       const fIniStr = new Date(crono.fechaInicio).toISOString().slice(0, 10)
       const fFinStr = new Date(crono.fechaFin).toISOString().slice(0, 10)
       if (dto.fechaInicio < fIniStr) throw new BadRequestException(`La fecha es anterior al cronograma (${fIniStr}).`)
       if (dto.fechaFin > fFinStr) throw new BadRequestException(`La fecha fin es posterior al cronograma (${fFinStr}).`)
 
-      // 4. Capacitador aprobado del proyecto
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
           WHERE CAPACITADORID = :1 AND PROYECTOID = :2
@@ -1134,7 +1053,6 @@ export class CronogramaService {
         throw new BadRequestException('El capacitador no pertenece al proyecto o no está aprobado.')
       }
 
-      // 5. Perfil válido
       const perfilCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
         [dto.perfilUTId, crono.utId],
@@ -1143,7 +1061,7 @@ export class CronogramaService {
         throw new BadRequestException('El perfil no es válido para esta unidad temática.')
       }
 
-      // 6. Total horas: en modalidad 3 (híbrida) sumamos presenciales + virtuales
+      // en hibrida (3) las horas presenciales tambien cuentan contra la UT
       const acumP: any[] = dto.modalidadId === 3
         ? await qr.query(
             `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
@@ -1163,7 +1081,6 @@ export class CronogramaService {
         )
       }
 
-      // 7. Convenio activo + consecutivo virtual (CONSECUTIVOV)
       const convRows: any[] = await qr.query(
         `SELECT CONVENIOSID AS "convId", NVL(CONVENIOSCRONOCONSECUTIVOV, 0) AS "consec"
            FROM CONVENIOS
@@ -1178,7 +1095,6 @@ export class CronogramaService {
       const consecutivo = Number(convRows[0].consec) + 1
       const sigla = `CV${String(consecutivo).padStart(6, '0')}`
 
-      // 8. Próximo numSesion (de actividades virtuales)
       const nsRows: any[] = await qr.query(
         `SELECT NVL(MAX(CRONOGRAMAVIRTUALNUMSESION), 0) + 1 AS "next"
            FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = :1`,
@@ -1186,17 +1102,14 @@ export class CronogramaService {
       )
       const numSesion = Number(nsRows[0].next)
 
-      // 9. Próximo CRONOGRAMAVIRTUALID
       const idRows: any[] = await qr.query(
         `SELECT NVL(MAX(CRONOGRAMAVIRTUALID), 0) + 1 AS "id" FROM CRONOGRAMAVIRTUAL`,
       )
       const newId = Number(idRows[0].id)
 
-      // 10. Construir Date objects
       const fechaIni = new Date(`${dto.fechaInicio}T05:00:00.000Z`)
       const fechaFin = new Date(`${dto.fechaFin}T05:00:00.000Z`)
 
-      // 11. INSERT
       await qr.query(
         `INSERT INTO CRONOGRAMAVIRTUAL
            (CRONOGRAMAVIRTUALID, CRONOGRAMAID,
@@ -1229,7 +1142,6 @@ export class CronogramaService {
         ],
       )
 
-      // 12. Actualizar contadores
       await qr.query(
         `UPDATE CRONOGRAMA SET CRONONUMTOTALACT = NVL(CRONONUMTOTALACT, 0) + 1
           WHERE CRONOGRAMAID = :1`,
@@ -1313,7 +1225,6 @@ export class CronogramaService {
       )
       if (!perfilCheck.length) throw new BadRequestException('El perfil no es válido para esta unidad temática.')
 
-      // Total horas: restar las actuales y sumar las nuevas (en híbrida sumar también presenciales)
       const acumP: any[] = dto.modalidadId === 3
         ? await qr.query(
             `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
@@ -1377,8 +1288,6 @@ export class CronogramaService {
       await qr.release()
     }
   }
-
-  // ── Radicar (Fase 4) ────────────────────────────────────────────────────
 
   async listarRadicados(proyectoId: number) {
     return this.ds.query(

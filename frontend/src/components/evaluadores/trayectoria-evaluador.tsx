@@ -14,10 +14,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Tipos — reflejan lo que devuelven /trayectoria, /resumen y /participaciones
- * ──────────────────────────────────────────────────────────────────────────── */
-
 interface Hito { codigo: string; nombre: string; cumplido: boolean; detalle?: string | null }
 interface Progreso { cumplidos: number; total: number; hitos: Hito[] }
 
@@ -106,8 +102,6 @@ interface Detalle extends Participacion {
     capacitacionId: number; nombre: string; plataforma: string | null
     horas: number | null; calificacion: number | null; calificacionMinima: number | null
     aprobado: boolean; tieneArchivo: boolean
-    // Los devuelve el backend desde siempre; sin declararlos, al corregir un
-    // curso se enviaban vacíos y se perdían las fechas y las observaciones.
     fechaInicio: string | null; fechaFin: string | null; observaciones: string | null
   }>
   pruebas: Array<{
@@ -119,8 +113,6 @@ interface Detalle extends Participacion {
   proyectos: Array<{
     partProyectoId: number; nombreProyecto: string | null; razonSocial: string | null
     nit: string | null; puntajeOtorgado: number | null; origen: string
-    // El backend siempre los devolvió; sin declararlos no se podía saber si un
-    // candidato del buscador ya estaba puesto.
     proyectoId: number | null; guardadoId: number | null
   }>
   documentos: { propios: Documento[]; heredados: Documento[]; permanentes: Documento[] }
@@ -128,12 +120,7 @@ interface Detalle extends Participacion {
   retroalimentacion: { recibidas: number; promedio: number | null; asignadas: number; pendientes: number }
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Colores de estado
- * Tailwind necesita las clases literales en el fuente; por eso el mapa completo
- * en vez de construir el nombre de la clase con template strings.
- * ──────────────────────────────────────────────────────────────────────────── */
-
+// Tailwind necesita las clases literales en el fuente, no armadas con template strings
 const COLOR_ESTADO: Record<string, { chip: string; punto: string; anillo: string }> = {
   neutral: { chip: 'bg-neutral-100 text-neutral-700 border-neutral-200', punto: 'bg-neutral-400', anillo: '#a3a3a3' },
   blue:    { chip: 'bg-blue-50 text-blue-700 border-blue-200',           punto: 'bg-blue-500',    anillo: '#3b82f6' },
@@ -147,10 +134,6 @@ const COLOR_ESTADO: Record<string, { chip: string; punto: string; anillo: string
 const colorDe = (token?: string | null) => COLOR_ESTADO[token ?? 'neutral'] ?? COLOR_ESTADO.neutral
 
 type SubTab = 'documentos' | 'formacion' | 'proyectos' | 'retroalimentacion' | 'certificado'
-
-/* ────────────────────────────────────────────────────────────────────────────
- * Componente principal
- * ──────────────────────────────────────────────────────────────────────────── */
 
 export function TrayectoriaEvaluador({
   evaluadorId, setToast,
@@ -272,27 +255,13 @@ export function TrayectoriaEvaluador({
   )
 }
 
-/* ── KPIs del hero ──────────────────────────────────────────────────────── */
-
-/**
- * El recorrido año por año: prueba y retroalimentación.
- *
- * Los recuadros de arriba dan un solo dato —la última prueba, el promedio de
- * retroalimentación— y con eso no se decide si vale la pena volver a convocar
- * a alguien: no se ve si mejoró, si lleva años pasando, ni si un promedio bajo
- * viene de un año suelto. Aquí está el recorrido completo, con los huecos a la
- * vista: un año en que estuvo en el banco y no presentó prueba aparece vacío,
- * que es justo lo que hay que notar.
- */
 function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
   if (!recorrido?.length) return null
 
   const estado = (a: boolean | null) =>
     a === true ? { txt: 'Aprobada', clase: 'bg-emerald-100 text-emerald-700' }
     : a === false ? { txt: 'No aprobada', clase: 'bg-red-100 text-red-700' }
-    // Sin evaluar NO es reprobada: las pruebas cargadas antes de que se
-    // calculara la aprobación no tienen porcentaje ni corte, y pintarlas en
-    // rojo afirmaría algo que nadie comprobó.
+    // sin evaluar no es reprobada: las pruebas viejas no traen porcentaje ni corte
     : { txt: 'Sin evaluar', clase: 'bg-neutral-100 text-neutral-500' }
 
   return (
@@ -371,8 +340,6 @@ function FilaKpis({ resumen }: { resumen: Resumen }) {
     </div>
   )
 }
-
-/* ── Rail de años ───────────────────────────────────────────────────────── */
 
 function Rail({
   items, seleccion, onSelect,
@@ -467,19 +434,7 @@ function BarraProgreso({ progreso, color }: { progreso: Progreso; color: string 
   )
 }
 
-/* ── Cabecera del ciclo ─────────────────────────────────────────────────── */
-
-/**
- * Cambia el estado del ciclo, con motivo.
- *
- * El estado normalmente lo sugiere el checklist, pero hay salidas que ningún
- * dato puede deducir: alguien declinó la invitación, le revocaron la
- * participación, no aprobó. Esas hay que declararlas.
- *
- * El motivo es obligatorio en los estados que cierran el ciclo sin evaluación
- * —lo exige el backend y se pide aquí antes de intentarlo—, porque un año
- * cerrado sin explicación no se puede auditar después.
- */
+// el motivo es obligatorio en los estados negativos: lo exige el backend
 function CambiarEstado({
   detalle, setToast, onRecargar, onCerrar,
 }: {
@@ -588,13 +543,7 @@ function CambiarEstado({
   )
 }
 
-/**
- * Grupos del ciclo.
- *
- * Se guarda el conjunto completo, no de a uno: el backend reemplaza lo que
- * haya (el primero queda como principal). Por eso la pantalla edita una lista
- * y manda todo junto — mandar altas sueltas dejaría fuera los retiros.
- */
+// se manda el conjunto completo: el backend reemplaza lo que haya
 function EditarGrupos({
   detalle, setToast, onRecargar, onCerrar,
 }: {
@@ -724,8 +673,6 @@ function CabeceraCiclo({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Los grupos se editan aquí y no en un tab: son parte de la
-              asignación del ciclo, junto al estado, no un anexo aparte. */}
           <button
             onClick={() => setEditando(v => (v === 'grupos' ? null : 'grupos'))}
             className="rounded-lg border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold text-neutral-600 transition hover:bg-neutral-50"
@@ -769,8 +716,7 @@ function CabeceraCiclo({
       )}
 
       {divergente && (
-        // El estado lo declara una persona; el checklist lo deduce de los datos.
-        // Cuando no coinciden se avisa en vez de sobrescribir en silencio.
+        // el estado lo declara una persona y el checklist lo deduce de los datos
         <p className="border-b border-amber-100 bg-amber-50/60 px-5 py-2.5 text-[12px] text-amber-800">
           El estado guardado es <strong>{detalle.estadoNombre}</strong>, pero por lo que hay cargado
           correspondería <strong>{detalle.estadoSugerido}</strong>.
@@ -814,8 +760,6 @@ function AnilloProgreso({ progreso, color }: { progreso: Progreso; color: string
   )
 }
 
-/* ── Checklist ──────────────────────────────────────────────────────────── */
-
 function Checklist({ progreso }: { progreso: Progreso }) {
   return (
     <section className="rounded-2xl border border-neutral-200 bg-white px-5 py-4 shadow-sm">
@@ -846,8 +790,6 @@ function Checklist({ progreso }: { progreso: Progreso }) {
     </section>
   )
 }
-
-/* ── Sub-tabs del año ───────────────────────────────────────────────────── */
 
 const SUBTABS: Array<{ id: SubTab; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { id: 'documentos', label: 'Documentos', icon: Paperclip },
@@ -931,18 +873,7 @@ function PanelSubTabs({
   )
 }
 
-/* ── Autorización del jefe ──────────────────────────────────────────────── */
-
-/**
- * Registra la autorización del jefe y su evidencia — el hito 2 del ciclo.
- *
- * Los endpoints existían desde el principio y ninguna pantalla los llamaba:
- * el dato se mostraba en la cabecera del año ("Autorizó — ") pero no había
- * forma de ponerlo, así que el hito no podía encenderse nunca.
- *
- * Va dentro del año y no en la ficha general porque la autorización es de un
- * ciclo concreto: el jefe autoriza participar en ESA convocatoria.
- */
+// la autorización es de un ciclo concreto, por eso va dentro del año
 function BloqueAutorizacion({
   detalle, setToast, onRecargar,
 }: {
@@ -995,10 +926,7 @@ function BloqueAutorizacion({
   async function subirEvidencia(archivo: File) {
     if (!a) return
 
-    // Se mira el tamaño ANTES de mandarlo. Un .msg con presentaciones adjuntas
-    // pasa de 8 MB sin esfuerzo, y sin esta comprobación se subía entero para
-    // que el servidor lo rechazara al final: minutos de espera y un mensaje
-    // que no decía qué había pasado. Aquí es inmediato y dice qué hacer.
+    // se mide antes de mandarlo: el servidor lo rechaza al final, tras subirlo entero
     const mb = archivo.size / (1024 * 1024)
     if (mb > MAX_EVIDENCIA_MB) {
       setToast({
@@ -1047,11 +975,6 @@ function BloqueAutorizacion({
           <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-600">
             Autorización del jefe
           </p>
-          {/* Se nombra el año y la convocatoria —que lleva el programa— en vez
-              de pedirlos en un desplegable: el ciclo ya está escogido al estar
-              en esta pantalla, y ofrecer elegirlo otra vez permitiría adjuntar
-              el correo de 2025 estando parado en 2026, que es justo el enredo
-              que se quiere evitar. */}
           <p className="text-[11px] text-neutral-400">
             Quién autorizó a este evaluador a participar en{' '}
             <strong className="text-neutral-500">
@@ -1196,15 +1119,6 @@ function BloqueAutorizacion({
   )
 }
 
-/**
- * Sube un documento ATADO AL AÑO — la confidencialidad del ciclo, y cualquier
- * otro soporte que corresponda a esta participación.
- *
- * Es la pieza que faltaba para el hito 3. El formulario de la ficha general
- * sube igual de bien, pero nunca dice a qué ciclo pertenece el archivo, así
- * que todo cae en "permanentes" y aparece repetido en 2024, 2025 y 2026
- * cuando en realidad cada año tiene su propio acuerdo firmado.
- */
 function SubirDocumentoDelAnio({
   evaluadorId, detalle, setToast, onRecargar,
 }: {
@@ -1241,8 +1155,7 @@ function SubirDocumentoDelAnio({
     if (!tipoSel) return setToast({ tipo: 'error', msg: 'Escoja el tipo de documento' })
     if (!archivo) return setToast({ tipo: 'error', msg: 'Escoja el archivo' })
 
-    // La extensión se comprueba aquí para decirlo con el nombre del tipo, en
-    // vez de dejar que el servidor devuelva un 400 después de subir el archivo.
+    // se comprueba aquí para nombrar el tipo; el servidor solo devuelve un 400
     const ext = (archivo.name.split('.').pop() ?? '').toLowerCase()
     if (!exts.includes(ext)) {
       return setToast({
@@ -1259,8 +1172,7 @@ function SubirDocumentoDelAnio({
       const fd = new FormData()
       fd.append('archivo', archivo)
       fd.append('tipoDocumentoEvalId', tipoSel)
-      // Esto es lo que lo ata al ciclo y enciende el hito. Sin este campo el
-      // documento queda como permanente y se ve en todos los años.
+      // sin participacionId el documento queda permanente y sale en todos los años
       fd.append('participacionId', String(detalle.participacionId))
       fd.append('anioReferencia', String(detalle.anio))
       if (descripcion.trim()) fd.append('descripcion', descripcion.trim())
@@ -1354,8 +1266,6 @@ function SubirDocumentoDelAnio({
   )
 }
 
-/* ── Documentos: propios / heredados / permanentes ──────────────────────── */
-
 function TabDocumentos({
   evaluadorId, detalle, setToast, onRecargar,
 }: {
@@ -1434,17 +1344,7 @@ function TabDocumentos({
   )
 }
 
-/**
- * Lista un grupo de documentos del ciclo.
- *
- * `onBorrar` solo llega en los grupos donde borrar tiene sentido: los que se
- * cargan para ESTE evaluador. Los heredados son un archivo único de la
- * convocatoria, compartido por todo el equipo, y se administran desde
- * Convocatorias — un botón de eliminar aquí borraria el documento de todos.
- *
- * Antes no había ninguno, y quien se equivocaba de archivo no tenía forma de
- * deshacerlo desde la pantalla: había que pedirlo por WhatsApp.
- */
+// sin onBorrar en los heredados: son un archivo único compartido por todo el ciclo
 function BloqueDocs({
   titulo, ayuda, docs, rutaBase, setToast, onBorrar,
 }: {
@@ -1501,15 +1401,7 @@ function BloqueDocs({
   )
 }
 
-/**
- * Extensiones que el navegador dibuja. Al resto solo se le ofrece descargar.
- *
- * Un .msg o un .xlsx no se pueden mostrar: al pulsar el ojo, el navegador los
- * bajaba igual, pero con el identificador interno del blob por nombre —
- * "04cfcda2-0097-4d6b-a368-ddb190d3cb66", sin extensión— y sin forma de saber
- * qué correo era. Ofrecer un botón que no hace lo que promete es peor que no
- * ofrecerlo.
- */
+// extensiones que el navegador dibuja; al resto las baja con el uuid del blob por nombre
 const SE_PUEDE_VER = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'txt']
 
 function sePuedeVer(nombre: string): boolean {
@@ -1565,27 +1457,7 @@ function BotonesArchivo({
   )
 }
 
-/* ── Formación y pruebas ────────────────────────────────────────────────── */
-
-/**
- * Registra el curso de formación del ciclo — el hito 4.
- *
- * El endpoint estaba desde el principio y ninguna pantalla lo llamaba: la
- * pestaña mostraba los cursos pero no había cómo agregar el primero, así que
- * el hito no podía encenderse nunca.
- *
- * "Aprobado" no se pide: lo deriva el backend comparando la calificación con
- * la nota de corte del ciclo. Ponerlo aquí permitiría marcar aprobado a quien
- * no llegó al corte, que es justo lo que la nota de corte existe para evitar.
- */
-/**
- * Registra un curso, o corrige uno ya registrado.
- *
- * `editando` llega cuando se pulsa el lápiz de una fila. Antes solo se podía
- * crear y borrar: una nota mal digitada obligaba a eliminar el curso y
- * volverlo a escribir entero, con su certificado. El backend ya aceptaba la
- * corrección (PUT /capacitaciones/:cid); solo faltaba ofrecerla.
- */
+// "aprobado" no se pide: lo deriva el backend contra la nota de corte del ciclo
 function FormularioCurso({
   detalle, setToast, onRecargar, onCerrar, editando,
 }: {
@@ -1844,10 +1716,7 @@ function TabFormacion({
                     {c.calificacionMinima != null ? `mín. ${c.calificacionMinima}` : 'sin corte'}
                   </p>
                 </div>
-                {/* Sin nota de corte no se puede decir "no aprobado": nadie ha
-                    reprobado nada, es que falta configurar el ciclo. Decirlo
-                    mal alarmaba a quien registraba el curso y la mandaba a
-                    buscar un error que no existia. */}
+                {/* sin nota de corte no es "no aprobado": falta configurar el ciclo */}
                 {c.calificacionMinima == null ? (
                   <span
                     title="Este ciclo no tiene calificación mínima. Se define en las reglas de la convocatoria."
@@ -1937,17 +1806,7 @@ function TabFormacion({
   )
 }
 
-/**
- * Registrar a mano un proyecto que no está en el SEP.
- *
- * Pasa de verdad: la Cámara de Comercio de Cartagena no existe en la tabla de
- * empresas, y los proyectos anteriores al módulo nunca se importaron. Sin esto,
- * una evaluación que sí ocurrió no se podía dejar registrada, y el hito de
- * proyectos quedaba apagado para siempre.
- *
- * Queda marcado como "Histórico" —no apunta a ningún proyecto del sistema— para
- * que en la ficha se distinga de los que sí están cargados y nadie los confunda.
- */
+// para proyectos que no existen en el SEP; quedan marcados como "histórico"
 function ManualProyecto({
   participacionId, sugerido, setToast, onRecargar,
 }: {
@@ -1966,8 +1825,7 @@ function ManualProyecto({
   const input = 'w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
 
   function abrir() {
-    // Lo que ya escribió en el buscador es casi siempre la empresa: se
-    // arrastra para que no lo teclee dos veces.
+    // lo tecleado en el buscador suele ser la empresa: se arrastra
     if (!abierto && !razonSocial) setRazonSocial(sugerido.trim())
     setAbierto(v => !v)
   }
@@ -2008,9 +1866,7 @@ function ManualProyecto({
       {abierto && (
         <div className="mt-2 grid grid-cols-1 gap-3 rounded-xl bg-white p-3 ring-1 ring-neutral-200 sm:grid-cols-3">
           <div className="sm:col-span-2">
-            {/* "Proponente" y no "empresa": es como se llama en el resto del
-                SEP a quien presenta el proyecto, y es la palabra con la que
-                la gestora lo tiene en la cabeza al transcribirlo. */}
+            {/* "Proponente" y no "empresa": así se llama en el resto del SEP */}
             <label className={label}>Proponente *</label>
             <input
               value={razonSocial}
@@ -2055,15 +1911,12 @@ function ManualProyecto({
   )
 }
 
-/* ── Proyectos evaluados ────────────────────────────────────────────────── */
-
 const ORIGEN_PROYECTO: Record<string, { texto: string; clase: string }> = {
   PROYECTO:  { texto: 'Ejecutado', clase: 'bg-emerald-100 text-emerald-700' },
   FORMULADO: { texto: 'Formulado', clase: 'bg-cyan-100 text-cyan-700' },
   HISTORICO: { texto: 'Histórico', clase: 'bg-neutral-100 text-neutral-600' },
 }
 
-/** Un proyecto candidato tal como lo devuelve el buscador del backend. */
 interface ProyectoCandidato {
   proyectoId: number | null
   guardadoId: number | null
@@ -2079,14 +1932,7 @@ interface RespProyectos {
   items: ProyectoCandidato[]
 }
 
-/**
- * Proyectos evaluados en el ciclo.
- *
- * Era de solo lectura: el endpoint para asignarlos existía y ninguna pantalla
- * lo llamaba, así que el hito 7 no había forma de encenderlo. Los candidatos
- * salen acotados a la convocatoria del ciclo — un evaluador de 2026 solo pudo
- * evaluar proyectos de esa convocatoria.
- */
+// los candidatos salen acotados a la convocatoria del ciclo
 function TabProyectos({
   detalle, setToast, onRecargar,
 }: {
@@ -2103,8 +1949,7 @@ function TabProyectos({
 
   const pid = detalle.participacionId
 
-  // Se busca con un respiro tras dejar de teclear, para no lanzar una consulta
-  // por letra. Con la convocatoria puesta la lista sale sin escribir nada.
+  // con la convocatoria puesta la lista sale sin escribir nada
   useEffect(() => {
     if (!abierto) return
     let vivo = true
@@ -2158,8 +2003,7 @@ function TabProyectos({
   }
 
   const etiqueta = (c: { nombreProyecto: string | null; razonSocial: string | null }) =>
-    // El nombre del proyecto viene vacío en casi todos: la empresa es lo que
-    // de verdad identifica al proyecto para quien lo está buscando.
+    // el nombre del proyecto viene vacío en casi todos: identifica más la empresa
     c.razonSocial || c.nombreProyecto || 'Sin identificar'
 
   return (
@@ -2204,12 +2048,6 @@ function TabProyectos({
             <p className="mt-3 text-[12px] text-amber-800">{resp.motivo}</p>
           )}
 
-          {/* No todo proyecto evaluado está cargado en el SEP: los de años
-              anteriores al módulo, y los que sencillamente nunca se
-              importaron. El backend siempre aceptó registrarlos a mano —los
-              marca como "histórico"— pero la pantalla solo dejaba escoger de
-              la lista, así que esa evaluación no había forma de dejarla
-              registrada. */}
           {!buscando && (
             <ManualProyecto
               participacionId={pid}
@@ -2293,24 +2131,17 @@ function TabProyectos({
   )
 }
 
-/* ── Retroalimentación ──────────────────────────────────────────────────── */
-
 function TabRetroalimentacion({ detalle }: { detalle: Detalle }) {
   const r = detalle.retroalimentacion
 
-  // El instrumento existe desde 2024. Antes de eso, "0 recibidas" no significa
-  // mal desempeño: significa que no había con qué medir. Distinguirlo evita
-  // que un año viejo se lea como una mala calificación.
+  // el instrumento existe desde 2024: antes, 0 recibidas no es mal desempeño
   if (r.recibidas === 0 && detalle.anio < 2024) {
     return (
       <Vacio texto={`Sin retroalimentación — ${detalle.anio} es anterior al inicio del instrumento (2024).`} />
     )
   }
   if (r.recibidas === 0 && r.asignadas === 0) {
-    // Decir "no se ha generado" sin decir dónde generarla deja al gestor
-    // buscando un botón que no está en esta pantalla: la matriz se arma para
-    // TODO el ciclo de una vez, no evaluador por evaluador, y por eso vive en
-    // la convocatoria. Se enlaza en vez de repetir el botón aquí.
+    // la matriz se arma para todo el ciclo, por eso se enlaza a la convocatoria
     return (
       <div className="px-5 py-8 text-center">
         <MessageSquareQuote size={26} className="mx-auto text-neutral-300" />
@@ -2383,17 +2214,7 @@ function Tarjeta({
   )
 }
 
-/* ── Certificado ────────────────────────────────────────────────────────── */
-
-/**
- * Carga el certificado que YA existe, para los años anteriores al módulo.
- *
- * No entra al registro de consecutivos: ese es el de los certificados que
- * emitió el SEP, con un código de verificación que la página pública puede
- * validar. Un PDF de 2025 no lo emitimos nosotros, así que se archiva como
- * documento del ciclo — que es justo para lo que existe el tipo
- * "Certificado de participación en evaluación".
- */
+// se archiva como documento del ciclo: no entra al registro de consecutivos
 function SubirCertificadoExistente({
   evaluadorId, participacionId, anio, setToast, onRecargar,
 }: {
@@ -2417,8 +2238,7 @@ function SubirCertificadoExistente({
       const fd = new FormData()
       fd.append('archivo', archivo)
       fd.append('tipoDocumentoEvalId', String(tipo.id))
-      // Con PARTICIPACIONID queda dentro del año y enciende el hito; sin él
-      // se iría a los documentos permanentes y aparecería en todos los años.
+      // sin participacionId se iría a permanentes y saldría en todos los años
       fd.append('participacionId', String(participacionId))
       fd.append('anioReferencia', String(anio))
       fd.append('descripcion', `Certificado de participación ${anio} (cargado)`)
@@ -2539,14 +2359,7 @@ function TabCertificado({
   const cert = detalle.certificado
   const vigente = cert && !cert.anulado
 
-  // Certificados de años anteriores que se archivaron a mano. Viven como
-  // documento del ciclo, no en el registro de consecutivos: el SEP no los
-  // emitió y no puede darles un código de verificación que pueda honrar.
-  //
-  // Se miran los dos sitios. Muchos se cargaron desde la pestaña general de
-  // Documentos, así que quedaron como permanentes con el año marcado; buscar
-  // solo entre los del ciclo los dejaba invisibles justo aquí, que es donde
-  // se los busca.
+  // se miran los dos sitios: muchos se cargaron como permanentes con el año marcado
   const cargados = [
     ...detalle.documentos.propios.filter(d => d.tipoCodigo === 'CERTIFICADO_PARTICIPACION'),
     ...detalle.documentos.permanentes.filter(
@@ -2629,10 +2442,7 @@ function TabCertificado({
           Emitir certificado
         </button>
 
-        {/* Los años anteriores al módulo ya tienen su certificado en papel y no
-            se van a reemitir: pedirle al gestor que genere uno nuevo cambiaría
-            el número del documento que la persona ya tiene en la mano. Por eso
-            hay que poder cargar el que existe. */}
+        {/* los años anteriores ya tienen certificado en papel: reemitir cambiaría su número */}
         <div className="mx-auto mt-6 max-w-md border-t border-neutral-100 pt-5">
           <p className="text-[12px] text-neutral-500">
             ¿El certificado de <strong>{detalle.anio}</strong> ya existe y solo hay que archivarlo?
@@ -2705,10 +2515,6 @@ function TabCertificado({
                 <XCircle size={13} /> Anular
               </button>
             )}
-            {/* Anulado: hay que poder emitir el reemplazo desde aquí. El botón
-                de emitir vivía solo en la rama "sin certificado", así que tras
-                anular uno el ciclo se quedaba sin salida en esta pantalla — el
-                único camino era el lote de la convocatoria, en otro sitio. */}
             {!vigente && (
               <button
                 onClick={() => setConfirmEmitir(true)}
@@ -2794,8 +2600,6 @@ function TabCertificado({
         cargando={emitiendo}
       />
 
-      {/* El mismo modal de emisión que la rama "sin certificado": sin esto, el
-          botón "Emitir uno nuevo" no tendría con qué confirmar. */}
       <ConfirmModal
         open={confirmEmitir}
         onClose={() => setConfirmEmitir(false)}
@@ -2814,8 +2618,6 @@ function TabCertificado({
     </div>
   )
 }
-
-/* ── Estados vacíos ─────────────────────────────────────────────────────── */
 
 function Vacio({ texto }: { texto: string }) {
   return <p className="px-5 py-8 text-center text-sm text-neutral-400">{texto}</p>
@@ -2849,8 +2651,6 @@ function SoloHistorico() {
     </div>
   )
 }
-
-/* ── Utilidades ─────────────────────────────────────────────────────────── */
 
 function fecha(d: string | null | undefined): string {
   if (!d) return '—'

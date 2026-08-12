@@ -7,13 +7,7 @@ import { AuditoriaService } from '../evaluadores/auditoria.service'
 import { bindRepetido } from '../common/db/binds'
 import { RetroMatrizService } from './retro-matriz.service'
 
-/**
- * Retroalimentación 360° — reemplazo del sistema que vivía aparte en Mongo.
- *
- * Todo se ancla a PARTICIPACIONID, no a la persona: así el resultado cae en el
- * año correcto de la ficha del evaluador sin ninguna lógica extra, y la misma
- * persona puede tener 4.6 en 2024 y 4.8 en 2025.
- */
+// todo se ancla a PARTICIPACIONID, no a la persona: separa por año
 
 export interface CtxUsuario {
   usuarioEmail: string
@@ -22,16 +16,15 @@ export interface CtxUsuario {
 
 export interface RespuestaEnviada {
   asignacionId: number
-  /** { "<numeroPregunta>": calificacion } para las preguntas de escala. */
+  /** { numeroPregunta: calificacion } */
   escalas: Record<string, number>
-  /** Texto de la pregunta TEXTO_POR_PERSONA, si la hay. */
+  /** pregunta TEXTO_POR_PERSONA */
   comentario?: string
 }
 
 const PERFIL_ADMIN = 1
 const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
-/** Mismo alcance que el resto del módulo: quien gestiona, gestiona completo. */
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 @Injectable()
@@ -42,26 +35,9 @@ export class RetroalimentacionService {
     private readonly auditoria: AuditoriaService,
   ) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Formulario                                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // formulario
 
-  /**
-   * Devuelve el instrumento de la convocatoria, clonando la plantilla base la
-   * primera vez.
-   *
-   * El clon es deliberado: si el instrumento del año apuntara a la plantilla,
-   * editar una pregunta reescribiría el histórico de todos los años
-   * anteriores. Cada ciclo se queda con su propia copia congelada.
-   *
-   * Puede entrar dos veces a la vez y no pasa nada. La pantalla de la matriz
-   * pide el avance y la vista previa en paralelo, y las dos acaban aquí: en un
-   * ciclo estrenado ninguna encuentra instrumento, las dos lo clonan, y a la
-   * segunda el índice único le responde que ya existe. Se lee de nuevo y se
-   * devuelve el que ganó — que es lo que la pantalla necesita. Antes esa
-   * carrera tumbaba la matriz con "Ese registro ya existe", y bastaba insistir
-   * para que funcionara, porque a la segunda vuelta el instrumento ya estaba.
-   */
+  // clona la plantilla la primera vez; el clon congela las preguntas del año
   async getFormulario(convocatoriaId: number) {
     const existente = await this.buscarFormulario(convocatoriaId)
     if (existente) return existente
@@ -88,9 +64,7 @@ export class RetroalimentacionService {
     try {
       await this.clonarPlantilla(convocatoriaId, plantilla[0].id, conv[0])
     } catch (e) {
-      // Si otra petición se adelantó, su instrumento sirve igual: es un clon
-      // de la misma plantilla. Solo se relanza el error si de verdad no quedó
-      // ninguno, que ya sería un fallo real y no una carrera.
+      // dos peticiones en paralelo pueden clonar a la vez: sirve el que ganó
       const delOtro = await this.buscarFormulario(convocatoriaId)
       if (!delOtro) throw e
       return delOtro
@@ -101,7 +75,6 @@ export class RetroalimentacionService {
     return creado
   }
 
-  /** Copia la plantilla base hacia una convocatoria, en una sola transacción. */
   private async clonarPlantilla(
     convocatoriaId: number,
     plantillaId: number,
@@ -113,9 +86,7 @@ export class RetroalimentacionService {
       const nuevoId = Number(seq[0].NEXTVAL)
 
       await m.query(
-        // Se copia también ESCALAETIQUETAS: si el ciclo no se queda con las
-        // etiquetas vigentes al abrirlo, un cambio posterior de redacción
-        // reinterpretaría respuestas ya enviadas.
+        // copia ESCALAETIQUETAS para que el ciclo conserve las etiquetas de su año
         `INSERT INTO RETROFORMULARIO
            (RETROFORMULARIOID, CONVOCATORIAID, NOMBRE, VERSION, ANIO, ESCALAMIN, ESCALAMAX,
             DURACIONMINUTOS, RESULTADOANONIMO, ACTIVO, ABIERTO, REGLASMATRIZ,
@@ -127,9 +98,7 @@ export class RetroalimentacionService {
         [nuevoId, convocatoriaId, conv.nombre, conv.anio, plantillaId],
       )
 
-      // Sin ORDER BY: Oracle rechaza SEQ.NEXTVAL en un SELECT ordenado
-      // (ORA-02287). Da igual — el orden viaja en la columna ORDEN, que se
-      // copia tal cual; el orden de inserción no significa nada.
+      // sin ORDER BY: Oracle rechaza SEQ.NEXTVAL en SELECT ordenado (ORA-02287)
       await m.query(
         `INSERT INTO RETROPREGUNTA
            (RETROPREGUNTAID, RETROFORMULARIOID, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN)
@@ -140,7 +109,6 @@ export class RetroalimentacionService {
     })
   }
 
-  /** Abre o cierra el diligenciamiento del ciclo. */
   async cambiarApertura(convocatoriaId: number, abierto: boolean, ctx: CtxUsuario) {
     const form = await this.getFormulario(convocatoriaId)
 
@@ -206,10 +174,7 @@ export class RetroalimentacionService {
       resultadoAnonimo: Number(f.resultadoAnonimo) === 1,
       abierto: Number(f.abierto) === 1,
       reglasMatriz: f.reglasMatriz as string | null,
-      // La escala dejó de ser solo numérica: cada valor tiene nombre
-      // (1 Deficiente … 5 Excelente). Si el JSON viniera corrupto se devuelve
-      // null y el formulario cae a mostrar solo los números, que sigue siendo
-      // usable — peor sería tumbar la pantalla por una etiqueta.
+      // si el JSON viene corrupto devuelve null y el formulario muestra solo números
       escalaEtiquetas: this.parsearEtiquetas(f.escalaEtiquetas as string | null),
       preguntas,
     }
@@ -246,11 +211,9 @@ export class RetroalimentacionService {
     }))
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Matriz de asignaciones                                                ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // matriz de asignaciones
 
-  /** Simula la generación sin escribir. Es el mismo cálculo que `generar`. */
+  // mismo calculo que generarMatriz, pero sin escribir
   async previewMatriz(convocatoriaId: number) {
     const form = await this.getFormulario(convocatoriaId)
     const resultado = await this.matriz.calcular(convocatoriaId, form.reglasMatriz)
@@ -259,10 +222,7 @@ export class RetroalimentacionService {
       [form.retroFormularioId],
     )
 
-    // El alcance de los transversales se expone explícitamente porque es la
-    // parte de la matriz que más se desactualiza y la que puede venir forzada
-    // desde la configuración del ciclo. Verlo antes de generar evita descubrir
-    // en el reporte que alguien evaluó a quien no debía.
+    // el alcance de los transversales puede venir forzado por las reglas del ciclo
     const nodos = await this.matriz.cargarNodos(convocatoriaId)
     const reglas = this.matriz.resolverReglas(form.reglasMatriz)
     const transversales = nodos
@@ -288,11 +248,7 @@ export class RetroalimentacionService {
     }
   }
 
-  /**
-   * Persiste los pares calculados. Los duplicados se saltan gracias al índice
-   * único, así que regenerar tras agregar gente es seguro: agrega lo nuevo y
-   * no toca lo ya diligenciado.
-   */
+  // regenerar es seguro: los duplicados se saltan y no se toca lo ya diligenciado
   async generarMatriz(convocatoriaId: number, ctx: CtxUsuario) {
     const form = await this.getFormulario(convocatoriaId)
     const { pares, stats } = await this.matriz.calcular(convocatoriaId, form.reglasMatriz)
@@ -347,7 +303,6 @@ export class RetroalimentacionService {
     }
   }
 
-  /** Par agregado a mano cuando la regla no lo cubrió. */
   async agregarAsignacion(
     convocatoriaId: number,
     dto: { evaluadorParticipacionId: number; evaluadoParticipacionId: number },
@@ -385,10 +340,7 @@ export class RetroalimentacionService {
     return { retroAsignacionId: id, message: 'Asignación agregada' }
   }
 
-  /**
-   * Retira una asignación sin borrarla. Si ya fue diligenciada no se toca: la
-   * respuesta existe y anular el par dejaría un resultado huérfano.
-   */
+  // no borra: si ya fue diligenciada, anularla dejaria la respuesta huerfana
   async anularAsignacion(asignacionId: number, motivo: string, ctx: CtxUsuario) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ESTADO AS "estado", PARTEVALUADORID AS "evaluador", PARTEVALUADOID AS "evaluado"
@@ -415,25 +367,9 @@ export class RetroalimentacionService {
     return { message: 'Asignación anulada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Lado del evaluador                                                    ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // lado del evaluador
 
-  /**
-   * Resuelve el ciclo abierto del usuario logueado.
-   *
-   * El JWT no lleva rol ni grupos: eso es contexto del año. Se navega
-   * PERSONA → EVALUADOR → PARTICIPACIÓN del ciclo con el instrumento abierto.
-   *
-   * No se pasa por USUARIO a propósito: quien llega aquí ya trae un JWT
-   * válido, así que su cuenta existe por definición. Meterla en el JOIN solo
-   * agregaba una forma de fallar — si el correo de la cuenta y el de la
-   * persona no coincidieran, el evaluador se quedaba sin ver su ciclo y sin
-   * ninguna explicación.
-   *
-   * Se acepta el correo personal o el institucional: en el banco conviven
-   * ambos y no hay regla firme sobre cuál se usa para entrar.
-   */
+  // no pasa por USUARIO a proposito: el correo de la cuenta puede no ser el de PERSONA
   async miCiclo(email: string) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID   AS "participacionId",
@@ -474,7 +410,6 @@ export class RetroalimentacionService {
     }
   }
 
-  /** A quiénes le toca retroalimentar, agrupado por rol del evaluado. */
   async misAsignaciones(participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT a.RETROASIGNACIONID AS "asignacionId",
@@ -507,8 +442,7 @@ export class RetroalimentacionService {
       areaNombre: r.areaNombre as string | null,
     }))
 
-    // Agrupado por rol: el formulario se llena por bloques y así el evaluador
-    // ve "los 3 analistas" juntos en vez de una lista plana de 12 personas.
+    // agrupado por rol: el formulario se llena por bloques
     const grupos = new Map<string, typeof items>()
     for (const it of items) {
       const clave = it.rolNombre ?? 'Sin rol'
@@ -524,9 +458,7 @@ export class RetroalimentacionService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Sesión de diligenciamiento                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // sesion de diligenciamiento
 
   async iniciarSesion(participacionId: number, ctx: CtxUsuario & { ip?: string }) {
     const pendientes: Array<{ T: number }> = await this.dataSource.query(
@@ -569,7 +501,6 @@ export class RetroalimentacionService {
     }
   }
 
-  /** Hidrata el cronómetro cuando el evaluador recarga la página. */
   async getSesion(sesionId: number, participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT RETROSESIONID AS "retroSesionId", PARTICIPACIONID AS "participacionId",
@@ -593,16 +524,7 @@ export class RetroalimentacionService {
     }
   }
 
-  /**
-   * Envía todas las respuestas de la sesión de una vez.
-   *
-   * Todo va en una transacción: si una respuesta falla la validación no queda
-   * media sesión enviada. El original de Mongo hacía insertMany sin
-   * transacción y ese es justo el escenario que dejaba asignaciones a medias.
-   */
-  // Sin `ctx`: el envío normal no se audita a propósito — quién diligenció ya
-  // queda en RETROSESION.USUARIOEMAIL desde que inició. El log guarda lo que
-  // altera un resultado ya emitido, no el flujo esperado.
+  // sin ctx: el envio no se audita, quien diligencio ya queda en RETROSESION.USUARIOEMAIL
   async enviarSesion(
     sesionId: number,
     participacionId: number,
@@ -619,7 +541,6 @@ export class RetroalimentacionService {
     const porPersona = form.preguntas.find(p => p.tipo === 'TEXTO_POR_PERSONA')
     const general = form.preguntas.find(p => p.tipo === 'TEXTO_GENERAL')
 
-    // Las asignaciones tienen que ser de este evaluador y estar pendientes.
     const ids = respuestas.map(r => Number(r.asignacionId))
     const q = bindRepetido(
       `SELECT a.RETROASIGNACIONID AS "id", a.PARTEVALUADOID AS "evaluado",
@@ -641,7 +562,6 @@ export class RetroalimentacionService {
       )
     }
 
-    // Toda pregunta de escala requerida debe venir contestada y en rango.
     for (const r of respuestas) {
       const nombre = (porId.get(Number(r.asignacionId))?.nombre as string ?? '').trim()
       for (const preg of escalas) {
@@ -748,8 +668,7 @@ export class RetroalimentacionService {
   }
 
   private async minutosDesdeInicio(sesionId: number): Promise<number> {
-    // El cálculo se hace en base de datos para no depender del reloj del
-    // servidor de aplicación ni de la zona horaria del proceso Node.
+    // se calcula en BD para no depender del reloj ni la zona horaria de Node
     const rows: Array<{ minutos: number }> = await this.dataSource.query(
       `SELECT ROUND((SYSDATE - FECHAINICIO) * 24 * 60) AS "minutos"
          FROM RETROSESION WHERE RETROSESIONID = :1`, [sesionId],
@@ -767,18 +686,9 @@ export class RetroalimentacionService {
     return this.getFormulario(Number(rows[0].convocatoriaId))
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Resultados                                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // resultados
 
-  /**
-   * Lo que un evaluador RECIBIÓ en un ciclo.
-   *
-   * El anonimato es de presentación, no de almacenamiento: la fila siempre
-   * guarda quién calificó, pero el nombre solo sale si el instrumento no es
-   * anónimo o si quien consulta gestiona el banco. El evaluado NUNCA lo ve —
-   * que es el punto del instrumento — y cada destape queda en el log.
-   */
+  // el anonimato es solo de presentacion: la fila siempre guarda quien califico
   async resultados(participacionId: number, perfilId: number, usuarioEmail: string) {
     const meta: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT f.RETROFORMULARIOID AS "formularioId", f.RESULTADOANONIMO AS "anonimo",
@@ -844,7 +754,6 @@ export class RetroalimentacionService {
       promedio: c.promedio != null ? Number(c.promedio) : null,
       fecha: c.fecha,
       origen: [c.rolCalificador, c.areaCalificador].filter(Boolean).join(' · ') || 'Par evaluador',
-      // Con el instrumento anónimo, el nombre simplemente no viaja al cliente.
       nombre: revelar ? (c.nombreCalificador as string ?? '').trim() : null,
       comentario: c.comentario as string | null,
     }))
@@ -873,7 +782,6 @@ export class RetroalimentacionService {
     }
   }
 
-  /** Quién ha diligenciado y quién no. Es la vista de seguimiento del ciclo. */
   async avance(convocatoriaId: number) {
     const form = await this.getFormulario(convocatoriaId)
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -938,7 +846,6 @@ export class RetroalimentacionService {
     }
   }
 
-  /** Respuestas a la pregunta general del proceso, para el reporte. */
   async sugerencias(convocatoriaId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT s.RETROSUGERENCIAID AS "sugerenciaId",
@@ -954,8 +861,7 @@ export class RetroalimentacionService {
         ORDER BY s.FECHAENVIO DESC`,
       [convocatoriaId],
     )
-    // Sin nombre: la sugerencia es sobre el proceso, no sobre una persona, y
-    // se responde con más franqueza cuando no queda firmada.
+    // sin nombre a proposito: la sugerencia es sobre el proceso, no sobre una persona
     return rows.map(r => ({
       sugerenciaId: Number(r.sugerenciaId),
       texto: r.texto as string,

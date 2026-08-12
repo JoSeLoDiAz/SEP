@@ -74,6 +74,14 @@ interface Resumen {
   promedioRetro: number | null
   totalRetroRecibidas: number
   pruebaVigente: { anio: number; puntaje: number | null; aprobada: boolean; vigente: boolean } | null
+  /** Un renglón por año en que participó. `pruebaAprobada` en null = sin evaluar. */
+  recorrido: Array<{
+    anio: number
+    porcentaje: number | null
+    puntaje: number | null
+    pruebaAprobada: boolean | null
+    retro: number | null
+  }>
 }
 
 interface Documento {
@@ -215,6 +223,7 @@ export function TrayectoriaEvaluador({
   return (
     <div className="flex flex-col gap-5">
       {resumen && <FilaKpis resumen={resumen} />}
+      {resumen && <FranjaRecorrido recorrido={resumen.recorrido} />}
 
       {rail.length === 0 ? (
         <VacioTotal />
@@ -264,6 +273,60 @@ export function TrayectoriaEvaluador({
 }
 
 /* ── KPIs del hero ──────────────────────────────────────────────────────── */
+
+/**
+ * El recorrido año por año: prueba y retroalimentación.
+ *
+ * Los recuadros de arriba dan un solo dato —la última prueba, el promedio de
+ * retroalimentación— y con eso no se decide si vale la pena volver a convocar
+ * a alguien: no se ve si mejoró, si lleva años pasando, ni si un promedio bajo
+ * viene de un año suelto. Aquí está el recorrido completo, con los huecos a la
+ * vista: un año en que estuvo en el banco y no presentó prueba aparece vacío,
+ * que es justo lo que hay que notar.
+ */
+function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
+  if (!recorrido?.length) return null
+
+  const estado = (a: boolean | null) =>
+    a === true ? { txt: 'Aprobada', clase: 'bg-emerald-100 text-emerald-700' }
+    : a === false ? { txt: 'No aprobada', clase: 'bg-red-100 text-red-700' }
+    // Sin evaluar NO es reprobada: las pruebas cargadas antes de que se
+    // calculara la aprobación no tienen porcentaje ni corte, y pintarlas en
+    // rojo afirmaría algo que nadie comprobó.
+    : { txt: 'Sin evaluar', clase: 'bg-neutral-100 text-neutral-500' }
+
+  return (
+    <div className="mt-3 overflow-x-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+        Recorrido año por año
+      </p>
+      <div className="flex min-w-max gap-2">
+        {recorrido.map(r => (
+          <div key={r.anio} className="w-[124px] shrink-0 rounded-xl border border-neutral-100 px-3 py-2">
+            <p className="text-[13px] font-bold" style={{ color: PRIMARY }}>{r.anio}</p>
+
+            <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Prueba</p>
+            <p className="text-[13px] font-semibold text-neutral-800">
+              {r.porcentaje != null ? `${r.porcentaje}%`
+                : r.puntaje != null ? `${r.puntaje} pts`
+                : '—'}
+            </p>
+            {(r.porcentaje != null || r.puntaje != null) && (
+              <span className={`mt-0.5 inline-block rounded px-1.5 py-px text-[9px] font-bold uppercase ${estado(r.pruebaAprobada).clase}`}>
+                {estado(r.pruebaAprobada).txt}
+              </span>
+            )}
+
+            <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Retro</p>
+            <p className="text-[13px] font-semibold text-neutral-800">
+              {r.retro != null ? `${r.retro} / 5` : '—'}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function FilaKpis({ resumen }: { resumen: Resumen }) {
   const prueba = resumen.pruebaVigente

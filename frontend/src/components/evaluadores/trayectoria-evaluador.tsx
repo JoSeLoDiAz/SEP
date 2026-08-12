@@ -1501,6 +1501,22 @@ function BloqueDocs({
   )
 }
 
+/**
+ * Extensiones que el navegador dibuja. Al resto solo se le ofrece descargar.
+ *
+ * Un .msg o un .xlsx no se pueden mostrar: al pulsar el ojo, el navegador los
+ * bajaba igual, pero con el identificador interno del blob por nombre —
+ * "04cfcda2-0097-4d6b-a368-ddb190d3cb66", sin extensión— y sin forma de saber
+ * qué correo era. Ofrecer un botón que no hace lo que promete es peor que no
+ * ofrecerlo.
+ */
+const SE_PUEDE_VER = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'txt']
+
+function sePuedeVer(nombre: string): boolean {
+  const ext = nombre.toLowerCase().split('.').pop() ?? ''
+  return SE_PUEDE_VER.includes(ext)
+}
+
 function BotonesArchivo({
   verUrl, descargarUrl, nombreFallback = 'archivo', setToast,
 }: {
@@ -1511,6 +1527,7 @@ function BotonesArchivo({
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
 }) {
   const [ocupado, setOcupado] = useState<'ver' | 'bajar' | null>(null)
+  const verSirve = sePuedeVer(nombreFallback)
 
   async function accion(tipo: 'ver' | 'bajar') {
     setOcupado(tipo)
@@ -1526,14 +1543,16 @@ function BotonesArchivo({
 
   return (
     <div className="flex shrink-0 gap-1">
-      <button
-        onClick={() => accion('ver')}
-        disabled={ocupado != null}
-        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-[#00304D] disabled:opacity-50"
-        title="Ver"
-      >
-        {ocupado === 'ver' ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
-      </button>
+      {verSirve && (
+        <button
+          onClick={() => accion('ver')}
+          disabled={ocupado != null}
+          className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-[#00304D] disabled:opacity-50"
+          title="Ver"
+        >
+          {ocupado === 'ver' ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
+        </button>
+      )}
       <button
         onClick={() => accion('bajar')}
         disabled={ocupado != null}

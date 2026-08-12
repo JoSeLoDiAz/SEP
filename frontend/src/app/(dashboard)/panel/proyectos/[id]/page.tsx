@@ -14,8 +14,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Proyecto {
   proyectoId: number
   nombre: string
@@ -50,14 +48,10 @@ const CARGOS = [
   'Persona encargada del área de Comunicaciones',
 ]
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function estadoInfo(e: number | null, convocatoriaEstado?: number) {
   switch (Number(e)) {
     case 1: return { label: 'Confirmado',     cls: 'bg-blue-100 text-blue-700 border-blue-200' }
-    // Estado 2: si la convocatoria sigue abierta es "Reversado" (el proponente
-    // puede reabrirlo); si la convocatoria cerró ya es "Subsanación" (SENA lo
-    // mandó a corregir).
+    // convocatoriaEstado 0 = convocatoria cerrada
     case 2: return {
       label: convocatoriaEstado === 0 ? 'Subsanación' : 'Reversado',
       cls: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -70,12 +64,9 @@ function estadoInfo(e: number | null, convocatoriaEstado?: number) {
 
 function puedeEditar(p: Proyecto) {
   const estado = Number(p.estado)
-  // Estado 2 (Subsanación/Reversado) siempre editable. Estado 0 requiere
-  // convocatoria abierta.
+  // estado 2 = subsanación/reversado
   return estado === 2 || (estado === 0 && p.convocatoriaEstado !== 0)
 }
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ProyectoDetallePage() {
   const { id } = useParams<{ id: string }>()
@@ -89,30 +80,29 @@ export default function ProyectoDetallePage() {
   const [afsEval, setAfsEval]           = useState<AfResumen[]>([])
   const [loading, setLoading]           = useState(true)
 
-  // Form generalidades
+  // form generalidades
   const [nombre, setNombre]     = useState('')
   const [convId, setConvId]     = useState('')
   const [modalId, setModalId]   = useState('')
   const [objetivo, setObjetivo] = useState('')
   const [guardando, setGuardando] = useState(false)
 
-  // (La confirmación del proyecto se hace desde la página de Reporte.)
+  // la confirmación del proyecto se hace desde la página de Reporte
 
-  // Asignar contacto existente
+  // asignar contacto existente
   const [modalAsignar, setModalAsignar]   = useState(false)
   const [asignandoId, setAsignandoId]     = useState<number | null>(null)
 
-  // Nuevo contacto modal
+  // nuevo contacto
   const [modalNuevo, setModalNuevo]       = useState(false)
   const [tiposDoc, setTiposDoc]           = useState<Array<{ id: number; nombre: string }>>([])
   const [formC, setFormC]                 = useState({ nombre: '', cargo: CARGOS[0], correo: '', telefono: '', documento: '', tipoIdentificacionId: '' })
   const [creandoC, setCreandoC]           = useState(false)
 
-  // Desasignar contacto
+  // desasignar contacto
   const [confirmQuitar, setConfirmQuitar] = useState<{ id: number; nombre: string } | null>(null)
   const [quitando, setQuitando]           = useState(false)
 
-  // Toast
   const toastKey = useRef(0)
   const [toastKey2, setToastKey2]         = useState(0)
   const [toast, setToast]                 = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
@@ -122,8 +112,6 @@ export default function ProyectoDetallePage() {
     setToast({ tipo, msg })
     setToastKey2(toastKey.current)
   }
-
-  // ── Data loading ─────────────────────────────────────────────────────────
 
   async function cargarProyecto() {
     try {
@@ -139,8 +127,7 @@ export default function ProyectoDetallePage() {
       setObjetivo(rP.data.objetivo ?? '')
       setConvocatorias(rC.data)
       setModalidades(rM.data)
-      // Solo cargamos las AF si el proyecto ya fue evaluado, para mostrar el
-      // bloque "Resultado de la evaluación".
+      // las AF solo se usan en el bloque de resultado (estados 3 y 4)
       const est = Number(rP.data.estado)
       if (est === 3 || est === 4) {
         try {
@@ -169,8 +156,6 @@ export default function ProyectoDetallePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proyectoId])
 
-  // ── Guardar generalidades ─────────────────────────────────────────────────
-
   async function guardar() {
     if (!nombre.trim() || !convId || !modalId) {
       showToast('error', 'Nombre, convocatoria y modalidad son obligatorios')
@@ -190,10 +175,6 @@ export default function ProyectoDetallePage() {
       setGuardando(false)
     }
   }
-
-  // (La confirmación/desconfirmación se ejecuta desde la página de Reporte.)
-
-  // ── Asignar contacto existente ────────────────────────────────────────────
 
   async function abrirAsignar() {
     try {
@@ -218,8 +199,6 @@ export default function ProyectoDetallePage() {
       setAsignandoId(null)
     }
   }
-
-  // ── Crear nuevo contacto ──────────────────────────────────────────────────
 
   async function abrirNuevoContacto() {
     setFormC({ nombre: '', cargo: CARGOS[0], correo: '', telefono: '', documento: '', tipoIdentificacionId: '' })
@@ -258,8 +237,6 @@ export default function ProyectoDetallePage() {
     }
   }
 
-  // ── Desasignar contacto ───────────────────────────────────────────────────
-
   async function confirmarQuitar() {
     if (!confirmQuitar) return
     setQuitando(true)
@@ -274,8 +251,6 @@ export default function ProyectoDetallePage() {
       setQuitando(false)
     }
   }
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -308,7 +283,7 @@ export default function ProyectoDetallePage() {
         />
       )}
 
-      {/* ── Encabezado ─────────────────────────────────────────────────── */}
+      {/* encabezado */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <FolderKanban size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -324,7 +299,6 @@ export default function ProyectoDetallePage() {
         </span>
       </div>
 
-      {/* ── Resultado de la evaluación: visible cuando SENA ya decidió ── */}
       {(Number(proyecto.estado) === 3 || Number(proyecto.estado) === 4) && (
         <ResultadoEvaluacion
           proyecto={proyecto}
@@ -332,13 +306,10 @@ export default function ProyectoDetallePage() {
         />
       )}
 
-      {/* ── Menú de secciones (uniforme) ─────────────────────────────── */}
       <ProyectoTabs proyectoId={proyectoId} active="generalidades" />
 
-      {/* ── Dos columnas: Generalidades + Objetivo ─────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-        {/* Generalidades */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col">
           <div className="px-5 py-4 border-b border-neutral-100 flex items-center gap-2">
             <FolderKanban size={15} className="text-[#00304D]" />
@@ -408,7 +379,6 @@ export default function ProyectoDetallePage() {
           </div>
         </div>
 
-        {/* Descripción General */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col">
           <div className="px-5 py-4 border-b border-neutral-100 flex items-center gap-2">
             <FileText size={15} className="text-[#00304D]" />
@@ -430,7 +400,6 @@ export default function ProyectoDetallePage() {
         </div>
       </div>
 
-      {/* Botón guardar */}
       {editable && (
         <div className="flex justify-end">
           <button
@@ -444,7 +413,6 @@ export default function ProyectoDetallePage() {
         </div>
       )}
 
-      {/* ── Contactos del Proyecto ─────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col">
         <div className="px-5 py-4 border-b border-neutral-100 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 flex-1">
@@ -473,7 +441,7 @@ export default function ProyectoDetallePage() {
           </div>
         ) : (
           <>
-            {/* Mobile cards */}
+            {/* móvil */}
             <div className="flex flex-col gap-3 p-4 sm:hidden">
               {contactos.map(c => (
                 <div key={c.contactoId} className="border border-neutral-100 rounded-xl p-4 flex flex-col gap-2">
@@ -493,7 +461,7 @@ export default function ProyectoDetallePage() {
               ))}
             </div>
 
-            {/* Desktop table */}
+            {/* escritorio */}
             <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -530,7 +498,6 @@ export default function ProyectoDetallePage() {
         )}
       </div>
 
-      {/* ── Modal asignar contacto existente ───────────────────────────── */}
       <Modal open={modalAsignar} onClose={() => setModalAsignar(false)} maxWidth="max-w-md">
         <div className="flex flex-col">
           <div className="flex items-center gap-3 px-6 py-4 bg-[#00304D]">
@@ -563,7 +530,6 @@ export default function ProyectoDetallePage() {
         </div>
       </Modal>
 
-      {/* ── Modal nuevo contacto ───────────────────────────────────────── */}
       <Modal open={modalNuevo} onClose={() => setModalNuevo(false)} maxWidth="max-w-lg">
         <div className="flex flex-col">
           <div className="flex items-center gap-3 px-6 py-4 bg-[#00304D]">
@@ -628,7 +594,6 @@ export default function ProyectoDetallePage() {
         </div>
       </Modal>
 
-      {/* ── Modal confirmar quitar contacto ────────────────────────────── */}
       <Modal open={!!confirmQuitar} onClose={() => !quitando && setConfirmQuitar(null)} maxWidth="max-w-sm">
         <div className="p-6 flex flex-col gap-5">
           <div className="flex flex-col gap-1">
@@ -655,12 +620,7 @@ export default function ProyectoDetallePage() {
   )
 }
 
-// ── Resultado de la evaluación ───────────────────────────────────────────────
-//
-// Bloque que se muestra en la pestaña Generalidades cuando el proyecto ya pasó
-// por la evaluación del SENA (estado 3 = aprobado, 4 = rechazado). Está pensado
-// con lenguaje claro para que un proponente sin perfil técnico entienda en qué
-// quedó su proyecto y qué AF se le aprobaron o rechazaron.
+// visible solo tras la evaluación del SENA: estado 3 aprobado, 4 rechazado
 
 function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfResumen[] }) {
   const aprobado  = Number(proyecto.estado) === 3
@@ -671,8 +631,7 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
   const afsSinMarca   = afs.filter(a => a.estadoAprobacion == null)
   const totalAf       = afs.length
 
-  // Cuando el proyecto está aprobado y aún no llegan las AF (carga lenta) o
-  // ninguna está marcada (caso muy raro), tratamos el aprobado como total.
+  // en proyecto aprobado, las AF sin marca cuentan como aprobadas
   const aprobadasEfectivas = aprobado && afsAprobadas.length === 0 && afsSinMarca.length > 0
     ? afsSinMarca.length
     : afsAprobadas.length
@@ -684,7 +643,6 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
 
   return (
     <section className={`bg-white rounded-2xl border-2 ${borderColor} shadow-sm overflow-hidden`}>
-      {/* Header */}
       <div className={`${headerColor} px-5 py-4 flex items-center gap-3`}>
         <div className="w-11 h-11 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0">
           <HeaderIcon size={20} strokeWidth={2.4} />
@@ -703,7 +661,6 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
 
       <div className="p-5 flex flex-col gap-5">
 
-        {/* Mensaje en lenguaje claro */}
         {aprobado && (
           <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4">
             <p className="text-sm text-neutral-800 leading-relaxed">
@@ -728,7 +685,7 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
           </div>
         )}
 
-        {/* Totales */}
+        {/* totales */}
         {totalAf > 0 && (
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-center">
@@ -746,7 +703,6 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
           </div>
         )}
 
-        {/* Lista de AF rechazadas con su motivo */}
         {afsRechazadas.length > 0 && (
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-red-700 mb-2">Acciones de formación rechazadas</p>
@@ -773,7 +729,7 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
           </div>
         )}
 
-        {/* Lista de AF aprobadas — con concepto (cards) + sin concepto (chips) */}
+        {/* en las aprobadas, motivoRechazo trae el concepto del evaluador */}
         {aprobado && afsAprobadas.length > 0 && (
           (() => {
             const conConcepto = afsAprobadas.filter(af => (af.motivoRechazo ?? '').trim())
@@ -812,7 +768,6 @@ function ResultadoEvaluacion({ proyecto, afs }: { proyecto: Proyecto; afs: AfRes
           })()
         )}
 
-        {/* Pista a la guía */}
         <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-[12px] text-blue-900 leading-relaxed">
           <p>
             ¿Tienes dudas sobre qué viene ahora? Abre la <strong>Guía del Proponente</strong> con el botón <strong>Ayuda</strong>

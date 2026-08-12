@@ -18,29 +18,9 @@ import { MiExpedienteGuard, MiEvaluadorActual } from './mi-expediente.guard'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { responderArchivo } from './responder-archivo'
 
-const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // 8 MB, el mismo tope de todo el SEP
+const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // mismo tope que el resto del SEP
 
-/**
- * El expediente del evaluador, para el evaluador.
- *
- * Prefijo propio y no rutas nuevas dentro de `/evaluadores` por dos razones.
- * La de fondo: allí TODO exige perfil de gestión, y abrir agujeros en un
- * controlador de cuarenta y tantos métodos que comprueban permisos a mano es
- * pedir que un día se olvide uno. La práctica: ese controlador tiene un
- * `@Get(':id')` que en Express 5 se traga cualquier segmento suelto que se
- * añada debajo, y el propio módulo ya tuvo que ordenar los controladores para
- * esquivarlo.
- *
- * Aquí no se recibe NUNCA el identificador del evaluador: lo pone el guard a
- * partir de la sesión. Lo que sí llega del cliente son identificadores de
- * archivos concretos, y cada uno se comprueba contra el dueño antes de
- * entregar nada.
- *
- * Qué NO hay aquí, y es deliberado: nada que cambie la situación del
- * evaluador dentro de un ciclo. Ni estado, ni aprobación, ni participaciones,
- * ni puntajes de prueba, ni emisión de certificados. Eso lo decide el equipo
- * del banco; si el evaluador pudiera tocarlo, dejaría de ser una decisión.
- */
+// prefijo aparte: el evaluadorId lo pone el guard desde la sesión, nunca llega del cliente
 @ApiTags('mi-expediente')
 @Controller('mi-expediente')
 @UseGuards(JwtAuthGuard, MiExpedienteGuard)
@@ -52,8 +32,6 @@ export class MiExpedienteController {
     private readonly trayectoria: TrayectoriaService,
     private readonly fichaPdf: FichaPdfService,
   ) {}
-
-  // ── Mi ficha ───────────────────────────────────────────────────────────
 
   @Get()
   @ApiOperation({ summary: 'Mis datos de evaluador' })
@@ -75,26 +53,7 @@ export class MiExpedienteController {
     responderArchivo(res, buffer, 'application/pdf', nombre, false)
   }
 
-  /**
-   * Solo los datos que son de la persona, y se copian campo por campo.
-   *
-   * La lista blanca es explícita a propósito: si se pasara el cuerpo entero al
-   * servicio, cualquier campo que se añada mañana al DTO quedaría editable
-   * desde aquí sin que nadie lo decida.
-   *
-   * Fuera quedan dos grupos, por motivos distintos.
-   *
-   * Regional, centro, cargo y jefe directo los pone la entidad: son los que
-   * deciden a qué convocatorias entra y quién aprueba su participación.
-   * Editarlos aquí convertiría un dato institucional en una casilla de texto.
-   *
-   * Y los CORREOS no se tocan, aunque parezcan datos personales. Son la llave
-   * con la que se decide de quién es este expediente: el portal cruza el
-   * correo de la cuenta con el de la ficha. Alguien que pudiera cambiarlo a
-   * mano podría hacer que la ficha de otra persona respondiera también a su
-   * correo y dejarla sin acceso al suyo. Un cambio de correo lo hace el
-   * equipo del banco.
-   */
+  // lista blanca a mano: el correo identifica el expediente y lo institucional lo pone la entidad
   @Put('perfil')
   @ApiOperation({ summary: 'Actualizar mis datos de contacto y formación' })
   actualizarPerfil(
@@ -119,8 +78,6 @@ export class MiExpedienteController {
   subirFoto(@MiEvaluadorActual() yo: MiEvaluador, @UploadedFile() file: MulterFile) {
     return this.service.subirFoto(yo.evaluadorId, file)
   }
-
-  // ── Hoja de vida: estudios, experiencia y TIC ──────────────────────────
 
   @Get('estudios')
   estudios(@MiEvaluadorActual() yo: MiEvaluador) {
@@ -233,8 +190,6 @@ export class MiExpedienteController {
     return this.service.eliminarTic(id)
   }
 
-  // ── Mis documentos ────────────────────────────────────────────────────
-
   @Get('documentos')
   @ApiOperation({ summary: 'Todos mis documentos: los permanentes y los de cada año' })
   documentos(@MiEvaluadorActual() yo: MiEvaluador) {
@@ -262,8 +217,6 @@ export class MiExpedienteController {
     const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(id)
     responderArchivo(res, buffer, mime, nombre, true)
   }
-
-  // ── Mi trayectoria ────────────────────────────────────────────────────
 
   @Get('trayectoria')
   @ApiOperation({ summary: 'Mi recorrido por los ciclos, año por año' })
@@ -298,7 +251,7 @@ export class MiExpedienteController {
     responderArchivo(res, buffer, mime, nombre, false)
   }
 
-  /** Para que el frontend sepa si esta cuenta tiene portal, sin adivinar. */
+  // el frontend pregunta aquí si la cuenta tiene portal
   @Get('existo')
   existo(@MiEvaluadorActual() yo: MiEvaluador, @CurrentUser() _user: unknown) {
     return { evaluadorId: yo.evaluadorId, activo: yo.activo }

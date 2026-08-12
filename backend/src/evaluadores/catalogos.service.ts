@@ -9,13 +9,9 @@ export interface CatalogoItem { id: number; nombre: string; activo: number }
 export class CatalogosEvaluadorService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // ── Catálogos del ciclo (v29) — solo lectura ────────────────────────────
-  //
-  // No tienen alta/baja desde la aplicación: son el vocabulario del proceso,
-  // no datos operativos. Se exponen porque los filtros del banco y los selects
-  // del año los necesitan; cambiarlos es una migración.
+  // catálogos del ciclo: solo lectura, se cambian por migración
 
-  /** Estados del año. `codigo` es la llave que viaja en los filtros. */
+  // `codigo` es la llave que viaja en los filtros
   async listarEstadosParticipacion(soloActivos = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ESTADOPARTID     AS "id",
@@ -43,7 +39,6 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /** Áreas de evaluación (técnica, jurídica, transversal…). */
   async listarAreas(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT AREAID            AS "id",
@@ -65,13 +60,7 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /**
-   * Años que REALMENTE existen en el banco, de más reciente a más antiguo.
-   *
-   * El filtro de año se poblaba con una ventana fija (año actual + 1, seis
-   * hacia atrás). Eso deja fuera lo que hay: el histórico llega hasta 2020 y
-   * ese año no se podía seleccionar, mientras se ofrecían años vacíos.
-   */
+  // años que existen en el banco, no una ventana fija de fechas
   async listarAniosParticipacion(): Promise<number[]> {
     const rows: Array<{ anio: number }> = await this.dataSource.query(
       `SELECT DISTINCT ANIO AS "anio" FROM EVALUADORPARTICIPACION
@@ -79,20 +68,13 @@ export class CatalogosEvaluadorService {
         ORDER BY 1 DESC`,
     )
     const anios = rows.map(r => Number(r.anio))
-    // El año en curso siempre está, aunque nadie haya participado todavía:
-    // en enero el banco está vacío y el filtro no puede quedarse sin él.
+    // el año en curso siempre está, aunque nadie haya participado todavía
     const actual = new Date().getFullYear()
     if (!anios.includes(actual)) anios.unshift(actual)
     return anios
   }
 
-  /**
-   * Firmas disponibles para los certificados.
-   *
-   * Es la misma tabla que usan los certificados de beneficiario, no una copia:
-   * la firma de quien avala es institucional, no del módulo. Se excluye la
-   * imagen del BLOB — aquí solo hace falta poder elegir.
-   */
+  // misma tabla que los certificados de beneficiario; se omite el BLOB de la firma
   async listarFirmasCertificado() {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT FIRMACERTIFICADOSID        AS "id",
@@ -110,13 +92,7 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /**
-   * Convocatorias REALES del SEP, para atarles el ciclo de evaluadores (v40).
-   *
-   * Se marca cuáles ya tienen ciclo: dos ciclos sobre la misma convocatoria y
-   * el mismo periodo son dos verdades para lo mismo, y el índice único de la
-   * v40 lo rechaza. Avisarlo en la lista evita llegar al error.
-   */
+  // "ciclos" avisa cuáles ya tienen uno: el índice único rechaza el duplicado
   async listarConvocatoriasSep(anio?: number) {
     const params: unknown[] = []
     let filtro = ''
@@ -142,7 +118,6 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /** Modalidades de participación (presencial, virtual…). */
   async listarModalidades(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT MODALIDADPARTID   AS "id",
@@ -164,16 +139,7 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  // ── ROLEVALUADOR ────────────────────────────────────────────────────────
-
-  /**
-   * Roles del evaluador. Expone CODIGO porque es la llave estable — el motor
-   * de la matriz razona sobre `EVALUADOR`, `APOYO_JURIDICO`, etc., no sobre el
-   * nombre, que puede reescribirse sin avisar.
-   *
-   * Ordena por ORDEN (jerarquía real: líder, coordinador, analista, evaluador,
-   * apoyos, transversal) y no alfabéticamente, que mezclaba niveles.
-   */
+  // CODIGO es la llave estable: la matriz razona sobre él, no sobre el nombre
   async listarRoles(soloActivos = false) {
     const where = soloActivos ? `WHERE ROLEVALUADORACTIVO = 1` : ''
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -243,8 +209,6 @@ export class CatalogosEvaluadorService {
     return { message: 'Rol actualizado' }
   }
 
-  // ── PROCESOEVAL ──────────────────────────────────────────────────────────
-
   async listarProcesos(soloActivos = false) {
     const where = soloActivos ? `WHERE PROCESOACTIVO = 1` : ''
     const rows: Array<{ id: number; nombre: string; descripcion: string | null; activo: number }> =
@@ -306,8 +270,6 @@ export class CatalogosEvaluadorService {
     return { message: 'Proceso actualizado' }
   }
 
-  // ── TIPOESTUDIO ──────────────────────────────────────────────────────────
-
   async listarTiposEstudio(soloActivos = false, excluirHV = false): Promise<CatalogoItem[]> {
     const conds: string[] = []
     if (soloActivos) conds.push(`TIPOESTUDIOACTIVO = 1`)
@@ -366,8 +328,6 @@ export class CatalogosEvaluadorService {
     return { message: 'Tipo actualizado' }
   }
 
-  // ── TIPODOCUMENTOEVAL ────────────────────────────────────────────────────
-
   async listarTiposDocumentoEvaluador(soloActivos = true) {
     const where = soloActivos ? `WHERE ACTIVO = 1` : ''
     const rows: Array<{
@@ -387,13 +347,9 @@ export class CatalogosEvaluadorService {
       codigo: r.codigo,
       nombre: r.nombre,
       admiteMultiple: Number(r.admiteMultiple) === 1,
-      // La pantalla lo usa para el `accept` del selector de archivo: así el
-      // gestor solo ve lo que de verdad se va a aceptar, en vez de escoger un
-      // .msg y que el servidor se lo rechace después. Es la misma fuente que
-      // valida la subida, para que no puedan discrepar.
+      // misma fuente que valida la subida, para que el `accept` no discrepe
       extensiones: extensionesDeTipoDocEval(r.codigo),
-      // Marca los que pertenecen a un ciclo. La pantalla general no los
-      // ofrece: cargarlos ahí los deja sin año y el hito no enciende.
+      // los del ciclo no van en la pantalla general: quedarían sin año
       esDelAnio: esTipoDocDelAnio(r.codigo),
       orden: Number(r.orden),
       activo: Number(r.activo) === 1,
@@ -413,8 +369,7 @@ export class CatalogosEvaluadorService {
     )
     if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
 
-    // ID por MAX+1 (la tabla es pequeña y no hay secuencia asociada — sigue el
-    // mismo patrón que EVALUADORDOCUMENTO).
+    // MAX+1: la tabla no tiene secuencia asociada
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
       `SELECT NVL(MAX(TIPODOCUMENTOEVALID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOEVAL`,
     )
@@ -463,8 +418,6 @@ export class CatalogosEvaluadorService {
     return { message: 'Tipo de documento actualizado' }
   }
 
-  // ── TIPODOCUMENTOCONV (catálogo de tipos de documento de convocatoria) ──
-
   async listarTiposDocumentoConvocatoria(soloActivos = true) {
     const where = soloActivos ? `WHERE ACTIVO = 1` : ''
     const rows: Array<{
@@ -484,7 +437,6 @@ export class CatalogosEvaluadorService {
       id: Number(r.id),
       codigo: r.codigo,
       nombre: r.nombre,
-      // Devolvemos como array para el frontend; el CSV crudo queda para admin.
       extensiones: this.parseExtensiones(r.extensionesPermitidas),
       extensionesPermitidas: r.extensionesPermitidas ?? '',
       orden: Number(r.orden),
@@ -492,7 +444,6 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /** CSV → array normalizado (lower, sin puntos ni espacios, sin duplicados). */
   private parseExtensiones(csv: string | undefined | null): string[] {
     if (!csv) return []
     return Array.from(new Set(
@@ -515,12 +466,11 @@ export class CatalogosEvaluadorService {
     )
     if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
 
-    // ID por MAX+1 — la tabla es un catálogo pequeño sin secuencia dedicada.
+    // MAX+1: la tabla no tiene secuencia asociada
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
       `SELECT NVL(MAX(TIPODOCUMENTOCONVID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOCONV`,
     )
     const id = Number(seq[0].NUEVO)
-    // Normaliza las extensiones a minúsculas, sin espacios y sin duplicados.
     const extensiones = this.normalizarExtensiones(cambios.extensionesPermitidas) || 'pdf'
     await this.dataSource.query(
       `INSERT INTO TIPODOCUMENTOCONV
@@ -567,10 +517,6 @@ export class CatalogosEvaluadorService {
     return { message: 'Tipo de documento actualizado' }
   }
 
-  /**
-   * Normaliza una lista csv de extensiones: minúsculas, trim, sin puntos,
-   * sin vacíos, sin duplicados. Devuelve la cadena csv resultante o ''.
-   */
   private normalizarExtensiones(csv: string | undefined): string {
     if (!csv) return ''
     const arr = csv.split(',')
@@ -579,9 +525,8 @@ export class CatalogosEvaluadorService {
     return Array.from(new Set(arr)).join(',')
   }
 
-  // ── REGIONAL / CENTROFORMACION / CIUDAD (para dropdowns del banco) ───────
+  // regional / centro / ciudad: dropdowns del banco
 
-  /** Lista de regionales del SENA para el dropdown de asignación del evaluador. */
   async listarRegionales(soloActivas = true) {
     const where = soloActivas ? `WHERE REGIONALACTIVO = 1` : ''
     const rows: Array<{ id: number; nombre: string }> = await this.dataSource.query(
@@ -593,10 +538,6 @@ export class CatalogosEvaluadorService {
     return rows.map(r => ({ id: Number(r.id), nombre: r.nombre }))
   }
 
-  /**
-   * Centros de formación. Si viene `regionalId` filtra por esa regional; útil
-   * para el cascading regional → centro en el formulario del evaluador.
-   */
   async listarCentros(regionalId?: number, soloActivos = true) {
     const conds: string[] = []
     const params: unknown[] = []
@@ -621,16 +562,11 @@ export class CatalogosEvaluadorService {
     }))
   }
 
-  /**
-   * Búsqueda por nombre parcial de ciudad para el autocomplete del municipio.
-   * Devuelve ciudad y departamento en campos separados; el frontend decide
-   * cómo mostrarlos y qué guardar en el input.
-   */
   async buscarCiudades(query: string, limite = 20) {
     const q = (query ?? '').trim()
     if (!q) return []
     const lim = Math.min(50, Math.max(1, Number(limite) || 20))
-    // Escapar comodines LIKE (% y _) para evitar wildcards accidentales.
+    // escapa % y _ para que no actúen como comodines del LIKE
     const escapado = q.toUpperCase().replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
     const like = `%${escapado}%`
     const rows: Array<{ id: number; ciudad: string; depto: string }> = await this.dataSource.query(

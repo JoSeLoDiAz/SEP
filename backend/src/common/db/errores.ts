@@ -1,26 +1,14 @@
 import { BadRequestException, ConflictException } from '@nestjs/common'
 
-/**
- * Traduce los errores de Oracle a algo que el usuario pueda resolver.
- *
- * Oracle dice exactamente qué pasó —qué columna, cuánto sobra, qué
- * restricción— pero ese detalle se pierde en el camino y a la pantalla llega
- * "Internal server error". Con un formulario de diez campos, eso obliga a
- * adivinar borrando de a uno.
- *
- * Casos reales que llegaron así:
- *   ORA-12899  el equipo evaluador con 124 caracteres en una columna de 120
- *   ORA-01438  un puntaje de 26450 en una columna que admite hasta 999.99
- *   ORA-02290  un proyecto sin nombre ni proponente
- */
+// traduce errores de Oracle a mensajes que el usuario pueda resolver
 
-/** Nombre de columna -> como se llama en pantalla. */
+// nombre de columna -> como se llama en pantalla
 export type Etiquetas = Record<string, string>
 
 const nombreDe = (columna: string, etiquetas: Etiquetas) =>
   etiquetas[columna.toUpperCase()] ?? columna.toLowerCase().replace(/_/g, ' ')
 
-/** El mayor número que cabe en NUMBER(p,s): 999.99 para (5,2). */
+// mayor número que cabe en NUMBER(p,s): 999.99 para (5,2)
 function topeNumerico(precision: number, escala: number): string {
   const enteros = precision - escala
   return escala > 0
@@ -28,18 +16,13 @@ function topeNumerico(precision: number, escala: number): string {
     : '9'.repeat(enteros)
 }
 
-/**
- * Convierte un error de Oracle en una excepción con mensaje entendible.
- * Devuelve `null` si no lo reconoce, para que el llamador lo re-lance tal cual
- * en vez de disfrazar de "dato inválido" una falla real del servidor.
- */
+// null si no reconoce el error, para que el llamador lo re-lance tal cual
 export function traducirErrorOracle(
   e: unknown,
   etiquetas: Etiquetas = {},
 ): BadRequestException | ConflictException | null {
   const msg = String((e as Error)?.message ?? '')
 
-  // ── Texto más largo que la columna ────────────────────────────────────
   const largo = /ORA-12899[^"]*"[^"]+"\."[^"]+"\."([^"]+)"\s*\(actual:\s*(\d+),\s*maximum:\s*(\d+)\)/i
     .exec(msg)
   if (largo) {
@@ -51,9 +34,7 @@ export function traducirErrorOracle(
     )
   }
 
-  // ── Número más grande de lo que la columna admite ─────────────────────
-  // Oracle no dice qué columna en el ORA-01438, así que se busca el detalle
-  // en la traza; si no está, al menos se explica el tipo de problema.
+  // el ORA-01438 no trae la columna en el mensaje: hay que sacarla de la traza
   if (/ORA-01438/i.test(msg)) {
     const conCol = /"([A-Z0-9_]+)"\s*\(actual:.*?precision:\s*(\d+),\s*scale:\s*(\d+)\)/i.exec(msg)
     if (conCol) {
@@ -69,13 +50,11 @@ export function traducirErrorOracle(
     )
   }
 
-  // ── Falta un dato obligatorio ─────────────────────────────────────────
   const obligatorio = /ORA-01400[^(]*\("[^"]+"\."[^"]+"\."([^"]+)"\)/i.exec(msg)
   if (obligatorio) {
     return new BadRequestException(`Falta "${nombreDe(obligatorio[1], etiquetas)}", que es obligatorio.`)
   }
 
-  // ── Restricción de la tabla ───────────────────────────────────────────
   if (/ORA-02290/i.test(msg)) {
     return new BadRequestException(
       'Los datos enviados no cumplen una regla de la tabla. Revise que los campos ' +
@@ -83,7 +62,6 @@ export function traducirErrorOracle(
     )
   }
 
-  // ── Apunta a algo que no existe ───────────────────────────────────────
   if (/ORA-02291/i.test(msg)) {
     return new BadRequestException(
       'Se está apuntando a un registro que no existe. Vuelva a cargar la pantalla ' +
@@ -91,7 +69,6 @@ export function traducirErrorOracle(
     )
   }
 
-  // ── Tiene cosas colgando ──────────────────────────────────────────────
   if (/ORA-02292/i.test(msg)) {
     return new ConflictException(
       'No se puede borrar porque tiene información asociada. Elimine primero lo que ' +
@@ -99,17 +76,14 @@ export function traducirErrorOracle(
     )
   }
 
-  // ── Ya existe ─────────────────────────────────────────────────────────
   if (/ORA-00001/i.test(msg)) {
     return new ConflictException('Ese registro ya existe. Búsquelo en la lista en vez de crearlo otra vez.')
   }
 
-  // ── Un texto donde iba un número ──────────────────────────────────────
   if (/ORA-01722/i.test(msg)) {
     return new BadRequestException('Uno de los campos numéricos trae letras o símbolos.')
   }
 
-  // ── Fecha mal formada ─────────────────────────────────────────────────
   if (/ORA-01847|ORA-01858|ORA-01861/i.test(msg)) {
     return new BadRequestException('Una de las fechas no es válida. Revise el día y el mes.')
   }
@@ -117,10 +91,7 @@ export function traducirErrorOracle(
   return null
 }
 
-/**
- * Igual que la anterior pero lanzando. Para envolver un INSERT o UPDATE
- * concreto donde ya se sabe cómo se llaman los campos en pantalla.
- */
+// igual que la anterior pero lanzando
 export function traducirValorLargo(e: unknown, etiquetas: Etiquetas = {}): void {
   const traducido = traducirErrorOracle(e, etiquetas)
   if (traducido) throw traducido

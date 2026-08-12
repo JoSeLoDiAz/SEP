@@ -38,13 +38,7 @@ interface Asignaciones {
   grupos: Array<{ rol: string; personas: Persona[] }>
 }
 
-/**
- * "Personas por retroalimentar" — la pantalla de entrada del evaluador.
- *
- * Reemplaza `MiPanelEval.vue`. No recibe ningún identificador por URL: el
- * ciclo se resuelve en el backend desde el JWT, así que no hay forma de
- * mirar (ni contestar) lo de otra persona cambiando un número.
- */
+// el ciclo sale del JWT en el backend, no de la URL: nadie puede ver el de otro
 export default function MiPanelRetroalimentacionPage() {
   const router = useRouter()
   const [ciclo, setCiclo] = useState<Ciclo | null>(null)
@@ -91,8 +85,6 @@ export default function MiPanelRetroalimentacionPage() {
     )
   }
 
-  // Sin ciclo abierto no hay nada que hacer aquí, y decirlo con claridad evita
-  // que la gente crea que el sistema se rompió.
   if (!ciclo) {
     return (
       <div className="p-5 sm:p-7 xl:p-10">

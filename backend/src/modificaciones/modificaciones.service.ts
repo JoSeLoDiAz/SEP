@@ -3,10 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
 
-/** DTO del módulo conveniente (lado empresa/operador) para crear o actualizar
- *  una modificación. Solo expone los tres campos del legacy "Agregar Modificaciones":
- *  Tipo, Fecha de envío y Observaciones. Las respuestas de interventoría y SENA
- *  se diligencian en otro módulo y no llegan por este DTO. */
+// lo que envía el conveniente; interventoría y SENA responden en otro módulo
 export interface ModificacionDto {
   tipoModificacionId: number
   fechaEnvio: string             // YYYY-MM-DD
@@ -29,7 +26,6 @@ const VAL_SENA_LBL: Record<number, string> = { 1: 'CUMPLE', 2: 'NO CUMPLE' }
 export class ModificacionesService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Catálogo TipoModificacion para el combobox. */
   async listarTipos() {
     return this.ds.query(
       `SELECT TIPOMODIFICACIONID AS "id", TRIM(TIPOMODIFICACIONNOMBRE) AS "nombre"
@@ -39,7 +35,6 @@ export class ModificacionesService {
     )
   }
 
-  /** Lista de modificaciones del proyecto para la tabla. */
   async listar(proyectoId: number) {
     const rows = await this.ds.query(
       `SELECT m.MODIFICACIONESID                        AS "id",
@@ -64,7 +59,7 @@ export class ModificacionesService {
         ORDER BY m.MODIFICACIONESID`,
       [proyectoId],
     )
-    // También el estado del convenio para que el front decida si gatear.
+    // el front usa este estado para gatear la edición
     const [conv] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
         WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
@@ -81,7 +76,6 @@ export class ModificacionesService {
     }
   }
 
-  /** Devuelve una modificación por id para editar. */
   async getOne(proyectoId: number, id: number) {
     const [row] = await this.ds.query(
       `SELECT m.*
@@ -91,7 +85,7 @@ export class ModificacionesService {
       [id, proyectoId],
     )
     if (!row) throw new NotFoundException('Modificación no encontrada.')
-    // Normalizar nombres camelCase para el frontend.
+    // el SELECT m.* devuelve las columnas en mayúsculas: hay que mapearlas
     return {
       id: Number(row.MODIFICACIONESID),
       proyectoId: Number(row.PROYECTOID),
@@ -125,8 +119,7 @@ export class ModificacionesService {
     if (!dto.fechaEnvio) throw new BadRequestException('Ingresa la fecha de envío.')
   }
 
-  /** El conveniente solo puede editar la modificación mientras la interventoría
-   *  no haya emitido concepto y el SENA no haya aprobado o rechazado. */
+  // concepto 4 = PENDIENTE y aprobación 0 = NA: único estado editable
   private exigirEditableConveniente(row: { concepto: number; aprobacionSena: number }) {
     if (Number(row.concepto) !== 4) {
       throw new ForbiddenException(
@@ -141,10 +134,6 @@ export class ModificacionesService {
     }
   }
 
-  /** Crea una nueva modificación (lado conveniente).
-   *  - Solo recibe Tipo, Fecha de envío y Observaciones.
-   *  - El resto de campos quedan en sus valores por defecto hasta que la
-   *    interventoría/SENA respondan en sus módulos respectivos. */
   async crear(proyectoId: number, dto: ModificacionDto, _usuarioId: number, _perfilId: number): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
     const [{ nid }] = await this.ds.query(
@@ -184,10 +173,6 @@ export class ModificacionesService {
     return { mensaje: 'Modificación registrada correctamente.', id }
   }
 
-  /** Actualiza una modificación existente (lado conveniente).
-   *  - Solo modifica Tipo, Fecha de envío y Observaciones.
-   *  - Valida que la interventoría aún no haya emitido concepto y que el SENA
-   *    no haya aprobado o rechazado. */
   async actualizar(proyectoId: number, id: number, dto: ModificacionDto, _usuarioId: number, _perfilId: number): Promise<{ mensaje: string }> {
     this.validar(dto)
     const [existe] = await this.ds.query(
@@ -216,7 +201,6 @@ export class ModificacionesService {
     return { mensaje: 'Modificación actualizada.' }
   }
 
-  /** Elimina una modificación (solo admin). */
   async eliminar(proyectoId: number, id: number, perfilId: number): Promise<{ mensaje: string }> {
     const PERFIL_ADMIN = 1
     if (perfilId !== PERFIL_ADMIN) {
@@ -232,7 +216,7 @@ export class ModificacionesService {
     return { mensaje: 'Modificación eliminada.' }
   }
 
-  /** Exporta a Excel todas las modificaciones del proyecto (28 columnas). */
+  // excel de 28 columnas: headers, filas y anchos van en el mismo orden
   async exportarExcel(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
     type Row = {
       id: number
@@ -376,7 +360,6 @@ export class ModificacionesService {
         Number(r.estado) === 1 ? 'ACTIVO' : 'INACTIVO',
       ])
     }
-    // Anchos sugeridos.
     const widths = [5, 30, 20, 30, 26, 18, 35, 22, 18, 18, 20, 18, 22, 22, 30, 14, 22, 22, 22, 22, 22, 22, 22, 16, 30, 26, 26, 10]
     widths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
 

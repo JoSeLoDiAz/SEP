@@ -40,13 +40,6 @@ interface Avance {
   }>
 }
 
-/**
- * Gestión de la matriz de retroalimentación de un ciclo.
- *
- * Reemplaza `EvalAdmin.vue`. El preview y la generación usan el mismo cálculo
- * en el backend, así que lo que se ve aquí es exactamente lo que se va a
- * guardar — por eso vale la pena mirarlo antes de generar.
- */
 export default function MatrizConvocatoriaPage() {
   const params = useParams<{ cid: string }>()
   const cid = Number(params.cid)
@@ -72,9 +65,6 @@ export default function MatrizConvocatoriaPage() {
       setPreview(p.data)
       setAvance(a.data)
     } catch (err) {
-      // Sin esto la pantalla caía en los valores por defecto y mostraba
-      // "0 pares" — un fallo disfrazado de ciclo vacío, que es peor que un
-      // error visible porque invita a generar una matriz que no existe.
       setPreview(null)
       setAvance(null)
       setErrorCarga(mensajeError(err, 'No se pudo cargar la matriz de este ciclo'))
@@ -240,7 +230,6 @@ export default function MatrizConvocatoriaPage() {
         </div>
       </section>
 
-      {/* Totales */}
       {t && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Kpi label="Participantes" valor={t.participantes} />
@@ -254,7 +243,6 @@ export default function MatrizConvocatoriaPage() {
         </div>
       )}
 
-      {/* Preview de la matriz */}
       <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-5 py-3">
           <div className="flex items-center gap-2">
@@ -316,7 +304,6 @@ export default function MatrizConvocatoriaPage() {
         </div>
       </section>
 
-      {/* Avance por persona */}
       {avance && avance.items.length > 0 && (
         <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
           <header className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3">
@@ -404,11 +391,7 @@ function Kpi({ label, valor, alerta }: { label: string; valor: number | string; 
   )
 }
 
-/**
- * Los huecos de la matriz se muestran siempre, incluso vacíos: que diga
- * "ninguno" es información, y esconder la sección cuando no hay problemas
- * haría creer que nunca se revisó.
- */
+// se pinta aunque no haya nadie: "ninguno" también es un dato
 function Alerta({
   titulo, personas, ayuda,
 }: { titulo: string; personas: ResumenPersona[]; ayuda: string }) {

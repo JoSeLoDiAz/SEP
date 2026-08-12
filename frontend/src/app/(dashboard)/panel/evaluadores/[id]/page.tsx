@@ -2499,10 +2499,28 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
           </p>
           <p className="mt-1 text-[11px] text-amber-800">
             El correo de autorización, el acuerdo de confidencialidad y el certificado de
-            participación pertenecen a un ciclo concreto. Ve a la pestaña{' '}
-            <strong>Trayectoria</strong>, abre el año y cárgalo en{' '}
-            <strong>Documentos de este año</strong>. Aquí quedaría suelto, repetido en todos
-            los años, y el hito del ciclo no se encendería.
+            participación pertenecen a un ciclo concreto, así que se cargan dentro de su año.
+          </p>
+          {/* Los pasos, con los nombres EXACTOS de lo que se ve en pantalla.
+              Decir "abre el año" no bastaba: el año se abre pulsándolo en la
+              línea de tiempo de la izquierda, y quien no lo sabía leía el
+              aviso como "no se puede" y se quedaba sin cargar los años
+              anteriores. */}
+          <ol className="mt-2 ml-4 list-decimal space-y-0.5 text-[11px] text-amber-800">
+            <li>Entra a la pestaña <strong>Trayectoria</strong>.</li>
+            <li>
+              En <strong>Línea de tiempo</strong>, a la izquierda, pulsa el año que quieras —
+              2024, 2025, el que sea.
+            </li>
+            <li>
+              Abajo, en <strong>Documentos</strong>, usa <strong>Registrar</strong> para el
+              correo de autorización de ese año, o <strong>Cargar documento</strong> para los
+              demás soportes.
+            </li>
+          </ol>
+          <p className="mt-2 text-[11px] text-amber-800">
+            Si se carga aquí queda suelto, repetido en todos los años, y el hito del ciclo no
+            se enciende.
           </p>
         </div>
       )}

@@ -240,6 +240,7 @@ export class FichaPdfService {
       this.abrirPagina(l, true)
       this.cabecera(l, d.ficha, d.foto, d.nombreCompleto)
       this.kpis(l, d.resumen)
+      this.recorrido(l, d.resumen.recorrido)
       this.alertas(l, d.ficha, d.resumen, d.tieneCedula)
 
       this.titulo(l, 'Formación académica')
@@ -484,6 +485,82 @@ export class FichaPdfService {
   }
 
   /**
+   * El recorrido año por año, en la primera página.
+   *
+   * Es la tabla por la que se pidió este cambio. Con 34 evaluadores de cinco
+   * hojas cada uno salen 170 páginas que nadie va a leer, y la herramienta
+   * termina siendo un archivador. Quien recibe esta ficha tiene una sola
+   * pregunta —¿lo convoco otra vez?— y necesita responderla sin pasar de la
+   * primera hoja: cuántos ciclos, cómo le fue en la prueba, cómo en la
+   * retroalimentación, y si lo recomendaron.
+   *
+   * El "recomendado" sale de la pregunta 10 del instrumento y va en su propia
+   * columna, no dentro del promedio: es la que decide.
+   */
+  private recorrido(l: Lienzo, filas: Awaited<ReturnType<TrayectoriaService['getResumen']>>['recorrido']) {
+    if (!filas?.length) return
+    const { doc } = l
+
+    const COLS = [
+      { t: 'Año', w: 34 },
+      { t: 'Prueba', w: 52 },
+      { t: 'Intentos', w: 42 },
+      { t: 'Estado', w: 66 },
+      { t: 'Retro.', w: 46 },
+      { t: 'Recomendado', w: 0 },   // el resto
+    ]
+    COLS[COLS.length - 1].w = l.ancho - COLS.reduce((a, c) => a + c.w, 0)
+
+    const altoFila = 13
+    this.asegurar(l, 16 + altoFila * (filas.length + 1) + 10)
+
+    doc.font('Helvetica-Bold').fontSize(7).fillColor(PRIMARY)
+    doc.text('RECORRIDO AÑO POR AÑO', l.x, l.y)
+    l.y += 11
+
+    // Encabezado
+    doc.roundedRect(l.x, l.y, l.ancho, altoFila, 2).fill(GRIS_FONDO)
+    doc.font('Helvetica-Bold').fontSize(6.2).fillColor(GRIS_SUAVE)
+    let x = l.x
+    for (const c of COLS) {
+      doc.text(c.t.toUpperCase(), x + 4, l.y + 4, { width: c.w - 8, lineBreak: false })
+      x += c.w
+    }
+    l.y += altoFila
+
+    for (const f of filas) {
+      // Sin porcentaje no se afirma nada: "sin evaluar" no es "no aprobada".
+      const estado = f.pruebaAprobada === true ? 'Aprobada'
+        : f.pruebaAprobada === false ? 'No aprobada'
+        : (f.porcentaje != null || f.puntaje != null) ? 'Sin evaluar' : '—'
+      const reco = f.recomendado == null ? '—'
+        : f.recomendado >= 4 ? `Sí · ${f.recomendado}/5`
+        : `No · ${f.recomendado}/5`
+
+      const celdas = [
+        String(f.anio),
+        f.porcentaje != null ? `${f.porcentaje}%` : f.puntaje != null ? `${f.puntaje} pts` : '—',
+        f.intentos != null ? String(f.intentos) : '—',
+        estado,
+        f.retro != null ? `${f.retro}/5` : '—',
+        reco,
+      ]
+
+      doc.font('Helvetica').fontSize(6.6).fillColor('#333333')
+      x = l.x
+      celdas.forEach((txt, i) => {
+        doc.text(txt, x + 4, l.y + 3.5, { width: COLS[i].w - 8, lineBreak: false })
+        x += COLS[i].w
+      })
+      doc.moveTo(l.x, l.y + altoFila).lineTo(l.x + l.ancho, l.y + altoFila)
+        .lineWidth(0.3).strokeColor('#E8E8E8').stroke()
+      l.y += altoFila
+    }
+
+    l.y += 12
+  }
+
+  /**
    * Lo que le falta a la ficha, arriba y en un recuadro. Es el bloque por el
    * que el gestor imprime esto: si las alertas quedaran al final o mezcladas
    * con el resto, nadie las vería.
@@ -500,8 +577,22 @@ export class FichaPdfService {
     if (ficha.tieneFoto !== true) avisos.push('No tiene foto cargada.')
 
     const p = resumen.pruebaVigente
+    // Se distingue "no aprobada" de "sin evaluar". La ficha decia que la
+    // prueba NO FUE APROBADA cuando en realidad nadie la habia evaluado —
+    // falta el porcentaje o la nota de corte del ciclo—, y esto se imprime
+    // justo encima de la tabla que dice "Sin evaluar": el mismo documento se
+    // contradecia a si mismo, y la version impresa es la que se usa para
+    // decidir si se vuelve a convocar a alguien.
+    const sinEvaluar = !!p && !p.aprobada
+      && resumen.recorrido?.find(x => x.anio === p.anio)?.pruebaAprobada == null
+
     if (!p) {
       avisos.push('No registra prueba de conocimiento.')
+    } else if (sinEvaluar) {
+      avisos.push(
+        `La prueba de ${p.anio} está sin evaluar: falta el porcentaje o el ` +
+        'porcentaje mínimo del ciclo, así que no se puede decir si aprobó.',
+      )
     } else if (!p.aprobada) {
       avisos.push(
         `La última prueba (${p.anio}) no fue aprobada` +

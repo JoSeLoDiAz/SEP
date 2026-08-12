@@ -1937,6 +1937,10 @@ export class EvaluadoresService {
   async listarPruebas(evaluadorId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT PRUEBAID            AS "pruebaId",
+              -- Hace falta para poder CORREGIR una prueba sin desatarla de su
+              -- ciclo: el formulario tiene que saber cuál traía puesto, o al
+              -- guardar la mandaría a "prueba suelta" y apagaría el hito.
+              PARTICIPACIONID     AS "participacionId",
               ANIO                AS "anio",
               TRIM(PERIODO)       AS "periodo",
               FECHAPRESENTACION   AS "fechaPresentacion",

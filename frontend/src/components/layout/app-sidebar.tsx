@@ -8,7 +8,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
   ClipboardList, Cog, FileCheck2, FileText, FolderKanban,
-  Home, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
+  Home, IdCard, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
   ShieldCheck, Users, Wallet, X, BookUser, BarChart2,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -78,6 +78,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'fa-bullhorn':          Megaphone,
   'fa-sitemap':           Network,
   'fa-sliders':           Cog,
+  'fa-id-card':           IdCard,
 }
 
 function faToLucide(iconClass: string): LucideIcon {

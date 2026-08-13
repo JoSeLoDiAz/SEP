@@ -64,7 +64,6 @@ const modules: ModuleDef[] = [
     description: 'Convocatoria dirigida a empresas para cofinanciar programas de formación de su talento humano.',
     href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FCE%202025/FCE-2025.aspx',
     cta: 'Conocer la convocatoria',
-    imagen: '/images/banner/banner1fce.webp',
     icon: 'GraduationCap',
     accent: 'lime',
     external: true,
@@ -75,7 +74,6 @@ const modules: ModuleDef[] = [
     description: 'Consulta y descarga los certificados de las acciones de formación en las que participaste.',
     href: '/certificados',
     cta: 'Descargar',
-    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
     icon: 'Award',
     accent: 'cerulean',
   },
@@ -133,8 +131,7 @@ export default function InicioPage() {
             Accede a las convocatorias, gestiona tu registro y consulta tus certificados y eventos.
           </p>
         </div>
-        {/* dos columnas: con la banda de imagen, en tres el texto queda estrangulado */}
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {modules.map((mod) => (
             <ModuleCard key={mod.id} mod={mod} />
           ))}

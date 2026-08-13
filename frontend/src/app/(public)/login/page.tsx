@@ -1,7 +1,6 @@
 'use client'
 
-import { GovBar } from '@/components/public/gov-bar'
-import { InstitutionalHeader } from '@/components/public/institutional-header'
+import { CampoClave } from '@/components/public/campo-clave'
 import { Modal } from '@/components/ui/modal'
 import { ToastBetowa, type ToastTipo } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
@@ -100,122 +99,108 @@ export default function LoginPage() {
         />
       )}
 
-      <div className="flex min-h-screen flex-col bg-neutral-50">
-        <GovBar />
-        <InstitutionalHeader />
+      <div className="flex min-h-[60vh] items-center justify-center bg-neutral-50 px-6 py-12">
+        <div className="flex w-full max-w-sm flex-col gap-5">
+          <Link
+            href="/inicio"
+            className="inline-flex w-fit items-center gap-1.5 rounded-md text-xs font-medium text-neutral-500 transition-colors hover:text-lime-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+          >
+            <ArrowLeft size={14} aria-hidden="true" />
+            Volver al portal
+          </Link>
 
-        <main className="flex flex-1 items-center justify-center px-4 py-10 sm:py-14">
-          <div className="flex w-full max-w-sm flex-col gap-5">
-            <Link
-              href="/inicio"
-              className="inline-flex w-fit items-center gap-1.5 rounded-md text-xs font-medium text-neutral-500 transition-colors hover:text-lime-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
-            >
-              <ArrowLeft size={14} aria-hidden="true" />
-              Volver al portal
-            </Link>
+          <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+            {/* filete verde: ata la tarjeta al color institucional */}
+            <div className="h-1 w-full bg-lime-500" aria-hidden="true" />
 
-            <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-md">
-              {/* filete verde: ata la tarjeta al color institucional */}
-              <div className="h-1 w-full bg-lime-500" aria-hidden="true" />
-
-              <div className="flex flex-col gap-6 p-6 sm:p-8">
-                <div className="flex flex-col items-center gap-2 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
-                    <LogIn size={24} className="text-white" aria-hidden="true" />
-                  </div>
-                  <h2 className="text-lg font-bold text-cerulean-500">Iniciar sesión</h2>
-                  <p className="text-xs text-neutral-500">
-                    Acceso para usuarios registrados
-                  </p>
+            <div className="flex flex-col gap-6 p-5 sm:p-6">
+              <div className="flex flex-col items-center gap-2 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
+                  <LogIn size={24} className="text-white" aria-hidden="true" />
                 </div>
-
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="login-email" className="text-xs font-semibold text-neutral-700">
-                      Correo electrónico
-                    </label>
-                    <input
-                      id="login-email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="correo@sena.edu.co"
-                      autoComplete="email"
-                      className="w-full rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-neutral-900 transition placeholder:text-neutral-400 focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/40"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <label htmlFor="login-clave" className="text-xs font-semibold text-neutral-700">
-                        Contraseña
-                      </label>
-                      <Link
-                        href="/recuperar-contrasena"
-                        className="rounded-md text-xs text-cerulean-500 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
-                      >
-                        ¿Olvidé mi contraseña?
-                      </Link>
-                    </div>
-                    <input
-                      id="login-clave"
-                      type="password"
-                      value={clave}
-                      onChange={(e) => setClave(e.target.value)}
-                      placeholder="••••••••"
-                      autoComplete="current-password"
-                      className="w-full rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-neutral-900 transition placeholder:text-neutral-400 focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/40"
-                    />
-                  </div>
-
-                  {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
-                  <div className="flex justify-center">
-                    <Turnstile
-                      ref={turnstileRef}
-                      siteKey={TURNSTILE_SITE_KEY}
-                      options={{ language: 'es', theme: 'light' }}
-                      onSuccess={(token) => setCaptchaToken(token)}
-                      onExpire={() => setCaptchaToken('')}
-                      onError={() => setCaptchaToken('')}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading || !captchaToken}
-                    aria-busy={loading}
-                    className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-lime-500 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-lime-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loading && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
-                    {loading ? 'Verificando...' : 'Ingresar'}
-                  </button>
-                </form>
-
-                <p className="text-center text-xs text-neutral-500">
-                  ¿No tienes cuenta?{' '}
-                  <button
-                    type="button"
-                    onClick={() => setRegistroModal(true)}
-                    className="rounded-md font-semibold text-lime-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
-                  >
-                    Registrarse en el SEP
-                  </button>
+                <h1 className="text-lg font-bold text-cerulean-500">Iniciar sesión</h1>
+                <p className="text-xs text-neutral-500">
+                  Acceso para usuarios registrados
                 </p>
               </div>
-            </section>
 
-            <p className="text-center text-[11px] leading-relaxed text-neutral-400">
-              Todos los accesos quedan registrados.
-            </p>
-          </div>
-        </main>
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label htmlFor="login-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Correo electrónico
+                  </label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="correo@sena.edu.co"
+                    autoComplete="email"
+                    className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm transition focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/30"
+                  />
+                </div>
 
-        {/* franja fina de creditos: el pie completo del portal es demasiado para el login */}
-        <footer className="bg-cerulean-500 py-3 text-center">
-          <p className="text-[11px] text-white/80">
-            © GGPC – DSNFT – SENA {new Date().getFullYear()}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <label htmlFor="login-clave" className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                      Contraseña
+                    </label>
+                    <Link
+                      href="/recuperar-contrasena"
+                      className="rounded-md text-xs font-medium text-cerulean-500 transition hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+                    >
+                      ¿Olvidé mi contraseña?
+                    </Link>
+                  </div>
+                  <CampoClave
+                    id="login-clave"
+                    value={clave}
+                    onChange={setClave}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                  />
+                </div>
+
+                {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
+                <div className="flex justify-center">
+                  <Turnstile
+                    ref={turnstileRef}
+                    siteKey={TURNSTILE_SITE_KEY}
+                    options={{ language: 'es', theme: 'light' }}
+                    onSuccess={(token) => setCaptchaToken(token)}
+                    onExpire={() => setCaptchaToken('')}
+                    onError={() => setCaptchaToken('')}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || !captchaToken}
+                  aria-busy={loading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-lime-500 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+                >
+                  {loading && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
+                  {loading ? 'Verificando...' : 'Ingresar'}
+                </button>
+              </form>
+
+              <p className="text-center text-xs text-neutral-500">
+                ¿No tienes cuenta?{' '}
+                <button
+                  type="button"
+                  onClick={() => setRegistroModal(true)}
+                  className="rounded-md font-semibold text-lime-600 transition hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+                >
+                  Registrarse en el SEP
+                </button>
+              </p>
+            </div>
+          </section>
+
+          <p className="text-center text-[11px] leading-relaxed text-neutral-400">
+            Todos los accesos quedan registrados.
           </p>
-        </footer>
+        </div>
       </div>
 
       {/* Modal selección tipo de registro */}

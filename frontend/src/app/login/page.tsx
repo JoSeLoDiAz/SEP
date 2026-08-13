@@ -1,10 +1,11 @@
 'use client'
 
+import { GovBar } from '@/components/public/gov-bar'
+import { InstitutionalHeader } from '@/components/public/institutional-header'
 import { Modal } from '@/components/ui/modal'
-import { ToastBetowa } from '@/components/ui/toast-betowa'
+import { ToastBetowa, type ToastTipo } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
 import { ArrowLeft, Building2, Loader2, LogIn, UserPlus } from 'lucide-react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
@@ -21,37 +22,19 @@ export default function LoginPage() {
   const [clave, setClave] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string>('')
   const [loading, setLoading] = useState(false)
-  const [toast, setToast] = useState(false)
-  const [toastNombre, setToastNombre] = useState('')
   const [registroModal, setRegistroModal] = useState(false)
-
-  // Error banner: always in DOM, CSS-only visibility — timer lives in a ref so re-renders can't kill it
-  const [errMsg, setErrMsg] = useState('')
-  const [errVisible, setErrVisible] = useState(false)
-  const errTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function showErr(msg: string) {
-    if (errTimer.current) clearTimeout(errTimer.current)
-    setErrMsg(msg)
-    setErrVisible(true)
-    errTimer.current = setTimeout(() => setErrVisible(false), 6000)
-  }
-
-  function hideErr() {
-    if (errTimer.current) clearTimeout(errTimer.current)
-    setErrVisible(false)
-  }
+  const [toast, setToast] = useState<{ tipo: ToastTipo; msg: string } | null>(null)
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    hideErr()
+    setToast(null)
 
     if (!email.trim() || !clave.trim()) {
-      showErr('Correo y contraseña son requeridos')
+      setToast({ tipo: 'error', msg: 'Correo y contraseña son requeridos' })
       return
     }
     if (!captchaToken) {
-      showErr('Por favor espera a que se complete la validación de seguridad')
+      setToast({ tipo: 'error', msg: 'Por favor espera a que se complete la validación de seguridad' })
       return
     }
 
@@ -90,8 +73,7 @@ export default function LoginPage() {
         perfilId: ok.usuario.perfilId,
         usuarioPerfilId: ok.usuario.usuarioPerfilId,
       }))
-      setToastNombre(ok.usuario.nombre)
-      setToast(true)
+      setToast({ tipo: 'success', msg: `Bienvenido: ${ok.usuario.nombre}` })
       setTimeout(() => router.push('/panel'), 1800)
     } catch (err: unknown) {
       const msg =
@@ -99,7 +81,7 @@ export default function LoginPage() {
         ?? 'Credenciales inválidas. Verifique e intente nuevamente.'
       setCaptchaToken('')
       turnstileRef.current?.reset()
-      showErr(msg)
+      setToast({ tipo: 'error', msg })
     } finally {
       setLoading(false)
     }
@@ -107,244 +89,139 @@ export default function LoginPage() {
 
   return (
     <>
-      <ToastBetowa
-        show={toast}
-        onClose={() => setToast(false)}
-        tipo="success"
-        titulo="¡Bienvenido!"
-        mensaje={`Bienvenido: ${toastNombre}`}
-      />
+      {toast && (
+        <ToastBetowa
+          show
+          onClose={() => setToast(null)}
+          tipo={toast.tipo}
+          titulo={toast.tipo === 'success' ? '¡Bienvenido!' : 'Acceso denegado'}
+          mensaje={toast.msg}
+          duration={4000}
+        />
+      )}
 
-      {/* Error banner: siempre en el DOM, visible/oculto con CSS — inmune a re-renders */}
-      <div
-        role="alert"
-        aria-live="assertive"
-        onClick={hideErr}
-        style={{
-          position: 'fixed',
-          top: 18,
-          right: 18,
-          width: 'min(480px, calc(100vw - 36px))',
-          zIndex: 20000,
-          pointerEvents: errVisible ? 'auto' : 'none',
-          opacity: errVisible ? 1 : 0,
-          transform: errVisible ? 'translateY(0) scale(1)' : 'translateY(-14px) scale(0.97)',
-          transition: 'opacity 0.25s ease, transform 0.25s ease',
-          background: '#fdecec',
-          border: '1px solid rgba(176,0,32,0.18)',
-          borderRadius: 16,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
-          padding: '14px 16px 10px',
-          display: 'grid',
-          gridTemplateColumns: '38px 1fr 28px',
-          gap: 10,
-          overflow: 'hidden',
-          cursor: 'pointer',
-        }}
-      >
-        {/* Ícono */}
-        <div style={{
-          width: 38, height: 38, borderRadius: 999,
-          display: 'grid', placeItems: 'center',
-          fontWeight: 900, color: '#fff', fontSize: 20,
-          background: 'linear-gradient(135deg,#b00020,#e11d48)',
-          boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-          flexShrink: 0,
-        }}>×</div>
+      <div className="flex min-h-screen flex-col bg-neutral-50">
+        <GovBar />
+        <InstitutionalHeader />
 
-        {/* Texto */}
-        <div>
-          <div style={{ fontWeight: 800, fontSize: '1rem', color: '#7f1d1d', lineHeight: 1.1 }}>
-            Acceso denegado
-          </div>
-          {errMsg && (
-            <div style={{ marginTop: 3, fontSize: '.88rem', color: 'rgba(127,29,29,.82)', lineHeight: 1.3 }}>
-              {errMsg}
-            </div>
-          )}
-        </div>
-
-        {/* Cerrar */}
-        <button
-          type="button"
-          aria-label="Cerrar"
-          onClick={hideErr}
-          style={{
-            border: 'none', background: 'transparent',
-            fontSize: 26, lineHeight: 1, color: 'rgba(0,0,0,.40)',
-            cursor: 'pointer', padding: 0, marginTop: -2, alignSelf: 'start',
-          }}
-        >×</button>
-
-        {/* Barra de progreso animada con CSS puro — sin estado */}
-        <div style={{ gridColumn: '1 / -1', height: 5, borderRadius: 999, background: 'rgba(0,0,0,.08)', overflow: 'hidden', marginTop: 8 }}>
-          <div
-            style={{
-              height: '100%',
-              background: 'linear-gradient(135deg,#b00020,#e11d48)',
-              animation: errVisible ? 'sep-err-bar 6s linear forwards' : 'none',
-            }}
-          />
-        </div>
-      </div>
-      <style>{`
-        @keyframes sep-err-bar {
-          from { width: 100%; }
-          to   { width: 0%; }
-        }
-      `}</style>
-
-      <div className="min-h-screen flex flex-col bg-neutral-50">
-        {/* GOV.CO bar */}
-        <div className="w-full bg-[#3366CC] py-1.5 px-4 flex items-center">
-          <div className="max-w-7xl w-full mx-auto flex items-center gap-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/govco.svg"
-              alt="GOV.CO"
-              className="h-5 w-auto object-contain"
-            />
-          </div>
-        </div>
-
-        {/* Cabecera institucional */}
-        <div className="bg-white border-b border-neutral-200 py-3 px-4">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-            {/* Logo SENA */}
-            <div className="flex-shrink-0">
-              <Image src="/images/sena-logo.svg" alt="SENA" width={70} height={70} priority
-                className="w-12 h-12 sm:w-16 sm:h-16 md:w-[70px] md:h-[70px] object-contain" />
-            </div>
-            <div className="w-px h-10 sm:h-14 bg-neutral-200 flex-shrink-0" />
-            {/* Título */}
-            <div className="flex-1 text-center px-1">
-              <p className="text-cerulean-500 text-sm sm:text-base md:text-xl font-extrabold leading-tight tracking-wide uppercase">
-                Sistema Especializado de
-              </p>
-              <p className="text-cerulean-500 text-sm sm:text-base md:text-xl font-extrabold leading-tight tracking-wide uppercase">
-                Proyectos — SEP
-              </p>
-            </div>
-            {/* Logo Trabajo */}
-            <div className="flex-shrink-0">
-              <Image src="/images/layout_set_logo_mintrabajo.png" alt="Ministerio del Trabajo"
-                width={120} height={70} priority
-                className="w-16 sm:w-24 md:w-[120px] object-contain h-auto" />
-            </div>
-          </div>
-        </div>
-
-        {/* Contenido */}
-        <div className="flex-1 flex items-center justify-center px-4 py-12">
-          <div className="w-full max-w-sm flex flex-col gap-6">
+        <main className="flex flex-1 items-center justify-center px-4 py-10 sm:py-14">
+          <div className="flex w-full max-w-sm flex-col gap-5">
             <Link
               href="/inicio"
-              className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-green-600 transition-colors w-fit"
+              className="inline-flex w-fit items-center gap-1.5 rounded-md text-xs font-medium text-neutral-500 transition-colors hover:text-lime-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
             >
-              <ArrowLeft size={14} />
+              <ArrowLeft size={14} aria-hidden="true" />
               Volver al portal
             </Link>
 
-            <div className="bg-white rounded-2xl border border-neutral-200 shadow-md p-8 flex flex-col gap-6">
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-14 h-14 rounded-2xl bg-green-500 flex items-center justify-center shadow-sm">
-                  <LogIn size={24} className="text-white" />
+            <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-md">
+              {/* filete verde: ata la tarjeta al color institucional */}
+              <div className="h-1 w-full bg-lime-500" aria-hidden="true" />
+
+              <div className="flex flex-col gap-6 p-6 sm:p-8">
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
+                    <LogIn size={24} className="text-white" aria-hidden="true" />
+                  </div>
+                  <h2 className="text-lg font-bold text-cerulean-500">Iniciar sesión</h2>
+                  <p className="text-xs text-neutral-500">
+                    Acceso para usuarios registrados
+                  </p>
                 </div>
-                <h1 className="text-lg font-bold text-neutral-900">Iniciar Sesión</h1>
-                <p className="text-xs text-neutral-500 text-center">
-                  Acceso usuarios registrados
+
+                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="login-email" className="text-xs font-semibold text-neutral-700">
+                      Correo electrónico
+                    </label>
+                    <input
+                      id="login-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="correo@sena.edu.co"
+                      autoComplete="email"
+                      className="w-full rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-neutral-900 transition placeholder:text-neutral-400 focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/40"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="login-clave" className="text-xs font-semibold text-neutral-700">
+                        Contraseña
+                      </label>
+                      <Link
+                        href="/recuperar-contrasena"
+                        className="rounded-md text-xs text-cerulean-500 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+                      >
+                        ¿Olvidé mi contraseña?
+                      </Link>
+                    </div>
+                    <input
+                      id="login-clave"
+                      type="password"
+                      value={clave}
+                      onChange={(e) => setClave(e.target.value)}
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      className="w-full rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-neutral-900 transition placeholder:text-neutral-400 focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/40"
+                    />
+                  </div>
+
+                  {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
+                  <div className="flex justify-center">
+                    <Turnstile
+                      ref={turnstileRef}
+                      siteKey={TURNSTILE_SITE_KEY}
+                      options={{ language: 'es', theme: 'light' }}
+                      onSuccess={(token) => setCaptchaToken(token)}
+                      onExpire={() => setCaptchaToken('')}
+                      onError={() => setCaptchaToken('')}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !captchaToken}
+                    aria-busy={loading}
+                    className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-lime-500 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-lime-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
+                    {loading ? 'Verificando...' : 'Ingresar'}
+                  </button>
+                </form>
+
+                <p className="text-center text-xs text-neutral-500">
+                  ¿No tienes cuenta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setRegistroModal(true)}
+                    className="rounded-md font-semibold text-lime-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+                  >
+                    Registrarse en el SEP
+                  </button>
                 </p>
               </div>
+            </section>
 
-              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-neutral-700">
-                    Correo electrónico
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="correo@sena.edu.co"
-                    autoComplete="email"
-                    className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-neutral-700">
-                      Contraseña
-                    </label>
-                    <Link
-                      href="/recuperar-contrasena"
-                      className="text-xs text-green-600 hover:underline"
-                    >
-                      ¿Olvidé mi contraseña?
-                    </Link>
-                  </div>
-                  <input
-                    type="password"
-                    value={clave}
-                    onChange={(e) => setClave(e.target.value)}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition"
-                  />
-                </div>
-
-                {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
-                <div className="flex justify-center">
-                  <Turnstile
-                    ref={turnstileRef}
-                    siteKey={TURNSTILE_SITE_KEY}
-                    options={{ language: 'es', theme: 'light' }}
-                    onSuccess={(token) => setCaptchaToken(token)}
-                    onExpire={() => setCaptchaToken('')}
-                    onError={() => setCaptchaToken('')}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || !captchaToken}
-                  className="w-full bg-green-500 hover:bg-green-600 active:bg-green-700 disabled:opacity-60 text-white font-semibold text-sm py-2.5 rounded-lg transition-colors mt-1 flex items-center justify-center gap-2"
-                >
-                  {loading && <Loader2 size={15} className="animate-spin" />}
-                  {loading ? 'Verificando...' : 'Ingresar'}
-                </button>
-              </form>
-
-              <p className="text-center text-xs text-neutral-400">
-                ¿No tienes cuenta?{' '}
-                <button
-                  type="button"
-                  onClick={() => setRegistroModal(true)}
-                  className="text-green-500 hover:underline font-semibold"
-                >
-                  Registrarse en el SEP
-                </button>
-              </p>
-            </div>
-
-            <p className="text-center text-[11px] text-neutral-400 leading-relaxed">
-              Todos los accesos son registrados y auditados.
+            <p className="text-center text-[11px] leading-relaxed text-neutral-400">
+              Todos los accesos quedan registrados.
             </p>
           </div>
-        </div>
+        </main>
 
-        {/* Footer */}
-        <div className="py-3 text-center" style={{ backgroundColor: '#39a900' }}>
-          <p className="text-white text-xs">
+        {/* franja fina de creditos: el pie completo del portal es demasiado para el login */}
+        <footer className="bg-cerulean-500 py-3 text-center">
+          <p className="text-[11px] text-white/80">
             © GGPC – DSNFT – SENA {new Date().getFullYear()}
           </p>
-        </div>
+        </footer>
       </div>
 
       {/* Modal selección tipo de registro */}
       <Modal open={registroModal} onClose={() => setRegistroModal(false)}>
         {/* Header */}
-        <div className="bg-[#00304D] px-6 py-4">
+        <div className="bg-cerulean-500 px-6 py-4">
           <h2 className="text-white font-semibold text-base">Registrarse en el SEP</h2>
         </div>
 

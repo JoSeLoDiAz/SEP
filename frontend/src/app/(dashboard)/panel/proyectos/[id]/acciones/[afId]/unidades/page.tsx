@@ -11,8 +11,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface AFDetalle {
   afId: number
   numero: number
@@ -92,8 +90,6 @@ interface UTFormState {
   usarNuevaHabilidad: boolean
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function getHorasPrac(ut: UTDetalle) {
   return (ut.horasPP ?? 0) + (ut.horasPV ?? 0) + (ut.horasPPAT ?? 0) + (ut.horasPHib ?? 0)
 }
@@ -115,16 +111,12 @@ const emptyForm = (): UTFormState => ({
   usarNuevaHabilidad: false,
 })
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
 const card = 'bg-white rounded-2xl border border-neutral-200 p-5 flex flex-col gap-4'
 const lbl  = 'block text-xs font-medium text-neutral-600 mb-1'
 const inp  = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/20 focus:border-[#00304D] disabled:bg-neutral-50'
 const ta   = `${inp} resize-none`
 const btnP = 'inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-[#00304D] text-white hover:bg-[#004d7a] disabled:opacity-50 transition'
 const btnO = 'inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-neutral-200 text-[#00304D] hover:bg-[#00304D] hover:text-white transition'
-
-// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function UnidadesPage() {
   const { id: proyIdStr, afId: afIdStr } = useParams<{ id: string; afId: string }>()
@@ -259,9 +251,7 @@ export default function UnidadesPage() {
     setSaving(true)
     try {
       const body = buildBodyFromForm()
-      // El backend devuelve `warnings: string[]` con avisos cumulativos del AF
-      // (mínimo de UTs, % horas prácticas TALLER) que no bloquean el save
-      // pero deben mostrarse al usuario para que sepa qué falta.
+      // los warnings del backend son avisos del AF: no bloquean el guardado
       let warnings: string[] = []
       if (utId === null) {
         const r = await api.post<{ warnings?: string[] }>(`/proyectos/${proyectoId}/acciones/${afId}/unidades`, body)
@@ -279,7 +269,7 @@ export default function UnidadesPage() {
       await cargar()
       const rHabs = await api.get<Opcion[]>(`/proyectos/${proyectoId}/acciones/${afId}/habilidades`)
       setHabilidadesCat(rHabs.data)
-      // Mostrar warnings (uno a uno con un pequeño delay para que se vean).
+      // en cascada: si salen juntos, los toasts se pisan
       warnings.forEach((w, i) => setTimeout(() => showToast(w, 'error'), 600 * (i + 1)))
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al guardar'
@@ -386,7 +376,6 @@ export default function UnidadesPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 rounded-2xl bg-[#00304D] px-5 py-4">
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex items-center gap-2 text-white/60 text-xs flex-wrap">
@@ -422,7 +411,6 @@ export default function UnidadesPage() {
         </div>
       </div>
 
-      {/* ── Barra superior: resumen + botón crear ──────────────────────────── */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span>
@@ -441,7 +429,6 @@ export default function UnidadesPage() {
         )}
       </div>
 
-      {/* ── Formulario de creación ─────────────────────────────────────────── */}
       {creando && (
         <div className={`${card} border-[#00304D]/30 bg-[#00304D]/5`}>
           <div className="flex items-center justify-between">
@@ -461,7 +448,6 @@ export default function UnidadesPage() {
         </div>
       )}
 
-      {/* ── Lista vacía ────────────────────────────────────────────────────── */}
       {uts.length === 0 && !creando && (
         <div className="text-center py-16 text-neutral-400 text-sm flex flex-col items-center gap-3">
           <BookOpen size={32} className="text-neutral-200" />
@@ -472,7 +458,6 @@ export default function UnidadesPage() {
         </div>
       )}
 
-      {/* ── Lista de UTs ───────────────────────────────────────────────────── */}
       {uts.map(ut => {
         const isExpanded = expandedId === ut.utId
         const isEditing  = editingId === ut.utId
@@ -481,7 +466,6 @@ export default function UnidadesPage() {
 
         return (
           <div key={ut.utId} className={card}>
-            {/* Cabecera de la UT */}
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#00304D]/10 flex items-center justify-center">
                 <span className="text-sm font-bold text-[#00304D]">{ut.numero}</span>
@@ -512,7 +496,6 @@ export default function UnidadesPage() {
               </div>
             </div>
 
-            {/* Detalle expandido */}
             {isExpanded && (
               <div className="border-t border-neutral-100 pt-4 flex flex-col gap-5">
                 {!det ? (
@@ -554,7 +537,6 @@ export default function UnidadesPage() {
                   </>
                 ) : (
                   <>
-                    {/* Vista de lectura */}
                     <div className="flex justify-end">
                       <button onClick={() => iniciarEdicion(det)} className={btnO}>Editar datos básicos</button>
                     </div>
@@ -624,8 +606,6 @@ export default function UnidadesPage() {
   )
 }
 
-// ── Sub-componentes ───────────────────────────────────────────────────────────
-
 function InfoField({ label, value, highlight }: { label: string; value: string | number; highlight?: boolean }) {
   return (
     <div>
@@ -689,7 +669,6 @@ function UTFormFields({ form, setF, hLabels, habilidadesCat }: {
           rows={2} maxLength={3000} className={ta} placeholder="Justificación…" />
       </div>
 
-      {/* Habilidad transversal */}
       <div className="border border-violet-100 rounded-xl p-3 bg-violet-50/40 flex flex-col gap-3">
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={form.esTransversal}

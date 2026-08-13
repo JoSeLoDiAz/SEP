@@ -7,16 +7,6 @@ import { useEffect, useState } from 'react'
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
 
-/**
- * Reglas del ciclo: notas de corte y certificación.
- *
- * Vivía solo en el backend. Sin esta pantalla la gestora no podía poner los
- * cortes —y quedaban en null, con lo que ninguna prueba se marcaba aprobada—
- * ni habilitar la emisión, con lo que el botón "Emitir certificado" respondía
- * siempre "la convocatoria todavía no habilitó la emisión". Estaba construida
- * la mitad de arriba del embudo y faltaba la salida.
- */
-
 export interface ReglasConvocatoria {
   puntajeMinimoPrueba: number | null
   calificacionMinimaCurso: number | null
@@ -66,13 +56,12 @@ export function ReglasDelCiclo({
     let vivo = true
     api.get<Firma[]>('/evaluadores/catalogos/firmas')
       .then(r => { if (vivo) setFirmas(r.data) })
-      // Sin firmas el certificado sale sin rúbrica, pero se puede emitir: el
-      // select queda vacío y no se bloquea el resto de la pantalla.
+      // sin firmas igual se puede emitir: el certificado sale sin rúbrica
       .catch(() => { if (vivo) setFirmas([]) })
     return () => { vivo = false }
   }, [])
 
-  // Se resincroniza cuando el padre recarga la convocatoria tras guardar.
+  // resincroniza cuando el padre recarga la convocatoria tras guardar
   useEffect(() => {
     setPuntaje(reglas.puntajeMinimoPrueba?.toString() ?? '')
     setCurso(reglas.calificacionMinimaCurso?.toString() ?? '')
@@ -89,9 +78,7 @@ export function ReglasDelCiclo({
   }
 
   async function guardar() {
-    // Se valida antes de mandar: un corte fuera de rango no rompe nada en la
-    // base, pero deja un ciclo donde nadie aprueba nunca y eso no se nota
-    // hasta que alguien reclama su certificado.
+    // la base acepta cortes fuera de rango: quedaría un ciclo donde nadie aprueba
     const p = numeroONulo(puntaje)
     if (puntaje.trim() && (p == null || p < 0 || p > 100)) {
       return setToast({ tipo: 'error', msg: 'El puntaje mínimo debe estar entre 0 y 100' })
@@ -153,7 +140,6 @@ export function ReglasDelCiclo({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Notas de corte ─────────────────────────────────────────── */}
       <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <header className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3.5">
           <Target size={16} style={{ color: PRIMARY }} />
@@ -167,12 +153,7 @@ export function ReglasDelCiclo({
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              {/* Es un PORCENTAJE, no un puntaje. El puntaje bruto depende de
-                  cuántas preguntas trajo el examen —40 sobre 50 no es lo mismo
-                  que 40 sobre 100—, así que compararlo contra un corte fijo no
-                  significa lo mismo de un año a otro. Ya había una prueba con
-                  corte 70 medida contra un puntaje de 41 y marcada como no
-                  aprobada, cuando ese 41 sobre 50 era un 82 % y sí pasaba. */}
+              {/* es porcentaje, no puntaje bruto: 41 sobre 50 no compara igual que 41 sobre 100 */}
               <label className={etiqueta}>Porcentaje mínimo para pasar la prueba</label>
               <div className="relative">
                 <input
@@ -199,7 +180,6 @@ export function ReglasDelCiclo({
         </div>
       </section>
 
-      {/* ── Certificación ──────────────────────────────────────────── */}
       <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <header className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3.5">
           <Award size={16} style={{ color: PRIMARY }} />
@@ -275,7 +255,6 @@ export function ReglasDelCiclo({
         </button>
       </div>
 
-      {/* ── Emisión en lote ────────────────────────────────────────── */}
       <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <header className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3.5">
           <Users size={16} style={{ color: PRIMARY }} />

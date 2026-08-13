@@ -9,10 +9,9 @@ export type ProyectoTab = 'generalidades' | 'acciones' | 'presupuesto' | 'confir
 interface ProyectoTabsProps {
   proyectoId: number
   active: ProyectoTab
-  /** Si true, no renderiza el tab "Confirmar Proyecto" (útil cuando la página
-   *  ya lo expone como botón con modal local). */
+  /** La página ya lo expone como botón con modal propio. */
   hideConfirmar?: boolean
-  /** Sub-tabs adicionales (p. ej. Detalle AF, Rubros) que aparecen a la derecha. */
+  /** Sub-tabs extra (Detalle AF, Rubros), van a la derecha. */
   extraTabs?: React.ReactNode
 }
 
@@ -20,13 +19,7 @@ const baseCls = 'inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibol
 const idleCls = 'bg-white border border-neutral-200 text-[#00304D] hover:bg-[#00304D] hover:text-white'
 const activeCls = 'bg-[#00304D] text-white'
 
-/** Menú de tabs uniforme para todas las páginas del proyecto.
- *  Iconos asignados por concepto:
- *    Generalidades  → FolderKanban
- *    Acciones AF    → Layers
- *    Presupuesto    → PiggyBank
- *    Confirmar      → CheckCircle2
- */
+// menú de tabs uniforme para todas las páginas del proyecto
 export function ProyectoTabs({ proyectoId, active, hideConfirmar, extraTabs }: ProyectoTabsProps) {
   function tab(key: ProyectoTab, href: string, label: string, Icon: React.ComponentType<{ size?: number }>) {
     const cls = `${baseCls} ${active === key ? activeCls : idleCls}`

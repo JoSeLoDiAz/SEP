@@ -4,18 +4,14 @@ import { DataSource } from 'typeorm'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const oracledb = require('oracledb') as { DB_TYPE_BLOB: number }
 
-// ── Tipos de documento dentro de DOCUMENTOSPERSONAS ───────────────────────
-//   HV → Hoja de Vida (un archivo por persona)
-//   EX → Experiencia laboral (uno por experiencia)
-//   TI → Título académico (uno por título)
-//   DA → Documento Adicional / Otros documentos requeridos (uno por requerido)
+// tipos en DOCUMENTOSPERSONAS: HV hoja de vida, EX experiencia, TI título, DA doc adicional
 export type TipoDocPersona = 'HV' | 'EX' | 'TI' | 'DA'
 
 const ADMIN = 1
 const INTERVENTOR = 11
 const COORD_INTERV = 10
 
-const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
+const MAX_PDF_BYTES = 8 * 1024 * 1024
 
 export interface PersonaDto {
   tipoDocumentoId: number
@@ -33,8 +29,6 @@ export interface PersonaDto {
 @Injectable()
 export class PersonasService {
   constructor(private readonly dataSource: DataSource) {}
-
-  // ── Búsqueda y CRUD ────────────────────────────────────────────────────
 
   async buscarPorDocumento(tipoDocumentoId: number, identificacion: string) {
     const [p] = await this.dataSource.query(
@@ -85,9 +79,7 @@ export class PersonasService {
     return p
   }
 
-  /** Crea una persona si no existe; si ya existe (mismo tipo + identificación)
-   *  devuelve la existente sin tocarla. Acepta Habeas Data como texto 'SI'/'NO'
-   *  para mantener el contrato del legacy. */
+  // si ya existe (mismo tipo + identificación) devuelve la existente sin tocarla
   async crearPersonaSiNoExiste(dto: PersonaDto, empresaId: number | null) {
     const existente = await this.buscarPorDocumento(dto.tipoDocumentoId, dto.identificacion)
     if (existente) return { personaId: existente.personaId, creada: false }
@@ -171,10 +163,6 @@ export class PersonasService {
     }
   }
 
-  // ── Documentos PDF ─────────────────────────────────────────────────────
-
-  /** Lista los documentos de una persona (sin BLOB). Si se pasa `tipo`/`num`,
-   *  filtra por tipo (HV/EX/TI/DA) y consecutivo. */
   async listarDocumentos(personaId: number, tipo?: TipoDocPersona, num?: number) {
     const where = [`PERSONAID = :1`]
     const params: any[] = [personaId]
@@ -195,9 +183,6 @@ export class PersonasService {
     )
   }
 
-  /** Sube un PDF asociado a (personaId, tipo, num). Replica la regla del
-   *  legacy: si ya existe un documento para esa combinación, no permite subir
-   *  (hay que eliminarlo primero). */
   async subirDocumento(
     personaId: number, tipo: TipoDocPersona, num: number,
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
@@ -215,7 +200,6 @@ export class PersonasService {
       throw new BadRequestException('Archivo vacío o ilegible.')
     }
     const numFinal = Number(num) > 0 ? Number(num) : 0
-    // 1) Verificar que no exista ya un documento para (personaId, tipo, num)
     const [{ existentes }] = await this.dataSource.query(
       `SELECT COUNT(*) AS "existentes" FROM DOCUMENTOSPERSONAS
         WHERE PERSONAID = :1 AND TRIM(DOCUMENTOSPERSONASTIPO) = :2
@@ -246,8 +230,6 @@ export class PersonasService {
     }
   }
 
-  /** Trae el BLOB del documento y su nombre. El controller arma el response
-   *  con Content-Type=application/pdf. */
   async getDocumentoArchivo(documentoId: number) {
     const rows = await this.dataSource.query(
       `SELECT DOCUMENTOSPERSONASID              AS "id",
@@ -275,8 +257,6 @@ export class PersonasService {
     return { nombreArchivo: row.nombreArchivo || 'archivo.pdf', buffer }
   }
 
-  // ── Experiencia laboral ────────────────────────────────────────────────
-
   async listarTiposExperiencia() {
     return this.dataSource.query(
       `SELECT TIPOEXPERIENCIAID                  AS "id",
@@ -287,17 +267,9 @@ export class PersonasService {
     )
   }
 
-  /** Lista la experiencia de la persona. Si se pasa `proyectoActualId`,
-   *  agrega los flags `convocatoriaOrigen` y `mismaConvocatoria` para que el
-   *  frontend sepa si el item se puede editar o no. La regla del legacy es:
-   *  - El item es editable si fue registrado por este mismo proyecto, o por
-   *    un proyecto de OTRA convocatoria (ej.: convocatoria del año pasado).
-   *  - El item NO es editable si fue registrado por otro proyecto de la
-   *    MISMA convocatoria (lo está usando ese proyecto activamente). */
+  // mismaConvocatoria = lo usa otro proyecto de la misma convocatoria: el front no deja editar
   async listarExperiencia(personaId: number, proyectoActualId?: number) {
-    // Calculamos la convocatoria del proyecto actual en una llamada separada.
-    // Si lo metemos como scalar subquery dentro del SELECT, oracledb tiene un
-    // comportamiento raro con parámetros posicionales y devuelve 0 filas.
+    // como scalar subquery con binds posicionales oracledb devuelve 0 filas, por eso va aparte
     let convocatoriaActual: number | null = null
     if (proyectoActualId) {
       const [row] = await this.dataSource.query(
@@ -330,8 +302,6 @@ export class PersonasService {
     return rows.map(r => {
       const co = r.convocatoriaOrigen != null ? Number(r.convocatoriaOrigen) : null
       const po = r.proyectoOrigen != null ? Number(r.proyectoOrigen) : null
-      // mismaConvocatoria: solo cuando hay un proyecto origen distinto al
-      // actual y comparten la convocatoria.
       const mismaConv = !!proyectoActualId && po != null && po !== Number(proyectoActualId)
         && co != null && convocatoriaActual != null && co === convocatoriaActual
       return {
@@ -394,7 +364,6 @@ export class PersonasService {
     if ((exp.estadoArchivo ?? '').toUpperCase() === 'APROBADO') {
       throw new BadRequestException('No se puede editar una experiencia ya aprobada por la interventoría.')
     }
-    // Si la experiencia viene de OTRO proyecto, validar la convocatoria.
     const heredada = !!dto.proyectoId && exp.proyectoOrigen != null
       && Number(exp.proyectoOrigen) !== Number(dto.proyectoId)
     if (heredada) {
@@ -424,9 +393,7 @@ export class PersonasService {
     if (dto.fechaFin !== undefined) {
       sets.push(`PERSONAEXPERIENCIAFECHAFIN = :${i++}`); params.push(new Date(dto.fechaFin))
     }
-    // Si el ítem venía de otra convocatoria, al editar toma propiedad este
-    // proyecto y vuelve a estado inicial para que la interventoría lo
-    // verifique de nuevo (limpia el flag de aprobación).
+    // al editar un ítem heredado, este proyecto lo toma y vuelve a pendiente de revisión
     if (heredada && dto.proyectoId) {
       sets.push(`PERSONAEXPERIENCIAPROYECTO = :${i++}`); params.push(Number(dto.proyectoId))
       sets.push(`PERSONAEXPERIENCIANOMBREARCHIV = NULL`)
@@ -473,7 +440,6 @@ export class PersonasService {
         )
       }
     }
-    // Borra el adjunto en cascada (DOCUMENTOSPERSONAS con tipo=EX y num=experienciaId).
     await this.dataSource.query(
       `DELETE FROM DOCUMENTOSPERSONAS
         WHERE PERSONAID = :1 AND TRIM(DOCUMENTOSPERSONASTIPO) = 'EX'
@@ -487,12 +453,6 @@ export class PersonasService {
     return { message: 'Experiencia eliminada.' }
   }
 
-  /** Reglas del legacy:
-   *  - Tipo, descripción, fechaInicio y fechaFin obligatorios al crear.
-   *  - fechaInicio < hoy.
-   *  - fechaFin <= hoy.
-   *  - fechaFin >= fechaInicio.
-   *  Al actualizar, los campos no provistos se omiten. */
   private validarExperiencia(
     dto: { tipoExperienciaId?: number; descripcion?: string; fechaInicio?: string; fechaFin?: string },
     esActualizar: boolean = false,
@@ -521,8 +481,6 @@ export class PersonasService {
       }
     }
   }
-
-  // ── Títulos académicos ─────────────────────────────────────────────────
 
   async listarTiposTitulo() {
     return this.dataSource.query(
@@ -705,9 +663,6 @@ export class PersonasService {
     return { message: 'Título eliminado.' }
   }
 
-  /** Reglas:
-   *  - Tipo, descripción y fecha de graduación obligatorios al crear.
-   *  - fechaGraduacion <= hoy. */
   private validarTitulo(
     dto: { tipoTituloId?: number; descripcion?: string; fechaGraduacion?: string },
     esActualizar: boolean = false,
@@ -724,8 +679,6 @@ export class PersonasService {
       if (fg > hoy) throw new BadRequestException('La fecha de graduación no puede ser superior a hoy.')
     }
   }
-
-  // ── Otros Documentos Adicionales (HVPERSONADOCADICIONAL) ─────────────────
 
   async listarTiposDocAdicional() {
     return this.dataSource.query(
@@ -833,10 +786,7 @@ export class PersonasService {
       [documentoId],
     )
     if (!d) throw new NotFoundException('Documento no encontrado')
-    // Reglas del legacy: si la interventoría aprobó el ítem, no se puede
-    // eliminar. Por ahora dejamos el delete abierto al dueño (perfil 7) y
-    // al admin/interventoría — más adelante atamos al estado de aprobación
-    // del ítem (HV/Experiencia/Título/DocAdic).
+    // permiso provisional: falta atar el borrado al estado de aprobación del ítem
     if (perfilId !== ADMIN && perfilId !== 7 && perfilId !== INTERVENTOR && perfilId !== COORD_INTERV) {
       throw new ForbiddenException('No tienes permiso para eliminar este documento.')
     }

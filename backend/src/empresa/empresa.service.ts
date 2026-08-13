@@ -6,7 +6,7 @@ import { Usuario } from '../auth/entities/usuario.entity'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { twofish } = require('twofish')
 
-// ── Twofish (mismo algoritmo que GeneXus) ────────────────────────────────────
+// twofish: mismo algoritmo que GeneXus
 
 function encrypt64(plainText: string, key: string): string {
   const tf = twofish(new Array(16).fill(0))
@@ -15,8 +15,6 @@ function encrypt64(plainText: string, key: string): string {
   while (padded.length < 16) padded.push(0x20)
   return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
 }
-
-// ── Raw-query helper: TRIM nchar ─────────────────────────────────────────────
 
 @Injectable()
 export class EmpresaService {
@@ -28,10 +26,7 @@ export class EmpresaService {
     private readonly dataSource: DataSource,
   ) {}
 
-  // ── Datos básicos completos ───────────────────────────────────────────────
-
   async getDatos(email: string) {
-    // Empresa
     const [emp] = await this.dataSource.query(
       `SELECT
          e.EMPRESAID                AS "empresaId",
@@ -71,7 +66,6 @@ export class EmpresaService {
     )
     if (!emp) throw new NotFoundException('Empresa no encontrada')
 
-    // Usuario (fecha registro + perfil)
     const [usr] = await this.dataSource.query(
       `SELECT u.USUARIOFECHAREGISTRO AS "fechaRegistro",
               TRIM(p.PERFILNOMBRE)   AS "perfilNombre"
@@ -82,7 +76,6 @@ export class EmpresaService {
       [email],
     )
 
-    // CIIU desc
     let ciiuDesc = ''
     if (emp.ciiuId) {
       try {
@@ -97,8 +90,6 @@ export class EmpresaService {
 
     return { ...emp, ...usr, ciiuDesc }
   }
-
-  // ── Lookups ───────────────────────────────────────────────────────────────
 
   async getDepartamentos() {
     return this.dataSource.query(
@@ -175,8 +166,6 @@ export class EmpresaService {
       )
     } catch { return [] }
   }
-
-  // ── Updates ───────────────────────────────────────────────────────────────
 
   async updateIdentificacion(email: string, dto: { empresaRazonSocial: string; empresaSigla: string }) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
@@ -362,8 +351,6 @@ export class EmpresaService {
     return { message: 'Contraseña actualizada correctamente' }
   }
 
-  // ── Mesas Sectoriales ─────────────────────────────────────────────────────
-
   async getMesasSectoriales() {
     try {
       return await this.dataSource.query(
@@ -423,8 +410,6 @@ export class EmpresaService {
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  // ── Sectores / Subsectores ────────────────────────────────────────────────
-
   async getSectores() {
     try {
       return await this.dataSource.query(
@@ -442,8 +427,6 @@ export class EmpresaService {
       )
     } catch { return [] }
   }
-
-  // ── Sectores que PERTENECE ────────────────────────────────────────────────
 
   async getSectoresPertenece(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
@@ -486,8 +469,6 @@ export class EmpresaService {
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  // ── Subsectores que PERTENECE ─────────────────────────────────────────────
-
   async getSubsectoresPertenece(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
@@ -528,8 +509,6 @@ export class EmpresaService {
       return { message: 'Subsector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
-
-  // ── Sectores que REPRESENTA ───────────────────────────────────────────────
 
   async getSectoresRepresenta(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
@@ -572,8 +551,6 @@ export class EmpresaService {
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  // ── Subsectores que REPRESENTA ────────────────────────────────────────────
-
   async getSubsectoresRepresenta(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
@@ -615,9 +592,7 @@ export class EmpresaService {
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  /** Resumen para los badges del home del proponente: cuenta registros y
-   *  estado de cada módulo (datos básicos, contactos, análisis, necesidades,
-   *  proyectos por estado, convenios activos). */
+  // resumen para los badges del home del proponente
   async getResumenPanel(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')

@@ -3,10 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
 
-/** DTO del módulo conveniente para crear o actualizar una plataforma virtual.
- *  Solo expone los 4 campos del legacy "Agregar Plataforma Virtual":
- *  Fecha de remisión, Link, Usuario y Clave. Las respuestas de interventoría
- *  y SENA se diligencian en otros módulos. */
+// solo los 4 campos que edita el conveniente; interventoría y SENA van por otros módulos
 export interface PlataformaVirtualDto {
   fechaRemi: string  // YYYY-MM-DD
   link: string
@@ -25,7 +22,6 @@ const VAL_SENA_LBL: Record<number, string> = { 1: 'CUMPLE', 2: 'NO CUMPLE' }
 export class PlataformasVirtualesService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Lista de plataformas virtuales del proyecto para la tabla. */
   async listar(proyectoId: number) {
     const rows: Array<{
       id: number; proyectoId: number;
@@ -69,7 +65,6 @@ export class PlataformasVirtualesService {
     }
   }
 
-  /** Detalle de una plataforma virtual para el modal de edición. */
   async getOne(proyectoId: number, id: number) {
     const [row] = await this.ds.query(
       `SELECT pv.*
@@ -110,8 +105,7 @@ export class PlataformasVirtualesService {
     if (!dto.clave?.trim()) throw new BadRequestException('Ingresa la clave de acceso.')
   }
 
-  /** El conveniente solo puede editar mientras la interventoría aún no apruebe
-   *  o rechace (ESTADO ∉ {1,2}) y el SENA no haya validado (VALSENA ∉ {1,2}). */
+  // bloquea al conveniente si ESTADO ∈ {1,2} o VALSENA ∈ {1,2}
   private exigirEditableConveniente(row: { estado: number; valSena: number }) {
     const estado = Number(row.estado ?? 0)
     if (estado === 1 || estado === 2) {
@@ -127,7 +121,6 @@ export class PlataformasVirtualesService {
     }
   }
 
-  /** Crea una nueva plataforma virtual (lado conveniente). */
   async crear(proyectoId: number, dto: PlataformaVirtualDto): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
     const [{ nid }] = await this.ds.query(
@@ -135,8 +128,7 @@ export class PlataformasVirtualesService {
     )
     const id = Number(nid)
 
-    // Todas las columnas son NOT NULL; los campos que aún no aplican se llenan con
-    // placeholders (N' ' para texto, SYSDATE para fechas, 0 para usuarios/estado).
+    // todas las columnas son NOT NULL: lo que no aplica va con placeholder
     await this.ds.query(
       `INSERT INTO PLATAFORMASVIRTUALES
          (PLATAFORMASVIRTUALESID, PROYECTOID,
@@ -162,9 +154,6 @@ export class PlataformasVirtualesService {
     return { mensaje: 'Plataforma virtual registrada correctamente.', id }
   }
 
-  /** Actualiza una plataforma virtual (lado conveniente).
-   *  Valida que la interventoría no haya emitido veredicto y que el SENA no
-   *  haya validado. Solo modifica fechaRemi, link, usuario y clave. */
   async actualizar(proyectoId: number, id: number, dto: PlataformaVirtualDto): Promise<{ mensaje: string }> {
     this.validar(dto)
     const [existe] = await this.ds.query(
@@ -193,7 +182,6 @@ export class PlataformasVirtualesService {
     return { mensaje: 'Plataforma virtual actualizada.' }
   }
 
-  /** Elimina una plataforma virtual (solo admin). */
   async eliminar(proyectoId: number, id: number, perfilId: number): Promise<{ mensaje: string }> {
     const PERFIL_ADMIN = 1
     if (perfilId !== PERFIL_ADMIN) {
@@ -209,8 +197,7 @@ export class PlataformasVirtualesService {
     return { mensaje: 'Plataforma virtual eliminada.' }
   }
 
-  /** Exporta a Excel todas las plataformas virtuales del proyecto.
-   *  Mantiene las 24 columnas del legacy `PExportarHerramienta`. */
+  // mantiene las 24 columnas del legacy PExportarHerramienta
   async exportarExcel(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
     type Row = {
       id: number; consec: number;

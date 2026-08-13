@@ -2,26 +2,14 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-/**
- * Auditoría del banco de evaluadores (tabla EVALUADORLOG, v35).
- *
- * `SEP_APP` tiene SELECT e INSERT sobre la tabla y nada más — sin UPDATE ni
- * DELETE. Eso es deliberado: un log que la aplicación puede reescribir no
- * sirve como auditoría. Este servicio, por tanto, solo registra y consulta.
- *
- * Qué se registra: aprobaciones, calificaciones, cambios de estado del ciclo,
- * generación/anulación de la matriz de retroalimentación, emisión y anulación
- * de certificados, y cada vez que alguien rompe el anonimato de una
- * retroalimentación. Los cargues de documentos y las lecturas normales NO se
- * registran: serían ruido que esconde lo que sí importa.
- */
+// auditoría del banco de evaluadores: SEP_APP solo tiene SELECT e INSERT sobre EVALUADORLOG, sin UPDATE ni DELETE
 
 export type OperacionLog =
   | 'INSERT' | 'UPDATE' | 'DELETE'
-  | 'ESTADO'   // cambio de estado de un ciclo
-  | 'GENERAR'  // generación de la matriz de retroalimentación
-  | 'ANULAR'   // anulación (asignación o certificado)
-  | 'EMITIR'   // emisión de certificado
+  | 'ESTADO'
+  | 'GENERAR'
+  | 'ANULAR'
+  | 'EMITIR'
 
 export interface RegistroLog {
   tabla: string
@@ -54,12 +42,7 @@ export class AuditoriaService {
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /**
-   * Registra una operación. **Nunca lanza**: si la auditoría falla no puede
-   * tumbar la operación de negocio que la originó — se deja traza en el log de
-   * aplicación y se sigue. El caso contrario (perder una aprobación porque el
-   * log estaba lleno) sería mucho peor.
-   */
+  // nunca lanza: un fallo de auditoría no debe tumbar la operación de negocio
   async registrar(r: RegistroLog): Promise<void> {
     try {
       const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
@@ -92,7 +75,6 @@ export class AuditoriaService {
     }
   }
 
-  /** Atajo para el caso más común: un UPDATE con snapshot antes/después. */
   async registrarCambio(
     tabla: string,
     registroId: number,
@@ -111,10 +93,6 @@ export class AuditoriaService {
       ...ctx,
     })
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Consulta — panel de coordinación                                      ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   async listar(f: FiltroLog = {}) {
     const page = Math.max(1, f.page ?? 1)
@@ -144,8 +122,7 @@ export class AuditoriaService {
       params,
     )
 
-    // Los CLOB de snapshot no se traen en el listado: son pesados y solo se
-    // necesitan al abrir un registro concreto.
+    // sin los CLOB de snapshot: pesan y solo se necesitan en el detalle
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT l.EVALUADORLOGID     AS "logId",
               l.EVALUADORID        AS "evaluadorId",
@@ -185,7 +162,6 @@ export class AuditoriaService {
     }
   }
 
-  /** Detalle con los snapshots. Se pide solo al expandir una fila. */
   async getDetalle(logId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT l.EVALUADORLOGID AS "logId",
@@ -202,10 +178,6 @@ export class AuditoriaService {
       valorDespues: await this.parsearLob(rows[0].valorDespues),
     }
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Helpers                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   private serializar(v: unknown): string | null {
     if (v == null) return null

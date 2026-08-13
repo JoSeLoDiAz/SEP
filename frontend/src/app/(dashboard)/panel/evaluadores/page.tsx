@@ -34,8 +34,7 @@ interface Contadores {
 
 export default function EvaluadoresDashboardPage() {
   const [busqueda, setBusqueda] = useState('')
-  // La búsqueda solo se aplica al enviar el formulario; el Excel debe salir con
-  // el texto YA aplicado, no con lo que el usuario esté tecleando.
+  // el Excel sale con el texto ya aplicado, no con lo que se esté tecleando
   const [busquedaAplicada, setBusquedaAplicada] = useState('')
   const [filtros, setFiltros] = useState<FiltrosBanco>(FILTROS_VACIOS)
   const [page, setPage] = useState(1)
@@ -49,11 +48,7 @@ export default function EvaluadoresDashboardPage() {
   const [esAdmin, setEsAdmin] = useState(false)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
 
-  // Cancela la consulta anterior cuando el usuario cambia filtros más rápido de
-  // lo que el backend responde.
   const cargaCtrlRef = useRef<AbortController | null>(null)
-  // Los contadores viven aparte del listado: no dependen de la página, así que
-  // tienen su propio ciclo de vida y su propia cancelación.
   const contadoresCtrlRef = useRef<AbortController | null>(null)
   const claveContadoresRef = useRef<string | null>(null)
 
@@ -93,20 +88,14 @@ export default function EvaluadoresDashboardPage() {
     }
   }
 
-  /**
-   * Contadores de alerta del banco filtrado. Se piden sin los flags de alerta
-   * entre sí: si ya estás filtrando "sin foto", el contador de "sin cédula"
-   * debe seguir midiendo el mismo universo y no el cruce de ambas.
-   */
+  // sin los flags de alerta entre sí: cada contador mide el mismo universo, no el cruce
   async function cargarContadores(base: Record<string, string>) {
     const comun = { ...base }
     delete comun.sinCedula
     delete comun.sinFoto
     delete comun.pruebaVigente
 
-    // Pasar de página no cambia el universo que miden las alertas: sin esta
-    // guarda, cada clic en "Siguiente" repetía las tres consultas y dejaba las
-    // tarjetas parpadeando en spinner.
+    // paginar no cambia el universo de las alertas: sin esta clave se repiten las 3 consultas
     const clave = new URLSearchParams(comun).toString()
     if (clave === claveContadoresRef.current) return
     claveContadoresRef.current = clave
@@ -134,27 +123,17 @@ export default function EvaluadoresDashboardPage() {
       ])
       setContadores({ sinCedula, sinFoto, sinPrueba })
     } catch {
-      // Los contadores son informativos: si fallan, la pantalla sigue sirviendo.
-      // Se olvida la clave para que el próximo cambio de criterios reintente.
-      //
-      // Pero hay que MARCAR el fallo: un "—" junto a "Filtrar por esta alerta"
-      // se lee como cero, y "nadie le falta la cédula" es lo contrario de lo
-      // que pasa cuando no se pudo contar.
+      // se olvida la clave para reintentar en el próximo cambio de criterios
       if (contadoresCtrlRef.current === ctrl) {
         claveContadoresRef.current = null
         setContadoresFallaron(true)
       }
     } finally {
-      // Si esta carga ya fue reemplazada, el spinner lo apaga la nueva.
       if (contadoresCtrlRef.current === ctrl) setCargandoContadores(false)
     }
   }
 
-  /**
-   * Relanza la consulta con los criterios nuevos. Si ya estamos en la página 1
-   * hay que pedirla a mano; si no, basta con volver a 1 y dejar que el efecto
-   * de `page` dispare la carga, para no lanzar dos veces las mismas consultas.
-   */
+  // en página 1 hay que pedir a mano; si no, el efecto de `page` dispara la carga
   function relanzar(q: string, f: FiltrosBanco) {
     if (page === 1) cargar(q, f, 1)
     else setPage(1)
@@ -175,7 +154,6 @@ export default function EvaluadoresDashboardPage() {
     relanzar('', FILTROS_VACIOS)
   }
 
-  /** Quita solo la búsqueda de texto y conserva los filtros puestos. */
   function limpiarBusqueda() {
     setBusqueda('')
     relanzar('', filtros)
@@ -188,7 +166,7 @@ export default function EvaluadoresDashboardPage() {
       await descargarArchivoConNombreDelServidor(
         `/evaluadores/reportes/banco.xlsx${qs ? `?${qs}` : ''}`,
         'banco-evaluadores.xlsx',
-        // La sábana recorre todo el banco filtrado: 15 s no alcanzan.
+        // la sábana recorre todo el banco filtrado: 15 s no alcanzan
         60_000,
       )
     } catch (err: unknown) {
@@ -202,9 +180,7 @@ export default function EvaluadoresDashboardPage() {
   const totalPaginas = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1
   const numFiltros = contarFiltros(filtros)
   const hayCriterios = numFiltros > 0 || busquedaAplicada !== ''
-  // "?" y no "—" cuando la consulta falló: el guion se confunde con un cero, y
-  // decirle que a nadie le falta la cédula cuando no se pudo contar es peor que
-  // no decir nada.
+  // "?" si la consulta falló: el guion se lee como cero
   const valorContador = (v: number | undefined) =>
     v != null ? String(v) : (contadoresFallaron ? '?' : '—')
 
@@ -394,7 +370,7 @@ export default function EvaluadoresDashboardPage() {
   )
 }
 
-// ── Componentes ──────────────────────────────────────────────────────────────
+// componentes
 
 function TarjetaMetrica({
   icono: Icono, etiqueta, valor, detalle, color, cargando, activo, onClick,
@@ -429,8 +405,7 @@ function TarjetaMetrica({
     return <div className={`${base} border-neutral-200`}>{contenido}</div>
   }
 
-  // El color del filtro activo es dato, no clase: va inline porque Tailwind no
-  // puede generar utilidades con un valor de runtime.
+  // color inline: Tailwind no genera utilidades con valores de runtime
   return (
     <button
       type="button"

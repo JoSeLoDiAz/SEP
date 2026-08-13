@@ -1,8 +1,67 @@
 import { FacebookWidget } from '@/components/public/facebook-widget'
-import { HeroInicio } from '@/components/public/hero-inicio'
+import { CarruselInicio, type Lamina } from '@/components/public/carrusel-inicio'
 import { InstagramWidget } from '@/components/public/instagram-widget'
 import { ModuleCard, type ModuleDef } from '@/components/public/module-card'
 import { SocialButtons } from '@/components/public/social-buttons'
+
+const laminas: Lamina[] = [
+  {
+    id: 'sep',
+    antetitulo: 'SENA · Gestión para la Productividad y la Competitividad',
+    titulo: 'Sistema Especializado de Proyectos',
+    texto: 'Consulta convocatorias, inscríbete a eventos, descarga tus certificados y verifica proyectos presentados.',
+    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
+    acciones: [
+      { texto: 'Descargar mi certificado', href: '/certificados', principal: true },
+      { texto: 'Ver eventos', href: '/eventos' },
+    ],
+  },
+  {
+    id: 'registro',
+    antetitulo: 'Crea tu cuenta',
+    titulo: 'Regístrate en el SEP',
+    texto: 'Si vas a presentar un proyecto, entra como proponente. Si solo necesitas certificados o inscribirte a eventos, entra como usuario.',
+    acciones: [
+      { texto: 'Registrarme como proponente', href: '/registro/proponente', principal: true },
+      { texto: 'Registrarme como usuario', href: '/registro/usuario' },
+    ],
+  },
+  {
+    id: 'fce',
+    antetitulo: 'Convocatoria abierta',
+    titulo: 'Formación Continua Especializada',
+    texto: 'El SENA cofinancia la formación que tu empresa o gremio necesita: tú presentas el proyecto y capacitas a tus trabajadores.',
+    acciones: [
+      {
+        texto: 'Conocer la convocatoria',
+        href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FCE%202025/FCE-2025.aspx',
+        externo: true,
+        principal: true,
+      },
+    ],
+  },
+  {
+    id: 'feec',
+    antetitulo: 'Economía campesina',
+    titulo: 'Formación para el campo colombiano',
+    texto: 'La FEEC lleva formación especializada a organizaciones y asociaciones rurales, con el mismo respaldo del SENA.',
+    acciones: [
+      {
+        texto: 'Conocer la FEEC',
+        href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FEEC%202025/FEEC-2025.aspx',
+        externo: true,
+        principal: true,
+      },
+    ],
+  },
+  {
+    id: 'verificar',
+    antetitulo: 'Transparencia',
+    titulo: 'Verifica un certificado o un proyecto',
+    texto: 'Comprueba en segundos si un certificado es auténtico o si un proyecto fue presentado ante el SENA.',
+    acciones: [{ texto: 'Verificar ahora', href: '/verificar', principal: true }],
+  },
+]
 
 const modules: ModuleDef[] = [
   {
@@ -20,7 +79,7 @@ const modules: ModuleDef[] = [
     description: 'Convocatoria dirigida a organizaciones y asociaciones del campo colombiano.',
     href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FEEC%202025/FEEC-2025.aspx',
     icon: 'Sprout',
-    accent: 'green',
+    accent: 'purpura',
     external: true,
   },
   {
@@ -62,7 +121,7 @@ const modules: ModuleDef[] = [
 export default function InicioPage() {
   return (
     <div className="flex flex-col">
-      <HeroInicio />
+      <CarruselInicio laminas={laminas} />
 
       <section className="mx-auto w-full max-w-6xl px-6 pb-12 pt-4 flex flex-col gap-8">
         <div className="flex flex-col items-center gap-2 text-center">

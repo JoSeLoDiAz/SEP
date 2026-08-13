@@ -137,7 +137,8 @@ export function PublicFooter() {
       </div>
 
       {/* Bloque institucional azul */}
-      <div className="bg-cerulean-500">
+      {/* esquinas redondeadas arriba, como en betowa y ape */}
+      <div className="overflow-hidden rounded-t-[2rem] bg-cerulean-500 sm:rounded-t-[3rem] lg:rounded-t-[4rem]">
         <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-3 lg:gap-12 lg:px-8">
 
           {/* Identidad + sellos */}

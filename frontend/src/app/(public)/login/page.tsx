@@ -1,10 +1,12 @@
 'use client'
 
 import { CampoClave } from '@/components/public/campo-clave'
+import { CarruselLogin, type LaminaLogin } from '@/components/public/carrusel-login'
 import { Modal } from '@/components/ui/modal'
 import { ToastBetowa, type ToastTipo } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
 import { ArrowLeft, Building2, Loader2, LogIn, UserPlus } from 'lucide-react'
+
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
@@ -12,6 +14,29 @@ import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 
 // Site key pública de Cloudflare Turnstile. Configurable por env.
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '0x4AAAAAADD6VVCyoP6eM5Ao'
+
+// las fotos las entrega diseño; sin ellas cada lámina queda con su color de marca
+const LAMINAS: LaminaLogin[] = [
+  {
+    id: 'proyectos',
+    titulo: 'Bienvenido al SEP',
+    texto: 'Tus proyectos de formación en un solo lugar.',
+    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
+    fondo: 'cerulean',
+  },
+  {
+    id: 'convocatorias',
+    titulo: 'Convocatorias abiertas',
+    texto: 'Presenta tu proyecto y forma a tu talento humano con el SENA.',
+    fondo: 'green',
+  },
+  {
+    id: 'certificados',
+    titulo: 'Certificados a un clic',
+    texto: 'Descarga y verifica los certificados de tus eventos.',
+    fondo: 'purpura',
+  },
+]
 
 export default function LoginPage() {
   const router = useRouter()
@@ -99,8 +124,12 @@ export default function LoginPage() {
         />
       )}
 
-      <div className="flex min-h-[60vh] items-center justify-center bg-neutral-50 px-6 py-12">
-        <div className="flex w-full max-w-sm flex-col gap-5">
+      <div className="relative isolate flex min-h-[72vh] items-center justify-center overflow-hidden bg-gradient-to-br from-celeste-50 via-white to-lime-50 px-4 py-12 sm:px-6">
+        {/* manchas muy tenues: dan aire sin cargar de color */}
+        <div aria-hidden="true" className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-celeste-500/10 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-40 -right-24 h-[28rem] w-[28rem] rounded-full bg-lime-500/10 blur-3xl" />
+
+        <div className="relative flex w-full max-w-4xl flex-col gap-4">
           <Link
             href="/inicio"
             className="inline-flex w-fit items-center gap-1.5 rounded-md text-xs font-medium text-neutral-500 transition-colors hover:text-lime-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
@@ -109,18 +138,18 @@ export default function LoginPage() {
             Volver al portal
           </Link>
 
-          <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-            {/* filete verde: ata la tarjeta al color institucional */}
-            <div className="h-1 w-full bg-lime-500" aria-hidden="true" />
+          <section className="grid overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-xl lg:grid-cols-2">
+            {/* en movil es una banda sobre el formulario; en escritorio, la columna izquierda */}
+            <CarruselLogin laminas={LAMINAS} />
 
-            <div className="flex flex-col gap-6 p-5 sm:p-6">
-              <div className="flex flex-col items-center gap-2 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
-                  <LogIn size={24} className="text-white" aria-hidden="true" />
+            <div className="flex flex-col gap-6 p-6 sm:p-9">
+              <div className="flex flex-col gap-2">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
+                  <LogIn size={22} className="text-white" aria-hidden="true" />
                 </div>
-                <h1 className="text-lg font-bold text-cerulean-500">Iniciar sesión</h1>
-                <p className="text-xs text-neutral-500">
-                  Acceso para usuarios registrados
+                <h1 className="text-2xl font-bold text-cerulean-500">Iniciar sesión</h1>
+                <p className="text-sm text-neutral-500">
+                  Ingresa con la cuenta que registraste en el SEP.
                 </p>
               </div>
 

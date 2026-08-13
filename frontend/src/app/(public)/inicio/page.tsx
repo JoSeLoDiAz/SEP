@@ -91,7 +91,8 @@ export default function InicioPage() {
             Gestión para la Productividad y la Competitividad
           </h2>
           <p className="max-w-2xl text-sm text-neutral-500">
-            Programas, trámites y servicios del SENA para empresas, gremios y ciudadanos.
+            Programas, trámites y servicios del SENA para proponentes como empresas
+            y gremios, y para beneficiarios de formación.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

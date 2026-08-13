@@ -32,14 +32,6 @@ export function InstitutionalHeader() {
           </p>
         </div>
 
-        <Image
-          src="/images/layout_set_logo_mintrabajo.png"
-          alt="Ministerio del Trabajo"
-          width={140}
-          height={80}
-          priority
-          className="hidden h-auto w-24 shrink-0 object-contain sm:block lg:w-[140px]"
-        />
       </div>
     </header>
   )

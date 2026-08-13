@@ -1,5 +1,6 @@
 import { FacebookIcon, InstagramIcon, LinkedinIcon, Radio, X, YoutubeIcon } from 'lucide-react'
 import Image from 'next/image'
+import { MinisteriosMarquee } from './ministerios-marquee'
 
 function TikTokIcon({ size = 16 }: { size?: number }) {
   return (
@@ -93,15 +94,7 @@ export function PublicFooter() {
           </div>
           {/* Separador vertical visible en sm+ */}
           <div className="hidden sm:block w-px self-stretch bg-neutral-300" />
-          {/* Ministerios */}
-          <div className="flex flex-wrap gap-3 items-center justify-center flex-1">
-            {ministerios.map(({ label, src, href }) => (
-              <a key={label} href={href} target="_blank" rel="noreferrer" title={label}
-                className="hover:scale-110 transition-transform">
-                <Image src={src} alt={label} width={80} height={40} className="object-contain h-10 w-auto" />
-              </a>
-            ))}
-          </div>
+          <MinisteriosMarquee entidades={ministerios} />
         </div>
       </div>
 

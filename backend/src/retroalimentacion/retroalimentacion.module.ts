@@ -6,7 +6,7 @@ import { RetroalimentacionService } from './retroalimentacion.service'
 import { RetroMatrizService } from './retro-matriz.service'
 import { RetroReporteService } from './retro-reporte.service'
 
-// importa EvaluadoresModule por ControlCambiosService: matriz, anulaciones y destapes van al log del banco, no a uno aparte
+// importa EvaluadoresModule por ControlCambiosService
 @Module({
   imports: [AuthModule, EvaluadoresModule],
   controllers: [RetroalimentacionController],

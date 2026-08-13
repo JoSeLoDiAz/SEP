@@ -43,10 +43,6 @@ export interface EvaluadorCrearDto {
   cargo?: string
   profesion?: string
   posgrado?: string
-  otrosEstudios?: string
-  jefeDirecto?: string    // legacy — texto libre; se conserva por compatibilidad
-  quienAprueba?: string   // reservado para Fase 4 (flujo de aprobación)
-  // Jefe directo estructurado (Fase 3) y municipio de residencia
   jefeNombre?: string
   jefeEmail?: string
   jefeCargo?: string
@@ -62,10 +58,6 @@ export interface EvaluadorActualizarDto {
   cargo?: string | null
   profesion?: string | null
   posgrado?: string | null
-  otrosEstudios?: string | null
-  jefeDirecto?: string | null
-  quienAprueba?: string | null
-  // Jefe directo estructurado y municipio de residencia
   jefeNombre?: string | null
   jefeEmail?: string | null
   jefeCargo?: string | null
@@ -536,23 +528,8 @@ export class EvaluadoresService {
     )
     if (!rows[0]) throw new NotFoundException('Evaluador no encontrado')
     const r = rows[0]
-    // Leer CLOB explícitamente
-    let otrosEstudios: string | null = null
-    if (r.otrosEstudios && typeof (r.otrosEstudios as { read?: () => unknown }).read === 'function') {
-      otrosEstudios = await new Promise<string>((resolve, reject) => {
-        const lob = r.otrosEstudios as NodeJS.ReadableStream
-        let s = ''
-        lob.setEncoding?.('utf8')
-        lob.on('data', (c) => { s += c })
-        lob.on('end', () => resolve(s))
-        lob.on('error', reject)
-      })
-    } else if (typeof r.otrosEstudios === 'string') {
-      otrosEstudios = r.otrosEstudios
-    }
     return {
       ...r,
-      otrosEstudios,
       tieneFoto: Number(r.tieneFoto) === 1,
       activo: Number(r.activo),
     }

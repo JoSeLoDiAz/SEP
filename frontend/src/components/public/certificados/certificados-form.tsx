@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Download, AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Download, Loader2, Search, User, Hash } from 'lucide-react'
 import api from '@/lib/api'
+import { cn } from '@/lib/utils'
 
 type Modo = 'persona' | 'codigo'
 
@@ -28,95 +29,132 @@ const TIPOS_DOCUMENTO = [
   { value: 'NIT', label: 'NIT' },
 ]
 
-function Alert({ message, type }: { message: string; type: 'error' | 'info' }) {
+const campo =
+  'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm transition focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/30'
+const etiqueta = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-neutral-500'
+
+function Aviso({ mensaje }: { mensaje: string }) {
   return (
-    <div className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium
-      ${type === 'error' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-cerulean-50 text-cerulean-500 border border-cerulean-200'}`}>
-      <AlertCircle size={16} className="flex-shrink-0" />
-      {message}
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+    >
+      <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+      {mensaje}
     </div>
   )
 }
 
-function ResultsTable({ rows, onDescargar }: { rows: CertificadoRow[]; onDescargar: (row: CertificadoRow) => void }) {
+function Insignia({ row }: { row: CertificadoRow }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-neutral-200">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-cerulean-500 text-white">
-            <th className="px-4 py-3 text-left font-semibold w-12">No.</th>
-            <th className="px-4 py-3 text-left font-semibold w-32">Participación</th>
-            <th className="px-4 py-3 text-left font-semibold w-1/4">Entidad</th>
-            <th className="px-4 py-3 text-left font-semibold">Certificado por</th>
-            <th className="px-4 py-3 text-left font-semibold whitespace-nowrap">Fecha</th>
-            <th className="px-4 py-3 text-center font-semibold w-32">Ver</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              // el id no basta como key: beneficiario y evaluador pueden repetirlo
-              key={`${row.tipo}-${row.urlPdf}`}
-              className={`border-t border-neutral-100 ${i % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}`}
-            >
-              <td className="px-4 py-3 text-neutral-600">{row.consecutivo}</td>
-              <td className="px-4 py-3">
-                {/* celeste y no cerulean: esa paleta solo define 50/500/700 */}
-                <span className={`inline-block px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
-                  row.tipo === 'EVALUADOR'
-                    ? 'bg-celeste-50 text-celeste-700 border border-celeste-500/40'
-                    : 'bg-green-50 text-green-700 border border-green-200'
-                }`}>
-                  {row.tipoNombre}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-neutral-800 font-medium">{row.entidad}</td>
-              <td className="px-4 py-3 text-neutral-700">
-                {row.concepto}
-                {row.detalle && (
-                  <span className="block text-xs text-neutral-400 mt-0.5">{row.detalle}</span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{row.fecha}</td>
-              <td className="px-4 py-3 text-center">
-                <button
-                  onClick={() => onDescargar(row)}
-                  className="inline-flex items-center gap-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold text-sm px-4 py-2 rounded transition-colors"
-                >
-                  <Download size={14} />
-                  Descargar
-                </button>
-              </td>
+    <span
+      className={cn(
+        'inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide',
+        row.tipo === 'EVALUADOR'
+          ? 'bg-purpura-50 text-purpura-700'
+          : 'bg-lime-50 text-green-700',
+      )}
+    >
+      {row.tipoNombre}
+    </span>
+  )
+}
+
+function BotonDescargar({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-lime-500 px-4 py-2 text-[13px] font-bold text-white transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+    >
+      <Download size={14} aria-hidden="true" />
+      Descargar
+    </button>
+  )
+}
+
+function Resultados({ rows, onDescargar }: {
+  rows: CertificadoRow[]
+  onDescargar: (row: CertificadoRow) => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[13px] text-neutral-500">
+        {rows.length === 1 ? 'Se encontró 1 certificado.' : `Se encontraron ${rows.length} certificados.`}
+      </p>
+
+      {/* movil: tarjetas. una tabla de 6 columnas no cabe en un telefono */}
+      <ul className="flex flex-col gap-3 lg:hidden">
+        {rows.map(row => (
+          <li
+            key={`${row.tipo}-${row.urlPdf}`}
+            className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <Insignia row={row} />
+              <span className="shrink-0 text-[11px] text-neutral-400">{row.fecha}</span>
+            </div>
+            <p className="mt-2 text-[13px] font-semibold leading-snug text-cerulean-500">{row.concepto}</p>
+            {row.detalle && <p className="text-[11px] text-neutral-400">{row.detalle}</p>}
+            <p className="mt-1 text-[12px] text-neutral-500">{row.entidad}</p>
+            <div className="mt-3">
+              <BotonDescargar onClick={() => onDescargar(row)} />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden overflow-hidden rounded-xl border border-neutral-200 lg:block">
+        <table className="w-full table-fixed text-sm">
+          <caption className="sr-only">Certificados encontrados</caption>
+          <thead>
+            <tr className="bg-cerulean-500 text-left text-[11px] uppercase tracking-wide text-white">
+              <th scope="col" className="w-10 px-3 py-3 font-semibold">No.</th>
+              <th scope="col" className="w-32 px-3 py-3 font-semibold">Participación</th>
+              <th scope="col" className="w-52 px-3 py-3 font-semibold">Entidad</th>
+              <th scope="col" className="px-3 py-3 font-semibold">Certificado por</th>
+              <th scope="col" className="w-28 px-3 py-3 font-semibold">Fecha</th>
+              <th scope="col" className="w-36 px-3 py-3 text-right font-semibold">Ver</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {rows.map(row => (
+              // el id no basta como key: beneficiario y evaluador pueden repetirlo
+              <tr key={`${row.tipo}-${row.urlPdf}`} className="transition hover:bg-neutral-50">
+                <td className="px-3 py-3 text-neutral-500 tabular-nums">{row.consecutivo}</td>
+                <td className="px-3 py-3"><Insignia row={row} /></td>
+                <td className="px-3 py-3 text-[13px] text-neutral-700">{row.entidad}</td>
+                <td className="px-3 py-3">
+                  <p className="text-[13px] font-medium text-neutral-800">{row.concepto}</p>
+                  {row.detalle && <p className="mt-0.5 text-[11px] text-neutral-400">{row.detalle}</p>}
+                </td>
+                <td className="px-3 py-3 text-[12px] text-neutral-500">{row.fecha}</td>
+                <td className="px-3 py-3 text-right">
+                  <BotonDescargar onClick={() => onDescargar(row)} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
 export function CertificadosForm() {
   const [modo, setModo] = useState<Modo>('persona')
-
-  const [tipoDoc, setTipoDoc]   = useState('CC')
-  const [numDoc,  setNumDoc]    = useState('')
-
+  const [tipoDoc, setTipoDoc] = useState('CC')
+  const [numDoc, setNumDoc] = useState('')
   const [codigo, setCodigo] = useState('')
-
-  const [loading, setLoading]   = useState(false)
-  const [alerta,  setAlerta]    = useState<{ msg: string; tipo: 'error' | 'info' } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [alerta, setAlerta] = useState<string | null>(null)
   const [resultados, setResultados] = useState<CertificadoRow[] | null>(null)
 
-  function resetForm() {
+  function cambiarModo(m: Modo) {
+    setModo(m)
     setAlerta(null)
     setResultados(null)
     setNumDoc('')
     setCodigo('')
-  }
-
-  function switchModo(m: Modo) {
-    setModo(m)
-    resetForm()
   }
 
   async function buscar() {
@@ -124,10 +162,10 @@ export function CertificadosForm() {
     setResultados(null)
 
     if (modo === 'persona') {
-      if (!tipoDoc)       return setAlerta({ msg: 'Debe seleccionar un Tipo de identificación', tipo: 'error' })
-      if (!numDoc.trim()) return setAlerta({ msg: 'Número de identificación vacío', tipo: 'error' })
-    } else {
-      if (!codigo.trim()) return setAlerta({ msg: 'Código del certificado vacío', tipo: 'error' })
+      if (!tipoDoc) return setAlerta('Selecciona un tipo de identificación.')
+      if (!numDoc.trim()) return setAlerta('Escribe el número de identificación.')
+    } else if (!codigo.trim()) {
+      return setAlerta('Escribe el código del certificado.')
     }
 
     setLoading(true)
@@ -139,13 +177,10 @@ export function CertificadosForm() {
 
       const { data } = await api.get<CertificadoRow[]>('/certificados', { params })
 
-      if (!data.length) {
-        setAlerta({ msg: 'No hay certificados registrados con esos datos', tipo: 'error' })
-      } else {
-        setResultados(data)
-      }
+      if (!data.length) setAlerta('No encontramos certificados con esos datos. Revisa e intenta de nuevo.')
+      else setResultados(data)
     } catch {
-      setAlerta({ msg: 'Error al consultar. Verifique su conexión o intente más tarde.', tipo: 'error' })
+      setAlerta('No se pudo consultar. Revisa tu conexión e intenta más tarde.')
     } finally {
       setLoading(false)
     }
@@ -157,92 +192,85 @@ export function CertificadosForm() {
     window.open(`${base}${row.urlPdf}`, '_blank', 'noopener,noreferrer')
   }
 
+  const pestana = (m: Modo, texto: string, Icono: typeof User) => (
+    <button
+      type="button"
+      onClick={() => cambiarModo(m)}
+      aria-pressed={modo === m}
+      className={cn(
+        'inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition',
+        modo === m ? 'bg-white text-cerulean-500 shadow-sm' : 'text-neutral-500 hover:text-cerulean-500',
+      )}
+    >
+      <Icono size={15} aria-hidden="true" />
+      {texto}
+    </button>
+  )
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex gap-3 justify-center flex-wrap">
-        <button
-          onClick={() => switchModo('persona')}
-          className={`px-6 py-2.5 rounded font-semibold text-sm transition-colors
-            ${modo === 'persona'
-              ? 'bg-green-500 text-white shadow-sm'
-              : 'bg-white border border-green-500 text-green-600 hover:bg-green-50'}`}
-        >
-          Consulta por Persona
-        </button>
-        <button
-          onClick={() => switchModo('codigo')}
-          className={`px-6 py-2.5 rounded font-semibold text-sm transition-colors
-            ${modo === 'codigo'
-              ? 'bg-green-500 text-white shadow-sm'
-              : 'bg-white border border-green-500 text-green-600 hover:bg-green-50'}`}
-        >
-          Consultar por Código
-        </button>
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="mx-auto flex max-w-md gap-1 rounded-xl bg-neutral-100 p-1">
+          {pestana('persona', 'Por identificación', User)}
+          {pestana('codigo', 'Por código', Hash)}
+        </div>
+
+        <div className="mt-5">
+          {modo === 'persona' ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="tipoDoc" className={etiqueta}>Tipo de documento</label>
+                <select id="tipoDoc" value={tipoDoc} onChange={e => setTipoDoc(e.target.value)} className={campo}>
+                  {TIPOS_DOCUMENTO.map(t => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="numDoc" className={etiqueta}>Número</label>
+                <input
+                  id="numDoc"
+                  type="text"
+                  inputMode="numeric"
+                  value={numDoc}
+                  onChange={e => setNumDoc(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && buscar()}
+                  placeholder="Sin puntos ni comas"
+                  className={campo}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-md">
+              <label htmlFor="codigo" className={etiqueta}>Código del certificado</label>
+              <input
+                id="codigo"
+                type="text"
+                value={codigo}
+                onChange={e => setCodigo(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && buscar()}
+                placeholder="El que aparece al pie del certificado"
+                className={cn(campo, 'font-mono')}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 flex justify-center">
+          <button
+            onClick={buscar}
+            disabled={loading}
+            aria-busy={loading}
+            className="inline-flex items-center gap-2 rounded-lg bg-lime-500 px-8 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Search size={16} aria-hidden="true" />}
+            {loading ? 'Buscando…' : 'Buscar'}
+          </button>
+        </div>
       </div>
 
-      <p className="text-center text-sm text-neutral-500">
-        En este espacio podrá descargar sus certificados de participación en los eventos del GGPC,
-        como beneficiario de una acción de formación o como evaluador del banco de evaluadores.
-      </p>
-
-      <div className="h-px bg-neutral-200" />
-
-      {modo === 'persona' ? (
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1.5 flex-1 min-w-[200px]">
-            <label className="text-sm font-semibold text-neutral-700">Tipo Documento</label>
-            <select
-              value={tipoDoc}
-              onChange={(e) => setTipoDoc(e.target.value)}
-              className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-            >
-              {TIPOS_DOCUMENTO.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5 flex-1 min-w-[160px]">
-            <label className="text-sm font-semibold text-neutral-700">No.</label>
-            <input
-              type="text"
-              value={numDoc}
-              onChange={(e) => setNumDoc(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && buscar()}
-              placeholder="Número de documento"
-              className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5 max-w-sm mx-auto w-full">
-          <label className="text-sm font-semibold text-neutral-700">Código del Certificado</label>
-          <input
-            type="text"
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && buscar()}
-            placeholder="Ingrese el código"
-            className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
-        </div>
-      )}
-
-      <div className="flex justify-center">
-        <button
-          onClick={buscar}
-          disabled={loading}
-          className="flex items-center gap-2 bg-green-500 hover:bg-green-600 disabled:opacity-60 text-white font-semibold px-8 py-2.5 rounded transition-colors"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-          {loading ? 'Buscando...' : 'Buscar'}
-        </button>
-      </div>
-
-      {alerta && <Alert message={alerta.msg} type={alerta.tipo} />}
-
-      {resultados && (
-        <ResultsTable rows={resultados} onDescargar={descargar} />
-      )}
+      {alerta && <Aviso mensaje={alerta} />}
+      {resultados && <Resultados rows={resultados} onDescargar={descargar} />}
     </div>
   )
 }

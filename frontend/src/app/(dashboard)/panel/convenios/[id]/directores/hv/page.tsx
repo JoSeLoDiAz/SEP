@@ -138,7 +138,7 @@ const FORM_DEFAULTS: FormPersona = {
   habeasData: false,
 }
 
-const TITLE_COLOR = '#00324D'
+const TITLE_COLOR = '#00304D'
 
 function formatDuracion(fi: Date | null, ff: Date | null): string {
   if (!fi || !ff) return '—'

@@ -1,4 +1,5 @@
 import { FacebookWidget } from '@/components/public/facebook-widget'
+import { HeroInicio } from '@/components/public/hero-inicio'
 import { InstagramWidget } from '@/components/public/instagram-widget'
 import { ModuleCard, type ModuleDef } from '@/components/public/module-card'
 import { SocialButtons } from '@/components/public/social-buttons'
@@ -79,11 +80,19 @@ const modules: ModuleDef[] = [
 export default function InicioPage() {
   return (
     <div className="flex flex-col">
-      <section className="max-w-5xl mx-auto w-full px-6 py-10 flex flex-col gap-8">
-        <div className="flex justify-center">
-          <h2 className="text-green-500 text-xl font-bold border-b-4 border-green-500 pb-1">
+      <HeroInicio />
+
+      <section className="mx-auto w-full max-w-6xl px-6 pb-12 pt-4 flex flex-col gap-8">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-lime-500">
+            Nuestros servicios
+          </span>
+          <h2 className="text-2xl font-bold text-cerulean-500 sm:text-3xl">
             Gestión para la Productividad y la Competitividad
           </h2>
+          <p className="max-w-2xl text-sm text-neutral-500">
+            Programas, trámites y servicios del SENA para empresas, gremios y ciudadanos.
+          </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {modules.map((mod) => (
@@ -92,12 +101,13 @@ export default function InicioPage() {
         </div>
       </section>
 
-      <section className="w-full border-t border-neutral-100 py-10 px-6">
-        <div className="max-w-5xl mx-auto flex flex-col items-center gap-6">
-          <div className="flex justify-center">
-            <h2 className="text-green-500 text-xl font-bold border-b-4 border-green-500 pb-1">
-              Síguenos en redes
-            </h2>
+      <section className="w-full bg-neutral-50 px-6 py-12">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-lime-500">
+              Mantente al día
+            </span>
+            <h2 className="text-2xl font-bold text-cerulean-500">Síguenos en redes</h2>
           </div>
           <SocialButtons />
           <div className="flex flex-col md:flex-row gap-6 w-full justify-center">

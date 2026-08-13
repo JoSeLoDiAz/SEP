@@ -29,7 +29,7 @@ export function HeroInicio() {
 
         <p className="max-w-xl text-sm leading-relaxed text-white/85 sm:text-base">
           Consulta convocatorias, inscríbete a eventos, descarga tus certificados
-          y verifica su autenticidad.
+          y verifica proyectos presentados.
         </p>
 
         <div className="mt-1 flex flex-wrap gap-3">

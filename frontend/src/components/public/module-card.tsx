@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import Link from 'next/link'
 import {
   ArrowRight,
@@ -22,7 +23,7 @@ const ICONS = {
 } satisfies Record<string, LucideIcon>
 
 export type ModuleIcon = keyof typeof ICONS
-export type ModuleAccent = 'lime' | 'green' | 'cerulean'
+export type ModuleAccent = 'lime' | 'green' | 'cerulean' | 'purpura'
 
 // clases literales: tailwind no compila nombres de clase armados en ejecucion
 const ACCENT: Record<ModuleAccent, { disco: string; borde: string; flecha: string; foco: string }> = {
@@ -44,6 +45,12 @@ const ACCENT: Record<ModuleAccent, { disco: string; borde: string; flecha: strin
     flecha: 'group-hover:text-cerulean-500',
     foco: 'focus-visible:outline-cerulean-500',
   },
+  purpura: {
+    disco: 'bg-purpura-500',
+    borde: 'group-hover:border-purpura-500',
+    flecha: 'group-hover:text-purpura-500',
+    foco: 'focus-visible:outline-purpura-500',
+  },
 }
 
 export interface ModuleDef {
@@ -53,6 +60,8 @@ export interface ModuleDef {
   href: string
   icon: ModuleIcon
   accent: ModuleAccent
+  /** 16:9. Si no viene, la tarjeta se pinta solo con el disco del icono. */
+  image?: string
   external?: boolean
   disabled?: boolean
 }
@@ -61,10 +70,27 @@ export function ModuleCard({ mod }: { mod: ModuleDef }) {
   const Icon = ICONS[mod.icon]
   const accent = ACCENT[mod.accent]
 
-  const base = 'group flex h-full flex-col rounded-2xl border bg-white p-5 transition-all duration-200'
+  const base = 'group flex h-full flex-col overflow-hidden rounded-2xl border bg-white transition-all duration-200'
 
   const cuerpo = (
     <>
+      {mod.image && (
+        <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-100">
+          <Image
+            src={mod.image}
+            alt=""
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            className={cn(
+              'object-cover transition-transform duration-300',
+              !mod.disabled && 'group-hover:scale-105',
+              mod.disabled && 'grayscale',
+            )}
+          />
+        </div>
+      )}
+
+      <div className="flex flex-1 flex-col p-5">
       <div className="flex items-start justify-between gap-3">
         <span
           className={cn(
@@ -113,6 +139,7 @@ export function ModuleCard({ mod }: { mod: ModuleDef }) {
           />
         </span>
       )}
+      </div>
     </>
   )
 

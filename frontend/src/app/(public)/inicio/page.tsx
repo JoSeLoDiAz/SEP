@@ -7,6 +7,8 @@ import { SocialButtons } from '@/components/public/social-buttons'
 const laminas: Lamina[] = [
   {
     id: 'sep',
+    acento: 'cerulean',
+    lado: 'izquierda',
     antetitulo: 'SENA · Gestión para la Productividad y la Competitividad',
     titulo: 'Sistema Especializado de Proyectos',
     texto: 'Consulta convocatorias, inscríbete a eventos, descarga tus certificados y verifica proyectos presentados.',
@@ -18,6 +20,8 @@ const laminas: Lamina[] = [
   },
   {
     id: 'registro',
+    acento: 'purpura',
+    lado: 'derecha',
     antetitulo: 'Crea tu cuenta',
     titulo: 'Regístrate en el SEP',
     texto: 'Si vas a presentar un proyecto, entra como proponente. Si solo necesitas certificados o inscribirte a eventos, entra como usuario.',
@@ -28,6 +32,8 @@ const laminas: Lamina[] = [
   },
   {
     id: 'fce',
+    acento: 'green',
+    lado: 'izquierda',
     antetitulo: 'Convocatoria abierta',
     titulo: 'Formación Continua Especializada',
     texto: 'El SENA cofinancia la formación que tu empresa o gremio necesita: tú presentas el proyecto y capacitas a tus trabajadores.',
@@ -41,21 +47,9 @@ const laminas: Lamina[] = [
     ],
   },
   {
-    id: 'feec',
-    antetitulo: 'Economía campesina',
-    titulo: 'Formación para el campo colombiano',
-    texto: 'La FEEC lleva formación especializada a organizaciones y asociaciones rurales, con el mismo respaldo del SENA.',
-    acciones: [
-      {
-        texto: 'Conocer la FEEC',
-        href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FEEC%202025/FEEC-2025.aspx',
-        externo: true,
-        principal: true,
-      },
-    ],
-  },
-  {
     id: 'verificar',
+    acento: 'cerulean',
+    lado: 'derecha',
     antetitulo: 'Transparencia',
     titulo: 'Verifica un certificado o un proyecto',
     texto: 'Comprueba en segundos si un certificado es auténtico o si un proyecto fue presentado ante el SENA.',

@@ -3,7 +3,7 @@ import {
 } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { AuditoriaService } from '../evaluadores/auditoria.service'
+import { ControlCambiosService } from '../evaluadores/control-cambios.service'
 import { bindRepetido } from '../common/db/binds'
 import { RetroMatrizService } from './retro-matriz.service'
 
@@ -32,7 +32,7 @@ export class RetroalimentacionService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly matriz: RetroMatrizService,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
 
   // formulario
@@ -132,7 +132,7 @@ export class RetroalimentacionService {
       [abierto ? 1 : 0, ctx.usuarioEmail, form.retroFormularioId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'RETROFORMULARIO', operacion: 'UPDATE', registroId: form.retroFormularioId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
       comentario: abierto ? 'Instrumento abierto' : 'Instrumento cerrado',
@@ -289,7 +289,7 @@ export class RetroalimentacionService {
       })
     }
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'RETROASIGNACION', operacion: 'GENERAR', registroId: form.retroFormularioId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
       comentario: `${nuevos.length} pares nuevos de ${pares.length} calculados`,
@@ -331,7 +331,7 @@ export class RetroalimentacionService {
       [id, form.retroFormularioId, dto.evaluadorParticipacionId, dto.evaluadoParticipacionId, ctx.usuarioEmail],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'RETROASIGNACION', operacion: 'INSERT', registroId: id,
       participacionId: dto.evaluadorParticipacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -358,7 +358,7 @@ export class RetroalimentacionService {
         WHERE RETROASIGNACIONID = :2`,
       [(motivo ?? 'anulada').slice(0, 200), asignacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'RETROASIGNACION', operacion: 'ANULAR', registroId: asignacionId,
       participacionId: Number(rows[0].evaluador),
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -741,7 +741,7 @@ export class RetroalimentacionService {
     )
 
     if (revelar && anonimo && calificadores.length > 0) {
-      await this.auditoria.registrar({
+      await this.controlCambios.registrar({
         tabla: 'RETRORESPUESTA', operacion: 'UPDATE', registroId: participacionId,
         participacionId, evaluadorId: Number(meta[0].evaluadorId),
         usuarioEmail, usuarioPerfilId: perfilId,

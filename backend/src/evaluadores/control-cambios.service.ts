@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-// auditoría del banco de evaluadores: SEP_APP solo tiene SELECT e INSERT sobre EVALUADORLOG, sin UPDATE ni DELETE
+// control de cambios del banco: SEP_APP solo tiene SELECT e INSERT sobre EVALUADORLOG, sin UPDATE ni DELETE
 
 export type OperacionLog =
   | 'INSERT' | 'UPDATE' | 'DELETE'
@@ -37,12 +37,12 @@ export interface FiltroLog {
 }
 
 @Injectable()
-export class AuditoriaService {
-  private readonly logger = new Logger(AuditoriaService.name)
+export class ControlCambiosService {
+  private readonly logger = new Logger(ControlCambiosService.name)
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // nunca lanza: un fallo de auditoría no debe tumbar la operación de negocio
+  // nunca lanza: un fallo del registro no debe tumbar la operación de negocio
   async registrar(r: RegistroLog): Promise<void> {
     try {
       const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(

@@ -172,7 +172,7 @@ export class RetroalimentacionController {
   }
 
   @Get('convocatorias/:cid/reporte.xlsx')
-  @ApiOperation({ summary: 'Reporte de 7 hojas del ciclo. Incluye nombres: es para auditoría' })
+  @ApiOperation({ summary: 'Reporte de 7 hojas del ciclo. Incluye nombres: es para el control de cambios' })
   async reporte(
     @CurrentUser() user: JwtUser,
     @Param('cid', ParseIntPipe) cid: number,

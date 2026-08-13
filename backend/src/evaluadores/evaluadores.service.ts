@@ -8,7 +8,7 @@ import { bindRepetido, enBloques } from '../common/db/binds'
 import {
   cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
 } from '../common/crypto/usuario-clave'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
@@ -261,7 +261,7 @@ export class EvaluadoresService {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
 
   // Búsqueda previa (al crear)
@@ -1326,7 +1326,7 @@ export class EvaluadoresService {
       )
     }
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTICIPACION',
       operacion: 'DELETE',
       registroId: participacionId,
@@ -1406,7 +1406,7 @@ export class EvaluadoresService {
       [Number(estados[0].id), motivo, ctx.usuarioEmail, participacionId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTICIPACION',
       operacion: 'ESTADO',
       registroId: participacionId,

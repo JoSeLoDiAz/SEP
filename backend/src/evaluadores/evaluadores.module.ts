@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { AuthModule } from '../auth/auth.module'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
 import { CertificadoService } from './certificado.service'
 import { CicloService } from './ciclo.service'
@@ -28,7 +28,7 @@ import { TrayectoriaService } from './trayectoria.service'
     CatalogosEvaluadorService,
     ConvocatoriasService,
     TrayectoriaService,
-    AuditoriaService,
+    ControlCambiosService,
     CicloService,
     CertificadoService,
     ReportesEvaluadorService,
@@ -37,6 +37,6 @@ import { TrayectoriaService } from './trayectoria.service'
     MiExpedienteGuard,
   ],
   // los usa retroalimentación (fase D) y la página pública de certificados
-  exports: [AuditoriaService, CertificadoService],
+  exports: [ControlCambiosService, CertificadoService],
 })
 export class EvaluadoresModule {}

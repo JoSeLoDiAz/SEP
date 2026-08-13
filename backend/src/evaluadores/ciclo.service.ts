@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import type { MulterFile } from './evaluadores.service'
 import { EXTENSIONES_CORREO, MIMES_CORREO } from './formatos-correo'
 
@@ -55,7 +55,7 @@ const EVIDENCIA_MIMES = ['application/pdf', ...MIMES_CORREO]
 export class CicloService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
 
   // aprobación del jefe: 1:1 con el ciclo
@@ -97,7 +97,7 @@ export class CicloService {
       ],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -136,7 +136,7 @@ export class CicloService {
       params,
     )
 
-    await this.auditoria.registrarCambio(
+    await this.controlCambios.registrarCambio(
       'EVALUADORAPROBACION', aprobacionId, antes, dto,
       {
         usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -159,7 +159,7 @@ export class CicloService {
       [file.buffer, file.mimetype || 'application/octet-stream', file.originalname, ctx.usuarioEmail, aprobacionId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'UPDATE', registroId: aprobacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -190,7 +190,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORAPROBACION WHERE APROBACIONID = :1`, [aprobacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'DELETE', registroId: aprobacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -239,7 +239,7 @@ export class CicloService {
       ],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -292,7 +292,7 @@ export class CicloService {
       params,
     )
 
-    await this.auditoria.registrarCambio(
+    await this.controlCambios.registrarCambio(
       'EVALUADORCAPACITACION', capacitacionId, antes, dto,
       {
         usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -316,7 +316,7 @@ export class CicloService {
         WHERE CAPACITACIONID = :5`,
       [file.buffer, file.mimetype, file.originalname, ctx.usuarioEmail, capacitacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'UPDATE', registroId: capacitacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -345,7 +345,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORCAPACITACION WHERE CAPACITACIONID = :1`, [capacitacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'DELETE', registroId: capacitacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -418,7 +418,7 @@ export class CicloService {
       throw e
     }
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTPROYECTO', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -442,7 +442,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORPARTPROYECTO WHERE PARTPROYECTOID = :1`, [partProyectoId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTPROYECTO', operacion: 'DELETE', registroId: partProyectoId,
       evaluadorId: Number(rows[0].evaluadorId),
       participacionId: Number(rows[0].participacionId),
@@ -602,7 +602,7 @@ export class CicloService {
       }
     })
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTGRUPO', operacion: 'UPDATE', registroId: participacionId,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,

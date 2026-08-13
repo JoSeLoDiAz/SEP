@@ -4,7 +4,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as crypto from 'crypto'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: Record<string, unknown>) => any = require('pdfkit')
@@ -45,7 +45,7 @@ const VERDE = '#39A900'
 export class CertificadoService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
 
   async emitir(participacionId: number, ctx: CtxUsuario, horasManuales?: number | null) {
@@ -121,7 +121,7 @@ export class CertificadoService {
       [pdf, certificadoId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCERTIFICADO', operacion: 'EMITIR', registroId: certificadoId,
       evaluadorId: datos.evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -207,7 +207,7 @@ export class CertificadoService {
       [texto.slice(0, 500), ctx.usuarioEmail, certificadoId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCERTIFICADO', operacion: 'ANULAR', registroId: certificadoId,
       evaluadorId: Number(filas[0].evaluadorId),
       participacionId: Number(filas[0].participacionId),

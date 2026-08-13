@@ -16,7 +16,7 @@ import { CatalogosEvaluadorService } from './catalogos.service'
 import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { TrayectoriaService } from './trayectoria.service'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import { CicloService } from './ciclo.service'
 import { CertificadoService } from './certificado.service'
 import { FichaPdfService } from './ficha-pdf.service'
@@ -43,7 +43,7 @@ export class EvaluadoresController {
     private readonly service: EvaluadoresService,
     private readonly catalogos: CatalogosEvaluadorService,
     private readonly trayectoria: TrayectoriaService,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
     private readonly ciclo: CicloService,
     private readonly certificados: CertificadoService,
     private readonly reportes: ReportesEvaluadorService,
@@ -51,7 +51,7 @@ export class EvaluadoresController {
   ) {}
 
 
-  // Contexto de auditoría de toda escritura del ciclo.
+  // contexto que se registra en toda escritura del ciclo
   private ctx(user: JwtUser) {
     return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
   }
@@ -305,11 +305,11 @@ export class EvaluadoresController {
     return this.service.buscarPorDocumento(tipoDocumentoIdentidadId, doc)
   }
 
-  // Debe ir antes de @Get(':id') o la ruta paramétrica se traga 'auditoria' y da 400.
+  // debe ir antes de @Get(':id') o la ruta paramétrica se traga 'control-cambios' y da 400
 
-  @Get('auditoria')
-  @ApiOperation({ summary: 'Log de auditoría del banco (coordinación y admin)' })
-  auditoriaGlobal(
+  @Get('control-cambios')
+  @ApiOperation({ summary: 'Control de cambios del banco (coordinación y admin)' })
+  controlCambiosGlobal(
     @CurrentUser() user: JwtUser,
     @Query('tabla') tabla?: string,
     @Query('operacion') operacion?: string,
@@ -320,17 +320,17 @@ export class EvaluadoresController {
     @Query('limit') limit = '50',
   ) {
     this.exigirGestion(user)
-    return this.auditoria.listar({
+    return this.controlCambios.listar({
       tabla, operacion, usuarioEmail, desde, hasta,
       page: Number(page), limit: Number(limit),
     })
   }
 
-  @Get('auditoria/:logId')
+  @Get('control-cambios/:logId')
   @ApiOperation({ summary: 'Snapshots antes/después de un registro del log' })
-  auditoriaDetalle(@CurrentUser() user: JwtUser, @Param('logId', ParseIntPipe) logId: number) {
+  controlCambiosDetalle(@CurrentUser() user: JwtUser, @Param('logId', ParseIntPipe) logId: number) {
     this.exigirGestion(user)
-    return this.auditoria.getDetalle(logId)
+    return this.controlCambios.getDetalle(logId)
   }
 
   @Get('buscar-proyectos')
@@ -440,16 +440,16 @@ export class EvaluadoresController {
     return this.trayectoria.getTrayectoria(id)
   }
 
-  @Get(':id/auditoria')
-  @ApiOperation({ summary: 'Log de auditoría de este evaluador' })
-  auditoriaDeEvaluador(
+  @Get(':id/control-cambios')
+  @ApiOperation({ summary: 'Control de cambios de este evaluador' })
+  controlCambiosDeEvaluador(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
     @Query('page') page = '1',
     @Query('limit') limit = '50',
   ) {
     this.exigirGestion(user)
-    return this.auditoria.listar({ evaluadorId: id, page: Number(page), limit: Number(limit) })
+    return this.controlCambios.listar({ evaluadorId: id, page: Number(page), limit: Number(limit) })
   }
 
   @Get('participaciones/:pid/detalle')
@@ -565,7 +565,7 @@ export class EvaluadoresController {
     @Body() dto: ParticipacionDto,
   ) {
     this.exigirGestion(user)
-    // `usuarioEmail` sale del JWT, nunca del body: es la columna de auditoría.
+    // usuarioEmail sale del JWT, nunca del body: es la columna que queda registrada
     return this.service.crearParticipacion(id, { ...dto, usuarioEmail: user.email })
   }
 

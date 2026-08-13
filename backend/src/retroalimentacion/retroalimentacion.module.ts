@@ -6,13 +6,7 @@ import { RetroalimentacionService } from './retroalimentacion.service'
 import { RetroMatrizService } from './retro-matriz.service'
 import { RetroReporteService } from './retro-reporte.service'
 
-/**
- * Retroalimentación 360° — port del sistema que vivía aparte en Mongo.
- *
- * Depende de EvaluadoresModule por `AuditoriaService`: la generación de la
- * matriz, las anulaciones y los destapes de anonimato van al mismo log que el
- * resto del banco, no a uno paralelo.
- */
+// importa EvaluadoresModule por ControlCambiosService: matriz, anulaciones y destapes van al log del banco, no a uno aparte
 @Module({
   imports: [AuthModule, EvaluadoresModule],
   controllers: [RetroalimentacionController],

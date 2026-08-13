@@ -7,7 +7,7 @@ import { aTitleCase } from '@/lib/title-case'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { TrayectoriaEvaluador } from '@/components/evaluadores/trayectoria-evaluador'
-import { AuditoriaEvaluador } from '@/components/evaluadores/auditoria-evaluador'
+import { ControlCambiosEvaluador } from '@/components/evaluadores/control-cambios-evaluador'
 import { VisorFicha } from '@/components/evaluadores/visor-ficha'
 import {
   ArrowLeft, Award, Briefcase, ChevronRight, Download, Eye, FileText,
@@ -52,7 +52,7 @@ interface RegionalCat { id: number; nombre: string }
 interface CentroCat { id: number; nombre: string }
 interface CiudadCat { id: number; ciudad: string; depto: string }
 
-type TabId = 'trayectoria' | 'perfil' | 'documentos' | 'auditoria'
+type TabId = 'trayectoria' | 'perfil' | 'documentos' | 'control-cambios'
 type PerfilSubTab = 'datos' | 'estudios' | 'tic' | 'experiencia'
 
 interface Tab { id: TabId; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
@@ -60,7 +60,7 @@ const TABS: Tab[] = [
   { id: 'trayectoria', label: 'Trayectoria', icon: ShieldCheck },
   { id: 'perfil',      label: 'Perfil',      icon: UserCircle2 },
   { id: 'documentos',  label: 'Documentos',  icon: Paperclip },
-  { id: 'auditoria',   label: 'Auditoría',   icon: History },
+  { id: 'control-cambios',   label: 'Control de cambios',   icon: History },
 ]
 
 interface SubTab { id: PerfilSubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
@@ -272,7 +272,7 @@ export default function FichaEvaluadorPage() {
       )}
 
       {tab === 'documentos' && <SeccionDocumentos  evaluadorId={evaluadorId} setToast={setToast} />}
-      {tab === 'auditoria'  && <AuditoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} />}
+      {tab === 'control-cambios'  && <ControlCambiosEvaluador evaluadorId={evaluadorId} setToast={setToast} />}
 
       <ConfirmModal
         open={confirmDesactivar}
@@ -1195,8 +1195,8 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
               </p>
             ) : !convId && (
               <p className="mt-1 text-[11px] text-amber-700">
-                Sin convocatoria el ciclo no hereda la invitación, no entra en la
-                retroalimentación y no se podrá certificar.
+                Sin convocatoria el ciclo no muestra los documentos de la
+                convocatoria, no entra en la retroalimentación y no se podrá certificar.
               </p>
             )}
           </div>

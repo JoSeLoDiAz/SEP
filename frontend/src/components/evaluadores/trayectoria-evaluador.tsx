@@ -516,7 +516,7 @@ function CambiarEstado({
         />
       </div>
       <p className="text-[11px] text-neutral-400 sm:col-span-2">
-        El cambio queda en la auditoría con su usuario y la fecha.
+        El cambio queda en el control de cambios con su usuario y la fecha.
         {detalle.estadoSugerido && detalle.estadoSugerido !== codigo && (
           <> Por lo que hay cargado correspondería <strong>{detalle.estadoSugerido}</strong>.</>
         )}
@@ -1311,7 +1311,7 @@ function TabDocumentos({
         onBorrar={setPorBorrar}
       />
       <BloqueDocs
-        titulo={`Heredados de la convocatoria${detalle.convocatoriaNombre ? ` · ${detalle.convocatoriaNombre}` : ''}`}
+        titulo={`Documentos de la convocatoria${detalle.convocatoriaNombre ? ` · ${detalle.convocatoriaNombre}` : ''}`}
         ayuda="Un solo archivo compartido por todos los evaluadores del ciclo. Se gestiona desde Convocatorias."
         docs={heredados}
         rutaBase="/evaluadores/convocatorias/documentos"
@@ -1358,7 +1358,7 @@ function BloqueDocs({
   if (!docs.length) return null
 
   const etiqueta = (d: Documento) =>
-    d.ambito === 'HEREDADO' ? 'General' : d.ambito === 'PERMANENTE' ? 'Permanente' : null
+    d.ambito === 'HEREDADO' ? 'De la convocatoria' : d.ambito === 'PERMANENTE' ? 'Permanente' : null
 
   return (
     <div className="px-5 py-4">

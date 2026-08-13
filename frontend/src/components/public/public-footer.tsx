@@ -200,7 +200,7 @@ export function PublicFooter() {
         <div className="w-px h-5 bg-white/30" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="https://betowa.sena.edu.co/assets/logos/gov-logo-new.svg"
+          src="/images/govco.svg"
           alt="GOV.CO"
           className="h-5 w-auto object-contain"
         />

@@ -2,7 +2,6 @@
 
 import api from '@/lib/api'
 import { ArrowLeft, CheckCircle, Eye, EyeOff, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
@@ -156,30 +155,8 @@ function RestablecerForm() {
 
 export default function RestablecerContrasenaPage() {
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-50">
-      {/* GOV.CO bar */}
-      <div className="w-full bg-[#3465CC] py-1.5 px-4">
-        <div className="max-w-7xl w-full mx-auto">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="https://betowa.sena.edu.co/assets/logos/gov-logo-new.svg" alt="GOV.CO" className="h-5 w-auto" />
-        </div>
-      </div>
-
-      {/* Cabecera institucional */}
-      <div className="bg-white border-b border-neutral-200 py-3 px-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <Image src="/images/sena-logo.svg" alt="SENA" width={60} height={60} className="w-12 h-12 md:w-[60px] md:h-[60px] object-contain" />
-          <div className="w-px h-10 bg-neutral-200 flex-shrink-0" />
-          <div className="flex-1 text-center">
-            <p className="text-cerulean-500 text-sm md:text-lg font-extrabold uppercase tracking-wide">Sistema Especializado de Proyectos — SEP</p>
-          </div>
-          <Image src="/images/layout_set_logo_mintrabajo.png" alt="Mintrabajo" width={100} height={60} className="w-14 md:w-[100px] object-contain h-auto" />
-        </div>
-      </div>
-
-      {/* Contenido */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-sm flex flex-col gap-6">
+    <div className="flex min-h-[70vh] items-center justify-center bg-neutral-50 px-4 py-12">
+      <div className="w-full max-w-sm flex flex-col gap-6">
           <Link href="/login" className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-green-600 transition-colors w-fit">
             <ArrowLeft size={14} /> Volver al inicio de sesión
           </Link>
@@ -193,11 +170,5 @@ export default function RestablecerContrasenaPage() {
           </Suspense>
         </div>
       </div>
-
-      {/* Footer */}
-      <div className="py-3 text-center" style={{ backgroundColor: '#39a900' }}>
-        <p className="text-white text-xs">© GGPC – DSNFT – SENA {new Date().getFullYear()}</p>
-      </div>
-    </div>
   )
 }

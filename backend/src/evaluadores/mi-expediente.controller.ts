@@ -64,7 +64,6 @@ export class MiExpedienteController {
       celular: dto.celular,
       profesion: dto.profesion,
       posgrado: dto.posgrado,
-      otrosEstudios: dto.otrosEstudios,
       municipioId: dto.municipioId,
     }
     return this.service.actualizar(yo.evaluadorId, permitido)

@@ -4,7 +4,9 @@ import { CabeceraPagina } from '@/components/public/cabecera-pagina'
 import api from '@/lib/api'
 import { ArrowLeft, CheckCircle2, Loader2, Star, UserCog } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+
+const SEGUNDOS_AUTO = 10
 
 interface PerfilOpcion {
   usuarioPerfilId: number
@@ -26,6 +28,8 @@ export default function SeleccionarPerfilPage() {
   const [seleccionado, setSeleccionado] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [errMsg, setErrMsg] = useState('')
+  // null = sin cuenta atras (nunca empezo o el usuario la detuvo)
+  const [restante, setRestante] = useState<number | null>(null)
 
   useEffect(() => {
     const raw = sessionStorage.getItem('sep_preauth')
@@ -37,14 +41,20 @@ export default function SeleccionarPerfilPage() {
       const parsed = JSON.parse(raw) as Preauth
       setData(parsed)
       const def = parsed.perfiles.find(p => p.predeterminado) ?? parsed.perfiles[0]
-      if (def) setSeleccionado(def.perfilId)
+      if (def) {
+        setSeleccionado(def.perfilId)
+        setRestante(SEGUNDOS_AUTO)
+      }
     } catch {
       router.replace('/login')
     }
   }, [router])
 
-  async function handleEntrar() {
-    if (!data || !seleccionado) return
+  const handleEntrar = useCallback(async (perfilId?: number) => {
+    // el id llega por parametro: tras un doble clic el estado aun no se actualizo
+    const destino = perfilId ?? seleccionado
+    if (!data || !destino) return
+    setRestante(null)
     setLoading(true)
     setErrMsg('')
     try {
@@ -53,7 +63,7 @@ export default function SeleccionarPerfilPage() {
         usuario: { email: string; nombre: string; perfilId: number; usuarioPerfilId?: number }
       }>('/auth/seleccionar-perfil', {
         preauthToken: data.preauthToken,
-        perfilId: seleccionado,
+        perfilId: destino,
       })
 
       localStorage.setItem('sep_token', res.data.accessToken)
@@ -73,6 +83,18 @@ export default function SeleccionarPerfilPage() {
     } finally {
       setLoading(false)
     }
+  }, [data, seleccionado, router])
+
+  // cuenta atras: al llegar a cero entra con el perfil marcado
+  useEffect(() => {
+    if (restante === null) return
+    if (restante === 0) { void handleEntrar(); return }
+    const t = setTimeout(() => setRestante(r => (r === null ? null : r - 1)), 1000)
+    return () => clearTimeout(t)
+  }, [restante, handleEntrar])
+
+  function detenerCuenta() {
+    setRestante(null)
   }
 
   function handleVolver() {
@@ -128,7 +150,9 @@ export default function SeleccionarPerfilPage() {
                 <li key={p.perfilId}>
                   <button
                     type="button"
-                    onClick={() => setSeleccionado(p.perfilId)}
+                    onClick={() => { detenerCuenta(); setSeleccionado(p.perfilId) }}
+                    onDoubleClick={() => handleEntrar(p.perfilId)}
+                    title="Doble clic para entrar directamente"
                     aria-pressed={activo}
                     className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500 sm:px-4 ${
                       activo
@@ -180,7 +204,7 @@ export default function SeleccionarPerfilPage() {
 
           <button
             type="button"
-            onClick={handleEntrar}
+            onClick={() => handleEntrar()}
             disabled={loading || !seleccionado}
             aria-busy={loading}
             className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-lime-500 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
@@ -188,10 +212,26 @@ export default function SeleccionarPerfilPage() {
             {loading && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
             {loading ? 'Ingresando...' : 'Ingresar con este perfil'}
           </button>
+
+          {restante !== null && !loading && (
+            // aria-live para que un lector de pantalla anuncie la cuenta atras
+            <p aria-live="polite" className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-center text-[11px] text-neutral-500">
+              <span>
+                Entrando automáticamente en <strong className="tabular-nums text-cerulean-500">{restante}s</strong>
+              </span>
+              <button
+                type="button"
+                onClick={detenerCuenta}
+                className="rounded font-semibold text-cerulean-500 underline transition hover:text-lime-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cerulean-500"
+              >
+                Cancelar
+              </button>
+            </p>
+          )}
         </div>
 
         <p className="mt-4 text-center text-[11px] text-neutral-400">
-          Todos los accesos quedan registrados.
+          Doble clic sobre un perfil para entrar directamente. Todos los accesos quedan registrados.
         </p>
       </div>
     </div>

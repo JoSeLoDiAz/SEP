@@ -3,52 +3,52 @@ import Link from 'next/link'
 import {
   ArrowRight,
   Award,
-  Calendar,
+  Building2,
+  CalendarCheck,
   ExternalLink,
   GraduationCap,
   Megaphone,
-  Sprout,
-  Tractor,
+  UserPlus,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const ICONS = {
   GraduationCap,
-  Sprout,
-  Tractor,
   Award,
-  Calendar,
+  CalendarCheck,
+  Building2,
+  UserPlus,
   Megaphone,
 } satisfies Record<string, LucideIcon>
 
 export type ModuleIcon = keyof typeof ICONS
 export type ModuleAccent = 'lime' | 'green' | 'cerulean' | 'purpura'
 
-// clases literales: tailwind no compila nombres de clase armados en ejecucion
-const ACCENT: Record<ModuleAccent, { disco: string; borde: string; flecha: string; foco: string }> = {
+// clases literales: tailwind no compila nombres armados en ejecucion
+const ACCENT: Record<ModuleAccent, { disco: string; filete: string; enlace: string; foco: string }> = {
   lime: {
     disco: 'bg-lime-500',
-    borde: 'group-hover:border-lime-500',
-    flecha: 'group-hover:text-lime-500',
+    filete: 'before:bg-lime-500',
+    enlace: 'text-lime-600',
     foco: 'focus-visible:outline-lime-500',
   },
   green: {
     disco: 'bg-green-500',
-    borde: 'group-hover:border-green-500',
-    flecha: 'group-hover:text-green-500',
+    filete: 'before:bg-green-500',
+    enlace: 'text-green-500',
     foco: 'focus-visible:outline-green-500',
   },
   cerulean: {
     disco: 'bg-cerulean-500',
-    borde: 'group-hover:border-cerulean-500',
-    flecha: 'group-hover:text-cerulean-500',
+    filete: 'before:bg-cerulean-500',
+    enlace: 'text-cerulean-500',
     foco: 'focus-visible:outline-cerulean-500',
   },
   purpura: {
     disco: 'bg-purpura-500',
-    borde: 'group-hover:border-purpura-500',
-    flecha: 'group-hover:text-purpura-500',
+    filete: 'before:bg-purpura-500',
+    enlace: 'text-purpura-500',
     foco: 'focus-visible:outline-purpura-500',
   },
 }
@@ -58,85 +58,94 @@ export interface ModuleDef {
   title: string
   description: string
   href: string
+  /** texto del enlace de accion; si falta se usa "Ir" */
+  cta?: string
   icon: ModuleIcon
   accent: ModuleAccent
-  /** 16:9. Si no viene, la tarjeta se pinta solo con el disco del icono. */
-  image?: string
+  /** 1200x900 (4:3). Banda lateral en escritorio, superior en movil. */
+  imagen?: string
   external?: boolean
   disabled?: boolean
+  /** ocupa toda la fila */
+  ancha?: boolean
 }
 
 export function ModuleCard({ mod }: { mod: ModuleDef }) {
   const Icon = ICONS[mod.icon]
   const accent = ACCENT[mod.accent]
 
-  const base = 'group flex h-full flex-col overflow-hidden rounded-2xl border bg-white transition-all duration-200'
+  // el filete de color va como pseudo-elemento para no desalinear el contenido
+  const base = cn(
+    'group relative flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white sm:flex-row',
+    'before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-1 before:content-[""]',
+    'transition-all duration-200',
+    mod.ancha && 'md:col-span-2',
+  )
+
+  const banda = mod.imagen && (
+    <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden bg-neutral-100 sm:aspect-auto sm:w-40 lg:w-44">
+      <Image
+        src={mod.imagen}
+        alt=""
+        fill
+        sizes="(max-width: 640px) 100vw, 176px"
+        className={cn(
+          'object-cover transition-transform duration-300',
+          !mod.disabled && 'group-hover:scale-105',
+          mod.disabled && 'grayscale',
+        )}
+      />
+    </div>
+  )
+
+  // sin imagen la tarjeta se sostiene con el disco del icono
+  const disco = !mod.imagen && (
+    <span
+      className={cn(
+        'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
+        mod.disabled ? 'bg-neutral-300' : accent.disco,
+      )}
+    >
+      <Icon size={20} strokeWidth={2} className="text-white" aria-hidden="true" />
+    </span>
+  )
 
   const cuerpo = (
     <>
-      {mod.image && (
-        <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-100">
-          <Image
-            src={mod.image}
-            alt=""
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-            className={cn(
-              'object-cover transition-transform duration-300',
-              !mod.disabled && 'group-hover:scale-105',
-              mod.disabled && 'grayscale',
-            )}
-          />
-        </div>
-      )}
+      {banda}
 
-      <div className="flex flex-1 flex-col p-5">
-      <div className="flex items-start justify-between gap-3">
-        <span
+      <div className="flex flex-1 gap-4 p-5">
+      {disco}
+
+      <div className="min-w-0 flex-1">
+        <h3
           className={cn(
-            'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
-            mod.disabled ? 'bg-neutral-300' : accent.disco,
+            'flex items-center gap-1.5 text-[15px] font-semibold leading-snug',
+            mod.disabled ? 'text-neutral-400' : 'text-cerulean-500',
           )}
         >
-          <Icon size={22} strokeWidth={2} className="text-white" aria-hidden="true" />
-        </span>
+          {mod.title}
+        </h3>
 
-        {mod.disabled && (
-          <span className="rounded-full bg-neutral-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-neutral-500">
-            Pronto
+        <p className={cn('mt-1 text-[13px] leading-snug', mod.disabled ? 'text-neutral-400' : 'text-neutral-500')}>
+          {mod.description}
+        </p>
+
+        {!mod.disabled && (
+          <span className={cn('mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold', accent.enlace)}>
+            {mod.cta ?? 'Ir'}
+            {mod.external ? (
+              <ExternalLink size={13} aria-hidden="true" />
+            ) : (
+              <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" aria-hidden="true" />
+            )}
           </span>
         )}
       </div>
 
-      <h3
-        className={cn(
-          'mt-4 flex items-center gap-1.5 text-base font-bold leading-snug',
-          mod.disabled ? 'text-neutral-400' : 'text-cerulean-500',
-        )}
-      >
-        {mod.title}
-        {mod.external && <ExternalLink size={13} className="shrink-0 text-neutral-300" aria-hidden="true" />}
-      </h3>
-
-      <p
-        className={cn(
-          'mt-1 line-clamp-2 text-[13px] leading-snug',
-          mod.disabled ? 'text-neutral-400' : 'text-neutral-500',
-        )}
-      >
-        {mod.description}
-      </p>
-
-      {!mod.disabled && (
-        <span className="mt-auto flex justify-end pt-4">
-          <ArrowRight
-            size={18}
-            aria-hidden="true"
-            className={cn(
-              'text-neutral-300 transition-all duration-200 group-hover:translate-x-1',
-              accent.flecha,
-            )}
-          />
+      {mod.disabled && (
+        <span className="self-center rounded-full bg-neutral-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+          Pronto
         </span>
       )}
       </div>
@@ -145,7 +154,7 @@ export function ModuleCard({ mod }: { mod: ModuleDef }) {
 
   if (mod.disabled) {
     return (
-      <div aria-disabled="true" className={cn(base, 'cursor-default border-neutral-200 bg-neutral-50/60 shadow-sm')}>
+      <div aria-disabled="true" className={cn(base, 'cursor-default bg-neutral-50 before:bg-neutral-300')}>
         {cuerpo}
       </div>
     )
@@ -153,10 +162,9 @@ export function ModuleCard({ mod }: { mod: ModuleDef }) {
 
   const interactiva = cn(
     base,
-    'border-neutral-200 shadow-sm hover:-translate-y-1 hover:shadow-lg',
-    'focus-visible:outline-2 focus-visible:outline-offset-2',
-    accent.borde,
+    accent.filete,
     accent.foco,
+    'shadow-sm hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2',
   )
 
   if (mod.external) {

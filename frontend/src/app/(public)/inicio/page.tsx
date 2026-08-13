@@ -61,54 +61,60 @@ const modules: ModuleDef[] = [
   {
     id: 'fce',
     title: 'Formación Continua Especializada',
-    description: 'Convocatoria para empresas y gremios que quieren formar a su talento.',
+    description: 'Convocatoria dirigida a empresas para cofinanciar programas de formación de su talento humano.',
     href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FCE%202025/FCE-2025.aspx',
+    cta: 'Conocer la convocatoria',
+    imagen: '/images/banner/banner1fce.webp',
     icon: 'GraduationCap',
     accent: 'lime',
     external: true,
   },
   {
-    id: 'feec',
-    title: 'Formación Especializada para la Economía Campesina',
-    description: 'Convocatoria dirigida a organizaciones y asociaciones del campo colombiano.',
-    href: 'https://www.sena.edu.co/es-co/Empresarios/Paginas/GPC%202025/FEEC%202025/FEEC-2025.aspx',
-    icon: 'Sprout',
-    accent: 'purpura',
-    external: true,
-  },
-  {
-    id: 'campesena',
-    title: 'CampeSENA',
-    description: 'Formación, emprendimiento y empleo para las comunidades rurales.',
-    href: 'https://sena.edu.co/es-co/campesena/Paginas/index.aspx',
-    icon: 'Tractor',
-    accent: 'green',
-    external: true,
-  },
-  {
     id: 'certificados',
     title: 'Descargar Certificados',
-    description: 'Descarga el certificado de un evento al que asististe.',
+    description: 'Consulta y descarga los certificados de las acciones de formación en las que participaste.',
     href: '/certificados',
+    cta: 'Descargar',
+    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
     icon: 'Award',
     accent: 'cerulean',
   },
   {
     id: 'eventos',
     title: 'Eventos Programados',
-    description: 'Consulta la agenda de eventos e inscríbete en línea.',
+    description: 'Revisa el cronograma de socializaciones, capacitaciones y jornadas del programa.',
     href: '/eventos',
-    icon: 'Calendar',
+    cta: 'Ver cronograma',
+    icon: 'CalendarCheck',
     accent: 'cerulean',
+  },
+  {
+    id: 'proponente',
+    title: 'Regístrese como Proponente',
+    description: 'Si desea presentar sus proyectos en las convocatorias, debe registrarse como Empresa.',
+    href: '/registro/proponente',
+    cta: 'Crear registro',
+    icon: 'Building2',
+    accent: 'green',
+  },
+  {
+    id: 'usuario',
+    title: 'Regístrese como Usuario',
+    description: 'Si cumple un rol diferente al de los proponentes, debe registrarse como Persona.',
+    href: '/registro/usuario',
+    cta: 'Crear registro',
+    icon: 'UserPlus',
+    accent: 'purpura',
   },
   {
     id: 'proximamente',
     title: 'Próximamente',
-    description: 'Estamos preparando un nuevo servicio para ti.',
+    description: 'Estamos preparando nuevos servicios para el ecosistema de proyectos del SENA.',
     href: '#',
     icon: 'Megaphone',
     accent: 'cerulean',
     disabled: true,
+    ancha: true,
   },
 ]
 
@@ -118,19 +124,17 @@ export default function InicioPage() {
       <CarruselInicio laminas={laminas} />
 
       <section className="mx-auto w-full max-w-6xl px-6 pb-12 pt-4 flex flex-col gap-8">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-lime-500">
-            Nuestros servicios
-          </span>
+        <div className="flex flex-col items-center gap-3 text-center">
           <h2 className="text-2xl font-bold text-cerulean-500 sm:text-3xl">
             Gestión para la Productividad y la Competitividad
           </h2>
+          <span aria-hidden="true" className="h-1 w-24 rounded-full bg-gradient-to-r from-lime-500 to-cerulean-500" />
           <p className="max-w-2xl text-sm text-neutral-500">
-            Programas, trámites y servicios del SENA para proponentes como empresas
-            y gremios, y para beneficiarios de formación.
+            Accede a las convocatorias, gestiona tu registro y consulta tus certificados y eventos.
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {/* dos columnas: con la banda de imagen, en tres el texto queda estrangulado */}
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           {modules.map((mod) => (
             <ModuleCard key={mod.id} mod={mod} />
           ))}

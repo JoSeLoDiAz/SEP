@@ -73,7 +73,6 @@ export default function DirectoresPage() {
   const [observacion, setObservacion] = useState('')
   const [validando, setValidando] = useState(false)
 
-  // Toast
   const [toastVisible, setToastVisible] = useState(false)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; titulo: string; msg: string } | null>(null)
   function showToast(tipo: 'success' | 'error', titulo: string, msg: string) {
@@ -149,14 +148,9 @@ export default function DirectoresPage() {
   const rechazado = estadoInter === 'RECHAZADO'
   const pendiente = estadoInter === 'PENDIENTE' || !estadoInter
 
-  // Si el convenio no está en ejecución, todo el módulo es solo lectura.
   const bloqueadoPorConvenio = convenioEnEjecucion === false
-  // El conviniente puede registrar/cambiar director si NO está aprobado todavía
-  // (cuando está rechazado, registrar uno nuevo reemplaza al anterior) y el
-  // convenio está en ejecución.
+  // si está rechazado, registrar uno nuevo reemplaza al anterior
   const puedeRegistrarConviniente = esConviniente && !aprobado && !bloqueadoPorConvenio
-  // La interventoría puede aprobar/rechazar mientras hay director pendiente
-  // y el convenio está en ejecución.
   const puedeValidarInterventoria = (esInterventoria || esAdmin) && director && pendiente && !bloqueadoPorConvenio
 
   return (
@@ -179,7 +173,6 @@ export default function DirectoresPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-1.5 bg-[#00304D]" />
         <div className="p-5 sm:p-6 flex items-start gap-4 flex-wrap">
@@ -203,7 +196,6 @@ export default function DirectoresPage() {
         </div>
       </div>
 
-      {/* Sin director registrado */}
       {!director && (
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-12 flex flex-col items-center gap-3 text-center">
           <UserSquare2 size={40} className="text-neutral-200" />
@@ -216,7 +208,6 @@ export default function DirectoresPage() {
         </div>
       )}
 
-      {/* Director registrado */}
       {director && (
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <div className={`px-5 py-3.5 border-b border-neutral-100 flex items-center justify-between gap-3 flex-wrap ${
@@ -277,7 +268,6 @@ export default function DirectoresPage() {
             </div>
           )}
 
-          {/* Acceso a la Hoja de Vida del director actual */}
           <div className="px-5 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <p className="text-[12px] text-neutral-500 leading-relaxed">
               Consulta la <strong>Hoja de Vida</strong> del director: archivo PDF, datos personales y, próximamente,
@@ -293,7 +283,6 @@ export default function DirectoresPage() {
         </div>
       )}
 
-      {/* Historial de directores anteriores (cuando hay reemplazos) */}
       {historial.length > 0 && (
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <button
@@ -391,7 +380,6 @@ export default function DirectoresPage() {
         </div>
       )}
 
-      {/* Modal: aprobar/rechazar (interventoría) */}
       <Modal open={validarOpen} onClose={() => !validando && setValidarOpen(false)} maxWidth="max-w-lg">
         <div className="p-6 flex flex-col gap-4">
           <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">

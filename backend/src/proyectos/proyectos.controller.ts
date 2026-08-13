@@ -34,7 +34,7 @@ export class ProyectosController {
     private readonly excelReportService: ExcelReportService,
   ) {}
 
-  // ── Catálogos (deben ir antes que :id) ────────────────────────────────────
+  // los catálogos deben ir antes que :id
 
   @Get('convocatorias')
   getConvocatorias() {
@@ -156,14 +156,10 @@ export class ProyectosController {
   @Get('recursosdicacticos')
   getRecursosDidacticosCat() { return this.proyectosService.getRecursosDidacticosCat() }
 
-  // ── Listado y creación ────────────────────────────────────────────────────
-
   @Get()
   listar(@CurrentUser() user: JwtUser) {
     return this.proyectosService.listar(user.email, user.perfilId)
   }
-
-  // ── Gestión de convocatorias (admin) ──────────────────────────────────────
 
   @Get('admin/convocatorias')
   listarConvocatoriasAdmin(@CurrentUser() user: JwtUser) {
@@ -243,8 +239,6 @@ export class ProyectosController {
     return this.proyectosService.publicarResultadosConvocatoria(id, !!body.publicar)
   }
 
-  // Lista de proyectos con versión FINAL para el admin (módulo de reportes).
-  // Solo perfilId=1.
   @Get('admin/con-final')
   listarConFinal(@CurrentUser() user: JwtUser) {
     if (user.perfilId !== PERFIL_ADMIN) {
@@ -257,8 +251,6 @@ export class ProyectosController {
   crear(@CurrentUser() user: JwtUser, @Body() dto: CrearProyectoDto) {
     return this.proyectosService.crear(user.email, dto)
   }
-
-  // ── Detalle y edición ─────────────────────────────────────────────────────
 
   @Get(':id')
   getDetalle(
@@ -283,8 +275,6 @@ export class ProyectosController {
     return { ok: issues.length === 0, issues }
   }
 
-  // ── Aprobación SENA (solo administrador) ──────────────────────────────────
-
   @Post(':id/aprobar')
   aprobarProyecto(
     @CurrentUser() user: JwtUser,
@@ -305,10 +295,7 @@ export class ProyectosController {
     )
   }
 
-  /** Rechazar el proyecto completo (estado 4) con motivo a nivel del proyecto.
-   *  Aun cuando el proyecto se rechaza, el admin puede dar concepto positivo
-   *  a algunas AFs (afsAprobadas, con concepto opcional) o motivos individuales
-   *  por AF rechazada (afsRechazadas). Solo perfilId=1. */
+  // aun rechazando el proyecto, el admin puede aprobar AFs sueltas
   @Post(':id/rechazar')
   rechazarProyecto(
     @CurrentUser() user: JwtUser,
@@ -329,10 +316,7 @@ export class ProyectosController {
     )
   }
 
-  /** Publica/despublica los resultados de la convocatoria a la que pertenece
-   *  el proyecto. Es una acción conjunta a nivel de convocatoria: todos los
-   *  proyectos evaluados de esa convocatoria se vuelven visibles (o se
-   *  ocultan) simultáneamente para sus respectivos proponentes. */
+  // afecta a toda la convocatoria del proyecto, no solo a este proyecto
   @Post(':id/publicar-resultados')
   publicarResultados(
     @CurrentUser() user: JwtUser,
@@ -345,8 +329,7 @@ export class ProyectosController {
     return this.proyectosService.publicarResultados(id, !!body.publicar)
   }
 
-  /** Revertir un proyecto Confirmado a Subsanación (estado 2).
-   *  Desmarca la versión FINAL actual; el proponente puede volver a editar. */
+  // desmarca la versión FINAL para que el proponente vuelva a editar
   @Post(':id/reversar')
   reversarProyecto(
     @CurrentUser() user: JwtUser,
@@ -359,8 +342,7 @@ export class ProyectosController {
     return this.proyectosService.reversarProyectoComoAdmin(id, user.email, body.comentario ?? null)
   }
 
-  // ── Excel oficial del proyecto (snapshot de la versión FINAL) ─────────────
-  // Solo lo descarga el administrador SENA. El proponente sigue usando el PDF.
+  // excel del snapshot de la versión FINAL; el proponente sigue con el PDF
 
   @Get(':id/excel')
   async descargarExcelFinal(
@@ -383,9 +365,7 @@ export class ProyectosController {
     res.send(buffer)
   }
 
-  /** Descarga masiva: ZIP con el Excel de cada proyecto con versión FINAL
-   *  cuyo estado esté en `estados` (ej. ?estados=1,3 = Confirmado o Aprobado).
-   *  Solo perfilId=1. */
+  // ?estados=1,3 → Confirmado o Aprobado
   @Get('admin/excel-bulk')
   async descargarExcelBulk(
     @CurrentUser() user: JwtUser,
@@ -410,8 +390,6 @@ export class ProyectosController {
     res.setHeader('X-Total-Generados', String(total))
     res.send(buffer)
   }
-
-  // ── Versiones del proyecto ────────────────────────────────────────────────
 
   @Post(':id/versiones')
   crearVersion(
@@ -466,8 +444,6 @@ export class ProyectosController {
     return this.proyectosService.restaurarVersion(id, versionId)
   }
 
-  // ── Contactos del proyecto ────────────────────────────────────────────────
-
   @Get(':id/contactos/disponibles')
   getContactosDisponibles(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     return this.proyectosService.getContactosDisponibles(user.email, id)
@@ -500,8 +476,6 @@ export class ProyectosController {
     return this.proyectosService.desasignarContacto(contactoId)
   }
 
-  // ── Acciones de Formación ─────────────────────────────────────────────────
-
   @Get(':id/acciones')
   listarAFs(
     @CurrentUser() user: JwtUser,
@@ -532,8 +506,6 @@ export class ProyectosController {
   eliminarAF(@Param('afId', ParseIntPipe) afId: number) {
     return this.proyectosService.eliminarAF(afId)
   }
-
-  // ── Perfil de Beneficiarios ───────────────────────────────────────────────
 
   @Get(':id/acciones/:afId/beneficiarios')
   getPerfilBeneficiarios(@Param('afId', ParseIntPipe) afId: number) {
@@ -586,8 +558,6 @@ export class ProyectosController {
   eliminarCuoc(@Param('ocAfId', ParseIntPipe) ocAfId: number) {
     return this.proyectosService.eliminarCuoc(ocAfId)
   }
-
-  // ── Sectores y Sub-sectores ───────────────────────────────────────────────
 
   @Get(':id/acciones/:afId/sectores')
   getSectoresYSubsectores(@Param('afId', ParseIntPipe) afId: number) {
@@ -654,8 +624,6 @@ export class ProyectosController {
     return this.proyectosService.eliminarSubSectorAf(ssaId)
   }
 
-  // ── Unidades Temáticas ────────────────────────────────────────────────────
-
   @Get(':id/acciones/:afId/habilidades')
   getHabilidadesUT(@Param('afId', ParseIntPipe) afId: number) {
     return this.proyectosService.getHabilidadesUT(afId)
@@ -719,8 +687,6 @@ export class ProyectosController {
     return this.proyectosService.eliminarPerfilUT(perfilId)
   }
 
-  // ── Alineación de la AF ───────────────────────────────────────────────────
-
   @Get(':id/acciones/:afId/alineacion')
   getAlineacionAF(@Param('afId', ParseIntPipe) afId: number) {
     return this.proyectosService.getAlineacionAF(afId)
@@ -733,8 +699,6 @@ export class ProyectosController {
   ) {
     return this.proyectosService.actualizarTextosAlineacion(afId, dto)
   }
-
-  // ── Grupos de cobertura ───────────────────────────────────────────────────
 
   @Get(':id/acciones/:afId/grupos')
   getGruposCobertura(@Param('afId', ParseIntPipe) afId: number) {
@@ -773,8 +737,6 @@ export class ProyectosController {
     return this.proyectosService.guardarCoberturaGrupo(grupoId, afId, dto.coberturas)
   }
 
-  // ── Material de Formación ─────────────────────────────────────────────────
-
   @Get(':id/acciones/:afId/material')
   getMaterialAF(@Param('afId', ParseIntPipe) afId: number) {
     return this.proyectosService.getMaterialAF(afId)
@@ -800,8 +762,6 @@ export class ProyectosController {
   eliminarRecursoAF(@Param('rdafId', ParseIntPipe) rdafId: number) {
     return this.proyectosService.eliminarRecursoAF(rdafId)
   }
-
-  // ── Rubros ────────────────────────────────────────────────────────────────
 
   @Get(':id/acciones/:afId/rubros/prereqs')
   getPrerequisitosRubros(@Param('afId', ParseIntPipe) afId: number) {
@@ -868,8 +828,6 @@ export class ProyectosController {
     return this.proyectosService.eliminarRubroAF(afId, afrubroid)
   }
 
-  // ── Presupuesto General del Proyecto ──────────────────────────────────────
-
   @Get(':id/presupuesto')
   getPresupuestoProyecto(
     @CurrentUser() user: JwtUser,
@@ -882,8 +840,6 @@ export class ProyectosController {
   guardarPresupuestoProyecto(@Param('id', ParseIntPipe) proyectoId: number) {
     return this.proyectosService.guardarPresupuestoProyecto(proyectoId)
   }
-
-  // ── Reporte completo del Proyecto ─────────────────────────────────────────
 
   @Get(':id/reporte')
   getReporteProyecto(

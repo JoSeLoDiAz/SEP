@@ -27,14 +27,11 @@ interface Convocatoria {
   fechaFin: string | null
   observaciones: string | null
   activo: boolean
-  // Reglas del ciclo. El backend siempre las devolvió; la pantalla no las
-  // declaraba, así que no había forma de verlas ni de cambiarlas.
   puntajeMinimoPrueba: number | null
   calificacionMinimaCurso: number | null
   certificadoTexto: string | null
   certificadoFirmaId: number | null
   certificadoHabilitado: boolean
-  /** Convocatoria real del SEP sobre la que se monta este ciclo (v40). */
   convocatoriaSepId: number | null
   convocatoriaSepNombre: string | null
   convocatoriaSepAnio: number | null
@@ -120,7 +117,6 @@ export default function FichaConvocatoriaPage() {
         <ToastBetowa show onClose={() => setToast(null)} tipo={toast.tipo} titulo={toast.tipo === 'success' ? 'Listo' : 'Error'} mensaje={toast.msg} duration={3500} />
       )}
 
-      {/* Hero header */}
       <div className="relative overflow-hidden rounded-3xl shadow-lg" style={{ background: `linear-gradient(135deg, ${PRIMARY} 0%, #001f33 70%, #000a14 100%)` }}>
         <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
         <div className="relative px-6 sm:px-8 py-6 flex flex-col sm:flex-row gap-5 items-start sm:items-center">
@@ -145,9 +141,6 @@ export default function FichaConvocatoriaPage() {
               }`}>
                 {conv.activo ? 'Activa' : 'Inactiva'}
               </span>
-              {/* Se muestra en la cabecera y no escondido en una pestaña: es la
-                  convocatoria oficial, y saber si el ciclo cuelga de ella o
-                  quedó suelto cambia lo que se puede hacer después. */}
               {conv.convocatoriaSepNombre ? (
                 <span className="inline-flex items-center gap-1 rounded bg-white/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/90">
                   SEP · {conv.convocatoriaSepNombre}
@@ -188,8 +181,6 @@ export default function FichaConvocatoriaPage() {
           Volver al listado
         </Link>
 
-        {/* La matriz vive en su propia pantalla: es una operación del ciclo
-            completo, no un documento más de esta ficha. */}
         <Link
           href={`/panel/evaluadores/convocatorias/${cid}/matriz`}
           className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
@@ -201,7 +192,6 @@ export default function FichaConvocatoriaPage() {
         </Link>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto bg-white border border-neutral-200 rounded-2xl p-1.5 shadow-sm">
         {TABS.map(t => {
           const Icon = t.icon
@@ -222,7 +212,6 @@ export default function FichaConvocatoriaPage() {
         })}
       </div>
 
-      {/* Contenido */}
       {tab === 'datos'      && <SeccionDatos      conv={conv} onChanged={cargar} setToast={setToast} />}
       {tab === 'reglas' && (
         <ReglasDelCiclo
@@ -255,8 +244,6 @@ export default function FichaConvocatoriaPage() {
   )
 }
 
-// ── Section wrapper ────────────────────────────────────────────────────────────
-
 function Section({ titulo, children, accion }: { titulo: string; children: React.ReactNode; accion?: React.ReactNode }) {
   return (
     <section className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
@@ -278,8 +265,6 @@ function Dato({ label, valor, multiline }: { label: string; valor: string | numb
     </div>
   )
 }
-
-// ── Sección DATOS ──────────────────────────────────────────────────────────────
 
 function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onChanged: () => void; setToast: SetToast }) {
   const currentYear = new Date().getFullYear()
@@ -399,8 +384,7 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
             onChange={e => {
               setConvSepId(e.target.value)
               const c = convsSep.find(x => String(x.id) === e.target.value)
-              // El año debe cuadrar con el de la convocatoria: el backend lo
-              // rechaza, así que se ajusta aquí en vez de dejar que falle.
+              // el backend rechaza el año si no cuadra con la convocatoria del SEP
               if (c) setAnio(String(c.anio))
             }}
             className={input}
@@ -488,8 +472,6 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
   )
 }
 
-// ── Sección DOCUMENTOS ─────────────────────────────────────────────────────────
-
 interface DocumentoConvocatoria {
   documentoId: number
   convocatoriaId: number
@@ -512,8 +494,7 @@ interface TipoDocConvCat {
   activo?: boolean
 }
 
-// Tailwind JIT necesita las clases literales presentes en el source; por eso
-// declaramos también la variante hover para que se compile en el CSS final.
+// Tailwind JIT solo compila clases literales del source: por eso el hover va escrito aquí
 const DOC_CHIP_COLORS: Record<string, { bg: string; text: string; border: string; hoverBg: string }> = {
   INVITACION:         { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',   hoverBg: 'hover:bg-blue-100'   },
   RATIFICACION:       { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', hoverBg: 'hover:bg-purple-100' },
@@ -527,7 +508,7 @@ function chipColor(codigo: string) {
   return DOC_CHIP_COLORS[codigo] ?? DOC_CHIP_FALLBACK
 }
 
-// Map de extensión → mime, para armar el `accept` del input file.
+// para armar el accept del input file
 const EXT_TO_MIME: Record<string, string> = {
   pdf:  'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -666,7 +647,6 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
         </button>
       }
     >
-      {/* Chips de filtro */}
       <div className="px-5 py-3 border-b border-neutral-100 flex flex-wrap gap-1.5 bg-neutral-50/40">
         <button
           onClick={() => setFiltroCodigo('__TODOS__')}
@@ -706,7 +686,6 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
         })}
       </div>
 
-      {/* Formulario colapsable */}
       {formAbierto && (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="sm:col-span-2">
@@ -774,7 +753,6 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
         </div>
       )}
 
-      {/* Listado */}
       {loading ? (
         <p className="px-5 py-6 text-sm text-neutral-500 flex items-center gap-2">
           <Loader2 size={14} className="animate-spin" />

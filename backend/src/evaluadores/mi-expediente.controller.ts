@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Res,
+  Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
@@ -7,6 +7,7 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import type { Response } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
+import { CatalogosEvaluadorService } from './catalogos.service'
 import { EvaluadoresService } from './evaluadores.service'
 import type {
   EstudioDto, EvaluadorActualizarDto, ExperienciaDto, MulterFile, TicDto,
@@ -31,7 +32,20 @@ export class MiExpedienteController {
     private readonly mio: MiExpedienteService,
     private readonly trayectoria: TrayectoriaService,
     private readonly fichaPdf: FichaPdfService,
+    private readonly catalogos: CatalogosEvaluadorService,
   ) {}
+
+  // los catálogos de /evaluadores exigen perfil de gestión; el evaluador necesita estos dos
+  @Get('catalogos/ciudades/buscar')
+  buscarCiudades(@Query('q') q?: string, @Query('limite') limite?: string) {
+    const lim = limite ? Number(limite) : 20
+    return this.catalogos.buscarCiudades(q ?? '', Number.isFinite(lim) ? lim : 20)
+  }
+
+  @Get('catalogos/tipos-estudio')
+  tiposEstudio() {
+    return this.catalogos.listarTiposEstudio(true, true)
+  }
 
   @Get()
   @ApiOperation({ summary: 'Mis datos de evaluador' })

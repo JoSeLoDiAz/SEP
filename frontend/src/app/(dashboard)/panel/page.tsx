@@ -270,7 +270,8 @@ const ADMIN_CARDS: AdminCard[] = [
 
 // perfiles con landing propia: se redirige al entrar
 const PERFIL_REDIRECT: Record<number, string> = {
-  15: '/panel/evaluadores', // GESTOR EVALUADORES
+  15: '/panel/evaluadores',   // GESTOR EVALUADORES
+  9: '/panel/mi-expediente',  // EVALUADORGFCE
 }
 
 export default function PanelHome() {

@@ -157,7 +157,7 @@ function RestablecerForm() {
 
 export default function RestablecerContrasenaPage() {
   return (
-    <div className="flex min-h-[70vh] items-center justify-center bg-neutral-50 px-4 py-12">
+    <div className="flex min-h-[70vh] items-center justify-center bg-gradient-to-br from-celeste-50 via-white to-lime-50 px-4 py-12">
       <div className="flex w-full max-w-sm flex-col gap-5">
         <Link
           href="/login"

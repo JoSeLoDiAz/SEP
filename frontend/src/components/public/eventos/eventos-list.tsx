@@ -1,115 +1,138 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ClipboardCheck, Loader2, AlertCircle, CalendarX } from 'lucide-react'
+import { CalendarX, ClipboardCheck, Loader2, ServerCrash } from 'lucide-react'
 import type { Evento } from '@/types'
 import api from '@/lib/api'
+import { cn } from '@/lib/utils'
 
-function formatFecha(iso: string) {
-  return new Date(iso).toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  })
+function fecha(iso: string) {
+  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function BadgeEstado({ active, trueLabel, falseLabel }: { active: boolean; trueLabel: string; falseLabel: string }) {
+const abierto = (ev: Evento) => Boolean(ev.eventoActivo && ev.eventoVisible)
+
+function Estado({ ev }: { ev: Evento }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
-      ${active
-        ? 'bg-green-50 text-green-600 border border-green-200'
-        : 'bg-neutral-100 text-neutral-500 border border-neutral-200'
-      }`}
+    <span
+      className={cn(
+        'inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide',
+        abierto(ev) ? 'bg-lime-50 text-green-700' : 'bg-neutral-100 text-neutral-500',
+      )}
     >
-      {active ? trueLabel : falseLabel}
+      {abierto(ev) ? 'Inscripciones abiertas' : 'Cerrado'}
     </span>
+  )
+}
+
+function BotonInscribirse({ ev }: { ev: Evento }) {
+  if (!abierto(ev)) return <span className="text-[12px] text-neutral-400">No disponible</span>
+  return (
+    <a
+      href={`/eventos/${ev.eventoId}/registrar`}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-lime-500 px-4 py-2 text-[13px] font-bold text-white transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+    >
+      <ClipboardCheck size={14} aria-hidden="true" />
+      Inscribirme
+    </a>
+  )
+}
+
+function Marco({ icono, titulo, detalle }: { icono: React.ReactNode; titulo: string; detalle: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-6 py-16 text-center">
+      {icono}
+      <p className="mt-3 text-sm font-semibold text-neutral-600">{titulo}</p>
+      <p className="mx-auto mt-1 max-w-md text-[12px] text-neutral-400">{detalle}</p>
+    </div>
   )
 }
 
 export function EventosList() {
   const [eventos, setEventos] = useState<Evento[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]   = useState<string | null>(null)
+  const [cargando, setCargando] = useState(true)
+  const [fallo, setFallo] = useState(false)
 
   useEffect(() => {
+    let vivo = true
     api.get<Evento[]>('/eventos')
-      .then(({ data }) => setEventos(data))
-      .catch(() => setError('No se pudo cargar el listado de eventos. Intente más tarde.'))
-      .finally(() => setLoading(false))
+      .then(({ data }) => { if (vivo) setEventos(data) })
+      .catch(() => { if (vivo) setFallo(true) })
+      .finally(() => { if (vivo) setCargando(false) })
+    return () => { vivo = false }
   }, [])
 
-  if (loading) {
+  if (cargando) {
     return (
-      <div className="flex items-center justify-center py-16 gap-3 text-neutral-400">
-        <Loader2 size={22} className="animate-spin" />
-        <span className="text-sm">Cargando eventos...</span>
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-neutral-500">
+        <Loader2 size={16} className="animate-spin" aria-hidden="true" /> Cargando eventos…
       </div>
     )
   }
 
-  if (error) {
+  if (fallo) {
     return (
-      <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm">
-        <AlertCircle size={16} className="flex-shrink-0" />
-        {error}
-      </div>
+      <Marco
+        icono={<ServerCrash size={30} className="mx-auto text-neutral-300" aria-hidden="true" />}
+        titulo="El listado no está disponible"
+        detalle="No pudimos consultar los eventos en este momento. Intenta de nuevo más tarde."
+      />
     )
   }
 
   if (!eventos.length) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3 text-neutral-400">
-        <CalendarX size={40} strokeWidth={1.5} />
-        <p className="text-sm">No hay eventos programados en este momento.</p>
-      </div>
+      <Marco
+        icono={<CalendarX size={30} className="mx-auto text-neutral-300" aria-hidden="true" />}
+        titulo="No hay eventos programados"
+        detalle="Cuando el GGPC publique un nuevo evento, aparecerá aquí."
+      />
     )
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-neutral-200">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-cerulean-500 text-white">
-            <th className="px-4 py-3 text-left font-semibold">Nombre</th>
-            <th className="px-4 py-3 text-left font-semibold whitespace-nowrap">Fecha Inicio</th>
-            <th className="px-4 py-3 text-left font-semibold whitespace-nowrap">Fecha Fin</th>
-            <th className="px-4 py-3 text-center font-semibold">Visibilidad</th>
-            <th className="px-4 py-3 text-center font-semibold">Estado</th>
-            <th className="px-4 py-3 text-center font-semibold w-32">Registrar</th>
-          </tr>
-        </thead>
-        <tbody>
-          {eventos.map((ev, i) => (
-            <tr
-              key={ev.eventoId}
-              className={`border-t border-neutral-100 ${i % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}`}
-            >
-              <td className="px-4 py-3 text-neutral-800 font-medium">{ev.eventoNombre}</td>
-              <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{formatFecha(ev.eventoFechaInicio)}</td>
-              <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{formatFecha(ev.eventoFechaFin)}</td>
-              <td className="px-4 py-3 text-center">
-                <BadgeEstado active={ev.eventoVisible} trueLabel="VISIBLE" falseLabel="NO VISIBLE" />
-              </td>
-              <td className="px-4 py-3 text-center">
-                <BadgeEstado active={ev.eventoActivo} trueLabel="ACTIVO" falseLabel="INACTIVO" />
-              </td>
-              <td className="px-4 py-3 text-center">
-                {ev.eventoActivo && ev.eventoVisible ? (
-                  <a
-                    href={`/eventos/${ev.eventoId}/registrar`}
-                    className="inline-flex items-center gap-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold text-xs px-3 py-2 rounded transition-colors whitespace-nowrap"
-                  >
-                    <ClipboardCheck size={14} />
-                    Registrar
-                  </a>
-                ) : (
-                  <span className="text-xs text-neutral-400">—</span>
-                )}
-              </td>
+    <div className="flex flex-col gap-3">
+      {/* movil: tarjetas. la tabla de 4 columnas no cabe en un telefono */}
+      <ul className="flex flex-col gap-3 lg:hidden">
+        {eventos.map(ev => (
+          <li key={ev.eventoId} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <Estado ev={ev} />
+            <p className="mt-2 text-[14px] font-semibold leading-snug text-cerulean-500">{ev.eventoNombre}</p>
+            <p className="mt-1 text-[12px] text-neutral-500">
+              {fecha(ev.eventoFechaInicio)} — {fecha(ev.eventoFechaFin)}
+            </p>
+            <div className="mt-3">
+              <BotonInscribirse ev={ev} />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden overflow-hidden rounded-xl border border-neutral-200 lg:block">
+        <table className="w-full table-fixed text-sm">
+          <caption className="sr-only">Eventos programados</caption>
+          <thead>
+            <tr className="bg-cerulean-500 text-left text-[11px] uppercase tracking-wide text-white">
+              <th scope="col" className="px-4 py-3 font-semibold">Evento</th>
+              <th scope="col" className="w-56 px-4 py-3 font-semibold">Fechas</th>
+              <th scope="col" className="w-52 px-4 py-3 font-semibold">Estado</th>
+              <th scope="col" className="w-40 px-4 py-3 text-right font-semibold">Inscripción</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {eventos.map(ev => (
+              <tr key={ev.eventoId} className="transition hover:bg-neutral-50">
+                <td className="px-4 py-3 text-[13px] font-medium text-neutral-800">{ev.eventoNombre}</td>
+                <td className="px-4 py-3 text-[12px] text-neutral-500 tabular-nums">
+                  {fecha(ev.eventoFechaInicio)} — {fecha(ev.eventoFechaFin)}
+                </td>
+                <td className="px-4 py-3"><Estado ev={ev} /></td>
+                <td className="px-4 py-3 text-right"><BotonInscribirse ev={ev} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

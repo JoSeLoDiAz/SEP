@@ -112,7 +112,6 @@ const modules: ModuleDef[] = [
     icon: 'Megaphone',
     accent: 'cerulean',
     disabled: true,
-    ancha: true,
   },
 ]
 

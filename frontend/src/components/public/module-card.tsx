@@ -70,18 +70,14 @@ export interface ModuleDef {
   imagen?: string
   external?: boolean
   disabled?: boolean
-  /** ocupa toda la fila */
-  ancha?: boolean
 }
 
 export function ModuleCard({ mod }: { mod: ModuleDef }) {
   const Icon = ICONS[mod.icon]
   const accent = ACCENT[mod.accent]
 
-  const base = cn(
-    'group flex h-full flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-all duration-200',
-    mod.ancha && 'sm:col-span-2 lg:col-span-3',
-  )
+  const base =
+    'group flex h-full flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-all duration-200'
 
   const cabecera = (
     <div

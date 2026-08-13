@@ -12,7 +12,7 @@ export default function CertificadosPage() {
       {/* Barra de título — estilo GeneXus original */}
       <div
         className="w-full flex items-center gap-3 px-6 py-4 text-white font-semibold text-lg shadow-md"
-        style={{ backgroundColor: '#00324D' }}
+        style={{ backgroundColor: '#00304D' }}
       >
         <Award size={22} className="flex-shrink-0" />
         Descarga de Certificados - SEP

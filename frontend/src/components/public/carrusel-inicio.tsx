@@ -7,12 +7,39 @@ import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, ShieldCheck } from 
 
 type Accion = { texto: string; href: string; externo?: boolean; principal?: boolean }
 
+/** solo tonos oscuros del manual: sobre lime-500 el texto blanco no contrasta */
+export type AcentoLamina = 'cerulean' | 'purpura' | 'green'
+
+/** el texto puede ir a un lado u otro; el degradado oscurece ese mismo lado */
+export type LadoLamina = 'izquierda' | 'derecha'
+
+// clases literales: tailwind no compila nombres armados en ejecucion
+const FONDO: Record<AcentoLamina, { solido: string; izquierda: string; derecha: string }> = {
+  cerulean: {
+    solido: 'bg-cerulean-500',
+    izquierda: 'bg-gradient-to-r from-cerulean-500/95 via-cerulean-500/80 to-cerulean-500/30',
+    derecha: 'bg-gradient-to-l from-cerulean-500/95 via-cerulean-500/80 to-cerulean-500/30',
+  },
+  purpura: {
+    solido: 'bg-purpura-500',
+    izquierda: 'bg-gradient-to-r from-purpura-500/95 via-purpura-500/80 to-purpura-500/30',
+    derecha: 'bg-gradient-to-l from-purpura-500/95 via-purpura-500/80 to-purpura-500/30',
+  },
+  green: {
+    solido: 'bg-green-500',
+    izquierda: 'bg-gradient-to-r from-green-500/95 via-green-500/80 to-green-500/30',
+    derecha: 'bg-gradient-to-l from-green-500/95 via-green-500/80 to-green-500/30',
+  },
+}
+
 export type Lamina = {
   id: string
   antetitulo: string
   titulo: string
   texto: string
   acciones: Accion[]
+  acento?: AcentoLamina
+  lado?: LadoLamina
   /** 2400x900. Si falta, la lámina se pinta solo con el degradado. */
   imagen?: string
 }
@@ -84,6 +111,9 @@ function Diapositiva({ lamina, visible, indice, total }: {
   indice: number
   total: number
 }) {
+  const fondo = FONDO[lamina.acento ?? 'cerulean']
+  const lado = lamina.lado ?? 'izquierda'
+
   return (
     <div
       role="group"
@@ -95,7 +125,7 @@ function Diapositiva({ lamina, visible, indice, total }: {
       }`}
     >
       {/* fondo solido: sin el, las laminas sin imagen se aclaran sobre el blanco de la pagina */}
-      <div className="absolute inset-0 -z-20 bg-cerulean-500" />
+      <div className={`absolute inset-0 -z-20 ${fondo.solido}`} />
 
       {lamina.imagen && (
         <Image
@@ -107,10 +137,11 @@ function Diapositiva({ lamina, visible, indice, total }: {
           className="-z-10 object-cover object-center"
         />
       )}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-r from-cerulean-500/95 via-cerulean-500/80 to-cerulean-500/40" />
+      <div className={`absolute inset-0 -z-10 ${fondo[lado]}`} />
 
       {/* misma altura en todas: si no, la pagina salta al cambiar de lamina */}
-      <div className="mx-auto flex w-full min-h-[24rem] max-w-6xl flex-col justify-center gap-5 px-6 pb-28 pt-14 sm:min-h-[26rem] sm:pb-32 sm:pt-20 lg:min-h-[30rem] lg:pb-36 lg:pt-24">
+      <div className="mx-auto flex w-full min-h-[24rem] max-w-6xl px-6 pb-28 pt-14 sm:min-h-[26rem] sm:pb-32 sm:pt-20 lg:min-h-[30rem] lg:pb-36 lg:pt-24">
+      <div className={`flex max-w-xl flex-col justify-center gap-5 ${lado === 'derecha' ? 'ml-auto lg:text-right lg:items-end' : ''}`}>
         <span className="inline-flex w-fit max-w-full items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm sm:text-[11px]">
           <ShieldCheck size={13} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0">{lamina.antetitulo}</span>
@@ -151,6 +182,7 @@ function Diapositiva({ lamina, visible, indice, total }: {
             )
           })}
         </div>
+      </div>
       </div>
     </div>
   )

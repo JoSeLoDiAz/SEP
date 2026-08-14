@@ -481,7 +481,10 @@ export class TrayectoriaService {
            TRIM(pa.MESA)               AS "mesa",
            TRIM(pa.EQUIPOEVALUADOR)    AS "equipoEvaluador",
            pa.DINAMIZADORPERSONAID     AS "dinamizadorPersonaId",
-           TRIM(di.PERSONANOMBRES) || ' ' || TRIM(di.PERSONAPRIMERAPELLIDO) AS "dinamizadorNombre"
+           -- primero el texto libre (v51); si no hay, el nombre de la persona relacionada.
+           -- TO_NCHAR: DINAMIZADOR es VARCHAR2 y los nombres NVARCHAR2
+           TRIM(COALESCE(TO_NCHAR(pa.DINAMIZADOR),
+                         TRIM(di.PERSONANOMBRES) || ' ' || TRIM(di.PERSONAPRIMERAPELLIDO))) AS "dinamizadorNombre"
       FROM EVALUADORPARTICIPACION pa
       LEFT JOIN ROLEVALUADOR         r  ON r.ROLEVALUADORID  = pa.ROLEVALUADORID
       LEFT JOIN PROCESOEVAL          pe ON pe.PROCESOID      = pa.PROCESOID

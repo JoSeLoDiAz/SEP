@@ -101,7 +101,8 @@ export default function RegistroProponentePage() {
         descripcion="Crea la cuenta de tu empresa, gremio o asociación para presentar proyectos en las convocatorias del SENA."
       />
 
-      <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-2">
+      <div className="bg-gradient-to-br from-celeste-50 via-white to-lime-50">
+        <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-6">
         <Link
           href="/login"
           className="mb-5 inline-flex w-fit items-center gap-1.5 text-xs text-neutral-500 transition hover:text-cerulean-500"
@@ -271,6 +272,7 @@ export default function RegistroProponentePage() {
             </button>
           </div>
         </form>
+      </div>
       </div>
 
       <ToastBetowa

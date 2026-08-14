@@ -21,7 +21,6 @@ const LAMINAS: LaminaLogin[] = [
     id: 'proyectos',
     titulo: 'Bienvenido al SEP',
     texto: 'Tus proyectos de formación en un solo lugar.',
-    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
     fondo: 'cerulean',
   },
   {

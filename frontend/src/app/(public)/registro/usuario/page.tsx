@@ -118,7 +118,8 @@ export default function RegistroUsuarioPage() {
         descripcion="Crea tu cuenta para inscribirte a eventos y descargar tus certificados."
       />
 
-      <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-2">
+      <div className="bg-gradient-to-br from-celeste-50 via-white to-lime-50">
+        <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-6">
         <Link
           href="/login"
           className="mb-4 inline-flex w-fit items-center gap-1.5 text-xs text-neutral-500 transition hover:text-cerulean-500"
@@ -272,6 +273,7 @@ export default function RegistroUsuarioPage() {
             </Link>
           </div>
         </form>
+      </div>
       </div>
     </div>
   )

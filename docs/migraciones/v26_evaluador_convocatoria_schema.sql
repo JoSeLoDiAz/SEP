@@ -1,26 +1,6 @@
 -- v26_evaluador_convocatoria_schema.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Convocatorias del banco de evaluadores.
---
--- Diseño:
---   - EVALUADORCONVOCATORIA  — cabecera (año, periodo, nombre, modalidad).
---   - TIPODOCUMENTOCONV      — catálogo de tipos de documento adjuntables
---                              a una convocatoria (invitación, ratificación,
---                              listados de asistencia, excel de selección).
---   - CONVOCATORIADOCUMENTO  — 1:N con el archivo en BLOB (PDF, XLSX, MSG,
---                              etc.). Cada convocatoria puede tener múltiples
---                              documentos por tipo (p. ej. varias listas de
---                              asistencia por jornadas distintas).
---
--- Idempotente: q-strings + EXCEPTION para ORA-00955 (ya existe), ORA-01408
--- (columna ya indexada), ORA-02264/02275 (constraint ya existe).
--- Ejecutar como SEPLOCAL en SQL Developer.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. EVALUADORCONVOCATORIA — cabecera                                      ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. EVALUADORCONVOCATORIA — cabecera
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORCONVOCATORIA (
@@ -41,10 +21,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. TIPODOCUMENTOCONV — catálogo de tipos de documento                    ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. TIPODOCUMENTOCONV — catálogo de tipos de documento
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE TIPODOCUMENTOCONV (
@@ -62,10 +39,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. CONVOCATORIADOCUMENTO — archivos adjuntos a la convocatoria           ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. CONVOCATORIADOCUMENTO — archivos adjuntos a la convocatoria
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE CONVOCATORIADOCUMENTO (
@@ -88,10 +62,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. Índices                                                               ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 4. Índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE INDEX IX_CONV_ANIO ON EVALUADORCONVOCATORIA (ANIO)';
@@ -114,10 +85,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 5. GRANTS y SINÓNIMOS                                                    ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 5. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORCONVOCATORIA TO SEP_APP;
 GRANT SELECT                         ON EVALUADORCONVOCATORIA TO SEP_LECTOR;

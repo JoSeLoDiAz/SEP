@@ -1,28 +1,6 @@
 -- v31_evaluador_capacitacion.sql
--- ──────────────────────────────────────────────────────────────────────────
--- EVALUADORCAPACITACION — curso de formación que el evaluador debe aprobar
--- para habilitarse en un ciclo, con su calificación y su certificado.
---
--- ¿Por qué NO se mete en EVALUADORTIC?
---   EVALUADORTIC es formación complementaria PERSONAL y atemporal del
---   evaluador (sus certificados TIC de toda la vida). Esto es un REQUISITO
---   DEL CICLO: cambia año a año, tiene nota de corte, y su aprobación es un
---   hito del checklist. Mezclarlos haría imposible responder "¿aprobó el
---   curso de 2024?".
---
--- Preparada para que el curso se dicte y se califique DENTRO del SEP más
--- adelante: la columna ORIGEN distingue el resultado cargado a mano
--- (EXTERNO — plataforma Territorium/Blackboard/Sofía) del que genere el
--- propio sistema (SISTEMA). Mientras tanto solo se usa EXTERNO y el módulo
--- interno se construye después sin migrar nada.
---
--- Idempotente. Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Tabla                                                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Tabla
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORCAPACITACION (
@@ -65,10 +43,7 @@ COMMENT ON COLUMN EVALUADORCAPACITACION.CALIFICACIONMINIMA IS
 COMMENT ON COLUMN EVALUADORCAPACITACION.APROBADO IS
   '1 = aprobó. Alimenta el hito 4 del checklist del ciclo.';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Secuencia e índices                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Secuencia e índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORCAPACITACION_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
@@ -84,10 +59,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORCAPACITACION     TO SEP_APP;
 GRANT SELECT                         ON EVALUADORCAPACITACION     TO SEP_LECTOR;

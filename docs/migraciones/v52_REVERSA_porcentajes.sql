@@ -1,6 +1,4 @@
 -- REVERSA de la v52. Deja EVALUADORPRUEBA y EVALUADORCONVOCATORIA
--- exactamente como estaban antes de calcular los porcentajes historicos.
--- Generado el 2026-08-12. Correr como SEP_APP.
 SET SERVEROUTPUT ON;
 
 UPDATE EVALUADORPRUEBA SET EFECTIVIDAD=NULL, PUNTAJEMINIMO=NULL, APROBADA=NULL WHERE PRUEBAID=9;

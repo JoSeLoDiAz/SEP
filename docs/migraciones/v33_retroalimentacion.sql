@@ -1,36 +1,6 @@
 -- v33_retroalimentacion.sql
--- ──────────────────────────────────────────────────────────────────────────
--- MÓDULO DE RETROALIMENTACIÓN (360°) — port a Oracle del sistema que hoy vive
--- aparte en FormularioInscripcionGGPC (MongoDB + Express + Vue).
---
--- Origen del modelo (colecciones Mongo → tablas Oracle):
---
---   EvalPersona     →  (NO SE PORTA) su rol/área/grupos son contexto POR AÑO
---                      y ya viven en EVALUADORPARTICIPACION (+ v34). El login
---                      deja de ser propio: pasa a USUARIO/USUARIOPERFIL del SEP.
---   EvalFormulario  →  RETROFORMULARIO + RETROPREGUNTA
---   EvalAsignacion  →  RETROASIGNACION
---   EvalSesion      →  RETROSESION
---   EvalRespuesta   →  RETRORESPUESTA + RETRORESPUESTAITEM
---   EvalSugerencia  →  RETROSUGERENCIA
---
--- DECISIÓN CLAVE: las asignaciones y las respuestas se anclan a
--- PARTICIPACIONID, no a EVALUADORID. Es lo que hace que la retroalimentación
--- caiga automáticamente en el año correcto de la ficha del evaluador, y que
--- un mismo evaluador pueda tener resultados distintos en 2024 y en 2025.
---
--- ANONIMATO: la fila SÍ guarda quién calificó (la coordinación necesita saber
--- quién no diligenció y auditar). El anonimato es de PRESENTACIÓN: con
--- RETROFORMULARIO.RESULTADOANONIMO = 1 el backend nunca expone el nombre del
--- calificador hacia el evaluado ni en su ficha; solo el origen (par, líder...).
---
--- Idempotente. Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. RETROFORMULARIO — instrumento versionado por convocatoria            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. RETROFORMULARIO — instrumento versionado por convocatoria
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETROFORMULARIO (
@@ -89,10 +59,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. RETROPREGUNTA                                                        ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. RETROPREGUNTA
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETROPREGUNTA (
@@ -131,10 +98,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. RETROASIGNACION — par (quien califica → a quien califica)            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. RETROASIGNACION — par (quien califica → a quien califica)
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETROASIGNACION (
@@ -195,10 +159,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. RETROSESION — un intento de diligenciamiento                         ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 4. RETROSESION — un intento de diligenciamiento
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETROSESION (
@@ -242,10 +203,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 5. RETRORESPUESTA — formulario diligenciado para UN evaluado            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 5. RETRORESPUESTA — formulario diligenciado para UN evaluado
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETRORESPUESTA (
@@ -304,10 +262,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 6. RETRORESPUESTAITEM — una pregunta contestada                         ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 6. RETRORESPUESTAITEM — una pregunta contestada
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETRORESPUESTAITEM (
@@ -343,10 +298,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 7. RETROSUGERENCIA — pregunta general, una por sesión                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 7. RETROSUGERENCIA — pregunta general, una por sesión
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE RETROSUGERENCIA (
@@ -380,17 +332,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 8. SEED — instrumento FCE con las 12 preguntas vigentes                 ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Textos tomados del instrumento "Retroalimentación FCE-2026" que hoy siembra
--- FormularioInscripcionGGPC/Backend/controllers/eval/formulario.js.
--- 10 preguntas de escala 1-5 con peso 5 (máximo 50) + Q11 por persona + Q12 general.
---
--- Se crea SIN CONVOCATORIAID (plantilla base). Al abrir un ciclo, el backend
--- clona esta plantilla hacia la convocatoria del año — así el histórico nunca
--- se altera si alguien edita las preguntas después.
+-- 8. SEED — instrumento FCE con las 12 preguntas vigentes
 
 DECLARE
   v_form_id NUMBER;
@@ -466,10 +408,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 9. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 9. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON RETROFORMULARIO     TO SEP_APP;
 GRANT SELECT, INSERT, UPDATE, DELETE ON RETROPREGUNTA       TO SEP_APP;

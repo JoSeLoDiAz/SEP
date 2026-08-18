@@ -1,16 +1,6 @@
--- =============================================================================
 -- Migración: Retos Nacionales para Alineación de AF
--- Versión: 4.0
--- Fecha: 2026-04-20
--- Autor: JoSeLoDiAz
--- Descripción: Crea tabla RETONACIONAL con los 8 retos del PND 2022-2026
---              y agrega RETONACIONALID a AFCOMPONENTE para mapear los
---              componentes estratégicos (IDs 775-875, sin tipo) a su reto.
--- =============================================================================
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Tabla RETONACIONAL
--- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE RETONACIONAL (
   RETONACIONALID     NUMBER        NOT NULL,
@@ -19,9 +9,7 @@ CREATE TABLE RETONACIONAL (
   CONSTRAINT PK_RETONACIONAL PRIMARY KEY (RETONACIONALID)
 );
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Datos de Retos Nacionales (PND Colombia Potencia Mundial de la Vida 2022-2026)
--- ─────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO RETONACIONAL (RETONACIONALID, RETONACIONALNOMBRE) VALUES
   (1, 'AGROECOLOGÍA, AGRICULTURA, AGROINDUSTRIA, BIOECONOMÍA, SOSTENIBILIDAD Y GESTIÓN AMBIENTAL (BASES DEL PLAN NACIONAL DE DESARROLLO, COLOMBIA POTENCIA MUNDIAL DE LA VIDA 2022 – 2026)');
@@ -40,9 +28,7 @@ INSERT INTO RETONACIONAL (RETONACIONALID, RETONACIONALNOMBRE) VALUES
 INSERT INTO RETONACIONAL (RETONACIONALID, RETONACIONALNOMBRE) VALUES
   (8, 'REINDUSTRIALIZACIÓN PARA LA DEFENSA Y LA VIDA (CONPES 4129 DE 2023 POLÍTICA NACIONAL DE REINDUSTRIALIZACIÓN)');
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Agregar RETONACIONALID a AFCOMPONENTE
--- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE AFCOMPONENTE ADD RETONACIONALID NUMBER;
 
@@ -51,9 +37,7 @@ ALTER TABLE AFCOMPONENTE
   FOREIGN KEY (RETONACIONALID)
   REFERENCES RETONACIONAL(RETONACIONALID);
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 4. Mapeo de AFCOMPONENTE (IDs 775-875, sin tipo) a su RETO NACIONAL
--- ─────────────────────────────────────────────────────────────────────────────
 
 -- Reto 1: Agroecología, Agricultura, Agroindustria, Bioeconomía, Sostenibilidad
 UPDATE AFCOMPONENTE SET RETONACIONALID = 1

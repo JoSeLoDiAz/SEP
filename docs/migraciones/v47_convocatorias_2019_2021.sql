@@ -1,6 +1,4 @@
 -- Convocatorias anteriores a 2022 y su ciclo del banco.
--- Presupuestos en 0 y fechas en NULL: anclan el año del banco, no operan
--- proyectos. Idempotente. Corre como SEP_APP.
 
 SET SERVEROUTPUT ON;
 

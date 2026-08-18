@@ -1,13 +1,4 @@
 -- Qué foto tiene cada evaluador de verdad. Solo consulta, no cambia nada.
--- Correr en PRODUCCIÓN para saber si el problema es el dato o la pantalla.
---
--- Interesa la columna ESTADO:
---   ok              la imagen está completa
---   VACÍA           la columna no es nula pero no tiene bytes: la subida se
---                   guardó a medias y hay que volver a cargarla
---   NO ES IMAGEN    se guardó otra cosa (los primeros bytes no son de JPG,
---                   PNG ni WebP)
---   sin foto        nunca se cargó
 
 SET LINESIZE 200
 SET PAGESIZE 100

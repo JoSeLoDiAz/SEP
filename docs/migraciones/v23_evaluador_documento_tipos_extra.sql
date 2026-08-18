@@ -1,21 +1,6 @@
 -- v23_evaluador_documento_tipos_extra.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Fase 2 del módulo Evaluadores — carga el resto de tipos de documento del
--- catálogo TIPODOCUMENTOEVAL. Todos con ADMITEMULTIPLE = 1 (pueden repetirse
--- por evaluador).
---
--- La v22 sembró id=1 (CEDULA). Esta migración agrega ids 2..6.
---
--- Idempotente: cada INSERT usa WHERE NOT EXISTS sobre CODIGO (que es UNIQUE),
--- así que reejecutar el script no produce errores ni duplicados.
---
--- Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Seed idempotente de tipos de documento (Fase 2)                         ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- Seed idempotente de tipos de documento (Fase 2)
 
 INSERT INTO TIPODOCUMENTOEVAL (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIPLE, ORDEN)
   SELECT 2, N'AUTORIZACION', N'Correo de autorización', 1, 20 FROM DUAL
@@ -36,6 +21,5 @@ INSERT INTO TIPODOCUMENTOEVAL (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIP
 INSERT INTO TIPODOCUMENTOEVAL (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIPLE, ORDEN)
   SELECT 6, N'CERTIFICADO_PARTICIPACION', N'Certificado de participación en evaluación', 1, 60 FROM DUAL
   WHERE NOT EXISTS (SELECT 1 FROM TIPODOCUMENTOEVAL WHERE CODIGO = N'CERTIFICADO_PARTICIPACION');
-
 
 COMMIT;

@@ -1,31 +1,6 @@
 -- v34_evaluador_participacion_spine.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Convierte EVALUADORPARTICIPACION en la COLUMNA VERTEBRAL del ciclo anual.
---
--- Hasta ahora participaciones, pruebas, documentos y convocatorias eran
--- cuatro islas que solo compartían un NUMBER(4) con el año. Esta migración
--- las ata:
---
---   EVALUADORPARTICIPACION  + CONVOCATORIAID, ESTADOPARTID, AREAID,
---                             MODALIDADPARTID, ESTRANSVERSAL, fechas, motivo
---   EVALUADORPRUEBA         + PARTICIPACIONID, APROBADA, PUNTAJEMINIMO
---   EVALUADORDOCUMENTO      + PARTICIPACIONID
---   EVALUADORCONVOCATORIA   + CONVOCATORIASEPID, notas de corte, MODALIDADPARTID
---
--- Y agrega dos tablas hijas que vienen del módulo de retroalimentación:
---   EVALUADORPARTGRUPO    — grupos (mesas) 1..8 en que participa ese año
---   EVALUADORPARTALCANCE  — alcance explícito de un evaluador transversal
---
--- Los PARTICIPACIONID nuevos son NULLABLE a propósito: el histórico 2021-2023
--- (pruebas sueltas, documentos sin ciclo) entra sin bloqueo y se ata después.
---
--- Idempotente. Ejecutar como SEPLOCAL, DESPUÉS de la v29.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. EVALUADORPARTICIPACION — columnas del ciclo                          ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. EVALUADORPARTICIPACION — columnas del ciclo
 
 DECLARE
   PROCEDURE add_col(p_tabla VARCHAR2, p_ddl VARCHAR2) IS
@@ -91,10 +66,7 @@ COMMENT ON COLUMN EVALUADORCONVOCATORIA.CONVOCATORIASEPID IS
 COMMENT ON COLUMN EVALUADORCONVOCATORIA.PUNTAJEMINIMOPRUEBA IS
   'Nota de corte de la prueba de conocimiento de ESE año. Cambia año a año.';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Constraints                                                          ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Constraints
 
 DECLARE
   PROCEDURE add_fk(p_ddl VARCHAR2) IS
@@ -141,13 +113,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. EVALUADORPARTGRUPO — grupos/mesas del año (N:M)                      ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Viene de EvalPersona.grupos [1..8]. Una persona puede estar en varios
--- grupos el mismo año (ej. un apoyo jurídico en los grupos 1, 2 y 8), por eso
--- es tabla y no columna.
+-- 3. EVALUADORPARTGRUPO — grupos/mesas del año (N:M)
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORPARTGRUPO (
@@ -182,12 +148,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. EVALUADORPARTALCANCE — alcance del evaluador transversal             ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Aplana EvalPersona.alcanceEvaluacion [{area, roles[]}] a una fila por
--- (participación, área, rol). Solo aplica cuando ESTRANSVERSAL = 1.
+-- 4. EVALUADORPARTALCANCE — alcance del evaluador transversal
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORPARTALCANCE (
@@ -219,10 +180,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 5. BACKFILL de los datos existentes                                     ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 5. BACKFILL de los datos existentes
 
 -- 5.1 MODALIDADPARTID desde el texto libre que hoy existe.
 UPDATE EVALUADORPARTICIPACION p
@@ -250,7 +208,6 @@ UPDATE EVALUADORCONVOCATORIA c
        );
 
 -- 5.2 ESTADOPARTID: el histórico existente se marca FINALIZADO, salvo lo que
---     tenía la bandera PROCESOREVOCADO = 1, que pasa a REVOCADO.
 UPDATE EVALUADORPARTICIPACION
    SET ESTADOPARTID = (SELECT ESTADOPARTID FROM ESTADOPARTICIPACION WHERE CODIGO = N'REVOCADO')
  WHERE ESTADOPARTID IS NULL
@@ -261,8 +218,6 @@ UPDATE EVALUADORPARTICIPACION
  WHERE ESTADOPARTID IS NULL;
 
 -- 5.3 CONVOCATORIAID: solo cuando existe UNA convocatoria del banco que
---     coincida en año (y periodo si ambos lo tienen). Si hay ambigüedad se
---     deja NULL para que el coordinador lo resuelva desde la UI.
 UPDATE EVALUADORPARTICIPACION p
    SET p.CONVOCATORIAID = (
          SELECT MIN(c.CONVOCATORIAID) FROM EVALUADORCONVOCATORIA c
@@ -275,8 +230,6 @@ UPDATE EVALUADORPARTICIPACION p
            AND (p.PERIODO IS NULL OR c.PERIODO IS NULL OR TRIM(c.PERIODO) = TRIM(p.PERIODO))) = 1;
 
 -- 5.4 EVALUADORPRUEBA.PARTICIPACIONID: se ata solo cuando el evaluador tiene
---     exactamente una participación en ese año. Con dos, queda NULL (histórico
---     suelto) y se resuelve a mano — es preferible a adivinar mal.
 UPDATE EVALUADORPRUEBA pr
    SET pr.PARTICIPACIONID = (
          SELECT MIN(pa.PARTICIPACIONID) FROM EVALUADORPARTICIPACION pa
@@ -287,7 +240,6 @@ UPDATE EVALUADORPRUEBA pr
          WHERE pa.EVALUADORID = pr.EVALUADORID AND pa.ANIO = pr.ANIO) = 1;
 
 -- 5.5 EVALUADORDOCUMENTO.PARTICIPACIONID: misma regla usando ANIOREFERENCIA.
---     Los documentos sin año quedan como permanentes (NULL), que es correcto.
 UPDATE EVALUADORDOCUMENTO d
    SET d.PARTICIPACIONID = (
          SELECT MIN(pa.PARTICIPACIONID) FROM EVALUADORPARTICIPACION pa
@@ -299,8 +251,6 @@ UPDATE EVALUADORDOCUMENTO d
          WHERE pa.EVALUADORID = d.EVALUADORID AND pa.ANIO = d.ANIOREFERENCIA) = 1;
 
 -- 5.6 EVALUADORAPROBACION desde el texto libre EVALUADOR.EVALUADORQUIENAPRUEBA.
---     Se crea una aprobación en la participación más antigua del evaluador,
---     marcada para revisión. Sin correo ni fecha reales: es solo rescate del dato.
 INSERT INTO EVALUADORAPROBACION
   (APROBACIONID, PARTICIPACIONID, APROBADORNOMBRE, APROBADOREMAIL,
    FECHAAPROBACION, OBSERVACIONES, USUARIOCREACION)
@@ -330,10 +280,7 @@ UPDATE EVALUADOR
    AND EVALUADORJEFEDIR IS NOT NULL
    AND LENGTH(TRIM(EVALUADORJEFEDIR)) > 0;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 6. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 6. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORPARTGRUPO       TO SEP_APP;
 GRANT SELECT                         ON EVALUADORPARTGRUPO       TO SEP_LECTOR;

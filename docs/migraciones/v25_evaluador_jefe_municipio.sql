@@ -1,16 +1,4 @@
 -- v25_evaluador_jefe_municipio.sql
--- Amplía EVALUADOR con datos estructurados del jefe directo y el municipio
--- donde el evaluador reside. Idempotente vía EXCEPTION (ORA-01430 = columna
--- ya existe, ORA-02264 = constraint ya existe).
---
--- Notas:
---   * EVALUADORJEFEDIR (texto libre) se conserva por compatibilidad — el
---     servicio dejó de escribir en esa columna, pero las filas antiguas la
---     siguen exponiendo.
---   * EVALUADORQUIENAPRUEBA se preserva para Fase 4 (flujo de aprobación).
---   * EVALUADORMUNICIPIOID reutiliza el catálogo CIUDAD ya cargado.
---
--- Ejecutar como SEPLOCAL en SQL Developer.
 
 BEGIN
   EXECUTE IMMEDIATE 'ALTER TABLE EVALUADOR ADD (EVALUADORJEFENOMBRE NVARCHAR2(200))';

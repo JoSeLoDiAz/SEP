@@ -1,7 +1,4 @@
 -- v27_evaluador_convocatoria_seed.sql
--- Seed idempotente del catálogo TIPODOCUMENTOCONV.
--- Los cinco tipos base que la Fase 5 exige para el sub-módulo de convocatorias.
--- Ejecutar como SEPLOCAL en SQL Developer.
 
 INSERT INTO TIPODOCUMENTOCONV
   (TIPODOCUMENTOCONVID, CODIGO, NOMBRE, EXTENSIONESPERMITIDAS, ORDEN)

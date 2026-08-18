@@ -1,43 +1,13 @@
 -- v40_evaluador_convocatoria_sep.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Ata el ciclo de evaluadores a la CONVOCATORIA real del SEP.
---
--- El problema: `EVALUADORCONVOCATORIA` nació con `CONVOCATORIASEPID` (v34)
--- pero sin llave foránea y sin que nada la escribiera. En la práctica el
--- gestor tecleaba a mano un nombre libre —"PRUEBA_REGLAS FCE 2026"— que no
--- tenía ninguna relación con "CONVOCATORIA DSNFT-0001-FCE-2026", que es la
--- convocatoria de verdad y donde está toda la información: programa,
--- presupuesto, fechas, estado, resultados publicados.
---
--- Dos nombres para la misma cosa es la forma más segura de que un año no
--- cuadre con el otro. El ciclo de evaluadores no es una convocatoria aparte:
--- es la capa de reglas —cortes, certificación, matriz— que se le pone ENCIMA
--- a una convocatoria que ya existe.
---
--- Qué hace esta migración:
---   1. Llave foránea CONVOCATORIASEPID → CONVOCATORIA(CONVOCATORIAID)
---   2. Índice, porque se va a consultar por ahí
---   3. Índice único parcial: una convocatoria del SEP no puede tener dos
---      ciclos de evaluadores del mismo periodo
---
--- Se deja NULLABLE a propósito. El histórico anterior a esto no tiene con qué
--- atarse, y volverla obligatoria dejaría filas viejas imposibles de guardar.
--- La obligatoriedad se exige en la pantalla, para lo nuevo.
---
--- Idempotente. Ejecutar como SEPLOCAL.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 0. Verificación previa                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 0. Verificación previa
 
 DECLARE
   v_huerfanas NUMBER;
 BEGIN
   -- Si alguien ya escribió ids que no existen, la FK fallaría a mitad. Mejor
-  -- saberlo antes y con el detalle, que ver un ORA-02298 sin contexto.
   SELECT COUNT(*) INTO v_huerfanas
     FROM EVALUADORCONVOCATORIA e
    WHERE e.CONVOCATORIASEPID IS NOT NULL
@@ -53,10 +23,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Llave foránea                                                        ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Llave foránea
 
 BEGIN
   EXECUTE IMMEDIATE q'[
@@ -72,14 +39,9 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Índices                                                              ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Índices
 
 -- La v34 ya creó IX_CONV_SEP sobre CONVOCATORIASEPID. Se comprueba en vez de
--- crear otro: un segundo índice sobre la misma columna no aporta nada y Oracle
--- lo rechazaría con ORA-01408.
 DECLARE
   v_n NUMBER;
 BEGIN
@@ -101,8 +63,6 @@ END;
 
 BEGIN
   -- Único parcial: dos ciclos del MISMO periodo sobre la MISMA convocatoria
-  -- del SEP serían dos verdades para lo mismo. Las filas sin atar quedan
-  -- fuera del índice —la expresión da NULL— y no estorban.
   EXECUTE IMMEDIATE q'[
     CREATE UNIQUE INDEX UQ_EVALCONV_SEP_PERIODO ON EVALUADORCONVOCATORIA (
       CASE WHEN CONVOCATORIASEPID IS NOT NULL THEN CONVOCATORIASEPID END,
@@ -120,14 +80,9 @@ END;
 /
 
 -- COMMENT no admite expresiones: el texto tiene que ir en UN literal. Con
--- `'a' || 'b'` Oracle responde ORA-00933 y el resto del script sigue como si
--- nada, así que el comentario se quedaba sin actualizar sin que se notara.
 COMMENT ON COLUMN EVALUADORCONVOCATORIA.CONVOCATORIASEPID IS 'Convocatoria real del SEP sobre la que se monta este ciclo de evaluadores. De ahi salen el nombre y el anio; aqui solo viven las reglas del banco (notas de corte, certificacion, matriz de retroalimentacion). Nullable: el historico anterior a la v40 no tiene con que atarse.';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. Verificación                                                         ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. Verificación
 
 DECLARE
   v_fk NUMBER; v_ix NUMBER; v_uq NUMBER; v_com NUMBER; v_sueltas NUMBER;
@@ -137,8 +92,6 @@ BEGIN
      AND CONSTRAINT_NAME = 'FK_EVALCONV_CONVSEP' AND CONSTRAINT_TYPE = 'R';
 
   -- Se comprueba el HECHO —que la columna esté indexada— y no un nombre que
-  -- yo escogí: la v34 ya la había indexado como IX_CONV_SEP, y buscar por
-  -- nombre daba "falta un índice" cuando no faltaba nada.
   SELECT COUNT(*) INTO v_ix FROM ALL_IND_COLUMNS
    WHERE TABLE_NAME = 'EVALUADORCONVOCATORIA'
      AND COLUMN_NAME = 'CONVOCATORIASEPID' AND COLUMN_POSITION = 1;
@@ -162,8 +115,6 @@ BEGIN
                        '  (histórico; se atan desde la pantalla, en Editar)');
 
   -- Cada cosa que se imprime también bloquea. Un contador que se muestra pero
-  -- no detiene da la sensación de que se verificó y no verifica nada — es la
-  -- lección que dejó el incidente de la v36.
   IF v_fk < 1 THEN
     RAISE_APPLICATION_ERROR(-20041, 'La llave foránea FK_EVALCONV_CONVSEP no quedó creada.');
   END IF;

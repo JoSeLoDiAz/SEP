@@ -1,44 +1,18 @@
 -- v43_centro_textil_gestion_industrial.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Falta un centro de formación en el catálogo: el Centro Textil y de Gestión
--- Industrial, de la Regional Antioquia.
---
--- Reportado al registrar a David Alexander Fique, que pertenece a ese centro
--- y no lo encontraba en el desplegable. Se comprobó: el catálogo tiene 116
--- centros en 34 regionales —la estructura completa— y Antioquia tiene 15,
--- pero ese no está entre ellos. El centro existe (centrotgi.blogspot.com).
---
--- ⚠  ANTES DE CORRER: revise el CENTROID de abajo.
---
---    Los CENTROID de esta tabla NO son un consecutivo: son los códigos
---    oficiales del SENA (9101, 9206, 9212…) y no siguen un bloque por
---    regional —los 92xx están repartidos entre las regionales 5, 8 y 11—,
---    así que el código correcto no se puede deducir de los que ya hay.
---
---    Aquí va MAX+1, que no choca con nada de lo cargado. Si tiene a la mano
---    el código oficial del centro, reemplácelo en la constante y corra con
---    ese: así el día que se recargue el catálogo oficial no aparece
---    duplicado y los evaluadores no quedan repartidos entre dos registros.
---
--- Idempotente: si el centro ya existe (por nombre o por código), no hace nada.
--- Puede correrse como SEP_APP: no lleva DDL.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
 DECLARE
-  -- ── Revise esto ────────────────────────────────────────────────────────
+  -- Revise esto
   k_centroid   CONSTANT NUMBER        := 9549;  -- código oficial si lo tiene
   k_nombre     CONSTANT VARCHAR2(200) := 'Centro Textil y de Gestión Industrial';
   k_regional   CONSTANT NUMBER        := 5;     -- Antioquia
   k_ciudad     CONSTANT NUMBER        := 5001;  -- Medellín
-  -- ───────────────────────────────────────────────────────────────────────
 
   v_porNombre  NUMBER;
   v_porCodigo  NUMBER;
 BEGIN
   -- Se busca por nombre normalizado para no crear un duplicado si alguien ya
-  -- lo cargó con otras tildes o mayúsculas.
   SELECT COUNT(*) INTO v_porNombre FROM CENTROFORMACION
    WHERE REGIONALID = k_regional
      AND UPPER(TRIM(CENTRONOMBRE)) LIKE '%TEXTIL%GESTI%INDUSTRIAL%';
@@ -59,12 +33,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Verificación                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Se comprueba el HECHO: que el centro aparece entre los de Antioquia y
--- activo, que es lo que el desplegable necesita para mostrarlo.
+-- Verificación
 
 DECLARE
   v_n NUMBER;

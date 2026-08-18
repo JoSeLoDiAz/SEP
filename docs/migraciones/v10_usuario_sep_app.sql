@@ -1,25 +1,6 @@
--- ══════════════════════════════════════════════════════════════════
 --   v10 — Crear usuario SEP_APP (least privilege para el backend)
---          + logon trigger para bloquear uso interactivo
---          + auditoría de sesiones
---
---   IMPORTANTE: ejecutar conectado como SYSTEM (necesita CREATE USER,
---   ADMINISTER DATABASE TRIGGER y AUDIT SYSTEM).
---
---   Antes de ejecutar:
---     1. Reemplaza <CLAVE_APP> en la línea 22 por una contraseña fuerte
---        (mínimo 16 caracteres, mezclar mayúsculas/números/símbolos)
---     2. NO commitees el script con la contraseña real
---     3. Pásala a los devs por canal seguro (Bitwarden / pendrive)
---
---   Modelo de seguridad después de v10:
---     • SEPLOCAL  → owner del schema (solo Josse, migraciones)
---     • SEP_APP   → backend Node.js (INSERT/UPDATE/DELETE/SELECT, sin DDL)
---     • SEP_LECTOR → SQL Developer de los devs (solo SELECT)
---     • SYSTEM    → DBA (solo Josse, mantenimiento)
--- ══════════════════════════════════════════════════════════════════
 
--- ─── 1. Crear SEP_APP (idempotente) ───────────────────────────────
+-- 1. Crear SEP_APP (idempotente)
 BEGIN
   EXECUTE IMMEDIATE 'DROP USER SEP_APP CASCADE';
 EXCEPTION WHEN OTHERS THEN NULL;
@@ -33,8 +14,7 @@ CREATE USER SEP_APP IDENTIFIED BY "<CLAVE_APP>"
 
 GRANT CREATE SESSION TO SEP_APP;
 
--- ─── 2. DML en TODAS las tablas de SEPLOCAL ───────────────────────
---      Wrap por-objeto: una tabla en estado raro no debe romper el loop.
+-- 2. DML en TODAS las tablas de SEPLOCAL
 BEGIN
   FOR t IN (SELECT table_name FROM dba_tables WHERE owner = 'SEPLOCAL') LOOP
     BEGIN
@@ -46,9 +26,7 @@ BEGIN
 END;
 /
 
--- ─── 3. SELECT en vistas ──────────────────────────────────────────
---      Wrap por-objeto: una vista INVALID (ORA-04063) NO debe romper
---      el loop y dejar el resto sin permisos.
+-- 3. SELECT en vistas
 BEGIN
   FOR v IN (SELECT view_name FROM dba_views WHERE owner = 'SEPLOCAL') LOOP
     BEGIN
@@ -59,7 +37,7 @@ BEGIN
 END;
 /
 
--- ─── 4. SELECT en secuencias (necesario para INSERT con NEXTVAL) ──
+-- 4. SELECT en secuencias (necesario para INSERT con NEXTVAL)
 BEGIN
   FOR s IN (SELECT sequence_name FROM dba_sequences WHERE sequence_owner = 'SEPLOCAL') LOOP
     BEGIN
@@ -70,7 +48,7 @@ BEGIN
 END;
 /
 
--- ─── 5. EXECUTE en procedimientos / funciones / packages ──────────
+-- 5. EXECUTE en procedimientos / funciones / packages
 BEGIN
   FOR p IN (SELECT object_name, object_type FROM dba_objects
             WHERE owner = 'SEPLOCAL'
@@ -83,7 +61,7 @@ BEGIN
 END;
 /
 
--- ─── 6. Sinónimos privados (el backend escribe `USUARIO`, no `SEPLOCAL.USUARIO`) ──
+-- 6. Sinónimos privados (el backend escribe `USUARIO`, no `SEPLOCAL.USUARIO`)
 BEGIN
   FOR o IN (SELECT object_name FROM dba_objects
             WHERE owner = 'SEPLOCAL'
@@ -97,18 +75,7 @@ BEGIN
 END;
 /
 
--- ─── 7. Logon trigger — bloquear uso interactivo de SEP_APP ───────
---   Solo permite conexión si el programa cliente es "node" o "nest".
---   No afecta a SYS/SYSTEM ni a otros usuarios.
---
---   Notas de implementación:
---   • Usa V$SESSION.PROGRAM en vez de SYS_CONTEXT('USERENV','PROGRAM')
---     porque ese parámetro NO está disponible en Oracle XE (ORA-02003).
---   • Sale temprano si el usuario no es SEP_APP (overhead mínimo para
---     el resto de logins).
---   • EXCEPTION fail-open: cualquier error en el trigger distinto a
---     nuestro ORA-20001 se traga, para no bloquear logins legítimos
---     si algo del SYS_CONTEXT/V$SESSION cambia entre versiones de Oracle.
+-- 7. Logon trigger — bloquear uso interactivo de SEP_APP
 CREATE OR REPLACE TRIGGER restringir_sep_app
 AFTER LOGON ON DATABASE
 DECLARE
@@ -139,10 +106,10 @@ EXCEPTION
 END;
 /
 
--- ─── 8. Auditar todas las sesiones de SEP_APP ─────────────────────
+-- 8. Auditar todas las sesiones de SEP_APP
 AUDIT SESSION BY SEP_APP;
 
--- ─── 9. Verificación ──────────────────────────────────────────────
+-- 9. Verificación
 PROMPT
 PROMPT === Privilegios de SEP_APP (resumen) ===
 SELECT privilege, COUNT(*) AS objetos FROM dba_tab_privs

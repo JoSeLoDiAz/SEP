@@ -1,49 +1,6 @@
 -- reiniciar_banco_evaluadores.sql
--- ──────────────────────────────────────────────────────────────────────────
--- DEJA EL MÓDULO DE EVALUADORES EN CERO. No es una migración: es un borrado
--- completo para volver a empezar una prueba desde la primera pantalla.
---
---   ⚠  ESTO SE CORRE EN LA BASE LOCAL DE DESARROLLO.
---      En producción borraría certificados que ya circularon. No lo corra allá.
---
--- ¿Por qué como SEPLOCAL y no desde la aplicación?
---   SEP_APP tiene sobre EVALUADORCERTIFICADO y EVALUADORLOG solo SELECT,
 --   INSERT y UPDATE (v37) — a propósito: ni un certificado emitido ni una
 --   línea de auditoría pueden desaparecer desde la aplicación. Como el
---   certificado tiene FK contra la participación, esa sola falta de permiso
---   arrastra al ciclo, al evaluador y a la convocatoria. Es el diseño
---   funcionando; la contrapartida es que reiniciar exige al dueño del esquema.
---
--- Qué borra:
---   · TODO el banco: evaluadores, hojas de vida, estudios, experiencia, TIC
---   · TODOS los ciclos: participaciones, documentos, pruebas, cursos,
---     aprobaciones, grupos, proyectos evaluados y certificados
---   · TODAS las convocatorias del banco con sus documentos
---   · La retroalimentación del año: el instrumento clonado a cada
---     convocatoria con sus preguntas, asignaciones, respuestas, sesiones y
---     sugerencias — pero NO la plantilla base (ver abajo)
---   · Las cuentas de acceso cuyo ÚNICO perfil es el 9 (evaluador)
---
--- Qué NO borra, y por qué:
---   · PERSONA — se comprobó contra el diccionario que esas mismas personas
---     están referenciadas por AFGRUPOBENEFICIARIO, POSTULACION y UTHORAS.
---     Borrarlas rompería datos de otros módulos. Al volver a registrar, el
---     sistema las encuentra por documento y reutiliza la ficha: es el camino
---     normal y queda igual de limpio.
---   · Las cuentas multirol — si un usuario tiene el perfil 9 y además otro
---     (por ejemplo el 8), se le quita solo el de evaluador. Quitarle la cuenta
---     entera lo dejaría sin el acceso que usa para lo demás.
---   · Los catálogos (roles, procesos, tipos de documento, firmas): son
---     configuración, no datos de prueba.
---   · La plantilla base de retroalimentación — la que no tiene convocatoria.
---     También es catálogo: es de donde el backend clona el instrumento al
---     abrir un ciclo. Antes se borraba con todo lo demás, y después la matriz
---     de cualquier año respondía "No existe la plantilla base del
---     instrumento" hasta resembrarla a mano.
---
--- Idempotente: correrlo dos veces no falla ni borra de más.
--- Ejecutar como SEPLOCAL en SQL Developer.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
@@ -51,12 +8,8 @@ DECLARE
   TYPE t_txt IS TABLE OF VARCHAR2(4000);
 
   -- El orden es el de las claves foráneas: hijos antes que padres. Como se
-  -- borra todo, no hacen falta subconsultas — y sin ellas no hay forma de
-  -- que un filtro mal escrito deje basura a medias.
   v_sqls t_txt := t_txt(
-    -- ── Retroalimentación ───────────────────────────────────────────────
-    -- La asignación apunta a la respuesta: se suelta el vínculo antes de
-    -- borrar la respuesta, o la FK lo impide.
+    -- Retroalimentación
     'UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL',
     'DELETE FROM RETRORESPUESTAITEM',
     'DELETE FROM RETRORESPUESTA',
@@ -64,15 +17,11 @@ DECLARE
     'DELETE FROM RETROSUGERENCIA',
     'DELETE FROM RETROSESION',
     -- La plantilla base (la que no tiene convocatoria) NO se toca: es
-    -- catálogo, no dato de evaluadores. Es de donde el backend clona el
-    -- instrumento al abrir un ciclo, y sin ella la matriz de cualquier año
-    -- responde "No existe la plantilla base del instrumento". Borrarla obliga
-    -- a resembrarla a mano; se borran solo las copias de cada convocatoria.
     'DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID IN
        (SELECT RETROFORMULARIOID FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NOT NULL)',
     'DELETE FROM RETROFORMULARIO WHERE CONVOCATORIAID IS NOT NULL',
 
-    -- ── Lo que cuelga del ciclo ─────────────────────────────────────────
+    -- Lo que cuelga del ciclo
     'DELETE FROM EVALUADORCERTIFICADO',
     'DELETE FROM EVALUADORPARTPROYECTO',
     'DELETE FROM EVALUADORPARTGRUPO',
@@ -81,33 +30,27 @@ DECLARE
     'DELETE FROM EVALUADORAPROBACION',
 
     -- Estas dos apuntan al evaluador Y a la participación: van antes que
-    -- ambos, no basta con ponerlas antes de uno.
     'DELETE FROM EVALUADORPRUEBA',
     'DELETE FROM EVALUADORDOCUMENTO',
 
     'DELETE FROM EVALUADORPARTICIPACION',
 
-    -- ── Convocatorias del banco ─────────────────────────────────────────
+    -- Convocatorias del banco
     'DELETE FROM CONVOCATORIADOCUMENTO',
     'DELETE FROM EVALUADORCONVOCATORIA',
 
-    -- ── Hoja de vida y evaluador ────────────────────────────────────────
+    -- Hoja de vida y evaluador
     'DELETE FROM EVALUADORESTUDIO',
     'DELETE FROM EVALUADOREXPERIENCIA',
     'DELETE FROM EVALUADORTIC',
     'DELETE FROM EVALUADOR',
 
-    -- ── Auditoría ───────────────────────────────────────────────────────
-    -- Se borra SOLO porque esto es un reinicio de la base local. En
-    -- producción esta línea no debe correrse nunca: la tabla existe
-    -- justamente para que nadie pueda hacer desaparecer lo que pasó.
+    -- Auditoría
     'DELETE FROM EVALUADORLOG',
 
-    -- ── Cuentas de acceso ───────────────────────────────────────────────
-    -- Primero se le quita el perfil de evaluador a todo el que lo tenga.
+    -- Cuentas de acceso
     'DELETE FROM USUARIOPERFIL WHERE PERFILID = 9',
     -- Y solo se borra la cuenta si ya no le queda ningún otro perfil: así
-    -- un multirol conserva su acceso.
     'DELETE FROM USUARIO u
       WHERE u.PERFILID = 9
         AND NOT EXISTS (SELECT 1 FROM USUARIOPERFIL up WHERE up.USUARIOID = u.USUARIOID)'
@@ -127,12 +70,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Verificación                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Se comprueba el HECHO —que las tablas quedaron vacías—, no que el bloque
--- de arriba no haya lanzado excepción. Si algo quedó, esto falla y se ve.
+-- Verificación
 
 DECLARE
   TYPE t_txt IS TABLE OF VARCHAR2(30);
@@ -144,7 +82,6 @@ DECLARE
     'EVALUADORPARTPROYECTO', 'EVALUADORPRUEBA', 'EVALUADORTIC',
     'CONVOCATORIADOCUMENTO',
     -- RETROFORMULARIO y RETROPREGUNTA no van aquí: deben quedar con la
-    -- plantilla base dentro. Se revisan aparte, más abajo.
     'RETROASIGNACION', 'RETRORESPUESTA',
     'RETRORESPUESTAITEM', 'RETROSESION', 'RETROSUGERENCIA'
   );

@@ -1,30 +1,6 @@
 -- v29_evaluador_catalogos_ciclo.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Catálogos que soportan el ciclo anual del evaluador (rediseño por año).
---
---   1) ESTADOPARTICIPACION — máquina de estados de una participación.
---                            Reemplaza la bandera PROCESOREVOCADO NUMBER(1)
---                            de EVALUADORPARTICIPACION, que no dice quién ni
---                            cuándo revocó.
---   2) MODALIDADPART        — PRESENCIAL / PAT / VIRTUAL. Hoy son strings
---                            sueltos escritos a mano en dos tablas y en un
---                            <select> del frontend.
---   3) AREAEVALUACION       — Técnica / Jurídica / Financiera. Viene del
---                            módulo de retroalimentación (EvalPersona.area)
---                            y es contexto POR AÑO, no del evaluador.
---   4) ROLEVALUADOR         — se amplía el seed con los roles reales del
---                            proceso FCE (líder, apoyos, transversal). La v20
---                            solo sembró EVALUADOR / ANALISTA / COORDINADOR.
---
--- Idempotente: q-strings + EXCEPTION (ORA-00955 objeto ya existe,
--- ORA-01430 columna ya existe, ORA-02264/02275 constraint ya existe).
--- Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. ESTADOPARTICIPACION — máquina de estados del ciclo anual             ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. ESTADOPARTICIPACION — máquina de estados del ciclo anual
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE ESTADOPARTICIPACION (
@@ -86,10 +62,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. MODALIDADPART — modalidad de la participación                        ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. MODALIDADPART — modalidad de la participación
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE MODALIDADPART (
@@ -120,13 +93,7 @@ WHEN NOT MATCHED THEN
   INSERT (MODALIDADPARTID, CODIGO, NOMBRE, DESCRIPCION, ORDEN)
   VALUES (s.ID, s.CODIGO, s.NOMBRE, s.DESCRIPCION, s.ORDEN);
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. AREAEVALUACION — área del equipo evaluador                           ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Viene de EvalPersona.area del módulo de retroalimentación
--- (FormularioInscripcionGGPC). Es contexto POR AÑO: la misma persona puede
--- estar en técnica un año y en jurídica otro.
+-- 3. AREAEVALUACION — área del equipo evaluador
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE AREAEVALUACION (
@@ -158,14 +125,7 @@ WHEN NOT MATCHED THEN
   INSERT (AREAID, CODIGO, NOMBRE, GRUPOSDEFECTO, ORDEN)
   VALUES (s.ID, s.CODIGO, s.NOMBRE, s.G, s.ORDEN);
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. ROLEVALUADOR — ampliación del catálogo                               ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- La v20 sembró EVALUADOR, ANALISTA y COORDINADOR. El proceso FCE real
--- (según el módulo de retroalimentación) usa además líder, cuatro apoyos y
--- transversal. Se agregan columnas CODIGO/ORDEN para poder referenciarlos
--- desde el generador de la matriz sin depender del texto del nombre.
+-- 4. ROLEVALUADOR — ampliación del catálogo
 
 BEGIN
   EXECUTE IMMEDIATE 'ALTER TABLE ROLEVALUADOR ADD (ROLEVALUADORCODIGO NVARCHAR2(40))';
@@ -229,10 +189,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 5. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 5. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON ESTADOPARTICIPACION TO SEP_APP;
 GRANT SELECT                         ON ESTADOPARTICIPACION TO SEP_LECTOR;

@@ -1,16 +1,4 @@
 -- Documentos: se retira "Experiencia laboral profesional" y queda solo
--- "Experiencia laboral en proyectos", que además pedirá el año.
---
--- La profesional ya se registra en Perfil -> Experiencia, con cargo, entidad,
--- fechas y soporte, y es la única que sale en la ficha PDF. Tenerla también
--- como documento suelto era la misma información en dos sitios, y en el sitio
--- que no se imprime.
---
--- Se DESACTIVA, no se borra: los documentos ya cargados con ese tipo siguen
--- viéndose y descargándose con su nombre. Lo que desaparece es la opción de
--- seguir cargando por ahí.
---
--- Idempotente. Corre como SEP_APP.
 
 SET SERVEROUTPUT ON;
 

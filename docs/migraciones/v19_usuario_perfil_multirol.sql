@@ -6,10 +6,10 @@
 -- USUARIOPERFIL para soportar N:M entre USUARIO y PERFIL, sin romper el
 -- código existente:
 --
---   - Por cada USUARIO con PERFILID NOT NULL se inserta una fila en
+-- Por cada USUARIO con PERFILID NOT NULL se inserta una fila en
 --     USUARIOPERFIL con PREDETERMINADO=1 y ESTADO=1.
---   - USUARIO.PERFILID se conserva como fallback durante la transición.
---   - El nuevo flujo de auth lee de USUARIOPERFIL para detectar multirol y
+-- USUARIO.PERFILID se conserva como fallback durante la transición.
+-- El nuevo flujo de auth lee de USUARIOPERFIL para detectar multirol y
 --     ofrecer selector de perfil al iniciar sesión.
 --
 -- FECHAULTIMOACCESO se actualiza cuando el usuario entra (o cambia) a un
@@ -36,7 +36,7 @@ CREATE INDEX IX_USUARIOPERFIL_USU ON USUARIOPERFIL (USUARIOID, ESTADO);
 
 CREATE SEQUENCE USUARIOPERFIL_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
--- ── Migración de los perfiles actuales ─────────────────────────────────────
+-- Migración de los perfiles actuales
 -- Cada USUARIO con PERFILID NOT NULL pasa a tener su perfil predeterminado.
 INSERT INTO USUARIOPERFIL (
   USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION
@@ -45,7 +45,7 @@ SELECT USUARIOPERFIL_SEQ.NEXTVAL, USUARIOID, PERFILID, 1, 1, SYSDATE
   FROM USUARIO
  WHERE PERFILID IS NOT NULL;
 
--- ── Validación post-migración ──────────────────────────────────────────────
+-- Validación post-migración
 -- Ambos counts deben coincidir. Correr manualmente después de la migración:
 --
 --   SELECT (SELECT COUNT(*) FROM USUARIO WHERE PERFILID IS NOT NULL) AS USUARIOS_CON_PERFIL,
@@ -56,7 +56,7 @@ SELECT USUARIOPERFIL_SEQ.NEXTVAL, USUARIOID, PERFILID, 1, 1, SYSDATE
 --
 -- USUARIOS_CON_PERFIL == USUARIOPERFIL_FILAS == PREDETERMINADOS == ACTIVOS
 
--- ── GRANTS y SINÓNIMOS para SEP_APP (CRUD) y SEP_LECTOR (SELECT) ───────────
+-- GRANTS y SINÓNIMOS para SEP_APP (CRUD) y SEP_LECTOR (SELECT)
 GRANT SELECT, INSERT, UPDATE, DELETE ON USUARIOPERFIL     TO SEP_APP;
 GRANT SELECT                         ON USUARIOPERFIL     TO SEP_LECTOR;
 GRANT SELECT                         ON USUARIOPERFIL_SEQ TO SEP_APP;

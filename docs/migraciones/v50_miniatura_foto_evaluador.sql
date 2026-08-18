@@ -1,18 +1,4 @@
 -- Guarda una miniatura de la foto del evaluador, aparte de la original.
---
--- Las fotos son de 60 a 280 KB y se muestran en tarjetas de 100 píxeles. Una
--- página del banco descargaba más de 2 MB solo en retratos, y la más pesada se
--- cortaba a medio camino en redes que no van finas — se veía el círculo con la
--- inicial y parecía que la persona no tenía foto.
---
--- La miniatura pesa unos 20 KB y es la que se muestra. La original NO se toca
--- y sigue siendo la que se descarga y la que sale en la ficha PDF, que se
--- imprime y necesita la resolución completa.
---
--- Nada que rellenar a mano: la miniatura se genera al cargar la foto, y las
--- que ya estaban se generan solas la primera vez que alguien las mira.
---
--- Idempotente. Ejecutar como SEPLOCAL (agrega columna).
 
 SET SERVEROUTPUT ON;
 

@@ -1,19 +1,6 @@
--- =============================================================================
 -- Migración: Articulación Territorial para el Desarrollo
--- Versión: 3.0
--- Fecha: 2026-04-20
--- Autor: JoSeLoDiAz
--- Descripción: Crea el catálogo ARTICULACIONTERRITORIAL con los 7 tipos
---              predefinidos, y agrega la columna ARTICULACIONTERRITORIALID
---              en UNIDADTEMATICA para reemplazar el uso de AFHABILIDAD como
---              referencia de habilidades transversales.
---              También elimina el límite de 5 actividades por UT (sin cambio
---              de esquema; el límite era solo en la aplicación).
--- =============================================================================
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Tabla ARTICULACIONTERRITORIAL
--- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE ARTICULACIONTERRITORIAL (
   ARTICULACIONTERRITORIALID      NUMBER           NOT NULL,
@@ -22,9 +9,7 @@ CREATE TABLE ARTICULACIONTERRITORIAL (
   CONSTRAINT PK_ARTTERRDES PRIMARY KEY (ARTICULACIONTERRITORIALID)
 );
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Datos del catálogo
--- ─────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO ARTICULACIONTERRITORIAL (ARTICULACIONTERRITORIALID, ARTICULACIONTERRITORIALNOMBRE) VALUES
   (1, 'DESARROLLO RURAL, ECONOMÍA CAMPESINA Y PRODUCTIVIDAD TERRITORIAL');
@@ -41,13 +26,10 @@ INSERT INTO ARTICULACIONTERRITORIAL (ARTICULACIONTERRITORIALID, ARTICULACIONTERR
 INSERT INTO ARTICULACIONTERRITORIAL (ARTICULACIONTERRITORIALID, ARTICULACIONTERRITORIALNOMBRE) VALUES
   (7, 'EQUIDAD, DIVERSIDAD E INCLUSIÓN COMO FACTORES DE PRODUCTIVIDAD');
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Nueva columna en UNIDADTEMATICA
---    Verificación previa:
 --      SELECT COLUMN_NAME FROM USER_TAB_COLUMNS
 --      WHERE TABLE_NAME='UNIDADTEMATICA'
 --      AND COLUMN_NAME='ARTICULACIONTERRITORIALID';
--- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE UNIDADTEMATICA ADD ARTICULACIONTERRITORIALID NUMBER;
 

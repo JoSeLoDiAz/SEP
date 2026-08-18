@@ -1,17 +1,4 @@
 -- Repone la plantilla base del instrumento de retroalimentación.
---
--- Sin ella la matriz de cualquier convocatoria contesta "No existe la
--- plantilla base del instrumento": el backend clona esa plantilla la primera
--- vez que se abre un ciclo, y si no hay de dónde clonar, no hay formulario.
---
--- Se perdió al reiniciar el banco de evaluadores: aquel script borraba
--- RETROFORMULARIO completo y se llevó por delante la plantilla, que no es
--- dato de evaluadores sino catálogo. Ya quedó corregido allá para que no
--- vuelva a pasar, pero las bases donde se corrió necesitan esto.
---
--- Las 12 preguntas son las mismas de la v33, sin cambios.
---
--- Idempotente: si ya hay plantilla no toca nada. Solo DML, corre como SEP_APP.
 
 SET SERVEROUTPUT ON;
 
@@ -34,9 +21,6 @@ DECLARE
   END;
 BEGIN
   -- Se busca por lo MISMO que consulta el backend, no por el nombre: si el
-  -- archivo se corrió con otra codificación, el nombre pudo quedar distinto y
-  -- entonces se insertaría una segunda plantilla en vez de reconocer la que ya
-  -- está. Lo que define a la plantilla base es no tener convocatoria.
   BEGIN
     SELECT RETROFORMULARIOID INTO v_form_id
       FROM RETROFORMULARIO

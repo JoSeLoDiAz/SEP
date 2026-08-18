@@ -1,38 +1,6 @@
 -- v35_evaluador_log.sql
--- ──────────────────────────────────────────────────────────────────────────
--- EVALUADORLOG — auditoría del banco de evaluadores.
---
--- Calcado de EJECUCIONLOG (v17), que ya está probado en producción para el
--- módulo de ejecución de proyectos. Misma forma: tabla afectada, operación,
--- id del registro, usuario, perfil, fecha y snapshots antes/después.
---
--- ¿Por qué hace falta? El módulo pasa a guardar autorizaciones de jefes,
--- calificaciones de desempeño y emisión de certificados. Sin traza no hay
--- forma de responder "¿quién cambió esta nota?" ni "¿quién borró esta
--- participación?", y son exactamente las preguntas que va a hacer la
--- coordinación.
---
--- QUÉ SE LOGGEA (decisión de aplicación, no de BD):
---   - EVALUADORAPROBACION      → INSERT / UPDATE / DELETE
---   - EVALUADORCAPACITACION    → UPDATE de CALIFICACION o APROBADO
---   - EVALUADORPARTICIPACION   → cambio de ESTADOPARTID y DELETE
---   - EVALUADORPRUEBA          → UPDATE de PUNTAJEMAYOR y DELETE
---   - RETRORESPUESTA / ITEM    → cualquier UPDATE o DELETE posterior al envío
---   - RETROASIGNACION          → generación y anulación de la matriz
---   - Emisión de certificados
---   NO se loggean los cargues de documentos ni las lecturas: ruido sin valor.
---
--- ACCESO: la coordinación (perfil 2) consulta el log en modo lectura desde el
--- panel; el admin (perfil 1) además puede exportarlo. Nadie puede escribir
--- ni borrar filas de esta tabla desde la aplicación.
---
--- Idempotente. Ejecutar como SEPLOCAL.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Tabla                                                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Tabla
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORLOG (
@@ -69,10 +37,7 @@ COMMENT ON COLUMN EVALUADORLOG.OPERACION IS
 COMMENT ON COLUMN EVALUADORLOG.VALORANTES IS
   'Snapshot JSON del registro antes del cambio. NULL en INSERT.';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Secuencia e índices                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Secuencia e índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORLOG_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
@@ -96,12 +61,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. Auditoría en tablas que ya existían                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Las tablas creadas en v30-v33 ya nacieron con estas columnas. Aquí se
--- completan las que venían de v20-v28.
+-- 3. Auditoría en tablas que ya existían
 
 DECLARE
   PROCEDURE add_col(p_tabla VARCHAR2, p_ddl VARCHAR2) IS
@@ -124,12 +84,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- SEP_APP inserta y lee. NO se otorga UPDATE ni DELETE: el log es inmutable
--- desde la aplicación, y eso es justamente lo que lo hace útil como auditoría.
+-- 4. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT ON EVALUADORLOG     TO SEP_APP;
 GRANT SELECT         ON EVALUADORLOG     TO SEP_LECTOR;

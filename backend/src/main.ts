@@ -1,26 +1,7 @@
-// Forzar UTC en el proceso Node ANTES de cualquier import que toque fechas
-// (oracledb, TypeORM). Si Node corre en una TZ distinta a la BD, el driver
-// Oracle aplica una conversión incorrecta y las fechas llegan desplazadas.
-// Al fijar TZ=UTC, oracledb interpreta los DATE de la BD (que están en UTC)
-// como UTC, y la serialización JSON queda con `Z` correcto.
+// UTC antes de importar oracledb/TypeORM: si no, el driver desplaza los DATE
 process.env.TZ = 'UTC'
 
-// Devolver los CLOB como string completos (sin Lob objects). Sin esto,
-// para extraer el contenido hay que envolver con DBMS_LOB.SUBSTR(col, 4000, 1)
-// que revienta con ORA-06502 cuando el texto tiene caracteres multibyte
-// (tildes, ñ) que exceden 4000 bytes en el buffer VARCHAR2.
-//
-// Y los BLOB como Buffer completos, por la misma razón de fondo pero con una
-// consecuencia peor. Un BLOB llega como un stream que hay que leer DESPUÉS de
-// que la consulta terminó — y para entonces TypeORM ya devolvió la conexión al
-// pool. Mientras el archivo quepa en el prefetch del driver (16 KB) los datos
-// vienen con la fila y no se nota; por encima de eso hacen falta más viajes
-// contra esa misma conexión, y si otra petición ya se la llevó, la lectura
-// falla a mitad. Es una carrera: depende del tamaño del archivo, de cuántas
-// peticiones haya a la vez y de cuánto tarde la red contra la base. Por eso se
-// caía siempre la foto más pesada de la pantalla, y siempre la misma, mientras
-// las demás se veían bien. Pedirlos como Buffer los trae enteros con la fila y
-// no queda nada que leer después.
+// LOB completos con la fila: como Lob hay que leerlos después y TypeORM ya devolvió la conexión al pool
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const oracledb = require('oracledb') as {
   fetchAsString: number[]; CLOB: number
@@ -41,7 +22,7 @@ import { OracleErrorFilter } from './common/filters/oracle-error.filter'
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
 
-  // Aumentar límite para campos NCLOB grandes (análisis, eslabones, etc.)
+  // límite alto por los NCLOB grandes (análisis, eslabones)
   app.useBodyParser('json', { limit: '20mb' })
   app.useBodyParser('urlencoded', { extended: true, limit: '20mb' })
 
@@ -53,9 +34,7 @@ async function bootstrap() {
     }),
   )
 
-  // El de Oracle va PRIMERO en la lista y por eso se aplica de último: Nest
-  // recorre los filtros al revés, así que el de multer atrapa lo suyo y el de
-  // Oracle recoge todo lo demás en vez de dejarlo salir como 500 mudo.
+  // Nest recorre los filtros al revés: el de Oracle va primero para aplicarse de último
   app.useGlobalFilters(new OracleErrorFilter(), new UploadErrorFilter())
 
   app.enableCors({
@@ -66,9 +45,7 @@ async function bootstrap() {
       'http://127.0.0.1:8081',
     ],
     credentials: true,
-    // Content-Disposition va expuesto porque en desarrollo el front corre en
-    // otro origen: sin esto el navegador oculta el header y toda descarga se
-    // guarda con el nombre de respaldo del cliente, no con el del servidor.
+    // sin exponer Content-Disposition el navegador lo oculta cross-origin y la descarga pierde el nombre
     exposedHeaders: ['X-New-Token', 'Content-Disposition'],
   })
 
@@ -83,14 +60,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService)
   const port = configService.get<number>('BACKEND_PORT', 4000)
 
-  // Node cierra una conexión inactiva a los 5 segundos. nginx, que reutiliza
-  // conexiones contra este proceso, las mantiene hasta 60 — así que llegaba a
-  // mandar una petición por una conexión que Node estaba cerrando en ese mismo
-  // instante, y nginx lo veía como "upstream prematurely closed connection".
-  // Quien esperaba el archivo recibía un 200 con el cuerpo a medias.
-  //
-  // La regla es que este lado aguante MÁS que el proxy, nunca menos. 75 y 80
-  // segundos dejan margen sobre los 60 de nginx.
+  // deben superar el keepalive de nginx (60s) o nginx reusa conexiones que Node ya cerró
   const server = app.getHttpServer()
   server.keepAliveTimeout = 75_000
   server.headersTimeout = 80_000

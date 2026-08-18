@@ -1,29 +1,6 @@
 -- v30_evaluador_aprobacion.sql
--- ──────────────────────────────────────────────────────────────────────────
--- EVALUADORAPROBACION — autorización del jefe directo para que el evaluador
--- participe en un ciclo. Es la tabla que quedó pendiente del doc
--- 01-plan-ajustes-hallazgos-yerly.md (allí se planeó como v25, pero la v25
--- terminó siendo jefe estructurado + municipio).
---
--- Decisión de diseño respecto del plan original: se ancla a PARTICIPACIONID,
--- NO a (EVALUADORID, ANIO). Razón: en un año con dos participaciones
--- (ej. EVALUADOR en FCE p1 y ANALISTA en FEEC p2) el jefe autoriza cada una
--- por separado, y con clave (evaluador, año) solo cabría una.
---
--- La evidencia del correo (.msg de Outlook o PDF) va como BLOB, consistente
--- con el resto del módulo (foto, cédula, certificados). Tope 20 MB validado
--- en aplicación — los .msg con adjuntos pesan más que un PDF normal.
---
--- Deprecia: EVALUADOR.EVALUADORQUIENAPRUEBA (texto libre). Esa columna se
--- migra aquí y se dropea en la v36.
---
--- Idempotente. Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Tabla                                                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Tabla
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORAPROBACION (
@@ -58,10 +35,7 @@ COMMENT ON COLUMN EVALUADORAPROBACION.CORREOEVIDENCIA IS
 COMMENT ON COLUMN EVALUADORAPROBACION.APROBADOREMAIL IS
   'Correo del jefe que autoriza. Desnormalizado a propósito: puede ser alguien fuera de PERSONA.';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Secuencia e índices                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Secuencia e índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORAPROBACION_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
@@ -77,10 +51,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORAPROBACION     TO SEP_APP;
 GRANT SELECT                         ON EVALUADORAPROBACION     TO SEP_LECTOR;

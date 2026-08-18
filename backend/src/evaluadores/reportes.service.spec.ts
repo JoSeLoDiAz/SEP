@@ -1,21 +1,9 @@
 import ExcelJS from 'exceljs'
 import { ReportesEvaluadorService } from './reportes.service'
 
-/**
- * La sábana del banco tiene dos trampas silenciosas:
- *
- *   1. El listado de pantalla topa en 100 filas. Si la exportación no sube ese
- *      tope, sale un archivo de 100 filas que parece completo. Nadie lo nota.
- *   2. La hoja de ciclos concatena bloques de ids (límite de 1000 en el `IN`
- *      de Oracle), y cada bloque llega con su propio orden. Sin reordenar en
- *      memoria, la hoja queda mezclada solo cuando el banco pasa de 900.
- *
- * Ninguna de las dos revienta: producen un archivo válido y equivocado. Estas
- * pruebas leen el .xlsx celda por celda. No tocan Oracle.
- */
+// pruebas de la sábana del banco: leen el .xlsx celda por celda, sin Oracle
 
-// Personas inventadas. Nunca datos de evaluadores reales: un fixture acaba
-// en el repositorio y en el historial, y ahí no van cédulas ni nombres.
+// datos inventados: nunca cédulas ni nombres reales en un fixture
 const EVALUADORES = [
   {
     evaluadorId: 7, personaId: 70, identificacion: '10000001',
@@ -35,7 +23,7 @@ const EVALUADORES = [
   },
 ]
 
-/** A propósito desordenado: el service debe ordenarlo por año descendente. */
+// desordenado a propósito: el service debe ordenarlo por año descendente
 const CICLOS = [
   {
     identificacion: '10000002', evaluador: 'DIEGO ALBERTO NARANJO', anio: 2025, periodo: null,
@@ -58,8 +46,6 @@ function dataSourceFalso() {
   return {
     query: jest.fn(async (sql: string, params?: unknown[]) => {
       if (sql.includes('FROM EVALUADORPARTICIPACION pa')) {
-        // El fixture no simula Oracle; lo que importa es qué WHERE y qué binds
-        // se mandaron, y eso se comprueba leyendo `query.mock.calls`.
         void params
         return CICLOS
       }
@@ -68,7 +54,7 @@ function dataSourceFalso() {
   }
 }
 
-/** Registra con qué argumentos se pidió el listado, que es la mitad del contrato. */
+// guarda los argumentos con que se pidió el listado
 function evaluadoresFalso() {
   const llamadas: unknown[][] = []
   return {
@@ -113,11 +99,9 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
   })
 
   it('deja constancia de los filtros que produjeron el archivo', async () => {
-    // Sin filtros: hay que decirlo, no dejar la celda ambigua.
     expect(String(celda('1. Evaluadores', 1, 1))).toContain('2 registro(s)')
     expect(String(celda('1. Evaluadores', 1, 1))).toContain('sin filtros')
 
-    // Con filtros: deben quedar escritos, y el año va en el nombre del archivo.
     const otro = new ReportesEvaluadorService(dataSourceFalso() as never, evaluadoresFalso().servicio as never)
     const r = await otro.sabanaBanco('rios', { anio: 2026, sinCedula: true })
     const wb2 = new ExcelJS.Workbook()
@@ -141,9 +125,7 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
   })
 
   it('rotula el promedio como "ciclos válidos": excluye los estados negativos', () => {
-    // La hoja 2 muestra el valor crudo de cada ciclo, incluidos los revocados.
-    // Sin este rótulo, promediar la hoja 2 a mano no reproduce la hoja 1 y
-    // parece un error de cálculo.
+    // la hoja 2 trae el valor crudo, revocados incluidos: promediarla no da la hoja 1
     expect(String(celda('1. Evaluadores', 3, 11))).toContain('ciclos válidos')
     expect(celda('2. Ciclos', 1, 13)).toBe('Retroalim. recibida')
   })
@@ -168,9 +150,6 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
   })
 
   it('propaga los filtros de ciclo a la hoja 2, no solo a la selección de personas', async () => {
-    // Sin esto, filtrar por 2026 traía a las personas que participaron en 2026
-    // pero con TODOS sus años encima, y la tabla dinámica no cuadraba con la
-    // cabecera de la hoja 1.
     const ds2 = dataSourceFalso()
     await new ReportesEvaluadorService(ds2 as never, evaluadoresFalso().servicio as never)
       .sabanaBanco('', { anio: 2026, estadoCodigo: 'FINALIZADO' })
@@ -178,8 +157,7 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
     const [sql, params] = ds2.query.mock.calls[0] as [string, unknown[]]
     expect(sql).toContain('pa.ANIO =')
     expect(sql).toContain('es.CODIGO =')
-    // Los ids del IN van primero y los del filtro después: con bind posicional
-    // el orden ES el contrato, y numerarlos mal es un error mudo.
+    // bind posicional: el orden es el contrato, ids del IN primero
     expect(params).toEqual([...EVALUADORES.map(e => e.evaluadorId), 2026, 'FINALIZADO'])
     const ids = EVALUADORES.length
     expect(sql).toContain(`:${ids + 1}`)
@@ -201,7 +179,6 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
   })
 
   it('Evaluadores: los campos vacíos salen en blanco, nunca como "null"', () => {
-    // El segundo no tiene cargo, ni profesión, ni regional, ni promedio.
     for (const col of [5, 6, 7, 11]) {
       expect(celda('1. Evaluadores', 5, col)).toBe('')
     }
@@ -209,16 +186,15 @@ describe('ReportesEvaluadorService — sábana del banco', () => {
 
   it('Evaluadores: traduce los booleanos a Sí/NO y marca en rojo lo que falta', () => {
     const s = wb.getWorksheet('1. Evaluadores')!
-    // El primero: sin cédula, con foto, sin prueba vigente.
     expect(celda('1. Evaluadores', 4, 12)).toBe('NO')
     expect(celda('1. Evaluadores', 4, 13)).toBe('Sí')
     expect(celda('1. Evaluadores', 4, 14)).toBe('NO')
 
     const relleno = (f: number, c: number) =>
       (s.getRow(f).getCell(c).fill as ExcelJS.FillPattern | undefined)?.fgColor?.argb
-    expect(relleno(4, 12)).toBe('FFFFD6D6')  // sin cédula → resaltado
-    expect(relleno(4, 13)).toBeUndefined()   // con foto  → limpio
-    expect(relleno(4, 14)).toBe('FFFFD6D6')  // sin prueba vigente → resaltado
+    expect(relleno(4, 12)).toBe('FFFFD6D6')
+    expect(relleno(4, 13)).toBeUndefined()
+    expect(relleno(4, 14)).toBe('FFFFD6D6')
   })
 
   it('Evaluadores: distingue al inactivo', () => {

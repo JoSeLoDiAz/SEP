@@ -1,29 +1,4 @@
 -- v44_equipo_evaluador_mas_largo.sql
--- ──────────────────────────────────────────────────────────────────────────
--- "Equipo evaluador" no cabe en 120 caracteres.
---
--- El campo se diseñó para una etiqueta corta ("Equipo A"), pero en la práctica
--- las gestoras escriben la lista de quienes lo componen, que es información
--- útil y es lo que tienen a la mano cuando registran:
---
---   Aline Isabel Melo Henriquez, Andrea Suarez, Alejandro Arias Osorio,
---   Francisco Javier Arazo Gomez, Yesenia Lizeth Duarte Meza      -> 124
---
--- Con VARCHAR2(120) eso no entra, y Oracle responde ORA-12899, que llegaba a
--- la pantalla como "Internal server error": ni el campo, ni cuánto sobraba.
--- Ese mensaje ya está traducido en el backend, pero el límite real sigue
--- siendo demasiado corto para el uso que tiene.
---
--- Qué hace: lleva MESA y EQUIPOEVALUADOR a 500 caracteres. Solo AMPLÍA; en
--- Oracle un VARCHAR2 es de longitud variable, así que no ocupa más espacio
--- por estar declarado más grande, y ninguna fila existente se toca.
---
--- Si esta migración se corre tarde no se rompe nada: hasta entonces el
--- backend dice exactamente qué campo se pasó y por cuántos caracteres, y con
--- eso se puede acortar y guardar.
---
--- Idempotente. Ejecutar como SEPLOCAL en SQL Developer (lleva DDL).
--- ──────────────────────────────────────────────────────────────────────────
 
   SET SERVEROUTPUT ON;
 
@@ -50,12 +25,7 @@
   END;
   /
 
-
-  -- ╔════════════════════════════════════════════════════════════════════════╗
-  -- ║ Verificación                                                            ║
-  -- ╚════════════════════════════════════════════════════════════════════════╝
-  -- Se comprueba el HECHO: que el texto que no cabía ahora entra. La fila de
-  -- prueba se deshace.
+  -- Verificación
 
   DECLARE
     v_len  NUMBER;

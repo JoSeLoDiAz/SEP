@@ -4,24 +4,15 @@ import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
 import { ImportarProyectoService, PreviewImportacion } from '../importar-proyecto/importar-proyecto.service'
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ Banco de proyectos GUARDADOS de una convocatoria (sin importarlos).        ║
-// ║                                                                            ║
-// ║ Reutiliza el parseo/preview del importador para obtener TODO el proyecto   ║
-// ║ (PreviewImportacion) y lo persiste como JSON (CLOB) en CONVPROYGUARDADO,   ║
-// ║ junto con columnas clave para filtrar y reportar. Permite ver un reporte   ║
-// ║ general por convocatoria y descargar una sábana (Excel multi-hoja) de      ║
-// ║ acciones de formación, unidades temáticas, actividades y rubros.           ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// banco de proyectos guardados de una convocatoria.
 
 type AF = PreviewImportacion['afs'][number]
 type Rubro = AF['rubros'][number]
 
 const n0 = (x: unknown) => Number(x) || 0
 const s = (x: unknown) => (x == null ? '' : String(x)).trim()
-// Elemento i de un arreglo como texto (para expandir en columnas 1..N).
 const at = (a: unknown, i: number) => s(Array.isArray(a) ? a[i] : undefined)
-// Fecha serial de Excel → dd/mm/aaaa (si no es serial, devuelve el texto tal cual).
+// 25569: dias entre el epoch de excel y el de unix; si no es serial, devuelve el texto.
 const fmtFecha = (v: unknown): string => {
   const str = s(v)
   if (!str) return ''
@@ -121,8 +112,7 @@ export class ConvocatoriaProyectosService {
     private readonly importar: ImportarProyectoService,
   ) {}
 
-  // node-oracledb puede devolver los CLOB como Lob (stream) o como string según
-  // la configuración; leemos ambos casos de forma segura.
+  // node-oracledb entrega el CLOB como Lob o como string segun la configuracion.
   private async readClob(v: unknown): Promise<string> {
     if (v == null) return ''
     if (typeof v === 'string') return v
@@ -131,7 +121,6 @@ export class ConvocatoriaProyectosService {
     return String(v)
   }
 
-  // ── Guardar un proyecto (re-parsea el .xlsx y persiste el JSON completo) ────
   async guardar(buffer: Buffer, convocatoriaId: number, usuarioId?: number) {
     const preview = await this.importar.preview(buffer, convocatoriaId)
     const pres = preview.proyecto?.presupuesto
@@ -142,9 +131,7 @@ export class ConvocatoriaProyectosService {
     )
     const id = Number(idRow[0].id)
 
-    // El CLOB se inserta por trozos (TO_CLOB(:n) || …) porque node-oracledb liga los
-    // strings como VARCHAR2. Para ser portable incluso en BD con MAX_STRING_SIZE=STANDARD
-    // (límite 4000 bytes) usamos trozos de 900 chars (≤ 3600 bytes aun en UTF-8 multibyte).
+    // trozos de 900 chars: node-oracledb liga strings como VARCHAR2 (tope 4000 bytes).
     const CHUNK = 900
     const chunks: string[] = []
     for (let i = 0; i < json.length; i += CHUNK) chunks.push(json.slice(i, i + CHUNK))
@@ -174,7 +161,6 @@ export class ConvocatoriaProyectosService {
     return { id, nombreProyecto: s(preview.proyecto?.nombre), razonSocial: s(preview.basicos?.razonSocial) }
   }
 
-  // ── Listado filtrable de proyectos guardados ────────────────────────────────
   async listar(convocatoriaId?: number, q?: string): Promise<FilaLista[]> {
     const params: unknown[] = []
     let where = '1 = 1'
@@ -214,7 +200,6 @@ export class ConvocatoriaProyectosService {
     }))
   }
 
-  // ── Convocatorias con conteo de proyectos guardados (para el filtro) ────────
   async convocatorias() {
     return this.dataSource.query(
       `SELECT c.CONVOCATORIAID           AS "id",
@@ -226,7 +211,6 @@ export class ConvocatoriaProyectosService {
     )
   }
 
-  // ── Resumen agregado de una convocatoria ────────────────────────────────────
   async resumen(convocatoriaId?: number) {
     const params: unknown[] = []
     let where = '1 = 1'
@@ -247,7 +231,6 @@ export class ConvocatoriaProyectosService {
     }
   }
 
-  // ── Detalle: devuelve el PreviewImportacion completo (para el reporte) ──────
   async detalle(id: number): Promise<PreviewImportacion> {
     const rows = await this.dataSource.query(
       `SELECT DATOSJSON AS "datos" FROM CONVPROYGUARDADO WHERE GUARDADOID = :1`,
@@ -270,7 +253,6 @@ export class ConvocatoriaProyectosService {
     return { ok: true }
   }
 
-  // Carga y parsea el JSON de los proyectos guardados (con su id de guardado).
   private async cargarProyectos(convocatoriaId?: number): Promise<Array<{ id: number; p: PreviewImportacion }>> {
     const params: unknown[] = []
     let where = '1 = 1'
@@ -279,15 +261,13 @@ export class ConvocatoriaProyectosService {
       `SELECT GUARDADOID AS "id", DATOSJSON AS "datos" FROM CONVPROYGUARDADO WHERE ${where} ORDER BY GUARDADOID`,
       params,
     )
-    // Los CLOB se leen/parsean en paralelo para acelerar la descarga.
     const out = await Promise.all((rows as Array<{ id: number; datos: unknown }>).map(async (r) => {
       try { return { id: Number(r.id), p: JSON.parse(await this.readClob(r.datos)) as PreviewImportacion } } catch { return null }
     }))
     return out.filter((x): x is { id: number; p: PreviewImportacion } => x !== null)
   }
 
-  // Aplica los filtros: proponente a nivel proyecto; evento/modalidad/sector a
-  // nivel AF. Devuelve los proyectos con SOLO sus AF que pasan el filtro.
+  // proponente filtra el proyecto entero; evento/modalidad/sector filtran cada AF.
   private aplicarFiltros(
     proys: Array<{ id: number; p: PreviewImportacion }>, f: AnaliticaFiltros,
   ): Array<{ id: number; p: PreviewImportacion; afs: AF[] }> {
@@ -314,7 +294,6 @@ export class ConvocatoriaProyectosService {
     return res
   }
 
-  // Totales + desgloses (por evento, modalidad y proponente) del set filtrado.
   private agregados(filtrados: Array<{ p: PreviewImportacion; afs: AF[] }>) {
     const tot = {
       proyectos: 0, afs: 0, unidades: 0, grupos: 0, beneficiarios: 0, valorTotal: 0, cofinSena: 0,
@@ -354,9 +333,7 @@ export class ConvocatoriaProyectosService {
     return { totales: tot, porEvento: arr(byEvento), porModalidad: arr(byModalidad), porProponente: arr(byProponente) }
   }
 
-  // Presupuesto DECLARADO (Datos_Presupuesto de cada proyecto) + cobertura territorial.
-  // Se calcula por proyecto (no por rubro) porque los topes, la transferencia y los
-  // beneficiarios de transferencia son conceptos a nivel de presupuesto del proyecto.
+  // usa el presupuesto declarado, no la suma de rubros: topes y transferencia son por proyecto.
   private enriquecido(filtrados: Array<{ p: PreviewImportacion; afs: AF[] }>) {
     const pres = {
       valorAFs: 0, gastosOperacion: 0, valorTransferencia: 0, beneficiariosTransferencia: 0,
@@ -411,15 +388,11 @@ export class ConvocatoriaProyectosService {
     }
   }
 
-  // ── Analítica filtrable: "cuánto de cofinanciación solicitan", con filtros por
-  // proponente/evento/modalidad/sector y desglose (ranking de quién solicita más).
-  // Incluye presupuesto declarado (topes, transferencia) y cobertura territorial.
   async analitica(f: AnaliticaFiltros) {
     const filtrados = this.aplicarFiltros(await this.cargarProyectos(f.convocatoriaId), f)
     return { ...this.agregados(filtrados), ...this.enriquecido(filtrados) }
   }
 
-  // ── Listado plano de TODAS las acciones de formación (con su proyecto) ──────
   async acciones(f: AnaliticaFiltros): Promise<AccionFila[]> {
     const filtrados = this.aplicarFiltros(await this.cargarProyectos(f.convocatoriaId), f)
     const out: AccionFila[] = []
@@ -452,7 +425,7 @@ export class ConvocatoriaProyectosService {
     return out
   }
 
-  // ── Sábana Excel: hojas normalizadas tipo Datos_* del formulador ────────────
+  // hojas normalizadas tipo Datos_* del formulador.
   async exportarExcel(f: AnaliticaFiltros = {}): Promise<Buffer> {
     const filtrados = this.aplicarFiltros(await this.cargarProyectos(f.convocatoriaId), f)
     const ag = this.agregados(filtrados)
@@ -483,7 +456,7 @@ export class ConvocatoriaProyectosService {
     const utSheet: Record<string, unknown>[] = []
     const coberturaSheet: Record<string, unknown>[] = []
     const presupuestoSheet: Record<string, unknown>[] = []
-    // Rubros con claves de orden (proponente → AF → id de rubro).
+    // prop/af/id son solo claves de ordenamiento, no salen al excel.
     const rubrosRows: Array<{ prop: string; af: number; id: number; row: Record<string, unknown> }> = []
 
     for (const { p, afs: afsMatch } of filtrados) {
@@ -491,7 +464,6 @@ export class ConvocatoriaProyectosService {
       const nit = s(b?.nit)
       const razon = s(b?.razonSocial)
 
-      // ── Datos básicos ──
       basicosSheet.push({
         'NÚMERO DE IDENTIFICACIÓN': s(b?.nit),
         'DÍGITO VERIFICACIÓN': s(b?.digitoVerificacion),
@@ -518,7 +490,6 @@ export class ConvocatoriaProyectosService {
         'TIPO DE IDENTIFICACIÓN': s(b?.tipoIdentificacion),
       })
 
-      // ── Datos contacto ──
       const rl = c?.representanteLegal, k1 = c?.contacto1, ks = c?.contactoSustenta
       contactoSheet.push({
         'NIT': nit,
@@ -540,7 +511,6 @@ export class ConvocatoriaProyectosService {
         'TELÉFONO/CELULAR PERSONA QUE SUSTENTA': s(ks?.telefono),
       })
 
-      // ── Datos generales ──
       generalesSheet.push({
         'NIT': nit,
         'Proponente': razon,
@@ -563,7 +533,6 @@ export class ConvocatoriaProyectosService {
         'INTERACCIONES CON OTROS ACTORES': s(g?.interacciones),
       })
 
-      // ── Diagnóstico ──
       for (const d of p.diagnosticos ?? []) {
         const h = d.herramientas ?? []
         diagnosticoSheet.push({
@@ -584,7 +553,6 @@ export class ConvocatoriaProyectosService {
         })
       }
 
-      // ── Necesidades ──
       for (const ne of p.necesidades ?? []) {
         necesidadesSheet.push({
           'NIT': nit,
@@ -598,12 +566,10 @@ export class ConvocatoriaProyectosService {
 
       for (const af of afsMatch) {
         const fin = finanzasAF(af)
-        // ── Datos AF (en el orden del reporte PDF: información → evento → grupos →
-        //    perfil → sectores → alineación → material) ──
+        // el orden de las columnas sigue el del reporte PDF.
         afSheet.push({
           'NIT': nit,
           'Proponente': razon,
-          // Información de la acción de formación
           'CONSECUTIVO DE LA ACCIÓN DE FORMACIÓN': n0(af.consecutivo),
           'NOMBRE DE LA ACCIÓN DE FORMACIÓN': s(af.nombre),
           'CÓDIGO DE LA NECESIDAD': af.codigoNecesidad == null ? '' : n0(af.codigoNecesidad),
@@ -615,18 +581,15 @@ export class ConvocatoriaProyectosService {
           'EFECTOS DEL PROBLEMA O NECESIDAD': s(af.efectos),
           'OBJETIVO(S) DE LA ACCIÓN DE FORMACIÓN': s(af.objetivos),
           'JUSTIFICACIÓN BENEFICIARIOS TALLER-PUESTO DE TRABAJO REAL': s(af.justificacionTallerPuesto),
-          // Datos del evento
           'EVENTO DE FORMACIÓN': s(af.eventoFormacion),
           'MODALIDAD DE FORMACIÓN': s(af.modalidadFormacion),
           'METODOLOGÍA DE FORMACIÓN': s(af.metodologia),
-          // Grupos y beneficiarios
           'NÚMERO DE HORAS POR GRUPO': n0(af.horasPorGrupo),
           'NÚMERO DE GRUPOS': n0(af.numeroGrupos),
           'BENEFICIARIOS PRESENCIALES POR GRUPO': n0(af.beneficiariosPresenciales),
           'BENEFICIARIOS SINCRÓNICOS POR GRUPO': n0(af.beneficiariosSincronicos),
           'TOTAL DE HORAS DE LA AF': fin.totalHoras,
           'TOTAL DE BENEFICIARIOS DE LA AF': fin.totalBenef,
-          // Perfil de los beneficiarios
           'AREA 1': at(af.areas, 0), 'AREA 2': at(af.areas, 1), 'AREA 3': at(af.areas, 2), 'AREA 4': at(af.areas, 3), 'AREA 5': at(af.areas, 4),
           'JUSTIFICACIÓN ÁREAS FUNCIONALES': s(af.justificacionAreas),
           'NIVEL 1': at(af.niveles, 0), 'NIVEL 2': at(af.niveles, 1), 'NIVEL 3': at(af.niveles, 2),
@@ -651,7 +614,6 @@ export class ConvocatoriaProyectosService {
           'JUSTIFICACIÓN TRABAJADORES ECONOMÍA CAMPESINA': s(af.trabajadoresCampesinosTexto),
           'NÚMERO DE TRABAJADORES ECONOMÍA POPULAR': n0(af.trabajadoresPopular),
           'JUSTIFICACIÓN TRABAJADORES ECONOMÍA POPULAR': s(af.trabajadoresPopularTexto),
-          // Sectores y subsectores
           'SECTOR 1': at(af.sectoresPertenecen, 0), 'SECTOR 2': at(af.sectoresPertenecen, 1), 'SECTOR 3': at(af.sectoresPertenecen, 2),
           'SECTOR 4': at(af.sectoresPertenecen, 3), 'SECTOR 5': at(af.sectoresPertenecen, 4),
           'SUBSECTOR 1': at(af.subsectoresPertenecen, 0), 'SUBSECTOR 2': at(af.subsectoresPertenecen, 1), 'SUBSECTOR 3': at(af.subsectoresPertenecen, 2),
@@ -663,7 +625,6 @@ export class ConvocatoriaProyectosService {
           'CLASIFICACIÓN POR SUBSECTOR 3': at(af.subsectoresBeneficia, 2), 'CLASIFICACIÓN POR SUBSECTOR 4': at(af.subsectoresBeneficia, 3),
           'CLASIFICACIÓN POR SUBSECTOR 5': at(af.subsectoresBeneficia, 4),
           'JUSTIFICACIÓN SECTORES Y SUB-SECTORES': s(af.justificacionSectores),
-          // Alineación y resultados
           'COMPONENTE ALINEACIÓN': s(af.componenteAlineacion),
           'DESCRIPCIÓN DE LA ALINEACIÓN': s(af.descripcionAlineacion),
           'JUSTIFICACIÓN ALINEACIÓN': s(af.justificacionAlineacion),
@@ -674,7 +635,6 @@ export class ConvocatoriaProyectosService {
           'IMPACTO PRODUCTIVIDAD 1': at(af.impactosProductividad, 0), 'IMPACTO PRODUCTIVIDAD 2': at(af.impactosProductividad, 1),
           'IMPACTO PRODUCTIVIDAD 3': at(af.impactosProductividad, 2), 'IMPACTO PRODUCTIVIDAD 4': at(af.impactosProductividad, 3),
           'IMPACTO PRODUCTIVIDAD 5': at(af.impactosProductividad, 4),
-          // Material de formación
           'AMBIENTE DE APRENDIZAJE': s(af.ambiente),
           'MATERIAL DE FORMACIÓN': s(af.material),
           'JUSTIFICACIÓN SI APLICA (MATERIAL)': s(af.justificacionSiAplica),
@@ -686,7 +646,6 @@ export class ConvocatoriaProyectosService {
           'VALIDACIÓN PRESUPUESTO AF': s(af.validacionPresupuesto),
         })
 
-        // ── Datos UT ──
         for (const u of af.uts ?? []) {
           const pf = u.perfiles ?? []
           utSheet.push({
@@ -714,7 +673,6 @@ export class ConvocatoriaProyectosService {
           })
         }
 
-        // ── Datos cobertura ──
         for (const cob of af.cobertura ?? []) {
           const dep = cob.departamentos ?? []
           const row: Record<string, unknown> = {
@@ -734,7 +692,6 @@ export class ConvocatoriaProyectosService {
           coberturaSheet.push(row)
         }
 
-        // ── Datos rubros ──
         for (const r of af.rubros ?? []) {
           const id = Number(r.idRubro)
           rubrosRows.push({
@@ -767,7 +724,6 @@ export class ConvocatoriaProyectosService {
         }
       }
 
-      // ── Datos presupuesto ──
       presupuestoSheet.push({
         'NIT': nit,
         'Proponente': razon,
@@ -788,7 +744,6 @@ export class ConvocatoriaProyectosService {
       })
     }
 
-    // Orden final de los rubros: proponente → acción de formación → id de rubro.
     rubrosRows.sort((a, b) => a.prop.localeCompare(b.prop) || (a.af - b.af) || (a.id - b.id))
     const rubrosSheet = rubrosRows.map(x => x.row)
 

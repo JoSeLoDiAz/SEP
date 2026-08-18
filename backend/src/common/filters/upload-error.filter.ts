@@ -1,21 +1,13 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common'
 import type { Response } from 'express'
 
-/**
- * Traduce a español los mensajes crudos que emite Multer cuando un upload no
- * cumple algún límite (`limits.fileSize`, etc.). El resto de HttpException se
- * re-emite tal cual para preservar el comportamiento estándar de Nest.
- *
- * Mensajes traducidos:
- *   - "File too large"  → "El archivo es demasiado grande. El máximo permitido es 8 MB."
- */
+// traduce a español los mensajes crudos de multer
 @Catch(HttpException)
 export class UploadErrorFilter implements ExceptionFilter {
   catch(exception: HttpException, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>()
 
-    // Igual que en el filtro de Oracle: sobre una respuesta ya enviada no se
-    // escribe. Hacerlo lanza ERR_HTTP_HEADERS_SENT y corta lo que iba saliendo.
+    // escribir sobre una respuesta ya enviada lanza ERR_HTTP_HEADERS_SENT
     if (response.headersSent) return
 
     const status = exception.getStatus()
@@ -32,7 +24,7 @@ export class UploadErrorFilter implements ExceptionFilter {
       })
     }
 
-    // Passthrough — replica el shape default de Nest.
+    // passthrough: replica el shape default de nest
     if (typeof orig === 'string') {
       return response.status(status).json({ statusCode: status, message: orig })
     }

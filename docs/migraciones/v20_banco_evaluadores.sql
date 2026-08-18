@@ -1,43 +1,8 @@
 -- v20_banco_evaluadores.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Banco de Evaluadores: 3 catálogos + 6 tablas principales.
---
--- Diseño basado en docs/evaluador/00-propuesta-modulo-evaluadores.md
---
---   1) Catálogos (gestionados desde el panel admin):
---        ROLEVALUADOR   - Roles que cumple un evaluador en cada evaluación
---                         (EVALUADOR, ANALISTA, COORDINADOR, etc.)
---        PROCESOEVAL    - Procesos de evaluación (FCE, FEEC, ...)
---        TIPOESTUDIO    - Tipos de estudio (HV, Pregrado, Posgrado, ...)
---
---   2) Banco:
---        EVALUADOR                    - Extensión 1:1 de PERSONA con datos
---                                       específicos del banco. La foto va
---                                       en BLOB en BD.
---        EVALUADORPARTICIPACION       - Historial por año/proceso (reemplaza
---                                       las 64 columnas repetidas del Excel).
---        EVALUADORESTUDIO             - HV, diplomas, certificados (PDF).
---        EVALUADOREXPERIENCIA         - Certificados laborales (PDF).
---        EVALUADORTIC                 - Formación TIC complementaria (PDF).
---        EVALUADORPRUEBACONOCIMIENTO  - Pruebas anuales por evaluador.
---
--- Notas:
---   - PERSONA, USUARIO, REGIONAL, CENTROFORMACION, CIUDAD y TIPOEVENTO ya
---     existen — el módulo se apalanca en ellas, no las duplica.
---   - El evaluador NO inicia sesión en el SEP en la fase inicial. La FK a
---     USUARIO queda prevista vía PERSONA por si más adelante se decide.
---   - MODALIDADPART se modela como VARCHAR2 ('PRESENCIAL', 'PAT', 'VIRTUAL')
---     hasta confirmar si existe una tabla MODALIDAD reutilizable.
---   - Tope de archivos sugerido: 8 MB por documento (validado a nivel
---     aplicación, no en BD).
--- ──────────────────────────────────────────────────────────────────────────
 
+-- 1. CATÁLOGOS
 
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. CATÁLOGOS                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
-
--- ── ROLEVALUADOR ──────────────────────────────────────────────────────────
+-- ROLEVALUADOR
 CREATE TABLE ROLEVALUADOR (
   ROLEVALUADORID      NUMBER         NOT NULL,
   ROLEVALUADORNOMBRE  VARCHAR2(80)   NOT NULL,
@@ -53,7 +18,7 @@ INSERT INTO ROLEVALUADOR (ROLEVALUADORID, ROLEVALUADORNOMBRE) VALUES (ROLEVALUAD
 INSERT INTO ROLEVALUADOR (ROLEVALUADORID, ROLEVALUADORNOMBRE) VALUES (ROLEVALUADOR_SEQ.NEXTVAL, 'ANALISTA');
 INSERT INTO ROLEVALUADOR (ROLEVALUADORID, ROLEVALUADORNOMBRE) VALUES (ROLEVALUADOR_SEQ.NEXTVAL, 'COORDINADOR');
 
--- ── PROCESOEVAL ───────────────────────────────────────────────────────────
+-- PROCESOEVAL
 CREATE TABLE PROCESOEVAL (
   PROCESOID      NUMBER         NOT NULL,
   PROCESONOMBRE  VARCHAR2(80)   NOT NULL,
@@ -68,7 +33,7 @@ CREATE SEQUENCE PROCESOEVAL_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 INSERT INTO PROCESOEVAL (PROCESOID, PROCESONOMBRE, PROCESODESC) VALUES (PROCESOEVAL_SEQ.NEXTVAL, 'FCE',  'Formación Continua Especializada');
 INSERT INTO PROCESOEVAL (PROCESOID, PROCESONOMBRE, PROCESODESC) VALUES (PROCESOEVAL_SEQ.NEXTVAL, 'FEEC', 'Formación Especializada Empresa Campesina');
 
--- ── TIPOESTUDIO ───────────────────────────────────────────────────────────
+-- TIPOESTUDIO
 CREATE TABLE TIPOESTUDIO (
   TIPOESTUDIOID      NUMBER         NOT NULL,
   TIPOESTUDIONOMBRE  VARCHAR2(80)   NOT NULL,
@@ -86,10 +51,7 @@ INSERT INTO TIPOESTUDIO (TIPOESTUDIOID, TIPOESTUDIONOMBRE) VALUES (TIPOESTUDIO_S
 INSERT INTO TIPOESTUDIO (TIPOESTUDIOID, TIPOESTUDIONOMBRE) VALUES (TIPOESTUDIO_SEQ.NEXTVAL, 'CERTIFICADO');
 INSERT INTO TIPOESTUDIO (TIPOESTUDIOID, TIPOESTUDIONOMBRE) VALUES (TIPOESTUDIO_SEQ.NEXTVAL, 'OTRO');
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. EVALUADOR — extensión 1:1 de PERSONA                                 ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. EVALUADOR — extensión 1:1 de PERSONA
 
 CREATE TABLE EVALUADOR (
   EVALUADORID            NUMBER         NOT NULL,
@@ -116,10 +78,7 @@ CREATE INDEX IX_EVALUADOR_ACTIVO ON EVALUADOR (EVALUADORACTIVO, EVALUADORID);
 
 CREATE SEQUENCE EVALUADOR_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. EVALUADORPARTICIPACION — historial por año/proceso (1:N)             ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. EVALUADORPARTICIPACION — historial por año/proceso (1:N)
 
 CREATE TABLE EVALUADORPARTICIPACION (
   PARTICIPACIONID        NUMBER         NOT NULL,
@@ -151,10 +110,7 @@ CREATE INDEX IX_PART_EVAL_ANIO ON EVALUADORPARTICIPACION (EVALUADORID, ANIO DESC
 
 CREATE SEQUENCE EVALUADORPARTICIPACION_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. EVALUADORESTUDIO — HV, diplomas y certificados académicos            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 4. EVALUADORESTUDIO — HV, diplomas y certificados académicos
 
 CREATE TABLE EVALUADORESTUDIO (
   ESTUDIOID         NUMBER         NOT NULL,
@@ -178,10 +134,7 @@ CREATE INDEX IX_ESTUDIO_EVAL ON EVALUADORESTUDIO (EVALUADORID);
 
 CREATE SEQUENCE EVALUADORESTUDIO_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 5. EVALUADOREXPERIENCIA — certificados laborales                        ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 5. EVALUADOREXPERIENCIA — certificados laborales
 
 CREATE TABLE EVALUADOREXPERIENCIA (
   EXPERIENCIAID    NUMBER         NOT NULL,
@@ -202,10 +155,7 @@ CREATE INDEX IX_EXP_EVAL ON EVALUADOREXPERIENCIA (EVALUADORID);
 
 CREATE SEQUENCE EVALUADOREXPERIENCIA_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 6. EVALUADORTIC — formación TIC complementaria                          ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 6. EVALUADORTIC — formación TIC complementaria
 
 CREATE TABLE EVALUADORTIC (
   TICID            NUMBER         NOT NULL,
@@ -226,10 +176,7 @@ CREATE INDEX IX_TIC_EVAL ON EVALUADORTIC (EVALUADORID);
 
 CREATE SEQUENCE EVALUADORTIC_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 7. EVALUADORPRUEBACONOCIMIENTO — pruebas anuales                        ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 7. EVALUADORPRUEBACONOCIMIENTO — pruebas anuales
 
 CREATE TABLE EVALUADORPRUEBA (
   PRUEBAID            NUMBER         NOT NULL,
@@ -255,12 +202,9 @@ CREATE INDEX IX_PRUEBA_EVAL_ANIO ON EVALUADORPRUEBA (EVALUADORID, ANIO DESC);
 
 CREATE SEQUENCE EVALUADORPRUEBA_SEQ START WITH 1 INCREMENT BY 1 NOCACHE;
 
+-- 8. GRANTS y SINÓNIMOS
 
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 8. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
-
--- ── Catálogos ─────────────────────────────────────────────────────────────
+-- Catálogos
 GRANT SELECT, INSERT, UPDATE, DELETE ON ROLEVALUADOR     TO SEP_APP;
 GRANT SELECT                         ON ROLEVALUADOR     TO SEP_LECTOR;
 GRANT SELECT                         ON ROLEVALUADOR_SEQ TO SEP_APP;
@@ -273,7 +217,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TIPOESTUDIO      TO SEP_APP;
 GRANT SELECT                         ON TIPOESTUDIO      TO SEP_LECTOR;
 GRANT SELECT                         ON TIPOESTUDIO_SEQ  TO SEP_APP;
 
--- ── Banco ─────────────────────────────────────────────────────────────────
+-- Banco
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADOR        TO SEP_APP;
 GRANT SELECT                         ON EVALUADOR        TO SEP_LECTOR;
 GRANT SELECT                         ON EVALUADOR_SEQ    TO SEP_APP;
@@ -298,7 +242,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORPRUEBA      TO SEP_APP;
 GRANT SELECT                         ON EVALUADORPRUEBA      TO SEP_LECTOR;
 GRANT SELECT                         ON EVALUADORPRUEBA_SEQ  TO SEP_APP;
 
--- ── Sinónimos para SEP_APP ────────────────────────────────────────────────
+-- Sinónimos para SEP_APP
 CREATE OR REPLACE SYNONYM SEP_APP.ROLEVALUADOR              FOR SEPLOCAL.ROLEVALUADOR;
 CREATE OR REPLACE SYNONYM SEP_APP.ROLEVALUADOR_SEQ          FOR SEPLOCAL.ROLEVALUADOR_SEQ;
 CREATE OR REPLACE SYNONYM SEP_APP.PROCESOEVAL               FOR SEPLOCAL.PROCESOEVAL;
@@ -319,7 +263,7 @@ CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORTIC_SEQ          FOR SEPLOCAL.EVALUAD
 CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORPRUEBA           FOR SEPLOCAL.EVALUADORPRUEBA;
 CREATE OR REPLACE SYNONYM SEP_APP.EVALUADORPRUEBA_SEQ       FOR SEPLOCAL.EVALUADORPRUEBA_SEQ;
 
--- ── Sinónimos para SEP_LECTOR ─────────────────────────────────────────────
+-- Sinónimos para SEP_LECTOR
 CREATE OR REPLACE SYNONYM SEP_LECTOR.ROLEVALUADOR              FOR SEPLOCAL.ROLEVALUADOR;
 CREATE OR REPLACE SYNONYM SEP_LECTOR.ROLEVALUADOR_SEQ          FOR SEPLOCAL.ROLEVALUADOR_SEQ;
 CREATE OR REPLACE SYNONYM SEP_LECTOR.PROCESOEVAL               FOR SEPLOCAL.PROCESOEVAL;

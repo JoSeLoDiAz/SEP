@@ -1,4 +1,3 @@
-// ── Respuesta genérica de la API ──
 export interface ApiResponse<T> {
   data: T
   message?: string
@@ -12,7 +11,6 @@ export interface PaginatedResponse<T> {
   limit: number
 }
 
-// ── Usuario ──
 export interface User {
   id: number
   nombre: string
@@ -21,7 +19,6 @@ export interface User {
   activo: boolean
 }
 
-// ── Certificado ──
 export interface CertificadoRow {
   consecutivo: number
   empresaRazonSocial: string
@@ -32,7 +29,6 @@ export interface CertificadoRow {
   proyectoId: number
 }
 
-// ── Evento (público) ──
 export interface Evento {
   eventoId: number
   eventoNombre: string
@@ -42,7 +38,6 @@ export interface Evento {
   eventoActivo: boolean
 }
 
-// ── Persona (resultado de búsqueda en inscripción) ──
 export interface PersonaBusqueda {
   personaId: number
   personaNombres: string
@@ -62,7 +57,6 @@ export interface PersonaBusqueda {
   personaHabeasData: boolean
 }
 
-// ── Postulación de la persona ──
 export interface PostulacionData {
   postulacionAno: number
   postulacionEdad: number
@@ -76,7 +70,6 @@ export interface PostulacionData {
   perfilTrasferenciaId: number
 }
 
-// ── Empresa beneficiaria ──
 export interface EmpresaBeneficiaria {
   beneficiarioEmpresaId: number
   beneficiarioEmpresaNombre: string
@@ -85,13 +78,11 @@ export interface EmpresaBeneficiaria {
   tamanoEmpresaNombre: string
 }
 
-// ── Estado global del wizard de inscripción ──
+// estado global del wizard de inscripción
 export interface RegistroState {
-  // ── Identidad ──
   tipoIdentificacion: string
   identificacion: string
 
-  // ── Persona ──
   personaId: number | null
   maskedNombreCompleto: string
   personaNombres: string
@@ -107,7 +98,6 @@ export interface RegistroState {
   personaDireccion: string
   personaEmail: string
 
-  // ── Empresa ──
   tipoDocEmpresa: string
   beneficiarioEmpresaNumero: string
   beneficiarioEmpresaId: number | null
@@ -115,7 +105,6 @@ export interface RegistroState {
   tamanoEmpresaId: number | null
   tamanoEmpresaNombre: string
 
-  // ── Postulación ──
   postulacionAno: number
   postulacionEdad: number
   rangoEdadId: number
@@ -123,11 +112,10 @@ export interface RegistroState {
   caracterizacionId: string
   nivelOcupacionalId: string
 
-  // ── Conferencia ──
   conferenciaId: string
   validarConferencia: boolean
 
-  // ── Control interno del wizard ──
+  // control interno del wizard
   validarPosAno: number   // 1=persona nueva, 2=existente sin postulación, 3=con postulación
   valiarRegistro: number
 }

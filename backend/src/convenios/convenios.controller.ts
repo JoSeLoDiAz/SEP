@@ -21,27 +21,18 @@ const PERFIL_COORD_INTERV = 10
 export class ConveniosController {
   constructor(private readonly conveniosService: ConveniosService) {}
 
-  // ── Listado del proponente ────────────────────────────────────────────────
-
   @Get('mios')
   listarMios(@CurrentUser() user: JwtUser) {
     return this.conveniosService.listarMisConvenios(user.email)
   }
 
-  /** Indicador booleano que el frontend usa para decidir si muestra
-   *  "Conviniente" (cuando hay convenios) o "Gremio / Empresa / Asociación"
-   *  (cuando no los hay) en el header del proponente. */
+  // el front lo usa para titular al proponente: "Conviniente" o "Gremio / Empresa / Asociación"
   @Get('mios/tiene')
   tieneConvenios(@CurrentUser() user: JwtUser) {
     return this.conveniosService.empresaTieneConvenios(user.email)
   }
 
-  // ── Detalle ───────────────────────────────────────────────────────────────
-  //
-  // Las rutas `/convenios/:proyectoId/...` se resuelven por el id del PROYECTO
-  // (no del convenio), porque la relación es 1-a-1 y el conviniente conoce su
-  // proyecto pero no el id interno del convenio.
-
+  // :proyectoId es el id del PROYECTO, no del convenio (relación 1-a-1)
   @Get(':proyectoId')
   detalle(
     @CurrentUser() user: JwtUser,
@@ -49,8 +40,6 @@ export class ConveniosController {
   ) {
     return this.conveniosService.getDetalleConvenio(user.email, proyectoId, user.perfilId)
   }
-
-  // ── Empresas beneficiarias (catálogo global, no por proyecto) ─────────────
 
   @Get('beneficiarios/empresas')
   listarEmpresasBeneficiarias() {
@@ -76,8 +65,6 @@ export class ConveniosController {
     return this.conveniosService.guardarEmpresaBeneficiaria(dto)
   }
 
-  // ── Beneficiarios: catálogos (géneros, niveles, etc.) ─────────────────────
-
   @Get('beneficiarios/catalogos')
   getCatalogosBeneficiario() {
     return this.conveniosService.getCatalogosBeneficiario()
@@ -87,8 +74,6 @@ export class ConveniosController {
   getCiudadesPorDepartamento(@Query('departamentoId') deptId?: string) {
     return this.conveniosService.getCiudadesPorDepartamento(Number(deptId) || 0)
   }
-
-  // ── Beneficiarios: persona + postulación ──────────────────────────────────
 
   @Get(':proyectoId/beneficiarios/persona/buscar')
   buscarPersonaConPostulacion(
@@ -127,8 +112,6 @@ export class ConveniosController {
     return this.conveniosService.guardarPostulacion(user.email, proyectoId, dto)
   }
 
-  // ── Beneficiarios del proyecto ────────────────────────────────────────────
-
   @Get(':proyectoId/beneficiarios')
   getBeneficiarios(
     @CurrentUser() user: JwtUser,
@@ -137,7 +120,7 @@ export class ConveniosController {
     return this.conveniosService.getBeneficiariosProyecto(user.email, proyectoId, user.perfilId)
   }
 
-  /** Descarga del reporte en Excel (.xlsx) con dos hojas: Activos · Inactivos. */
+  // xlsx con dos hojas: activos e inactivos
   @Get(':proyectoId/beneficiarios/reporte')
   @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   async descargarReporteBeneficiarios(
@@ -150,8 +133,6 @@ export class ConveniosController {
     res.setHeader('Content-Length', String(buf.length))
     res.end(buf)
   }
-
-  // ── Asociar beneficiario a grupo (AF · Grupo) ─────────────────────────────
 
   @Get(':proyectoId/beneficiarios/persona/:personaId/grupos')
   getAccionesYGrupos(
@@ -188,10 +169,7 @@ export class ConveniosController {
     return this.conveniosService.removerBeneficiarioDeGrupo(user.email, proyectoId, afGrupoBeneficiarioId)
   }
 
-  // ── Director del convenio ─────────────────────────────────────────────────
-
-  /** Devuelve `{ activo, historial }` con todos los directores del proyecto.
-   *  El activo arriba; el historial son los que fueron reemplazados. */
+  // devuelve { activo, historial }: historial son los directores reemplazados
   @Get(':proyectoId/director')
   getDirectores(
     @CurrentUser() user: JwtUser,
@@ -206,15 +184,13 @@ export class ConveniosController {
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
     @Body() dto: DirectorBasicoDto,
   ) {
-    // Solo la empresa dueña del convenio (o admin) puede registrar director.
     if (user.perfilId !== PERFIL_EMPRESA && user.perfilId !== PERFIL_ADMIN) {
       throw new ForbiddenException('Solo la empresa conviniente puede registrar al director.')
     }
     return this.conveniosService.crearDirector(user.email, proyectoId, dto)
   }
 
-  /** Asocia una PERSONA existente como director (recomendado cuando ya se
-   *  registró la HV de la persona). Body: { personaId } */
+  // para persona que ya tiene HV registrada; crearDirector es para la que no
   @Post(':proyectoId/director/asociar')
   asociarDirector(
     @CurrentUser() user: JwtUser,
@@ -230,7 +206,6 @@ export class ConveniosController {
     return this.conveniosService.asociarDirector(user.email, proyectoId, Number(body.personaId))
   }
 
-  /** Aprobación / rechazo del director por la interventoría. */
   @Post(':proyectoId/director/validar')
   validarDirector(
     @CurrentUser() user: JwtUser,

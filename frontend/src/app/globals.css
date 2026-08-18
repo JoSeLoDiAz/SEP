@@ -165,3 +165,10 @@ html[data-underline-links="true"] body a:not([class*="no-underline"]) {
   text-underline-offset: 3px !important;
   text-decoration-thickness: 2px !important;
 }
+
+/* ── Carrusel de ministerios ──────────────────────────────────────── */
+/* -50% porque la lista se pinta duplicada: al llegar ahi vuelve a 0 sin salto */
+@keyframes deslizar {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}

@@ -1,17 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import type { MulterFile } from './evaluadores.service'
 import { EXTENSIONES_CORREO, MIMES_CORREO } from './formatos-correo'
 
-/**
- * Lo que cuelga de un ciclo del evaluador: aprobación del jefe, curso de
- * formación, proyectos evaluados y grupos/mesas.
- *
- * Todo aquí se ancla a PARTICIPACIONID. Si un método recibe un evaluadorId es
- * solo para auditar o para buscar; el dato siempre pertenece al ciclo.
- */
+// lo que cuelga de un ciclo del evaluador; todo se ancla a PARTICIPACIONID
 
 export interface AprobacionDto {
   aprobadorNombre: string
@@ -50,19 +44,10 @@ export interface CtxUsuario {
   usuarioPerfilId?: number
 }
 
-/** Tope de la evidencia de aprobación. Los .msg con adjuntos pesan más que un PDF. */
+// 8 MB: un .msg con adjuntos pesa más que un PDF
 const MAX_EVIDENCIA_BYTES = 8 * 1024 * 1024
 
-/**
- * La evidencia es un correo, y cada quien lo guarda con lo que tiene: Outlook
- * de escritorio da .msg, el web da .eml, y "guardar como" del navegador da
- * .html o .mht. La lista vive en formatos-correo para que los cuatro sitios
- * del banco que reciben correos acepten lo mismo.
- *
- * Se valida por extensión con el mime como respaldo: los navegadores mandan
- * los .msg unas veces como octet-stream y otras como vnd.ms-outlook, y cerrar
- * por mime rechazaría archivos legítimos.
- */
+// se valida por extensión con el mime de respaldo: el .msg llega unas veces como octet-stream y otras como vnd.ms-outlook
 const EVIDENCIA_EXTENSIONES = ['pdf', ...EXTENSIONES_CORREO].map(x => `.${x}`)
 const EVIDENCIA_MIMES = ['application/pdf', ...MIMES_CORREO]
 
@@ -70,12 +55,10 @@ const EVIDENCIA_MIMES = ['application/pdf', ...MIMES_CORREO]
 export class CicloService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Aprobación del jefe (1:1 con el ciclo)                                ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // aprobación del jefe: 1:1 con el ciclo
 
   async crearAprobacion(participacionId: number, dto: AprobacionDto, ctx: CtxUsuario) {
     const evaluadorId = await this.evaluadorDe(participacionId)
@@ -114,7 +97,7 @@ export class CicloService {
       ],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -153,7 +136,7 @@ export class CicloService {
       params,
     )
 
-    await this.auditoria.registrarCambio(
+    await this.controlCambios.registrarCambio(
       'EVALUADORAPROBACION', aprobacionId, antes, dto,
       {
         usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -176,7 +159,7 @@ export class CicloService {
       [file.buffer, file.mimetype || 'application/octet-stream', file.originalname, ctx.usuarioEmail, aprobacionId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'UPDATE', registroId: aprobacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -207,7 +190,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORAPROBACION WHERE APROBACIONID = :1`, [aprobacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORAPROBACION', operacion: 'DELETE', registroId: aprobacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -216,16 +199,13 @@ export class CicloService {
     return { message: 'Aprobación eliminada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Capacitación del ciclo                                                ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // capacitación del ciclo
 
   async crearCapacitacion(participacionId: number, dto: CapacitacionDto, ctx: CtxUsuario) {
     const evaluadorId = await this.evaluadorDe(participacionId)
     if (!dto.nombre?.trim()) throw new BadRequestException('Nombre del curso requerido')
 
-    // La nota de corte se congela al crear: si el año siguiente sube el
-    // mínimo, el histórico no se reescribe solo.
+    // la nota de corte se congela al crear: si el mínimo sube después, el histórico no cambia
     const minimo = dto.calificacionMinima ?? await this.minimoCursoDeConvocatoria(participacionId)
     const aprobado = this.calcularAprobado(dto.calificacion, minimo)
 
@@ -259,7 +239,7 @@ export class CicloService {
       ],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -292,9 +272,7 @@ export class CicloService {
     if (dto.fechaInicio !== undefined) pushFecha('FECHAINICIO', dto.fechaInicio)
     if (dto.fechaFin !== undefined) pushFecha('FECHAFIN', dto.fechaFin)
 
-    // APROBADO nunca se recibe del cliente: se deriva de la nota contra el
-    // corte congelado. Si llegara del front, un typo cambiaría un hito del
-    // checklist sin que nadie lo note.
+    // APROBADO nunca viene del cliente: se deriva de la nota contra el corte congelado
     if (dto.calificacion !== undefined || dto.calificacionMinima !== undefined) {
       const calificacion = dto.calificacion !== undefined ? dto.calificacion : antes.calificacion
       const minimo = dto.calificacionMinima !== undefined ? dto.calificacionMinima : antes.calificacionMinima
@@ -314,7 +292,7 @@ export class CicloService {
       params,
     )
 
-    await this.auditoria.registrarCambio(
+    await this.controlCambios.registrarCambio(
       'EVALUADORCAPACITACION', capacitacionId, antes, dto,
       {
         usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -338,7 +316,7 @@ export class CicloService {
         WHERE CAPACITACIONID = :5`,
       [file.buffer, file.mimetype, file.originalname, ctx.usuarioEmail, capacitacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'UPDATE', registroId: capacitacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -367,7 +345,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORCAPACITACION WHERE CAPACITACIONID = :1`, [capacitacionId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCAPACITACION', operacion: 'DELETE', registroId: capacitacionId,
       evaluadorId: antes.evaluadorId, participacionId: antes.participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -376,27 +354,20 @@ export class CicloService {
     return { message: 'Capacitación eliminada' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Proyectos evaluados                                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // proyectos evaluados
 
   async agregarProyecto(participacionId: number, dto: PartProyectoDto, ctx: CtxUsuario) {
     const evaluadorId = await this.evaluadorDe(participacionId)
 
     const nombre = dto.nombreProyecto?.trim() || null
     const razon = dto.razonSocial?.trim() || null
-    // La empresa basta para identificarlo. En este módulo el proyecto SE
-    // reconoce por la empresa —PROYECTONOMBRE viene vacío en la práctica—, así
-    // que exigir un nombre obligaba a inventarlo para poder registrar una
-    // evaluación real de un proyecto que no está cargado en el SEP.
+    // el proponente basta: PROYECTONOMBRE viene vacío en la práctica
     if (!dto.proyectoId && !dto.guardadoId && !nombre && !razon) {
       throw new BadRequestException(
         'Indique el proyecto: seleccione uno del sistema, o escriba al menos el proponente.',
       )
     }
 
-    // Evita que el mismo proyecto entre dos veces al mismo ciclo, que es el
-    // error típico cuando se carga desde un Excel a medias.
     if (dto.proyectoId || dto.guardadoId) {
       const dup = await this.dataSource.query(
         `SELECT PARTPROYECTOID FROM EVALUADORPARTPROYECTO
@@ -437,12 +408,7 @@ export class CicloService {
         ],
       )
     } catch (e) {
-      // CK_PARTPROY_REF exige PROYECTOID, GUARDADOID o NOMBREPROYECTO: se
-      // escribió antes de que existiera el registro a mano, y no contempla que
-      // el proponente por sí solo ya identifica el proyecto. La v42 la relaja.
-      //
-      // Mientras esa migración no se corra, esto responde con lo que hay que
-      // hacer en vez de con un error 500 que no le dice nada a nadie.
+      // CK_PARTPROY_REF todavía exige proyecto, guardado o nombre; la v42 la relaja
       if (String((e as Error)?.message ?? '').includes('ORA-02290')) {
         throw new BadRequestException(
           'Escriba también el nombre o código del proyecto (por ejemplo BPRO-FCE-2026). ' +
@@ -452,7 +418,7 @@ export class CicloService {
       throw e
     }
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTPROYECTO', operacion: 'INSERT', registroId: id,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -476,7 +442,7 @@ export class CicloService {
     await this.dataSource.query(
       `DELETE FROM EVALUADORPARTPROYECTO WHERE PARTPROYECTOID = :1`, [partProyectoId],
     )
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTPROYECTO', operacion: 'DELETE', registroId: partProyectoId,
       evaluadorId: Number(rows[0].evaluadorId),
       participacionId: Number(rows[0].participacionId),
@@ -486,23 +452,7 @@ export class CicloService {
     return { message: 'Proyecto retirado del ciclo' }
   }
 
-  /**
-   * Los proyectos que se le pueden asignar a un ciclo.
-   *
-   * Se acotan a la CONVOCATORIA del ciclo, no a todo el SEP: un evaluador del
-   * ciclo 2026 solo pudo evaluar proyectos de esa convocatoria, y ofrecerle
-   * los 1.024 del histórico es invitar a atribuirle uno de otro año. Con el
-   * filtro puesto, la lista es corta —entre 8 y 300 según la convocatoria— y
-   * se puede navegar sin escribir nada.
-   *
-   * Ojo con los datos: `PROYECTONOMBRE` viene NULL en todos los registros, así
-   * que el proyecto se identifica por la EMPRESA. Buscar por nombre de
-   * proyecto no encuentra nada, y por eso la búsqueda mira sobre todo la razón
-   * social y el NIT.
-   *
-   * Devuelve también el contexto para que la pantalla pueda explicar por qué
-   * la lista está vacía en vez de mostrar un hueco.
-   */
+  // proyectos asignables, acotados a la convocatoria del ciclo; PROYECTONOMBRE viene NULL, se busca por empresa y NIT
   async buscarProyectos(q: string, limite = 15, participacionId?: number) {
     const texto = (q ?? '').trim()
     const tope = Math.min(200, Math.max(1, limite))
@@ -524,8 +474,6 @@ export class CicloService {
       convocatoriaNombre = (filas[0].nombre as string | null) ?? null
 
       if (convocatoriaSepId == null) {
-        // Sin convocatoria del SEP no hay universo de proyectos que ofrecer.
-        // Se dice por qué en vez de devolver una lista vacía muda.
         return {
           convocatoria: null,
           motivo: 'Este ciclo no está atado a una convocatoria del SEP. ' +
@@ -535,17 +483,14 @@ export class CicloService {
       }
     }
 
-    // Sin convocatoria que acote, se exige un mínimo de texto: buscar en los
-    // 1.024 proyectos con dos letras no ayuda a nadie.
+    // sin convocatoria que acote, buscar en todo el histórico con dos letras no sirve
     if (!convocatoriaSepId && texto.length < 3) {
       return { convocatoria: null, motivo: 'Escriba al menos 3 caracteres.', items: [] }
     }
 
     const like = `%${texto.toUpperCase()}%`
 
-    // Cada rama arma sus propios binds: con la convocatoria puesta cambia el
-    // número de parámetros, y numerarlos a mano se rompe en cuanto alguien
-    // agrega una condición.
+    // cada rama arma sus binds: la convocatoria cambia el número de parámetros
     const armar = (cols: { conv: string; nombre: string; social: string; nit: string }) => {
       const params: unknown[] = []
       const bind = (v: unknown) => { params.push(v); return `:${params.length}` }
@@ -568,9 +513,7 @@ export class CicloService {
       social: 'g.RAZONSOCIAL', nit: 'g.NIT',
     })
 
-    // Sin .catch silencioso a propósito: si una de las dos consultas falla por
-    // un cambio de esquema, el typeahead tiene que romperse de forma visible y
-    // no devolver media lista como si estuviera completa.
+    // sin .catch a propósito: mejor romper visible que devolver media lista
     const [ejecutados, formulados] = await Promise.all([
       this.dataSource.query(
         `SELECT p.PROYECTOID                  AS "proyectoId",
@@ -627,15 +570,9 @@ export class CicloService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Grupos / mesas del ciclo                                              ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // grupos / mesas del ciclo
 
-  /**
-   * Reemplaza el conjunto completo de grupos del ciclo. Es un `set`, no un
-   * `add`: la UI muestra los grupos como chips múltiples y mandar el conjunto
-   * entero evita tener que diferenciar altas y bajas en el cliente.
-   */
+  // set, no add: reemplaza el conjunto completo de grupos del ciclo
   async definirGrupos(participacionId: number, grupos: number[], ctx: CtxUsuario) {
     const evaluadorId = await this.evaluadorDe(participacionId)
 
@@ -665,7 +602,7 @@ export class CicloService {
       }
     })
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORPARTGRUPO', operacion: 'UPDATE', registroId: participacionId,
       evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -676,9 +613,7 @@ export class CicloService {
     return { grupos: limpios, message: 'Grupos actualizados' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Helpers                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // helpers
 
   private async evaluadorDe(participacionId: number): Promise<number> {
     const rows: Array<{ evaluadorId: number }> = await this.dataSource.query(
@@ -750,11 +685,7 @@ export class CicloService {
     return rows[0]?.minimo != null ? Number(rows[0].minimo) : null
   }
 
-  /**
-   * Sin nota de corte no se puede afirmar que aprobó. Se devuelve `false` en
-   * vez de asumir que sí: un hito del checklist en verde por defecto sería
-   * peor que uno en gris.
-   */
+  // sin nota de corte no se afirma que aprobó: false, no true
   private calcularAprobado(calificacion?: number | null, minimo?: number | null): boolean {
     if (calificacion == null || minimo == null) return false
     return Number(calificacion) >= Number(minimo)

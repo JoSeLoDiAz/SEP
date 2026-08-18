@@ -4,41 +4,20 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-/** Quién es el evaluador que está pidiendo, resuelto desde su sesión. */
 export interface MiEvaluador {
   evaluadorId: number
   personaId: number
   activo: boolean
 }
 
-/**
- * Resuelve el expediente del evaluador que abrió sesión, y solo el suyo.
- *
- * Todo lo de aquí parte de una regla: el identificador del evaluador NO viaja
- * nunca en la dirección ni en el cuerpo de la petición. Se deduce de la
- * sesión. Los identificadores del banco son números correlativos —43, 44,
- * 45…— así que si la dirección dijera de quién es la hoja de vida, adivinar
- * la de otro sería cambiar un número. Los identificadores de los archivos sí
- * viajan, porque hacen falta para pedir uno concreto; por eso cada consulta
- * lleva el dueño en el WHERE en vez de comprobarlo aparte: una consulta que
- * no encuentra nada no puede devolver lo que no es.
- */
+// el evaluadorId sale de la sesión, nunca de la petición: los ids del banco son correlativos
 @Injectable()
 export class MiExpedienteService {
   private readonly log = new Logger(MiExpedienteService.name)
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /**
-   * De la cuenta al evaluador, por el correo de la persona.
-   *
-   * Se miran los dos correos porque las fichas traen unas veces el personal y
-   * otras el institucional. Y NO se toma el primero que aparezca: en PERSONA
-   * hay correos repetidos entre personas distintas —comprobado, hay varios—,
-   * así que si un día dos de ellas fueran evaluadoras, quedarse con una sería
-   * enseñarle a alguien el expediente de otro sin que nadie se entere. Ante
-   * dos, se corta y se avisa.
-   */
+  // PERSONA tiene correos repetidos entre personas distintas: ante dos fichas, corta
   async resolver(usuarioId: number): Promise<MiEvaluador> {
     const filas: Array<{ evaluadorId: number; personaId: number; activo: number }> =
       await this.dataSource.query(
@@ -63,7 +42,6 @@ export class MiExpedienteService {
     }
 
     if (filas.length > 1) {
-      // Sin adivinar. Que falle a la vista es preferible a acertar por azar.
       this.log.error(
         `El usuario ${usuarioId} resuelve a ${filas.length} evaluadores ` +
         `(${filas.map(f => f.evaluadorId).join(', ')}). Hay correos repetidos en PERSONA.`,
@@ -78,13 +56,7 @@ export class MiExpedienteService {
     return { evaluadorId: Number(f.evaluadorId), personaId: Number(f.personaId), activo: Number(f.activo) === 1 }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Comprobaciones de pertenencia                                         ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-  //
-  // Devuelven 404 y no 403 a propósito: un 403 confirmaría que ese documento
-  // existe y es de alguien. Para quien pregunta por algo que no es suyo, no
-  // existe y punto.
+  // 404 y no 403: un 403 confirmaría que el documento existe y es de alguien
 
   private async exigirPropio(sql: string, id: number, evaluadorId: number, que: string) {
     const filas = await this.dataSource.query(sql, [id, evaluadorId])
@@ -129,18 +101,9 @@ export class MiExpedienteService {
       certificadoId, evaluadorId, 'el certificado')
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Consultas propias del portal                                          ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
+  // consultas del portal
 
-  /**
-   * Los ciclos a los que se le ha convocado, del más reciente al más antiguo.
-   *
-   * Es lo que responde "¿me llamaron para una evaluación nueva?". Se marca
-   * `esNueva` cuando el ciclo es del año en curso y todavía no se ha decidido
-   * si participa: eso es exactamente lo que la persona está buscando al
-   * entrar.
-   */
+  // esNueva: ciclo del año en curso sobre el que aún no ha decidido si participa
   async misConvocatorias(evaluadorId: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID       AS "participacionId",
@@ -197,7 +160,6 @@ export class MiExpedienteService {
     )
   }
 
-  /** Un correo o evidencia suyo, ya comprobado que lo es. */
   async getEvidencia(aprobacionId: number, evaluadorId: number) {
     await this.esMiAprobacion(aprobacionId, evaluadorId)
     const filas: Array<{ blob: Buffer | null; mime: string | null; nombre: string | null }> =

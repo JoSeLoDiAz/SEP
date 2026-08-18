@@ -1,16 +1,6 @@
 import ExcelJS from 'exceljs'
 import { RetroReporteService } from './retro-reporte.service'
 
-/**
- * El generador del reporte hace bastante aritmética de índices (columnas
- * dinámicas por pregunta, matriz cruzada N×N, coloreado por celda). Eso se
- * rompe en silencio: el archivo se genera igual, solo que con los números
- * corridos una columna.
- *
- * Estas pruebas arman un ciclo pequeño con un `DataSource` simulado y leen el
- * .xlsx resultante celda por celda. No tocan Oracle.
- */
-
 // Ciclo de juguete: 3 personas, todas se evalúan entre sí menos un par.
 const PARTICIPANTES = [
   { participacionId: 10, nombre: 'Ana Gómez',   email: 'ana@sena.edu.co',   rol: 'EVALUADOR', area: 'Técnica' },
@@ -67,11 +57,7 @@ const SESIONES = [
   { participacionId: 30, minutos: 82, seExcedio: 1 },
 ]
 
-/**
- * DataSource simulado: enruta por una palabra clave de cada consulta. Es frágil
- * a propósito — si alguien reescribe una query, el test falla y obliga a
- * revisar el fixture en vez de dejarlo mintiendo.
- */
+// enruta por palabra clave de la consulta: si alguien reescribe una query, el test falla a propósito
 function dataSourceFalso() {
   return {
     query: jest.fn(async (sql: string) => {
@@ -124,7 +110,6 @@ describe('RetroReporteService', () => {
   })
 
   it('Consolidado promedia por pregunta y deja las columnas alineadas', () => {
-    // Beto recibió 5 y 4 en P1 → 4.5; y 4 y 3 en P2 → 3.5. Promedio 4.
     // Columnas: 1 nombre, 2 rol, 3 área, 4 P1, 5 P2, 6 promedio, 7 recibidas.
     const s = wb.getWorksheet('2. Consolidado')!
     const filaBeto = s.getRow(3)
@@ -179,7 +164,6 @@ describe('RetroReporteService', () => {
   })
 
   it('Progreso descuenta las anuladas y marca el exceso de tiempo', () => {
-    // Beto tenía 2 asignaciones pero una está ANULADA: cuenta 1, con 0 enviadas.
     const s = wb.getWorksheet('6. Progreso y tiempos')!
     const filas = new Map<string, ExcelJS.Row>()
     s.eachRow((f, n) => { if (n > 1) filas.set(String(f.getCell(1).value), f) })
@@ -203,7 +187,6 @@ describe('RetroReporteService', () => {
     expect(s.getRow(1).getCell(1).value).toBe('Evaluador \\ Evaluado')
     // Fila 2 = Ana; columna 3 = Beto (col 1 es la etiqueta).
     expect(s.getRow(2).getCell(3).value).toBe(4.5)
-    // Diagonal: Ana contra Ana.
     expect(s.getRow(2).getCell(2).value).toBe('—')
     // Ana no evaluó a Caro: celda vacía, no cero.
     expect(s.getRow(2).getCell(4).value ?? '').toBe('')

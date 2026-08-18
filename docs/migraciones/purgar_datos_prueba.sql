@@ -1,32 +1,4 @@
 -- purgar_datos_prueba.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Limpieza de los datos que dejan las verificaciones de punta a punta del
--- módulo de evaluadores. NO es una migración: se corre cuando haga falta.
---
--- Reemplaza a `purgar_datos_prueba_certificados.sql`, que cubría solo un caso.
---
--- ¿Por qué hay que correrla a mano como SEPLOCAL?
---   `SEP_APP` tiene sobre EVALUADORCERTIFICADO solo SELECT, INSERT y UPDATE
---   (v37) — deliberadamente, para que un documento oficial que ya circuló no
---   pueda desaparecer desde la aplicación. Como consecuencia, la app tampoco
---   puede borrar sus propios datos de prueba, y por FK eso arrastra a la
---   participación, al evaluador, a la persona y a la convocatoria.
---
---   Es el diseño funcionando, no un defecto. Pero significa que cualquier
---   prueba que llegue a emitir un certificado necesita esta purga.
---
--- Qué borra, y solo eso:
---   · certificados de los años de prueba (2027 y 2028)
---   · participaciones marcadas PRUEBA_%
---   · convocatorias llamadas PRUEBA_%
---   · personas con identificación 9000000xx–9000003xx
---   · usuarios @prueba-*.local
---
--- Los años 2027 y 2028 se usaron a propósito para no quemar consecutivos de
--- la serie 2026, que es la que va a usarse de verdad.
---
--- Idempotente. Ejecutar como SEPLOCAL en SQL Developer.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
@@ -117,10 +89,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Verificación                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- Verificación
 
 DECLARE
   v_p NUMBER; v_c NUMBER; v_ce NUMBER; v_pa NUMBER; v_u NUMBER;
@@ -146,5 +115,3 @@ END;
 /
 
 -- Las filas de EVALUADORLOG NO se borran: el log es inmutable por diseño y
--- registra que estas operaciones ocurrieron. Borrarlas sería exactamente lo
--- que esa tabla existe para impedir.

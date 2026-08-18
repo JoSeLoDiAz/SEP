@@ -23,17 +23,7 @@ interface Respuesta {
   }
 }
 
-/**
- * Validación pública de certificados de evaluador.
- *
- * Vive en el grupo `(public)` — sin sesión — porque quien llega aquí
- * normalmente NO tiene cuenta en el SEP: es otra entidad, un empleador o un
- * auditor con el documento impreso en la mano.
- *
- * Ruta propia y no `/verificar/[codigo]`: esa ya valida versiones de proyecto.
- * Son dos documentos distintos, con formatos de código distintos, y mezclarlos
- * en una sola pantalla obligaría a adivinar cuál se está consultando.
- */
+// ruta aparte de /verificar/[codigo]: esa valida versiones de proyecto, otro formato de código
 export default function VerificarCertificadoPage() {
   const params = useParams<{ codigo: string }>()
   const router = useRouter()
@@ -53,9 +43,7 @@ export default function VerificarCertificadoPage() {
         const r = await api.get<Respuesta>(`/publico/certificados/${encodeURIComponent(codigo)}`)
         if (vivo) setRes(r.data)
       } catch {
-        // Distinguir "no se pudo consultar" de "no es válido": decir que un
-        // certificado es inválido cuando en realidad falló la red sería mentir
-        // sobre un documento que quizá sí es legítimo.
+        // fallo de red no es certificado inválido
         if (vivo) setErrorRed(true)
       } finally {
         if (vivo) setCargando(false)
@@ -130,8 +118,6 @@ export default function VerificarCertificadoPage() {
         )}
       </section>
 
-      {/* Quien teclea el código a mano se equivoca a menudo; obligarlo a editar
-          la URL para reintentar es hostil. */}
       <form
         onSubmit={e => {
           e.preventDefault()

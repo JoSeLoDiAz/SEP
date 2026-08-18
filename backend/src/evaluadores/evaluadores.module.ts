@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { AuthModule } from '../auth/auth.module'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
 import { CertificadoService } from './certificado.service'
 import { CicloService } from './ciclo.service'
@@ -18,13 +18,7 @@ import { TrayectoriaService } from './trayectoria.service'
 
 @Module({
   imports: [AuthModule],
-  // ⚠️ El orden importa. `EvaluadoresController` tiene `@Get(':id')` bajo
-  // `/evaluadores`, que con Express 5 captura también `/evaluadores/convocatorias`
-  // y hace reventar el ParseIntPipe con 400. Registrando primero el controller
-  // más específico, sus rutas ganan. (Express 5 usa path-to-regexp v8, que ya
-  // no admite restringir el parámetro con regex inline tipo `:id(\\d+)`.)
-  // `MiExpedienteController` cuelga de `/mi-expediente`, no de `/evaluadores`,
-  // asi que el orden le da igual. Va primero por costumbre.
+  // el orden importa: en Express 5 el `@Get(':id')` de EvaluadoresController captura /evaluadores/convocatorias
   controllers: [
     MiExpedienteController, ConvocatoriasController, EvaluadoresController,
     VerificacionController,
@@ -34,7 +28,7 @@ import { TrayectoriaService } from './trayectoria.service'
     CatalogosEvaluadorService,
     ConvocatoriasService,
     TrayectoriaService,
-    AuditoriaService,
+    ControlCambiosService,
     CicloService,
     CertificadoService,
     ReportesEvaluadorService,
@@ -42,10 +36,7 @@ import { TrayectoriaService } from './trayectoria.service'
     MiExpedienteService,
     MiExpedienteGuard,
   ],
-  // `AuditoriaService`: el módulo de retroalimentación (fase D) también escribe
-  // en el log. `CertificadoService`: la página pública de certificados sirve el
-  // PDF del evaluador reusando este generador, para que no existan dos
-  // versiones del mismo documento oficial.
-  exports: [AuditoriaService, CertificadoService],
+  // los usa retroalimentación (fase D) y la página pública de certificados
+  exports: [ControlCambiosService, CertificadoService],
 })
 export class EvaluadoresModule {}

@@ -4,24 +4,12 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as crypto from 'crypto'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: Record<string, unknown>) => any = require('pdfkit')
 
-/**
- * Certificados de participación del banco de evaluadores.
- *
- * Es un documento oficial, así que no basta con generar un PDF bonito:
- *
- *   - CONSECUTIVO por año, tomado bajo bloqueo para que dos emisiones
- *     simultáneas no se lleven el mismo número.
- *   - CODIGOVERIFICACION aleatorio, consultable sin sesión. Un PDF sin forma
- *     de validarlo es trivialmente falsificable.
- *   - DATOSSNAPSHOT congela lo que se certificó. Si mañana se corrige la
- *     ficha, la reimpresión sigue diciendo lo mismo que el original.
- *   - No se borra: se anula, y el consecutivo no se reutiliza.
- */
+// certificados del banco de evaluadores
 
 export interface CtxUsuario {
   usuarioEmail: string
@@ -44,15 +32,9 @@ interface Snapshot {
   convocatoria: string | null
   proyectosEvaluados: number
 
-  // ── Congelado al emitir ──────────────────────────────────────────────
-  // Quién firma y con qué texto salió el documento. Se guardan aquí y no se
-  // vuelven a leer del catálogo, porque la coordinación del GGPC cambia de un
-  // año a otro: si el PDF se regenerara leyendo FIRMACERTIFICADOS, un
-  // certificado de 2024 pasaría a mostrar a quien coordina hoy — es decir,
-  // el documento diría que lo firmó alguien que no lo firmó.
+  // congelado al emitir: el catálogo cambia de un año a otro
   firmaNombre?: string | null
   firmaCargo?: string | null
-  /** Cuerpo con el que se emitió. La plantilla del ciclo puede reescribirse. */
   textoCertificado?: string | null
 }
 
@@ -63,12 +45,8 @@ const VERDE = '#39A900'
 export class CertificadoService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
   ) {}
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Emisión                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   async emitir(participacionId: number, ctx: CtxUsuario, horasManuales?: number | null) {
     const datos = await this.reunirDatos(participacionId)
@@ -93,8 +71,6 @@ export class CertificadoService {
     const snapshot: Snapshot = {
       ...datos.snapshot,
       horas: horasManuales ?? datos.snapshot.horas,
-      // Se congelan aquí, no al imprimir: quien firma y el cuerpo del documento
-      // son parte de lo que se certificó, no de cómo se ve hoy el catálogo.
       firmaNombre: datos.firma?.nombre || null,
       firmaCargo: datos.firma?.cargo || null,
       textoCertificado: datos.texto ?? null,
@@ -105,9 +81,7 @@ export class CertificadoService {
     let codigo = ''
 
     await this.dataSource.transaction(async m => {
-      // El consecutivo se toma bajo bloqueo de las filas del año: sin esto,
-      // dos emisiones a la vez leerían el mismo MAX y chocarían contra el
-      // UNIQUE (ANIO, CONSECUTIVO) — o peor, quedarían con el mismo número.
+      // FOR UPDATE del año: sin él dos emisiones leen el mismo MAX
       await m.query(
         `SELECT CERTIFICADOID FROM EVALUADORCERTIFICADO
           WHERE ANIO = :1 FOR UPDATE`, [snapshot.anio],
@@ -138,8 +112,7 @@ export class CertificadoService {
       )
     })
 
-    // El PDF se genera después de tener el número: si fallara, el registro ya
-    // existe y se puede regenerar desde el snapshot sin quemar otro consecutivo.
+    // el PDF va después del número: si falla se regenera sin quemar consecutivo
     const pdf = await this.construirPdf(snapshot, {
       consecutivo, codigo, texto: datos.texto, firma: datos.firma,
     })
@@ -148,7 +121,7 @@ export class CertificadoService {
       [pdf, certificadoId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCERTIFICADO', operacion: 'EMITIR', registroId: certificadoId,
       evaluadorId: datos.evaluadorId, participacionId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
@@ -162,11 +135,7 @@ export class CertificadoService {
     }
   }
 
-  /**
-   * A quiénes les falta certificado en el ciclo. Se excluyen los cierres
-   * negativos (declinó, no aprobó, revocado): certificar participación a quien
-   * no participó sería emitir un documento falso.
-   */
+  // excluye cierres negativos (declinó, no aprobó, revocado)
   async pendientesDeCertificado(
     convocatoriaId: number,
   ): Promise<Array<{ participacionId: number; nombre: string; rol: string | null }>> {
@@ -193,15 +162,14 @@ export class CertificadoService {
     }))
   }
 
-  /** Emisión masiva del ciclo. Devuelve el detalle uno a uno, sin abortar. */
+  // emisión masiva: no aborta, reporta los omitidos
   async emitirLote(convocatoriaId: number, ctx: CtxUsuario) {
     const candidatos = await this.pendientesDeCertificado(convocatoriaId)
 
     const emitidos: Array<{ participacionId: number; nombre: string; consecutivo: number }> = []
     const omitidos: Array<{ participacionId: number; nombre: string; motivo: string }> = []
 
-    // En serie a propósito: el consecutivo se toma bajo bloqueo y lanzarlos en
-    // paralelo solo generaría contención sobre la misma fila.
+    // en serie: el consecutivo va bajo bloqueo, en paralelo solo hay contención
     for (const c of candidatos) {
       try {
         const r = await this.emitir(c.participacionId, ctx)
@@ -239,7 +207,7 @@ export class CertificadoService {
       [texto.slice(0, 500), ctx.usuarioEmail, certificadoId],
     )
 
-    await this.auditoria.registrar({
+    await this.controlCambios.registrar({
       tabla: 'EVALUADORCERTIFICADO', operacion: 'ANULAR', registroId: certificadoId,
       evaluadorId: Number(filas[0].evaluadorId),
       participacionId: Number(filas[0].participacionId),
@@ -248,15 +216,8 @@ export class CertificadoService {
       valorAntes: { consecutivo: filas[0].consecutivo, anio: filas[0].anio },
     })
 
-    // El consecutivo NO se reutiliza: un hueco en la numeración es una señal
-    // legítima de que algo se anuló, y reciclarlo haría que dos documentos
-    // distintos hayan circulado con el mismo número.
     return { message: 'Certificado anulado. El consecutivo no se reutiliza.' }
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Descarga y verificación                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   async getPdf(certificadoId: number): Promise<{ buffer: Buffer; nombre: string }> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -277,8 +238,7 @@ export class CertificadoService {
       }
     }
 
-    // Sin BLOB se regenera desde el snapshot. Por eso el snapshot es NOT NULL:
-    // es la fuente de verdad del documento, el PDF es solo su presentación.
+    // sin BLOB se regenera desde el snapshot
     const snapshot = JSON.parse(f.snapshot as string) as Snapshot
     const extras = await this.textoYFirma(
       snapshot,
@@ -297,12 +257,7 @@ export class CertificadoService {
     return { buffer: pdf, nombre: (f.nombre as string) || `certificado-${certificadoId}.pdf` }
   }
 
-  /**
-   * Validación pública, sin sesión. Devuelve lo mínimo para confirmar que el
-   * documento es auténtico: nombre, rol, año y estado. Nada de correos,
-   * cédula completa ni identificadores internos — quien consulta puede ser
-   * cualquiera con el código en la mano.
-   */
+  // consulta pública sin sesión: solo lo mínimo para cotejar
   async verificar(codigo: string) {
     const limpio = (codigo ?? '').trim().toUpperCase()
     if (!limpio) throw new BadRequestException('Código requerido')
@@ -326,7 +281,6 @@ export class CertificadoService {
       certificado: {
         numero: `${f.anio}-${String(Number(f.consecutivo)).padStart(4, '0')}`,
         nombre: s.nombre,
-        // Cédula parcial: suficiente para cotejar, insuficiente para suplantar.
         identificacion: this.enmascarar(s.identificacion),
         rol: s.rol,
         proceso: s.proceso,
@@ -336,10 +290,6 @@ export class CertificadoService {
       },
     }
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Datos y PDF                                                           ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   private async reunirDatos(participacionId: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -405,18 +355,7 @@ export class CertificadoService {
     }
   }
 
-  /**
-   * Reconstruye texto y firma para reimprimir un certificado ya emitido.
-   *
-   * La regla es: **manda el snapshot**. Un certificado emitido en 2024 debe
-   * salir hoy exactamente igual que el día que se firmó, aunque desde entonces
-   * haya cambiado la coordinación del GGPC o se haya reescrito la plantilla
-   * del ciclo. Del catálogo solo se toma la imagen de la rúbrica, y solo para
-   * la firma que quedó registrada en la fila del certificado.
-   *
-   * El respaldo al catálogo existe únicamente para los certificados anteriores
-   * a este congelamiento, cuyo snapshot no trae estos campos.
-   */
+  // manda el snapshot; el catálogo solo para certificados viejos y la rúbrica
   private async textoYFirma(
     snapshot: Snapshot,
     firmaId: number | null,
@@ -436,9 +375,7 @@ export class CertificadoService {
       return { texto: snapshot.textoCertificado, firma }
     }
 
-    // Certificado viejo: se busca la plantilla por la participación, no por el
-    // año. Un mismo año puede tener varias convocatorias y `ROWNUM = 1` traía
-    // cualquiera de ellas, así que el cuerpo podía no ser el que correspondía.
+    // por participación, no por año: un año tiene varias convocatorias
     if (participacionId == null) return { texto: null, firma }
     const filas: Array<{ texto: string | null }> = await this.dataSource.query(
       `SELECT cv.CERTIFICADOTEXTO AS "texto"
@@ -468,12 +405,7 @@ export class CertificadoService {
     }
   }
 
-  /**
-   * Rellena la plantilla de la convocatoria. Si no hay plantilla usa un texto
-   * por defecto, porque un certificado sin cuerpo no sirve de nada y fallar
-   * aquí dejaría al evaluador sin su constancia por una configuración que él
-   * no controla.
-   */
+  // sin plantilla usa el texto por defecto en vez de fallar
   private redactar(snapshot: Snapshot, plantilla: string | null): string {
     const base = plantilla?.trim() ||
       'El Grupo de Gestión para la Productividad y la Competitividad del SENA hace constar que ' +
@@ -556,7 +488,7 @@ export class CertificadoService {
       if (extra.firma?.imagen) {
         try {
           doc.image(extra.firma.imagen, W / 2 - 70, firmaY - 46, { fit: [140, 44] })
-        } catch { /* una firma ilegible no debe impedir emitir el certificado */ }
+        } catch { /* firma ilegible no bloquea la emisión */ }
       }
       doc.moveTo(W / 2 - 110, firmaY).lineTo(W / 2 + 110, firmaY).lineWidth(0.8).stroke('#999')
       if (extra.firma) {
@@ -566,8 +498,7 @@ export class CertificadoService {
         doc.text(extra.firma.cargo, M, doc.y + 1, { width: contenido, align: 'center' })
       }
 
-      // Pie: número, código y cómo validarlo. Sin esto el PDF no se puede
-      // contrastar contra nada y deja de servir como constancia.
+      // Pie
       const numero = `${snapshot.anio}-${String(extra.consecutivo).padStart(4, '0')}`
       doc.font('Helvetica').fontSize(8).fillColor('#777')
       doc.text(
@@ -584,15 +515,7 @@ export class CertificadoService {
     })
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Utilidades                                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Código legible pero no adivinable: año, consecutivo y 6 caracteres
-   * aleatorios. Derivarlo solo del consecutivo permitiría enumerar
-   * certificados ajenos probando números.
-   */
+  // los 6 aleatorios evitan que se enumeren códigos ajenos
   private generarCodigo(anio: number, consecutivo: number): string {
     const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
     const bytes = crypto.randomBytes(6)
@@ -601,19 +524,7 @@ export class CertificadoService {
     return `${anio}-${String(consecutivo).padStart(4, '0')}-${azar}`
   }
 
-  /**
-   * URL de validación que se imprime en el certificado.
-   *
-   * Sale de `APP_URL` —la misma que ya usa `MailService` para los enlaces de
-   * restablecimiento— y no de una variable propia: el documento se imprime y
-   * circula fuera del sistema, así que apuntar a un dominio distinto del de
-   * los correos sería una segunda dirección que mantener y que se desactualiza
-   * sola. Con dos variables, la que nadie configura es la que rompe.
-   *
-   * El respaldo es el dominio institucional, no una ruta relativa: un
-   * certificado que dice "/verificar-certificado/XXXX" es inservible justo
-   * para quien más lo necesita, alguien externo intentando comprobarlo.
-   */
+  // APP_URL (la de MailService); absoluta porque el PDF circula fuera
   private urlVerificacion(codigo: string): string {
     const base = (process.env.APP_URL || 'https://sep.sena.edu.co')
       .trim().replace(/\/+$/, '')

@@ -1,29 +1,6 @@
 -- v37_evaluador_certificado.sql
--- ──────────────────────────────────────────────────────────────────────────
--- EVALUADORCERTIFICADO — emisión del certificado de participación DESDE el
--- SEP (decisión confirmada: el sistema lo genera, no se sube a mano).
---
--- Reusa la infraestructura ya existente:
---   - FIRMACERTIFICADOS  → bloque de firma (nombre, cargo, imagen). Misma
---                          tabla que usa el módulo certificados/ de beneficiarios.
---   - PDFKit en backend/src/certificados/certificados.service.ts → mismo motor.
---
--- Diseño:
---   * CONSECUTIVO único por año — es un documento oficial, necesita numeración.
---   * CODIGOVERIFICACION — cadena aleatoria para validar autenticidad en una
---     URL pública /verificar/:codigo. Sin esto, un PDF es trivialmente falsificable.
---   * DATOSSNAPSHOT (JSON) — congela nombre, cédula, rol, proceso, mesa, fechas
---     y horas al momento de emitir. Si mañana se corrige la ficha, el
---     certificado ya emitido sigue reimprimiéndose idéntico.
---   * ANULADO + MOTIVOANULACION — nunca se borra un certificado emitido; se anula.
---
--- Idempotente. Ejecutar como SEPLOCAL, después de la v34.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Tabla                                                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Tabla
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORCERTIFICADO (
@@ -75,10 +52,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Secuencia e índices                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Secuencia e índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORCERTIFICADO_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
@@ -101,12 +75,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. Plantilla de texto del certificado (configurable, no hardcodeada)    ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- El cuerpo del certificado cambia de un año a otro (nombre de la convocatoria,
--- normativa citada). Se guarda por convocatoria para no tocar código cada año.
+-- 3. Plantilla de texto del certificado (configurable, no hardcodeada)
 
 DECLARE
   PROCEDURE add_col(p_tabla VARCHAR2, p_ddl VARCHAR2) IS
@@ -135,11 +104,7 @@ UPDATE EVALUADORCONVOCATORIA
                           N'con una dedicación de {{horas}} horas.'
  WHERE CERTIFICADOTEXTO IS NULL;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Sin DELETE: un certificado emitido se anula (ANULADO = 1), nunca se borra.
+-- 4. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE ON EVALUADORCERTIFICADO     TO SEP_APP;
 GRANT SELECT                 ON EVALUADORCERTIFICADO     TO SEP_LECTOR;

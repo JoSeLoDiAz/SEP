@@ -1,36 +1,6 @@
 -- v38_retro_instrumento_16_preguntas.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Actualiza el instrumento de retroalimentación al alcance definitivo de la
--- convocatoria DSNFT-0001-FCE-2026: 16 preguntas en vez de las 12 que sembró
--- la v33.
---
---   1–14  escala 1 a 5   (antes eran 10)
---   15    abierta por persona evaluada
---   16    abierta sobre el proceso, una sola vez
---
--- Las cuatro preguntas nuevas de escala son:
---   2  cumplimiento del cronograma          (antes no se medía aparte)
---   3  puntualidad y jornada laboral
---   11 atención de subsanaciones
---   12 atención de requerimientos del líder
---
--- Además se agrega ESCALAETIQUETAS: la escala dejó de ser solo numérica y
--- ahora tiene nombre por valor (1 Deficiente … 5 Excelente). Guardarlas en el
--- instrumento y no en el código permite que un año cambie la redacción sin
--- desplegar, y que el histórico conserve la que estaba vigente.
---
--- ALCANCE: solo toca la PLANTILLA BASE (CONVOCATORIAID IS NULL). Los
--- instrumentos ya clonados a una convocatoria NO se modifican — ese es el
--- punto de haberlos clonado: un ciclo diligenciado no puede cambiar de
--- preguntas debajo de las respuestas que ya se guardaron.
---
--- Idempotente. Ejecutar como SEPLOCAL.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Etiquetas de la escala                                               ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Etiquetas de la escala
 
 BEGIN
   EXECUTE IMMEDIATE 'ALTER TABLE RETROFORMULARIO ADD (ESCALAETIQUETAS NVARCHAR2(400))';
@@ -46,10 +16,7 @@ UPDATE RETROFORMULARIO
    SET ESCALAETIQUETAS = N'{"1":"Deficiente","2":"Bajo","3":"Aceptable","4":"Bueno","5":"Excelente"}'
  WHERE ESCALAETIQUETAS IS NULL;
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Reemplazo de las preguntas de la plantilla base                      ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Reemplazo de las preguntas de la plantilla base
 
 DECLARE
   v_form_id   NUMBER;
@@ -72,8 +39,6 @@ BEGIN
    WHERE CONVOCATORIAID IS NULL AND ACTIVO = 1 AND ROWNUM = 1;
 
   -- Guardarraíl: si alguien ya respondió sobre la plantilla base (no debería
-  -- pasar nunca, porque las sesiones cuelgan de un clon), abortar antes de
-  -- borrar preguntas que tienen respuestas apuntando a ellas.
   SELECT COUNT(*) INTO v_respuestas
     FROM RETRORESPUESTAITEM i
     JOIN RETROPREGUNTA q ON q.RETROPREGUNTAID = i.RETROPREGUNTAID
@@ -91,7 +56,7 @@ BEGIN
 
   DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = v_form_id;
 
-  -- ── Escala 1 a 5 ───────────────────────────────────────────────────────
+  -- Escala 1 a 5
   preg(1, N'ESCALA', 5, 1,
     N'¿Cumplió de manera oportuna y responsable con las actividades y proyectos asignados durante el proceso de evaluación?',
     N'Responsabilidad, cumplimiento y gestión del tiempo');
@@ -135,7 +100,7 @@ BEGIN
     N'¿Recomendaría la participación de esta persona en futuros procesos de evaluación del Grupo de Gestión para la Productividad y la Competitividad (GGPC)?',
     N'Idoneidad para futuras convocatorias');
 
-  -- ── Abiertas ───────────────────────────────────────────────────────────
+  -- Abiertas
   preg(15, N'TEXTO_POR_PERSONA', 0, 0,
     N'¿Qué recomendaciones, observaciones o comentarios considera pertinentes para tener en cuenta sobre el desempeño de la persona evaluada en futuros procesos?',
     NULL);
@@ -153,10 +118,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. Verificación                                                         ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. Verificación
 
 DECLARE
   v_total NUMBER; v_escala NUMBER; v_abiertas NUMBER;

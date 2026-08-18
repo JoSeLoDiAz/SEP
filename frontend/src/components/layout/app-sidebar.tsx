@@ -8,7 +8,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
   ClipboardList, Cog, FileCheck2, FileText, FolderKanban,
-  Home, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
+  Home, IdCard, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
   ShieldCheck, Users, Wallet, X, BookUser, BarChart2,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-// ── Mapa URL GeneXus → ruta Next.js ─────────────────────────────────────────
+// mapa url genexus → ruta next
 
 const URL_MAP: Record<string, string> = {
   'InicioEmpresa.aspx':        '/panel',
@@ -36,21 +36,14 @@ const URL_MAP: Record<string, string> = {
   'Evaluaciones.aspx':         '/panel/evaluaciones',
 }
 
-/**
- * Resuelve la ruta de un ítem del menú.
- *
- * Las entradas heredadas del GeneXus guardan un `.aspx` y necesitan el mapa de
- * arriba. Las pantallas nuevas guardan directamente su ruta Next, así que
- * agregar una opción al menú es sembrar una fila y nada más — sin tocar código
- * ni desplegar. El mapa queda solo para lo viejo, que no va a crecer.
- */
+// el mapa solo cubre lo heredado; las pantallas nuevas guardan su ruta next en bd
 function rutaDe(url: string): string | null {
   const u = (url ?? '').trim()
   if (!u) return null
   return u.startsWith('/') ? u : (URL_MAP[u] ?? null)
 }
 
-// ── Mapa ícono FontAwesome → Lucide ─────────────────────────────────────────
+// mapa icono fontawesome → lucide
 
 const ICON_MAP: Record<string, LucideIcon> = {
   'fa-home':              Home,
@@ -80,12 +73,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'fa-tachometer-alt':    LayoutDashboard,
   'fa-chart-bar':         BarChart2,
   'fa-address-book':      BookUser,
-  // Banco de evaluadores. Se nombran como el resto (prefijo fa-) para no
-  // introducir una segunda convención en la tabla MENU.
+  // llevan prefijo fa- aunque no vengan de fontawesome: la tabla MENU usa esa convención
   'fa-shield-check':      ShieldCheck,
   'fa-bullhorn':          Megaphone,
   'fa-sitemap':           Network,
   'fa-sliders':           Cog,
+  'fa-id-card':           IdCard,
 }
 
 function faToLucide(iconClass: string): LucideIcon {
@@ -94,10 +87,8 @@ function faToLucide(iconClass: string): LucideIcon {
   for (const part of parts) {
     if (ICON_MAP[part]) return ICON_MAP[part]
   }
-  return FileText // default
+  return FileText
 }
-
-// ── Types ────────────────────────────────────────────────────────────────────
 
 interface MenuItem { desc: string; url: string; icono: string }
 
@@ -106,8 +97,6 @@ interface AppSidebarProps {
   mobileOpen: boolean
   onMobileClose: () => void
 }
-
-// ── Component ────────────────────────────────────────────────────────────────
 
 export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarProps) {
   const pathname = usePathname()
@@ -127,12 +116,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
     { desc: 'Convenios', url: 'WPConvenios.aspx', icono: 'ScrollText' },
   ]
 
-  /**
-   * Perfiles del banco de evaluadores. Su menú sale entero de la tabla MENU
-   * (v39), así que no se les inyecta "Convenios": es un módulo que no les
-   * corresponde y aparecía solo porque el extra estaba en duro para todos.
-   * Se acota a estos dos para no quitárselo a quien hoy sí lo usa.
-   */
+  // perfiles del banco: su menú viene completo de la tabla MENU, no se les inyecta convenios
   const PERFILES_BANCO = [9, 15]
 
   useEffect(() => {
@@ -143,7 +127,6 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
           desc: LABEL_OVERRIDE[item.desc] ?? item.desc,
         }))
         if (!PERFILES_BANCO.includes(getSepUsuario()?.perfilId ?? 0)) {
-          // Añadir items extra que no vengan del API
           for (const extra of EXTRA_ITEMS) {
             if (!items.some(it => it.url === extra.url)) {
               items.push(extra)
@@ -153,10 +136,6 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
         setMenuItems(items)
         setMenuFallo(false)
       })
-      // Si el menú no carga, la barra lateral se quedaba VACÍA y en silencio.
-      // Es la única navegación del panel —la barra superior no tiene enlaces—,
-      // así que el usuario queda encerrado en la pantalla donde esté sin saber
-      // por qué. Se avisa y se ofrece reintentar.
       .catch(() => { setMenuItems([]); setMenuFallo(true) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intento])
@@ -167,9 +146,6 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   }
 
   function renderNav(isMobile: boolean) {
-    // Sin menú y con fallo: se dice qué pasó y se ofrece reintentar. Antes se
-    // devolvía null y la barra quedaba vacía, indistinguible de "este perfil no
-    // tiene opciones".
     if (menuItems.length === 0 && menuFallo) {
       return (
         <nav className="flex flex-col gap-2 flex-1 px-2 py-3">
@@ -300,7 +276,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
 
   return (
     <>
-      {/* ── Desktop sidebar ────────────────────────────────────────────── */}
+      {/* sidebar escritorio */}
       <aside className={cn(
         'relative hidden lg:flex flex-col min-h-screen bg-[#00304D] flex-shrink-0 z-20 transition-all duration-250',
         collapsed ? 'w-[68px] px-3 py-5' : 'w-[240px] px-4 py-5'
@@ -318,7 +294,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
         </button>
       </aside>
 
-      {/* ── Mobile backdrop + drawer ────────────────────────────────────── */}
+      {/* backdrop + drawer móvil */}
       <div
         className={cn('fixed inset-0 z-40 bg-black/50 lg:hidden transition-opacity duration-200',
           mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none')}

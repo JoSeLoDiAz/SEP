@@ -3,21 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Generador del reporte Excel oficial del proyecto a partir del snapshot de la
-// versión marcada como FINAL.
-//
-// Estructura: 10 hojas en el orden EXACTO del template SENA. Los encabezados
-// (incluyendo typos del template original como "ENEFICIARIOS",
-// "BENEFICIOARIOS", "TRASFERENCIA", etc.) se conservan tal cual para que el
-// archivo resultante sea procesable por los scripts Python downstream.
-//
-// Para columnas repetidas (AREA 1..5, OCUPACION CUOC 1..20, etc.) siempre se
-// emiten todas las posiciones aunque solo se llene la primera, también para
-// preservar el contrato con Python.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// ── Encabezados (verbatim del template) ──────────────────────────────────────
+// encabezados verbatim del template SENA, typos y columnas repetidas incluidos: lo espera el script Python
 
 const HEADERS_BASICOS = [
   'NÚMERO DE IDENTIFICACION', 'DÍGITO VERIFICACION', 'NOMBRE DE LA ENTIDAD PROPONENTE', 'SIGLA',
@@ -171,8 +157,6 @@ const HEADERS_COBERTURA = (() => {
   return base
 })()
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 type AnyRec = Record<string, any>
 type Row = Array<string | number | null>
 
@@ -185,8 +169,6 @@ function clobToString(v: any): string {
   if (Buffer.isBuffer(v)) return v.toString('utf8')
   return String(v)
 }
-/** Formatea una fecha (string ISO o Date) como DD/MM/YYYY (formato del
- *  reporte oficial). Si el valor no es una fecha válida, retorna ''. */
 function fmtDate(v: any): string {
   if (!v) return ''
   const d = v instanceof Date ? v : new Date(String(v))
@@ -201,11 +183,6 @@ function fmtDate(v: any): string {
 export class ExcelReportService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // ── Entry points ───────────────────────────────────────────────────────────
-
-  /** Genera un archivo ZIP con el Excel de cada proyecto que tenga versión
-   *  FINAL marcada y cuyo estado actual esté en la lista `estados`. Útil
-   *  para descargas masivas (ej. todos los Confirmados o Aprobados). */
   async generateBulkExcelZip(estados: number[]): Promise<{ filename: string; buffer: Buffer; total: number }> {
     if (!estados.length) throw new NotFoundException('Debe especificar al menos un estado.')
     const placeholders = estados.map((_, i) => `:${i + 1}`).join(',')
@@ -234,8 +211,7 @@ export class ExcelReportService {
         zip.file(filename, buffer)
         exitos++
       } catch (e) {
-        // Si un proyecto falla, lo registramos como un .txt de error en el zip
-        // y continuamos con el resto, para que la descarga no se aborte por uno.
+        // un proyecto que falla no aborta el zip: queda como .txt de error
         zip.file(`ERROR-${p.codigo || p.proyectoId}.txt`, `No se pudo generar el Excel: ${(e as Error).message}`)
       }
     }
@@ -245,11 +221,8 @@ export class ExcelReportService {
     return { filename, buffer: buffer as Buffer, total: exitos }
   }
 
-  /** Genera el Excel del proyecto desde su versión FINAL.
-   *  Si no hay versión FINAL, lanza NotFoundException. */
   async generateProyectoExcelFinal(proyectoId: number) {
-    // Solo metadata; el snapshot se lee por chunks en readSnapshotJson
-    // para evitar ORA-06502 cuando el CLOB tiene multibyte UTF-8.
+    // aqui solo metadata: el CLOB del snapshot va aparte en readSnapshotJson
     const [version] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID  AS "versionId",
               VERSIONNUMERO      AS "numero",
@@ -271,10 +244,7 @@ export class ExcelReportService {
     return { filename, buffer }
   }
 
-  /** Lee el CLOB completo del snapshot y lo parsea. Usa el driver oracledb
-   *  directamente con fetchInfo: STRING para que devuelva el CLOB como una
-   *  cadena (sin tener que pasar por DBMS_LOB.SUBSTR, que tiene problemas
-   *  con buffers VARCHAR2 cuando hay multibyte UTF-8). */
+  // fetchInfo STRING trae el CLOB entero: DBMS_LOB.SUBSTR revienta con ORA-06502 si hay multibyte UTF-8
   private async readSnapshotJson(versionId: number): Promise<AnyRec> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const oracledb = require('oracledb') as {
@@ -309,11 +279,7 @@ export class ExcelReportService {
     }
   }
 
-  // ── Workbook builder ───────────────────────────────────────────────────────
-
-  /** Catálogos id→nombre cargados una sola vez para resolver IDs en el snapshot
-   *  (TIPOAMBIENTE, GESTIONCONOCIMIENTO, MATERIALFORMACION) y la descripción
-   *  legible de los rubros (que no se persiste en AFRUBRO). */
+  // catalogos id→nombre: el snapshot solo guarda los IDs
   private async loadCatalogs() {
     const [ambientes, gestiones, materiales, rubros, retosNac, componentes] = await Promise.all([
       this.dataSource.query(`SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE`).catch(() => []),
@@ -328,7 +294,6 @@ export class ExcelReportService {
       for (const r of rows) m.set(Number(r.id), String(r[key] ?? ''))
       return m
     }
-    // Componente → Reto: para resolver el reto a partir del componenteId del AF.
     const componenteRetoId = new Map<number, number>()
     for (const c of componentes as any[]) {
       componenteRetoId.set(Number(c.id), Number(c.retoId))
@@ -343,10 +308,7 @@ export class ExcelReportService {
     }
   }
 
-  /** Carga los rubros R09 (GO) y R015 (Transferencia) por AF del proyecto, con
-   *  su codigo/nombre/descripcion del catálogo y los montos persistidos en
-   *  AFRUBRO. El snapshot solo guarda los valores monetarios — el catálogo no
-   *  se snapshotea, pero los nombres de R09/R015 son estables. */
+  // R09 y R015: el snapshot solo guarda los montos, el nombre y la descripcion salen del catalogo
   private async loadGoTransRubros(proyectoId: number) {
     if (!proyectoId) return new Map<number, { go?: any; trans?: any }>()
     const rows = await this.dataSource.query(
@@ -383,19 +345,14 @@ export class ExcelReportService {
     const cats = await this.loadCatalogs()
     const wb = XLSX.utils.book_new()
 
-    // Mapa necesidadId → número secuencial (1,2,3...) por proyecto, para que
-    // "NUMERO DIAGNOSTICO" en Datos_Diagnostico/NecesidadesAF y "CODIGO DEL
-    // DIAGNOSTICO DE LA NECESIDAD" en Datos_AF coincidan.
+    // consecutivo 1..N por necesidad: es el NUMERO DIAGNOSTICO que comparten las hojas
     const diagSeq = new Map<number, number>()
     ;((snap.diagnosticos as AnyRec[]) ?? []).forEach((d, i) => {
       const id = Number(d?.necesidadId)
       if (id) diagSeq.set(id, i + 1)
     })
 
-    // Para cada AF, traemos los rubros especiales R09 (Gastos de Operación) y
-    // R015 (Transferencia) con su nombre/descripción del catálogo, ya que el
-    // snapshot solo guarda los valores monetarios sueltos. Una sola query por
-    // proyecto, no por AF.
+    // una sola query por proyecto, no por AF
     const proyectoId = Number(snap?.proyecto?.id) || 0
     const goTransRubros = await this.loadGoTransRubros(proyectoId)
 
@@ -413,13 +370,9 @@ export class ExcelReportService {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true })
   }
 
-  /** Wrapper que enriquece la hoja Datos_Basicos con campos no presentes en
-   *  snapshots antiguos (certifComp/expertTecn) consultando EMPRESA por NIT. */
   private async buildBasicosAsync(snap: AnyRec): Promise<Row[]> {
     const e = snap.empresa ?? {}
-    // Para snapshots viejos que no incluían certifComp/expertTecn/indicativo,
-    // hacemos fallback a la EMPRESA viva por NIT. (Estos campos son de perfil
-    // empresa, no del proyecto, así que no rompemos inmutabilidad).
+    // snapshots viejos no traen estos campos; son del perfil de empresa, no del proyecto
     if ((e.certifComp == null || e.expertTecn == null || e.indicativo == null) && e.nit) {
       try {
         const [row] = await this.dataSource.query(
@@ -445,21 +398,18 @@ export class ExcelReportService {
     XLSX.utils.book_append_sheet(wb, ws, name)
   }
 
-  // ── Hoja: Datos_Basicos ────────────────────────────────────────────────────
-
   private buildBasicos(snap: AnyRec, flags: { certif?: any; expert?: any } = {}): Row[] {
     const e = snap.empresa ?? {}
     const proy = snap.proyecto ?? {}
     const mesas = (snap.mesasSectoriales as string[]) ?? []
-    // Empresa.certifComp / expertTecn pueden venir como 1/0 numérico, '1'/'0'
-    // string, o 'S'/'N'. Lo normalizamos a "SI" / "NO".
+    // certifComp/expertTecn llegan como 1/0, '1'/'0' o 'S'/'N' segun la epoca del dato
     const yesNo = (v: any): string => {
       const sv = String(v ?? '').trim().toUpperCase()
       if (sv === '1' || sv === 'S' || sv === 'SI' || sv === 'SÍ' || sv === 'TRUE') return 'SI'
       if (sv === '0' || sv === 'N' || sv === 'NO' || sv === 'FALSE') return 'NO'
       return ''
     }
-    // El reporte oficial SENA usa MAYÚSCULAS para los catálogos.
+    // el reporte SENA exige los catalogos en mayusculas
     const ciiu = e.ciiuCodigo && e.ciiuDescripcion
       ? `${s(e.ciiuCodigo)} - ${up(e.ciiuDescripcion)}`
       : up(e.ciiuDescripcion ?? e.ciiuCodigo)
@@ -476,10 +426,10 @@ export class ExcelReportService {
       s(e.website),
       ciiu,
       up(e.tipoEmpresa),
-      yesNo(flags.certif ?? e.certifComp),  // CERTIFICACIÓN DE COMPETENCIAS LABORALES
-      yesNo(flags.expert ?? e.expertTecn),  // VINCULO EXPERTOS TECNICOS
+      yesNo(flags.certif ?? e.certifComp),
+      yesNo(flags.expert ?? e.expertTecn),
       up(e.cobertura),
-      e.indicativo != null ? s(e.indicativo) : '',  // CÓDIGO INDICATIVO (EMPRESAINDICATIVO)
+      e.indicativo != null ? s(e.indicativo) : '',
       up(e.tamanoEmpresa),
       s(e.celular),
       up(mesas[0] ?? ''),
@@ -491,8 +441,6 @@ export class ExcelReportService {
     return [HEADERS_BASICOS, row]
   }
 
-  // ── Hoja: Datos_Contacto ───────────────────────────────────────────────────
-
   private buildContacto(snap: AnyRec): Row[] {
     const e = snap.empresa ?? {}
     const contactos = (snap.contactos as AnyRec[]) ?? []
@@ -500,14 +448,7 @@ export class ExcelReportService {
       const c = up(cargo)
       return needles.some(n => c.includes(n.toUpperCase()))
     }
-    // El form actual define solo 3 cargos en el dropdown:
-    //   1. Representante Legal           (datos en empresa.rep*)
-    //   2. Persona encargada del área de Talento Humano  → "Primer contacto"
-    //   3. Persona encargada del área de Comunicaciones → "Persona que sustenta"
-    // Si hay más contactos, ignoramos los extras (solo emitimos los 3 oficiales).
-    // Mantenemos compatibilidad con cargos del esquema anterior:
-    // "Coordinador"/"Primer Contacto" → primero;
-    // "Responsable"/"Sustenta" → sustenta.
+    // solo salen 3 contactos; "Coordinador"/"Responsable" son cargos del esquema viejo
     const primero = contactos.find(c => matches(c.cargo, 'TALENTO HUMANO', 'COORDINADOR', 'PRIMER CONTACTO'))
       ?? contactos.find(c => !matches(c.cargo, 'REPRESENTANTE', 'COMUNICACIONES', 'RESPONSABLE', 'SUSTENTA'))
     const sustenta = contactos.find(c => matches(c.cargo, 'COMUNICACIONES', 'RESPONSABLE', 'SUSTENTA'))
@@ -518,8 +459,6 @@ export class ExcelReportService {
     ]
     return [HEADERS_CONTACTO, row]
   }
-
-  // ── Hoja: Datos_Generalidades ──────────────────────────────────────────────
 
   private buildGeneralidades(snap: AnyRec): Row[] {
     const e = snap.empresa ?? {}
@@ -542,8 +481,6 @@ export class ExcelReportService {
     return [HEADERS_GENERALIDADES, row]
   }
 
-  // ── Hoja: Datos_NecesidadesAF ──────────────────────────────────────────────
-
   private buildNecesidadesAF(snap: AnyRec, diagSeq: Map<number, number>): Row[] {
     const rows: Row[] = [HEADERS_NECESIDADESAF]
     const diagnosticos = (snap.diagnosticos as AnyRec[]) ?? []
@@ -562,13 +499,11 @@ export class ExcelReportService {
     return rows
   }
 
-  // ── Hoja: Datos_Diagnostico ────────────────────────────────────────────────
-
   private buildDiagnostico(snap: AnyRec, diagSeq: Map<number, number>): Row[] {
     const rows: Row[] = [HEADERS_DIAGNOSTICO]
     const diagnosticos = (snap.diagnosticos as AnyRec[]) ?? []
     diagnosticos.forEach((d, idx) => {
-      // El diagnostico viene FLAT (campos en el objeto raíz, no en .necesidad)
+      // el diagnostico viene FLAT: los campos estan en la raiz, no en .necesidad
       const numDiag = diagSeq.get(Number(d?.necesidadId)) ?? (idx + 1)
       const herrs: AnyRec[] = (d?.herramientas as AnyRec[]) ?? []
       const row: Row = [numDiag]
@@ -576,25 +511,22 @@ export class ExcelReportService {
         row.push(s(herrs[i]?.herramienta ?? ''))
         row.push(n(herrs[i]?.muestra) || '')
       }
-      // Mapeo SI/NO desde códigos numéricos para herrCreacion / planCapa
       const yesNo = (v: any): string => {
         const sv = s(v).toUpperCase()
         if (sv === '1' || sv === 'SI' || sv === 'SÍ' || sv === 'TRUE') return 'SI'
         if (sv === '0' || sv === 'NO' || sv === 'FALSE') return 'NO'
         return sv
       }
-      row.push(fmtDate(d?.fechaRegistro))            // FECHA DE DIAGNOSTICO (DD/MM/YYYY)
-      row.push(yesNo(d?.herrCreacion))               // ¿CREACION PROPIA?
-      row.push(s(d?.herrOtra))                        // OTRO TIPO DE HERRAMIENTA
-      row.push(yesNo(d?.planCapa))                   // ¿PLAN DE CAPACITACION?
-      row.push(clobToString(d?.herrDescrip))         // Descripción
-      row.push(clobToString(d?.herrResultados))      // Resumen de resultados
+      row.push(fmtDate(d?.fechaRegistro))
+      row.push(yesNo(d?.herrCreacion))
+      row.push(s(d?.herrOtra))
+      row.push(yesNo(d?.planCapa))
+      row.push(clobToString(d?.herrDescrip))
+      row.push(clobToString(d?.herrResultados))
       rows.push(row)
     })
     return rows
   }
-
-  // ── Hoja: Datos_Presupuesto ────────────────────────────────────────────────
 
   private buildPresupuesto(snap: AnyRec): Row[] {
     const p = snap.presupuesto ?? {}
@@ -607,29 +539,26 @@ export class ExcelReportService {
     const valorGO    = Number(go.total) || 0
     const valorTrans = Number(tr.totalValor) || 0
     const valorTotal = Number(totProy.valorTotal) || (valorAFs + valorGO + valorTrans)
-    // POLIZA = porcentaje de Gastos de Operación sobre el valor de las AFs
-    // (con 2 decimales).
+    // la columna POLIZA en realidad lleva el % de gastos de operacion sobre las AFs
     const polizaPct = Number(go.porcSobreAFs) || 0
     const row: Row = [
-      Number(tot.totalAfs) || acciones.length,        // # AF DEL PROYECTO
-      Number(tot.totalBeneficiarios) || 0,            // # DE ENEFICIARIOS
-      valorAFs,                                       // VALOR DE LAS AF
-      valorGO,                                        // GASTOS DE OPERACIÓN
-      valorTrans,                                     // VALOR TRANSFERENCIA
-      Number(tr.totalBeneficiarios) || 0,             // # DE BENEFICIOARIOS TRASFERENCIA
-      Math.round(polizaPct * 100) / 100,              // POLIZA = % GO
-      valorTotal,                                     // VALOR TOTAL DEL PROYECTO
+      Number(tot.totalAfs) || acciones.length,
+      Number(tot.totalBeneficiarios) || 0,
+      valorAFs,
+      valorGO,
+      valorTrans,
+      Number(tr.totalBeneficiarios) || 0,
+      Math.round(polizaPct * 100) / 100,
+      valorTotal,
       Number(totProy.cofSena ?? tot.totalCofSena) || 0,
       Number(totProy.contraEspecie ?? tot.totalContraEspecie) || 0,
       Number(totProy.contraDinero ?? tot.totalContraDinero) || 0,
-      Number(go.totalCofSena) || 0,                   // GO COFINANCIACION SENA
-      Number(go.totalContraEspecie) || 0,             // GO CONTRAPARTIDA ESPECIE
-      Number(go.totalContraDinero) || 0,              // GO CONTRAPARTIDA DINERO
+      Number(go.totalCofSena) || 0,
+      Number(go.totalContraEspecie) || 0,
+      Number(go.totalContraDinero) || 0,
     ]
     return [HEADERS_PRESUPUESTO, row]
   }
-
-  // ── Hoja: Datos_AF ─────────────────────────────────────────────────────────
 
   private buildAF(
     snap: AnyRec,
@@ -656,7 +585,7 @@ export class ExcelReportService {
       const material  = det.material ?? {}
       const rubrosAf  = (det.rubros as AnyRec[]) ?? []
 
-      // Catálogos en MAYÚSCULAS para coincidir con el reporte legacy SENA.
+      // el legacy SENA exige los catalogos en mayusculas
       const areas: string[] = ((perfil.areas as AnyRec[]) ?? []).map((a: AnyRec) => up(a.nombre || a.otro))
       const niveles: string[] = ((perfil.niveles as AnyRec[]) ?? []).map((nv: AnyRec) => up(nv.nombre))
       const cuoc: string[] = ((perfil.cuoc as AnyRec[]) ?? []).map((o: AnyRec) => up(o.nombre))
@@ -665,104 +594,91 @@ export class ExcelReportService {
       const sectBen: string[] = ((sectores.sectoresBenef as AnyRec[]) ?? []).map((x: AnyRec) => up(x.nombre))
       const subBen: string[]  = ((sectores.subsectoresBenef as AnyRec[]) ?? []).map((x: AnyRec) => up(x.nombre))
 
-      // Impactos: el dominio guarda dos textos largos (resDesem y resForm). Los
-      // metemos en los slots 1 de cada bloque y dejamos los demás vacíos.
+      // solo hay dos textos de impacto: van en el slot 1 de cada bloque de cinco
       const resDesem = clobToString(alineacion.resDesem ?? '')
       const resForm  = clobToString(alineacion.resForm ?? '')
 
-      // CODIGO DE LA NECESIDAD = necesidadFormacionId (DB ID).
-      // CODIGO DEL DIAGNOSTICO = necesidadId (DB ID del diagnóstico padre).
-      // El reporte legacy usa los IDs raw de DB en estos campos (no el
-      // consecutivo 1..N que sí se usa en Datos_Diagnostico/NecesidadesAF).
+      // aqui van los IDs crudos de la BD, no el consecutivo 1..N de las otras hojas
       const necNum = af.necesidadFormacionId ?? ''
       const diagNum = af.necesidadId ?? ''
 
       const valTotalAf = rubrosAf.reduce((acc, r) => acc + (Number(r.totalRubro) || 0), 0)
 
-      // Catálogos: los nombres no están en el snapshot, los resolvemos por ID.
-      // Todos en MAYÚSCULAS para mantener el formato del reporte SENA.
+      // los nombres de catalogo no van en el snapshot, se resuelven por ID
       const ambienteNombre = up(cats.ambientes.get(Number(material.tipoAmbienteId)) ?? '')
       const gestionNombre  = up(cats.gestiones.get(Number(material.gestionConocimientoId)) ?? '')
       const materialNombre = up(cats.materiales.get(Number(material.materialFormacionId)) ?? '')
 
-      // Reto Nacional: el snapshot guarda alineacion.componenteId. Buscamos el
-      // retoId del componente y luego el nombre del reto en el catálogo.
+      // el snapshot solo guarda componenteId: el reto se deduce del componente
       const componenteId = Number(alineacion.componenteId) || 0
       const retoId = cats.componenteRetoId.get(componenteId) ?? (Number(alineacion.retoNacionalId) || 0)
       const retoNombre = up(cats.retosNac.get(retoId) ?? '')
       const componenteNombreUp = up(alineacion.componenteNombre ?? '')
 
       const row: Row = [
-        Number(af.numero) || (idx + 1),                     // CONSECUTIVO
-        up(af.nombre),                                      // NOMBRE
-        clobToString(af.necesidadFormacionNombre),          // DIAGNÓSTICO DE NECESIDADES = problema/necesidad detectada
-        clobToString(af.causa),                             // ANÁLISIS DE CAUSAS
-        clobToString(af.objetivo),                          // OBJETIVO(S)
-        up(perfil.enfoque ?? ''),                           // ENFOQUE
-        up(af.tipoEvento),                                  // EVENTO
-        up(af.modalidad),                                   // MODALIDAD
-        up(af.metodologia),                                 // METODOLOGÍA
+        Number(af.numero) || (idx + 1),
+        up(af.nombre),
+        clobToString(af.necesidadFormacionNombre),          // la columna DIAGNÓSTICO DE NECESIDADES lleva la necesidad detectada
+        clobToString(af.causa),
+        clobToString(af.objetivo),
+        up(perfil.enfoque ?? ''),
+        up(af.tipoEvento),
+        up(af.modalidad),
+        up(af.metodologia),
         Number(af.numHorasGrupo) || '',
         Number(af.numGrupos) || '',
-        Number(af.benefGrupo) || '',                        // PRESENCIALES POR GRUPO
-        Number(af.benefViGrupo) || '',                      // SINCRÓNICOS POR GRUPO
+        Number(af.benefGrupo) || '',
+        Number(af.benefViGrupo) || '',
         s(areas[0] ?? ''), s(areas[1] ?? ''), s(areas[2] ?? ''), s(areas[3] ?? ''), s(areas[4] ?? ''),
-        clobToString(perfil.justAreas ?? ''),               // JUSTIFICACIÓN AREAS
+        clobToString(perfil.justAreas ?? ''),
         s(niveles[0] ?? ''), s(niveles[1] ?? ''), s(niveles[2] ?? ''),
-        clobToString(perfil.justNivelesOcu ?? ''),          // JUSTIFICACION NIVELES
-        // IMPACTO DESEMPEÑO 1..5 (solo el 1 con data)
+        clobToString(perfil.justNivelesOcu ?? ''),
         resDesem, '', '', '', '',
-        // IMPACTO PRODUCTIVIDAD 1..5 (solo el 1)
         resForm, '', '', '', '',
-        Number(perfil.mipymes) || '',                       // MIPYMES (empresas)
-        Number(perfil.trabMipymes) || '',                   // TRABAJADORES MIPYMES
-        clobToString(perfil.mipymesD ?? ''),                // JUSTIF MIPYMES
-        Number(perfil.cadenaProd) || '',                    // EMPRESAS CADENA
-        Number(perfil.trabCadProd) || '',                   // TRAB CADENA
-        clobToString(perfil.cadenaProdD ?? ''),             // JUSTIF CADENA
-        Number(perfil.mujer) || '',                         // MUJERES
-        Number(perfil.numCampesino) || '',                  // CAMPESINOS
-        Number(perfil.trabDiscapac) || '',                  // DISCAPACIDAD
-        Number(perfil.trabajadorBic) || '',                 // BIC
-        // SECTORES 1..5 — sectores beneficiarios (al que pertenece la AF)
+        Number(perfil.mipymes) || '',
+        Number(perfil.trabMipymes) || '',
+        clobToString(perfil.mipymesD ?? ''),
+        Number(perfil.cadenaProd) || '',
+        Number(perfil.trabCadProd) || '',
+        clobToString(perfil.cadenaProdD ?? ''),
+        Number(perfil.mujer) || '',
+        Number(perfil.numCampesino) || '',
+        Number(perfil.trabDiscapac) || '',
+        Number(perfil.trabajadorBic) || '',
+        // SECTOR/SUBSECTOR son los del beneficiario; CLASIFICACION son los de la AF
         s(sectBen[0] ?? ''), s(sectBen[1] ?? ''), s(sectBen[2] ?? ''), s(sectBen[3] ?? ''), s(sectBen[4] ?? ''),
-        // SUBSECTORES 1..5 beneficiarios
         s(subBen[0] ?? ''), s(subBen[1] ?? ''), s(subBen[2] ?? ''), s(subBen[3] ?? ''), s(subBen[4] ?? ''),
-        // CLASIFICACIÓN POR SECTOR 1..5 — sectores AF (clasificación)
         s(sectAf[0] ?? ''), s(sectAf[1] ?? ''), s(sectAf[2] ?? ''), s(sectAf[3] ?? ''), s(sectAf[4] ?? ''),
-        // CLASIFICACIÓN POR SUBSECTOR 1..5
         s(subAf[0] ?? ''), s(subAf[1] ?? ''), s(subAf[2] ?? ''), s(subAf[3] ?? ''), s(subAf[4] ?? ''),
-        retoNombre,                                         // 63 COMPONENTE = nombre del Reto Nacional
-        componenteNombreUp,                                 // 64 DESCRIPCIÓN = nombre del componente AF
-        clobToString(alineacion.compod ?? ''),              // 65 JUSTIFICACIÓN ALINEACIÓN = compod (texto descripción)
-        clobToString(alineacion.justificacion ?? ''),       // 66 JUSTIFICACIÓN AF ESPECIALIZADA = justificacion
-        ambienteNombre,                                     // AMBIENTE DE APRENDIZAJE
-        materialNombre,                                     // MATERIAL DE FORMACIÓN
-        clobToString(material.justMat ?? ''),               // JUSTIFICACIÓN SI APLICA (justMat)
-        gestionNombre,                                      // GESTIÓN DEL CONOCIMIENTO
+        // la columna COMPONENTE lleva el reto nacional y DESCRIPCIÓN el componente
+        retoNombre,
+        componenteNombreUp,
+        clobToString(alineacion.compod ?? ''),
+        clobToString(alineacion.justificacion ?? ''),
+        ambienteNombre,
+        materialNombre,
+        clobToString(material.justMat ?? ''),
+        gestionNombre,
         'SI',                                               // DESEA INCLUIR ESTA AF
-        clobToString(material.insumo ?? ''),                // INSUMOS
-        clobToString(material.justInsumo ?? ''),            // JUSTIFICACIÓN DEL INSUMO
+        clobToString(material.insumo ?? ''),
+        clobToString(material.justInsumo ?? ''),
         ((material.recursos as AnyRec[]) ?? []).map(r => up(r.nombre)).filter(Boolean).join(' | '),
-        s(necNum),                                          // CODIGO NECESIDAD
-        s(diagNum),                                         // CODIGO DIAGNOSTICO
-        // OCUPACION CUOC 1..20
+        s(necNum),
+        s(diagNum),
         ...Array.from({ length: 20 }, (_, i) => s(cuoc[i] ?? '')),
         valTotalAf > 0 ? 'SI' : '',                         // VALIDACION PRESUPUESTO AF
-        clobToString(af.justnec),                           // JUSTIFICACION AF
-        clobToString(sectores.justificacion ?? ''),         // JUSTIFICACIÓN SECTORES Y SUB-SECTORES
-        clobToString(perfil.justCampesino ?? ''),           // JUSTIF TRABAJADORES CAMPESINOS
-        Number(perfil.numPopular) || '',                    // # ECONOMÍA POPULAR
-        clobToString(perfil.justPopular ?? ''),             // JUSTIF ECONOMÍA POPULAR
-        '',                                                 // JUSTIFICACIÓN BENEFICIARIOS TALLER (no se captura)
-        clobToString(af.efectos),                           // EFECTOS DEL PROBLEMA
+        clobToString(af.justnec),
+        clobToString(sectores.justificacion ?? ''),
+        clobToString(perfil.justCampesino ?? ''),
+        Number(perfil.numPopular) || '',
+        clobToString(perfil.justPopular ?? ''),
+        '',                                                 // JUSTIFICACIÓN BENEFICIARIOS TALLER: no se captura
+        clobToString(af.efectos),
       ]
       rows.push(row)
     })
     return rows
   }
-
-  // ── Hoja: Datos_UT ─────────────────────────────────────────────────────────
 
   private buildUT(snap: AnyRec): Row[] {
     const rows: Row[] = [HEADERS_UT]
@@ -775,8 +691,7 @@ export class ExcelReportService {
       const det = detalleByAfId[Number(af.afId)] ?? {}
       const uts = (det.unidadesTematicas as AnyRec[]) ?? []
       uts.forEach((ut, idx) => {
-        // Las horas se guardan disgregadas por modalidad (PP/PV/PPAT/PHib y
-        // TP/TV/TPAT/THib). Para el reporte sumamos las prácticas y teóricas.
+        // las horas vienen disgregadas por modalidad; el reporte pide la suma
         const horasPracticas =
           (Number(ut.horasPP) || 0) + (Number(ut.horasPV) || 0)
           + (Number(ut.horasPPAT) || 0) + (Number(ut.horasPHib) || 0)
@@ -788,12 +703,9 @@ export class ExcelReportService {
           .map((a: AnyRec) => up(a.nombre || a.otro))
         const perfilesUT: AnyRec[] = (ut.perfiles as AnyRec[]) ?? []
         const habilidad = up(ut.articulacionTerritorialNombre ?? '')
-        // ES TRANSVERSAL solo se muestra si el flag está explícitamente
-        // marcado (1=SI). Si es 0 o null (UT regular sin transversalidad),
-        // dejamos en blanco para coincidir con el reporte legacy.
+        // 0 o null va en blanco, no "NO": asi lo hace el reporte legacy
         const esTrans = Number(ut.esTransversal) === 1 ? 'SI' : ''
-        // Helpers para par PERFIL/HORAS: si no hay perfil, ambas celdas
-        // quedan vacías (el reporte legacy no rellena 0 en esos casos).
+        // sin perfil las dos celdas van vacias, el legacy no rellena con 0
         const perfilN = (i: number) => up(perfilesUT[i]?.rubroNombre ?? '')
         const horasN  = (i: number): number | '' => perfilesUT[i]
           ? (Number(perfilesUT[i].horasCap) || 0)
@@ -801,9 +713,9 @@ export class ExcelReportService {
         const row: Row = [
           Number(af.numero) || 0,
           Number(ut.numero) || (idx + 1),
-          up(ut.nombre),                                        // NOMBRE UT en mayúsculas
-          horasPracticas,                                       // HORAS PRACTICAS (default 0)
-          horasTeoricas,                                        // HORAS TEORICAS (default 0)
+          up(ut.nombre),
+          horasPracticas,
+          horasTeoricas,
           clobToString(ut.contenido),
           clobToString(ut.competencias),
           actividades[0] ?? '', actividades[1] ?? '', actividades[2] ?? '',
@@ -822,8 +734,6 @@ export class ExcelReportService {
     })
     return rows
   }
-
-  // ── Hoja: Datos_Rubros ─────────────────────────────────────────────────────
 
   private buildRubros(
     snap: AnyRec,
@@ -846,30 +756,23 @@ export class ExcelReportService {
         const numHoras = Number(r.numHoras) || 0
         const benef = Number(r.beneficiarios) || 0
         const dias = Number(r.dias) || 0
-        // TARIFA MAXIMA = valor unitario del rubro = VALOR MAXIMO / # UNIDADES.
-        // Se elige la primera unidad no-cero (horas, paginas/unidades, días,
-        // beneficiarios). Si todo es 0, la tarifa = valor máximo.
+        // TARIFA MAXIMA = valor maximo dividido por la primera unidad no-cero
         const divisor = numHoras || cantidad || dias || benef || 1
         const tarifaMaxima = valorMaximo > 0 ? Math.round(valorMaximo / divisor) : 0
-        // VALOR * BENEFICIARIOS = total del rubro / beneficiarios (calculado
-        // si el campo persistido viene vacío).
+        // si el valor persistido viene vacio, se calcula
         let valorBenef = Number(r.valorBenef) || 0
         if (!valorBenef && benef > 0 && totalRubro > 0) {
           valorBenef = Math.round(totalRubro / benef)
         }
-        // Nombre del rubro: el template trae "CODIGO + descripción". En la BD
-        // RUBRONOMBRE ya incluye el código como prefijo (ej: "R01.1.1 HONORARIOS - ...")
-        // así que NO lo duplicamos. Si no, lo prefijamos.
+        // RUBRONOMBRE ya suele traer el codigo de prefijo, no lo duplicamos
         const nombreSrc = s(r.nombre || r.codigo)
         const codigoSrc = s(r.codigo)
         const nombreCompleto = codigoSrc && nombreSrc.toUpperCase().startsWith(codigoSrc.toUpperCase())
           ? nombreSrc
           : (codigoSrc ? `${codigoSrc} ${nombreSrc}` : nombreSrc)
-        // Descripción del rubro: no se persiste en AFRUBRO, la traemos del
-        // catálogo RUBRO por rubroId.
+        // la descripcion no se persiste en AFRUBRO, sale del catalogo
         const descripcion = clobToString(cats.rubrosDesc.get(Number(r.rubroId)) ?? '')
-        // CASO: la BD guarda "1", "2", etc. El reporte legacy usa "Caso01",
-        // "Caso02", ... con padding a 2 dígitos.
+        // la BD guarda "1" y el legacy espera "Caso01"
         const casoNum = Number(r.caso)
         const casoStr = !isNaN(casoNum) && casoNum > 0
           ? `Caso${String(casoNum).padStart(2, '0')}`
@@ -877,20 +780,20 @@ export class ExcelReportService {
 
         const row: Row = [
           Number(af.numero) || 0,
-          Number(r.rubroId) || 0,                       // IDRUBRO = rubroId de la BD
+          Number(r.rubroId) || 0,
           nombreCompleto,
           descripcion,
           clobToString(r.justificacion),
-          tarifaMaxima,                                // TARIFA MAXIMA
-          numHoras,                                    // # HORAS
-          cantidad,                                    // #PAGINAS /UNIDADES
-          benef,                                       // # DE BENEFICIARIOS
-          dias,                                        // # DE DIAS
-          totalRubro,                                  // TOTALRUBRO
-          valorMaximo,                                 // VALOR MAXIMO
-          casoStr,                                     // CASO (Caso01, Caso02…)
+          tarifaMaxima,
+          numHoras,
+          cantidad,
+          benef,
+          dias,
+          totalRubro,
+          valorMaximo,
+          casoStr,
           s(r.paquete),
-          valorBenef,                                  // VALOR * BENEFICIARIOS
+          valorBenef,
           Number(r.cofSena) || 0,
           Number(r.contraEspecie) || 0,
           Number(r.contraDinero) || 0,
@@ -898,10 +801,7 @@ export class ExcelReportService {
         rows.push(row)
       })
 
-      // Después de los rubros normales de la AF, agregamos R09 (Gastos de
-      // Operación) y R015 (Transferencia) si existen. Esos rubros se manejan
-      // por separado en el modelo (no están en det.rubros) pero deben aparecer
-      // en el reporte como una fila más por AF.
+      // R09 y R015 no viven en det.rubros pero el reporte los quiere como fila extra por AF
       const goTrans = goTransRubros.get(Number(af.afId))
       if (goTrans?.go) {
         const g = goTrans.go
@@ -911,18 +811,17 @@ export class ExcelReportService {
         const nombreCompleto = nombreSrc.toUpperCase().startsWith(codigoSrc.toUpperCase())
           ? nombreSrc
           : (codigoSrc ? `${codigoSrc} ${nombreSrc}` : nombreSrc)
-        // Para Gastos de Operación (R09) la unidad siempre es 1 (1 paquete por
-        // AF). Si el AFRUBRO no la tiene persistida, la inferimos como 1.
+        // R09 siempre es un paquete por AF
         const cantGO = Number(g.cantidad) || 1
         const row: Row = [
           Number(af.numero) || 0,
-          Number(g.rubroId) || 0,                // IDRUBRO de la BD
-          nombreCompleto,                        // R09 GASTOS DE OPERACIÓN DEL PROYECTO
+          Number(g.rubroId) || 0,
+          nombreCompleto,
           clobToString(g.descripcion),
-          '',                                    // JUSTIFICACIÓN (no aplica para R09)
-          total,                                 // TARIFA MAXIMA = total / 1 unidad
+          '',                                    // JUSTIFICACIÓN
+          total,                                 // TARIFA MAXIMA
           0,                                     // # HORAS
-          cantGO,                                // #PAGINAS /UNIDADES = 1
+          cantGO,                                // #PAGINAS /UNIDADES
           0, 0,                                  // # BENEF / # DÍAS
           total,                                 // TOTALRUBRO
           total,                                 // VALOR MAXIMO
@@ -944,18 +843,18 @@ export class ExcelReportService {
           : (codigoSrc ? `${codigoSrc} ${nombreSrc}` : nombreSrc)
         const row: Row = [
           Number(af.numero) || 0,
-          Number(t.rubroId) || 0,                // IDRUBRO de la BD
-          nombreCompleto,                        // R015 TRANSFERENCIA DE CONOCIMIENTO Y TECNOLOGÍA
+          Number(t.rubroId) || 0,
+          nombreCompleto,
           clobToString(t.descripcion),
           '',                                    // JUSTIFICACIÓN
           0, 0, 0,                               // TARIFA / # HORAS / # PAG
-          Number(t.beneficiarios) || 0,          // # DE BENEFICIARIOS (sí aplica)
+          Number(t.beneficiarios) || 0,          // # DE BENEFICIARIOS
           0,                                     // # DE DÍAS
           total,                                 // TOTALRUBRO
           0,                                     // VALOR MAXIMO
           '', '',                                // CASO / PAQUETE
           0,                                     // VALOR * BENEFICIARIOS
-          0, 0,                                  // SENA / ESPECIE (transferencia es 100% dinero)
+          0, 0,                                  // SENA / ESPECIE: la transferencia es 100% dinero
           total,                                 // CONTRAPARTIDA DINERO
         ]
         rows.push(row)
@@ -963,8 +862,6 @@ export class ExcelReportService {
     })
     return rows
   }
-
-  // ── Hoja: Datos_Cobertura ──────────────────────────────────────────────────
 
   private buildCobertura(snap: AnyRec): Row[] {
     const rows: Row[] = [HEADERS_COBERTURA]
@@ -976,18 +873,12 @@ export class ExcelReportService {
     acciones.forEach(af => {
       const det = detalleByAfId[Number(af.afId)] ?? {}
       const grupos = (det.grupos as AnyRec[]) ?? []
-      // Reglas del template VBA SENA:
-      //  - AF "Virtual" o "PAT" (Presencial Asistida por Tecnologías): las
-      //    columnas DEPARTAMENTO PRE / CIUDAD PRE / BENEFICIARIOS quedan vacías
-      //    y todas las coberturas se vuelcan en DEPARTAMENTO 1..25 / BENEFICIARIOS 1..25.
-      //  - AF "Presencial" o "Presencial Híbrida": la primera cobertura va en
-      //    PRE; el resto en 1..25.
+      // regla del VBA SENA: en Virtual/PAT las columnas PRE van vacias y todo cae en 1..25
       const modalidadAfUp = up(af.modalidad)
       const afEsPatOVirtual = modalidadAfUp.includes('VIRTUAL')
         || modalidadAfUp.includes('PAT')
       grupos.forEach((g, idx) => {
         const cobs: AnyRec[] = (g.coberturas as AnyRec[]) ?? []
-        // Solo intentamos llenar PRE si la modalidad de la AF lo permite.
         const idxPre = afEsPatOVirtual
           ? -1
           : cobs.findIndex(c => s(c.modal).toUpperCase() === 'P')
@@ -999,9 +890,9 @@ export class ExcelReportService {
         const row: Row = [
           Number(af.numero) || 0,
           `GRUPO ${Number(g.grupoNumero) || (idx + 1)}`,
-          tienePre ? up(pre.deptoNombre ?? '') : '',  // DEPARTAMENTO PRE
-          tienePre ? up(pre.ciudadNombre ?? '') : '', // CIUDAD PRE
-          tienePre ? (Number(pre.benef) || 0) : '',   // BENEFICIARIOS PRE
+          tienePre ? up(pre.deptoNombre ?? '') : '',
+          tienePre ? up(pre.ciudadNombre ?? '') : '',
+          tienePre ? (Number(pre.benef) || 0) : '',
         ]
         for (let i = 0; i < 25; i++) {
           row.push(up(otras[i]?.deptoNombre ?? ''))

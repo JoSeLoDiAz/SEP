@@ -1,37 +1,4 @@
 -- v45_despachos_regionales.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Falta el despacho de la regional en casi todas las regionales.
---
--- Reportado desde Tolima ("en Tolima no está el despacho"), pero al cotejar
--- el banco completo contra el catálogo resultó ser general: de las 34
--- regionales, la ÚNICA con su despacho cargado es Antioquia (código 1010).
--- Dirección General tiene el suyo aparte (1001).
---
--- En el archivo del banco, 30 evaluadores están adscritos al despacho de su
--- regional y lo escriben de cinco formas distintas —"DESPACHO DIRECCIÓN",
--- "DIRECCIÓN REGIONAL", "DIRECION REGIONAL", "DESPACHO REGIONAL", "REGIONAL
--- <nombre>"— justamente porque no hay ninguna opción que escoger.
---
--- Qué hace: crea "Despacho Regional" en cada regional que no lo tenga.
---
--- ⚠  SOBRE EL CÓDIGO
---    Los CENTROID son los códigos oficiales del SENA y no se pueden deducir:
---    Antioquia es la regional 5 y su despacho es 1010, así que no hay
---    fórmula. Aquí se usa 1000 + REGIONALID, que es determinista, legible y
---    no choca con nada de lo cargado (en el rango 1000-1099 solo están
---    ocupados 1001 y 1010).
---
---    Si consigue los códigos oficiales de los despachos, es mejor cargarlos
---    con esos: el día que se recargue el catálogo del SENA, estos quedarían
---    duplicados y los evaluadores repartidos entre dos registros.
---
--- CIUDADID se deja en NULL a propósito: la columna lo permite y poner la
--- capital "a ojo" en 26 regionales es inventar dato. Se puede completar
--- después sin afectar el desplegable, que solo filtra por regional.
---
--- Idempotente: si la regional ya tiene despacho, no la toca.
--- Puede correrse como SEP_APP: no lleva DDL.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
@@ -76,11 +43,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Verificación                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Se comprueba el HECHO: que no queda ninguna regional sin despacho.
+-- Verificación
 
 DECLARE
   v_faltan NUMBER := 0;

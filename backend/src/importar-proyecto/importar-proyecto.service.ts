@@ -17,16 +17,7 @@ function encrypt64(plainText: string, key: string): string {
   return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ Importador de proyectos formulados desde el formulador VBA (.xlsx).       ║
-// ║                                                                            ║
-// ║ El VBA genera el mismo formato de hojas Datos_* que el backend produce    ║
-// ║ con excel-report.service.ts. Esta clase hace la operación inversa: leer   ║
-// ║ el .xlsx y devolver un preview tipado con validaciones para que el admin  ║
-// ║ confirme antes de crear todo en BD (Sprint 2).                            ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
-
-// ── Tipos del Excel parseado ────────────────────────────────────────────────
+// tipos del excel parseado
 
 export interface ExcelBasicos {
   nit: string
@@ -141,15 +132,10 @@ export interface ExcelAF {
   trabajadoresCampesinos: number | null
   trabajadoresDiscapacidad: number | null
   empresasBic: number | null
-  /** Sectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   sectoresPertenecen: string[]
-  /** Subsectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   subsectoresPertenecen: string[]
-  /** Sector que la AF BENEFICIA (clasificación, normalmente 1). */
   sectoresBeneficia: string[]
-  /** Subsector que la AF BENEFICIA (clasificación, normalmente 1). */
   subsectoresBeneficia: string[]
-  /** Justificación de la elección de sectores y subsectores. */
   justificacionSectores: string | null
   componenteAlineacion: string | null
   descripcionAlineacion: string | null
@@ -186,11 +172,8 @@ export interface ExcelUT {
   actividades: string[]
   descripcionActividad: string | null
   perfiles: Array<{ perfil: string; horas: number | null }>
-  /** Texto de la articulación territorial (la columna se llama
-   *  HABILIDAD TRANSVERSAL en el Excel pero conceptualmente es articulación
-   *  territorial — es una UT especial vinculada a una región). */
+  // en el Excel la columna se llama HABILIDAD TRANSVERSAL
   articulacionTerritorial: string | null
-  /** True cuando la UT es de articulación territorial (col ES TRANSVERSAL = SI). */
   esArticulacionTerritorial: boolean
 }
 
@@ -218,14 +201,11 @@ export interface ExcelRubro {
 export interface ExcelCoberturaFila {
   numeroAF: number
   numeroGrupo: number
-  // Presencial:
   departamentoPresencial: string | null
   ciudadPresencial: string | null
   beneficiariosPresencial: number | null
-  // Virtual / PAT / Híbrida: hasta 25 departamentos.
+  // virtual / PAT / hibrida: hasta 25 departamentos
   departamentos: Array<{ departamento: string; beneficiarios: number }>
-  /** Justificación de la relación de los beneficiarios con los lugares de
-   *  ejecución planteados (col 56 del Excel). */
   justificacion: string | null
 }
 
@@ -242,7 +222,7 @@ export interface ProyectoExcel {
   cobertura: ExcelCoberturaFila[]
 }
 
-// ── Preview enriquecido con BD ──────────────────────────────────────────────
+// preview enriquecido con BD
 
 export interface PreviewEmpresa {
   estado: 'nueva' | 'existente'
@@ -294,15 +274,11 @@ export interface PreviewImportacion {
   validaciones: PreviewValidacion[]
 }
 
-// ── Service ─────────────────────────────────────────────────────────────────
-
 @Injectable()
 export class ImportarProyectoService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /** Match tolerante para nombres de modalidad: el Excel suele decir
-   *  "EMPRESA INDIVIDUAL" pero la BD guarda solo "INDIVIDUAL". Compara
-   *  ignorando prefijos como "EMPRESA " / "EMPRESAS " y espacios duplicados. */
+  // el Excel dice "EMPRESA INDIVIDUAL" y la BD guarda solo "INDIVIDUAL"
   private matchModalidad(
     texto: string,
     catalogo: Array<{ id: number; nombre: string }>,
@@ -313,19 +289,14 @@ export class ImportarProyectoService {
       .replace(/\s+/g, ' ')
       .replace(/^EMPRESAS?\s+/, '')
     const t = norm(texto)
-    // Match exacto sobre normalizado.
     const exact = catalogo.find(m => norm(m.nombre) === t)
     if (exact) return exact
-    // Contención: el texto del Excel contiene el del catálogo (o viceversa).
     return catalogo.find(m => {
       const c = norm(m.nombre)
       return c.length > 2 && (t.includes(c) || c.includes(t))
     })
   }
 
-  /** Match tolerante para modalidad de formación con aliases conocidos:
-   *  "PAT" ↔ "PRESENCIAL ASISTIDA POR TECNOLOGÍAS",
-   *  "PRESENCIAL HÍBRIDA" ↔ "HÍBRIDA", etc. */
   private matchModalidadFormacion(
     texto: string,
     catalogo: Array<{ id: number; nombre: string }>,
@@ -344,11 +315,9 @@ export class ImportarProyectoService {
       'PRESENCIAL': ['PRESENCIAL'],
     }
 
-    // Match exacto.
     const exact = catalogo.find(m => norm(m.nombre) === t)
     if (exact) return exact
 
-    // Aliases en ambas direcciones (texto del Excel → catálogo).
     for (const [clave, alias] of Object.entries(aliases)) {
       if (t === norm(clave) || alias.some(a => norm(a) === t)) {
         const candidato = catalogo.find(m => {
@@ -359,15 +328,12 @@ export class ImportarProyectoService {
       }
     }
 
-    // Contención.
     return catalogo.find(m => {
       const c = norm(m.nombre)
       return c.length > 2 && (t.includes(c) || c.includes(t))
     })
   }
 
-  /** Lee el .xlsx y devuelve la estructura tipada del proyecto. Es síncrono y
-   *  no toca BD — ideal para tests rápidos.  */
   parseExcel(buffer: Buffer): ProyectoExcel {
     let wb: XLSX.WorkBook
     try {
@@ -396,8 +362,6 @@ export class ImportarProyectoService {
     return { basicos, contactos, generalidades, diagnosticos, necesidades, presupuesto, afs, uts, rubros, cobertura }
   }
 
-  /** Parsea el .xlsx, valida la convocatoria, busca empresa/usuario por NIT y
-   *  email, y devuelve el preview con validaciones.  */
   async preview(buffer: Buffer, convocatoriaId: number): Promise<PreviewImportacion> {
     if (!convocatoriaId) throw new BadRequestException('Debe indicar la convocatoria')
 
@@ -408,7 +372,7 @@ export class ImportarProyectoService {
       - data.presupuesto.gastosOperacion
       - data.presupuesto.valorTransferencia
 
-    // ── Convocatoria ────────────────────────────────────────────────────────
+    // convocatoria
     const conv = await this.dataSource.query(
       `SELECT CONVOCATORIAID            AS "id",
               TRIM(CONVOCATORIANOMBRE)  AS "nombre",
@@ -429,12 +393,9 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'warning', mensaje: 'La convocatoria seleccionada no está abierta' })
     }
 
-    // ── Nombre del proyecto autogenerado: SIGLA-FCE-AÑO ────────────────────
     const sigla = (data.basicos.sigla ?? '').trim() || data.basicos.razonSocial.trim().slice(0, 30)
     const nombreProyecto = `${sigla}-FCE-${anioConv}`.slice(0, 100)
 
-    // ── Modalidad del proyecto (de Datos_Basicos.MODALIDAD DE PARTICIPACIÓN).
-    // Match tolerante: "EMPRESA INDIVIDUAL" del Excel ↔ "INDIVIDUAL" del catálogo.
     const mods: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
@@ -448,9 +409,7 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Validaciones contra catálogos: tipos de evento, modalidad de
-    // formación y rubros de la convocatoria. Cualquier desfase queda como
-    // aviso en el preview para que el admin lo revise.
+    // validaciones contra catalogos: tipo de evento, modalidad de formacion y rubros
     const tiposEvento: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT TIPOEVENTOID AS "id", TRIM(UPPER(TIPOEVENTONOMBRE)) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`,
     )
@@ -483,8 +442,7 @@ export class ImportarProyectoService {
         })
       }
     }
-    // Validar rubros: matchea por código exacto, o por nombre exacto si el
-    // código no coincide (la convocatoria puede tener códigos distintos).
+    // el rubro matchea por codigo y, si no coincide, por nombre
     const rubrosFaltantes = new Set<string>()
     for (const r of data.rubros) {
       const cod = r.idRubro.trim().toUpperCase()
@@ -500,23 +458,13 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Validaciones de catálogos auxiliares (áreas, niveles, CUOC, sectores,
-    // ambiente, material, recursos, gestión, etc.) — todo lookup por nombre
-    // o código contra los catálogos vivos del SEP. Lo que no resuelva sale
-    // como aviso y NO se importará en esa subtabla.
-    // Normalización tolerante: trim + upper + sin acentos + espacios colapsados.
-    // Cubre las variantes habituales entre Excel/BD (mayúsculas vs minúsculas,
-    // tilde sí/no, espacios extra). Para nombres largos también se admite
-    // substring match (ej. el Excel dice "ARCHIPIÉLAGO DE SAN ANDRÉS,
-    // PROVIDENCIA Y SANTA CATALINA" y la BD solo "SAN ANDRÉS Y PROVIDENCIA").
+    // catalogos auxiliares: lo que no resuelva sale como aviso y no se importa
     const normalizar = (s: string | null | undefined) =>
       (s ?? '')
         .normalize('NFD').replace(/[̀-ͯ]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
         .toUpperCase()
-    // Tokens significativos para matching aproximado (palabras ≥ 4 chars,
-    // ignorando conectores como Y/DE/LA).
     const tokens = (s: string): string[] => s.split(/[^A-Z0-9Ñ]+/i)
       .map(t => t.toUpperCase())
       .filter(t => t.length >= 4 && !['PARA', 'DESDE', 'HASTA'].includes(t))
@@ -525,14 +473,11 @@ export class ImportarProyectoService {
       if (!n) return false
       if (cat.has(n)) return true
       if (n.length < 6) return false
-      // Substring en ambas direcciones (uno contiene al otro).
       for (const k of cat) {
         if (k.length < 6) continue
         if (k.includes(n) || n.includes(k)) return true
       }
-      // Token-overlap: el VBA abrevia palabras (p.ej. "EO" por "Entidades
-      // Oficiales"). Si las palabras significativas del Excel están todas
-      // en la entrada del catálogo (o viceversa), aceptamos como match.
+      // token-overlap: el VBA abrevia palabras ("EO" por "Entidades Oficiales")
       const t1 = tokens(n)
       if (t1.length === 0) return false
       for (const k of cat) {
@@ -594,8 +539,7 @@ export class ImportarProyectoService {
     for (const af of data.afs) {
       checkSet(areasCat,         af.areas,                noResueltos.areas)
       checkSet(nivelesCat,       af.niveles,              noResueltos.niveles)
-      // El Excel suele traer "1234 - Nombre". Probamos primero el nombre
-      // completo y, si no matchea, lo que queda después del guión.
+      // el Excel trae "1234 - Nombre"
       checkSet(cuocCat, af.ocupacionesCuoc.map(c => {
         if (matchCat(cuocCat, c)) return c
         const idxDash = c.indexOf('-')
@@ -640,7 +584,7 @@ export class ImportarProyectoService {
     rep('Actividades de UT',                  noResueltos.utActividades)
     rep('Departamentos (cobertura)',          noResueltos.departamentos)
 
-    // ── Validaciones exhaustivas (datos básicos / generalidades / contactos)
+    // validaciones de basicos, generalidades y contactos
     if (data.basicos.nit && !/^\d+$/.test(data.basicos.nit.replace(/\D/g, '').slice(0, 20))) {
       validaciones.push({ nivel: 'error', campo: 'NIT', mensaje: 'El NIT del Excel no es numérico.' })
     }
@@ -664,7 +608,7 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'error', campo: 'REPRESENTANTE LEGAL', mensaje: 'Falta el representante legal.' })
     }
 
-    // ── Validaciones por AF
+    // validaciones por AF
     for (const af of data.afs) {
       const prefix = `AF ${af.consecutivo}`
       if (!af.nombre?.trim()) validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'Falta el nombre de la AF.' })
@@ -679,7 +623,6 @@ export class ImportarProyectoService {
       if (af.ocupacionesCuoc.length === 0) validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'Sin ocupaciones CUOC definidas.' })
       if (!af.ambiente?.trim()) validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'Falta ambiente de aprendizaje.' })
 
-      // UTs de esta AF
       const utsAf = data.uts.filter(u => u.numeroAF === af.consecutivo)
       if (utsAf.length === 0) {
         validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'La AF no tiene unidades temáticas.' })
@@ -706,7 +649,6 @@ export class ImportarProyectoService {
         }
       }
 
-      // Cobertura
       const covAf = data.cobertura.filter(c => c.numeroAF === af.consecutivo)
       if (covAf.length === 0) {
         validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'La AF no tiene grupos de cobertura.' })
@@ -718,7 +660,6 @@ export class ImportarProyectoService {
         })
       }
 
-      // Rubros: consistencia interna (cofin + especie + dinero ≈ total)
       const rubrosAf = data.rubros.filter(r => r.numeroAF === af.consecutivo)
       if (rubrosAf.length === 0) {
         validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'La AF no tiene rubros registrados.' })
@@ -737,7 +678,7 @@ export class ImportarProyectoService {
       }
     }
 
-    // ── Validaciones del presupuesto general
+    // validaciones del presupuesto
     const p = data.presupuesto
     const totalCalculado = p.valorAFs + p.gastosOperacion + p.valorTransferencia
     if (Math.abs(totalCalculado - p.valorTotal) > 1) {
@@ -783,16 +724,13 @@ export class ImportarProyectoService {
       }
     }
 
-    // ── Empresa por NIT ─────────────────────────────────────────────────────
+    // empresa por NIT
     const nit = data.basicos.nit?.trim()
     if (!nit) {
       validaciones.push({ nivel: 'error', campo: 'NIT', mensaje: 'El Excel no trae NIT' })
     }
     let empresa: PreviewEmpresa = { estado: 'nueva', nit, razonSocial: data.basicos.razonSocial }
-    // EMPRESAIDENTIFICACION es NUMBER en Oracle. El NIT del Excel puede traer puntos,
-    // guiones o el dígito de verificación (p. ej. "890.982.432-0"); Number() sobre eso
-    // daría NaN y rompe el bind (NJS-105). Lo dejamos en solo dígitos y únicamente
-    // consultamos cuando queda un entero válido; si no, se trata como empresa nueva.
+    // EMPRESAIDENTIFICACION es NUMBER: un NIT con puntos rompe el bind (NJS-105)
     const nitNum = Number((nit ?? '').replace(/\D/g, ''))
     if (nit && Number.isFinite(nitNum) && nitNum > 0) {
       const e = await this.dataSource.query(
@@ -829,7 +767,7 @@ export class ImportarProyectoService {
       }
     }
 
-    // ── Usuario por email ───────────────────────────────────────────────────
+    // usuario por email
     const email = data.basicos.email?.trim().toLowerCase() ?? ''
     let usuario: PreviewUsuario = { email, estado: 'nuevo' }
     if (email) {
@@ -842,7 +780,7 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'error', campo: 'CORREO ELECTRÓNICO', mensaje: 'El Excel no trae correo de la empresa' })
     }
 
-    // ── Validaciones cruzadas ──────────────────────────────────────────────
+    // validaciones cruzadas
     if (data.afs.length === 0) {
       validaciones.push({ nivel: 'error', mensaje: 'No hay Acciones de Formación en el Excel' })
     }
@@ -852,12 +790,7 @@ export class ImportarProyectoService {
         mensaje: `Datos_Presupuesto declara ${data.presupuesto.numeroAFs} AFs pero hay ${data.afs.length} en Datos_AF`,
       })
     }
-    // Validación cruzada de cofinanciación SENA.
-    // En el Excel "Datos_Presupuesto.cofinanciacionSena" es el TOTAL del
-    // proyecto (ya incluye GO). Para comparar contra la suma de rubros, hay
-    // que sumar SOLO los rubros NORMALES (excluyendo R09 GO y R015 Transf,
-    // que ya vienen aparte como gastosOpCofinSena y valorTransferencia) más
-    // el GO. La transferencia no aporta cofin SENA (va a contrapartida dinero).
+    // el cofin SENA del Excel ya incluye GO: se excluyen R09 y R015 de la suma
     const isGOCode = (cod: string, nom: string) =>
       /^R0?9(\D|$)/i.test(cod) || /GASTOS\s+DE\s+OPERACI/i.test(nom)
     const isTransCode = (cod: string, nom: string) =>
@@ -874,7 +807,6 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Agrupar AF con sus UT, rubros y cobertura ──────────────────────────
     const afsConDetalle = data.afs.map(af => ({
       ...af,
       uts: data.uts.filter(u => Number(u.numeroAF) === Number(af.consecutivo)),
@@ -905,10 +837,6 @@ export class ImportarProyectoService {
       validaciones,
     }
   }
-
-  // ╔════════════════════════════════════════════════════════════════════════╗
-  // ║ Confirmación: inserción real en BD                                      ║
-  // ╚════════════════════════════════════════════════════════════════════════╝
 
   async confirmar(
     buffer: Buffer,
@@ -950,16 +878,14 @@ export class ImportarProyectoService {
     const email = data.basicos.email?.trim().toLowerCase()
     if (!nit)   throw new BadRequestException('El Excel no trae NIT')
     if (!email) throw new BadRequestException('El Excel no trae correo')
-    // EMPRESAIDENTIFICACION / EMPRESADIGITOVERIFICACION son NUMBER en Oracle. El NIT
-    // puede venir con puntos, guiones o el dígito de verificación ("890.982.432-0"),
-    // así que lo dejamos en solo dígitos antes de convertir para no romper el bind.
+    // EMPRESAIDENTIFICACION y EMPRESADIGITOVERIFICACION son NUMBER: solo digitos
     const nitNum = Number((nit ?? '').replace(/\D/g, ''))
     if (!Number.isFinite(nitNum) || nitNum <= 0) {
       throw new BadRequestException(`El NIT "${nit}" no es un número válido`)
     }
     const dvNum = Number(String(data.basicos.digitoVerificacion ?? '').replace(/\D/g, '') || '0')
 
-    // Convocatoria — además del id, traemos el año para el nombre del proyecto
+    // el año se usa en el nombre del proyecto
     const conv: Array<{ anio: number }> = await this.dataSource.query(
       `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
       [dto.convocatoriaId],
@@ -967,8 +893,6 @@ export class ImportarProyectoService {
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
     const anioConvocatoria = Number(conv[0].anio)
 
-    // Modalidad del proyecto: tomada de Datos_Basicos.modalidadParticipacion.
-    // Match tolerante (ver matchModalidad).
     const modsCat: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
@@ -979,7 +903,7 @@ export class ImportarProyectoService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // ── 1. Empresa ────────────────────────────────────────────────────────
+      // 1. empresa
       const empresaExistente: Array<{ id: number }> = await qr.query(
         `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = :1 AND ROWNUM = 1`,
         [nitNum],
@@ -1007,7 +931,7 @@ export class ImportarProyectoService {
           )
         }
       } else {
-        // Crear empresa nueva con defaults sensatos para campos NOT NULL.
+        // los 1 fijos del INSERT son defaults para columnas NOT NULL
         const seq = await qr.query(`SELECT EMPRESAID.NEXTVAL FROM dual`)
         empresaId = Number(seq[0].NEXTVAL)
         await qr.query(
@@ -1034,7 +958,7 @@ export class ImportarProyectoService {
         )
       }
 
-      // ── 2. Usuario + USUARIOPERFIL ────────────────────────────────────────
+      // 2. usuario + USUARIOPERFIL
       const usuarioExistente: Array<{ id: number }> = await qr.query(
         `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1 AND ROWNUM = 1`,
         [email],
@@ -1065,10 +989,7 @@ export class ImportarProyectoService {
         )
       }
 
-      // ── 3. Proyecto ───────────────────────────────────────────────────────
-      // Nombre autogenerado: SIGLA-FCE-AÑO. La modalidad sale de Datos_Basicos
-      // (resuelta por nombre). Estado 0 (borrador) para que el proponente o el
-      // admin puedan revisar y editar antes de confirmar.
+      // 3. proyecto — entra en estado 0 (borrador)
       const codSeg = crypto.randomBytes(12).toString('hex').toUpperCase()
       const modalidadId = modProy?.id ?? dto.modalidadProyectoId ?? 1
       const sigla = (data.basicos.sigla ?? '').trim() || data.basicos.razonSocial.trim().slice(0, 30)
@@ -1086,7 +1007,7 @@ export class ImportarProyectoService {
       const seqP: Array<{ id: number }> = await qr.query(`SELECT PROYECTOID.CURRVAL AS "id" FROM dual`)
       const proyectoId = Number(seqP[0].id)
 
-      // ── 4. Contactos (3) — cargos según el listado oficial del SEP ───────
+      // 4. contactos: los cargos salen del listado oficial del SEP
       const contactos = [
         { ...data.contactos.representanteLegal, cargo: 'Representante Legal' },
         { ...data.contactos.contacto1,           cargo: 'Talento Humano' },
@@ -1105,17 +1026,13 @@ export class ImportarProyectoService {
         )
       }
 
-      // ── 4.5 Diagnósticos (NECESIDAD) y necesidades de formación
-      //         (NECESIDADFORMACION). Indexamos por (codigoDiagnostico,
-      //         codigoNecesidad) para que cada AF pueda referenciar la
-      //         correcta vía NECESIDADFORMACIONIDAF.
+      // 4.5 diagnosticos (NECESIDAD) y necesidades de formacion (NECESIDADFORMACION)
       const necFormIdPor = new Map<string, number>()  // "diag-nec" → necesidadFormacionId
       const necesidadIdPorDiag = new Map<number, number>()
       let necesidadesCreadas = 0
       let necFormCreadas = 0
       let herramientasCreadas = 0
 
-      // Catálogo de fuentes de herramienta (ENCUESTAS, ENTREVISTAS, etc.)
       const fuentesHerr: Array<{ id: number; nombre: string }> = await qr.query(
         `SELECT FUENTEHERRAMIENTAID AS "id",
                 TRIM(UPPER(FUENTEHERRAMIENTANOMBRE)) AS "nombre"
@@ -1126,18 +1043,16 @@ export class ImportarProyectoService {
         return fuentesHerr.find(f => f.nombre === n)?.id ?? null
       }
 
-      // Excel trae "DD/MM/YYYY" (string) o un número serial. Lo convertimos a
-      // string ISO YYYY-MM-DD para Oracle TO_DATE.
+      // el Excel trae "DD/MM/YYYY" o un serial; Oracle TO_DATE necesita ISO
       const toIsoDate = (v: string | null): string | null => {
         if (!v) return null
         const s = v.trim()
-        // Excel serial number (días desde 1900).
+        // serial de Excel: dias desde 1900
         if (/^\d{4,6}(\.\d+)?$/.test(s)) {
           const serial = Number(s)
           const d = new Date(Math.round((serial - 25569) * 86400 * 1000))
           if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
         }
-        // DD/MM/YYYY o DD-MM-YYYY
         const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
         if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
         return null
@@ -1156,8 +1071,6 @@ export class ImportarProyectoService {
         necesidadIdPorDiag.set(diag.numero, Number(necId))
         necesidadesCreadas++
 
-        // Datos del diagnóstico (fecha, herramienta propia, otra, descripción,
-        // resumen y plan de capacitación).
         const isoFecha = toIsoDate(diag.fecha)
         const esCreacionPropia = (diag.herramientaPropia ?? '').trim().toUpperCase().startsWith('SI') ? 1 : 0
         const tienePlanCapa    = (diag.planCapacitacion  ?? '').trim().toUpperCase().startsWith('SI') ? 1 : 0
@@ -1181,13 +1094,10 @@ export class ImportarProyectoService {
           ],
         )
 
-        // HERRAMIENTANECESIDAD por cada herramienta del diagnóstico (lookup
-        // por nombre; las que no resuelvan quedan en noResueltos.fuentes).
         for (const h of diag.herramientas) {
           const fuenteId = findFuente(h.nombre)
           if (!fuenteId) {
-            // Aún no existe noResueltos en este punto del flujo; lo dejamos
-            // como log para el admin: la herramienta se omite silenciosamente.
+            // noResueltos todavia no existe en este punto: la herramienta se omite
             continue
           }
           await qr.query(
@@ -1202,7 +1112,6 @@ export class ImportarProyectoService {
         }
       }
 
-      // Insertar las necesidades de formación de cada diagnóstico.
       for (const nec of data.necesidades) {
         const necesidadId = necesidadIdPorDiag.get(nec.numeroDiagnostico)
         if (!necesidadId) continue
@@ -1222,11 +1131,7 @@ export class ImportarProyectoService {
         necFormCreadas++
       }
 
-      // ── 5. Catálogos: lookup completo por nombre/código (todos los que el
-      //    Excel del VBA puede traer en texto). Lo que no resuelve queda
-      //    registrado en `noResueltos` y se devuelve al admin para que lo
-      //    complete después en la edición del proyecto vivo.
-      // Normalización tolerante: trim + upper + sin acentos + espacios colapsados.
+      // 5. catalogos: lo que no resuelve queda en noResueltos y lo completa el admin
       const normalizar = (s: string | null | undefined) =>
         (s ?? '')
           .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -1270,7 +1175,6 @@ export class ImportarProyectoService {
       const tiposEvento = tiposEventoMap as Array<{ id: number; nombre: string }>
       const modsForm    = modsFormCat    as Array<{ id: number; nombre: string }>
 
-      // Rubros de la convocatoria (lookup por código y por nombre).
       const rubrosConv: Array<{ id: number; codigo: string; nombre: string }> = await qr.query(
         `SELECT RUBROID AS "id",
                 TRIM(UPPER(RUBROCODIGO)) AS "codigo",
@@ -1289,12 +1193,10 @@ export class ImportarProyectoService {
         const exact = cat.get(k)
         if (exact !== undefined) return exact
         if (k.length < 6) return null
-        // Substring match (uno contiene al otro) para nombres largos.
         for (const [catKey, id] of cat) {
           if (catKey.length < 6) continue
           if (catKey.includes(k) || k.includes(catKey)) return id
         }
-        // Token-overlap (≥60% palabras ≥4 chars compartidas).
         const t1 = tokensConf(k)
         if (t1.length === 0) return null
         for (const [catKey, id] of cat) {
@@ -1313,10 +1215,7 @@ export class ImportarProyectoService {
       const findModalidad = (nombre: string | null) =>
         nombre ? this.matchModalidadFormacion(nombre, modsForm)?.id ?? null : null
 
-      // Para AREAFUNCIONAL y UTACTIVIDADES, cuando el valor del Excel no
-      // existe en el catalogo principal, el formulador lo registra como
-      // "Otra"/"Otro" y deja el nombre real en una columna OTRO. Localizamos
-      // el id del registro "Otra"/"Otro" para usarlo como fallback.
+      // id del registro "Otra"/"Otro", el fallback cuando el valor no esta en el catalogo
       const findOtroId = (cat: Map<string, number>, candidatos: string[]): number | null => {
         for (const c of candidatos) {
           const id = cat.get(c)
@@ -1338,7 +1237,6 @@ export class ImportarProyectoService {
         return null
       }
 
-      // Acumuladores de no resueltos por categoría — se devuelven al admin.
       const noResueltos: Record<string, Set<string>> = {
         areas: new Set(), niveles: new Set(), cuoc: new Set(),
         sectoresPert: new Set(), subsectoresPert: new Set(),
@@ -1350,7 +1248,7 @@ export class ImportarProyectoService {
         componente: new Set(),
       }
 
-      // ── 6. AFs + sub-tablas ─────────────────────────────────────────────
+      // 6. AFs + sub-tablas
       const afIdsPorConsecutivo = new Map<number, number>()
       let afsCreadas = 0
       let utsCreadas = 0
@@ -1383,29 +1281,22 @@ export class ImportarProyectoService {
         const benefSinc = af.beneficiariosSincronicos ?? 0
         const numGrupos = af.numeroGrupos ?? 0
         const horasGrupo = af.horasPorGrupo ?? 0
-        // Totales del proyecto: por-grupo × n° grupos.
         const benefTot  = (benefPres + benefSinc) * (numGrupos || 1)
         const totHoras  = horasGrupo * (numGrupos || 1)
 
         const seqA: Array<{ NEXTVAL: number }> = await qr.query(`SELECT ACCIONFORMACIONID.NEXTVAL FROM dual`)
         const afId = Number(seqA[0].NEXTVAL)
 
-        // Resultados de impacto (CLOBs en BD): el Excel trae 5 entradas para
-        // cada uno (impacto en desempeño / impacto en productividad). Se
-        // concatenan con saltos de línea para que el editor del proyecto vivo
-        // pueda separarlos posteriormente.
+        // se concatenan con salto de linea para que el editor del proyecto vivo los separe
         const resDesem = af.impactosTrabajador.filter(Boolean).join('\n').trim() || null
         const resForm  = af.impactosProductividad.filter(Boolean).join('\n').trim() || null
 
-        // Componente Estratégico: el Excel trae el nombre del AFCOMPONENTE
-        // en col "ALINEACIÓN DE LA ACCIÓN DE FORMACIÓN" (descripcionAlineacion).
+        // el nombre del AFCOMPONENTE viene en la col "ALINEACIÓN DE LA ACCIÓN DE FORMACIÓN"
         const componenteId = findInMap(afComponenteCat, af.descripcionAlineacion)
         if (af.descripcionAlineacion && !componenteId) {
-          // Sin lookup: dejamos el texto en COMPOD para que el admin lo elija
-          // luego desde el editor.
+          // sin lookup: el texto queda en COMPOD y el admin lo elige despues
         }
 
-        // NECESIDADFORMACIONIDAF: por (codigoDiagnostico, codigoNecesidad).
         const necFormKey = `${af.codigoDiagnostico ?? ''}-${af.codigoNecesidad ?? ''}`
         const necFormIdAf = necFormIdPor.get(necFormKey) ?? null
 
@@ -1467,10 +1358,7 @@ export class ImportarProyectoService {
             af.cadenaEmpresas ?? null, af.cadenaTrabajadores ?? null,
             af.justificacionCadena?.trim() ?? null,
             af.justificacionSectores?.trim() ?? null,
-            // COMPOD = Justificación de la Alineación (BN, r[65]) — el editor del
-            // proyecto vivo lee esta columna para esa textarea. JUSTIFICACION =
-            // Justificación AF Especializada (BO, r[66]). El nombre del
-            // AFCOMPONENTE (descripcionAlineacion) se referencia vía COMPONENTEID.
+            // COMPOD = justificacion de la alineacion; JUSTIFICACION = AF especializada
             componenteId, af.justificacionAlineacion?.trim() ?? null, af.justificacionEspecializada?.trim() ?? null,
             resDesem, resForm,
             ambienteId, af.justificacionSiAplica?.trim() ?? null,
@@ -1484,10 +1372,7 @@ export class ImportarProyectoService {
         afIdsPorConsecutivo.set(af.consecutivo, afId)
         afsCreadas++
 
-        // ── Áreas funcionales ──
-        // Cuando el Excel trae un area que no existe en el catalogo,
-        // se inserta como "Otra" con el nombre original en AFAREAFUNCIONALOTRO,
-        // tal como lo hace el formulador GeneXus.
+        // areas funcionales: si no esta en el catalogo va como "Otra" + AFAREAFUNCIONALOTRO
         for (const a of af.areas) {
           let aid = findInMap(areasCat, a)
           let textoOtro: string | null = null
@@ -1511,7 +1396,7 @@ export class ImportarProyectoService {
           areasCreadas++
         }
 
-        // ── Niveles ocupacionales ──
+        // niveles ocupacionales
         for (const n of af.niveles) {
           const nid2 = findInMap(nivelesCat, n)
           if (!nid2) { noResueltos.niveles.add(n); continue }
@@ -1526,8 +1411,7 @@ export class ImportarProyectoService {
           nivelesCreados++
         }
 
-        // ── Ocupaciones CUOC: el Excel viene "1234 - Nombre"; matcheamos
-        // el nombre completo y si no, lo que queda tras el guión.
+        // CUOC: el Excel viene "1234 - Nombre"
         for (const c of af.ocupacionesCuoc) {
           let cid = findInMap(cuocCat, c)
           if (!cid) {
@@ -1546,7 +1430,7 @@ export class ImportarProyectoService {
           cuocCreados++
         }
 
-        // ── Sectores que PERTENECEN los beneficiarios (AFPSECTOR/AFPSUBSECTOR) ──
+        // sectores a los que pertenecen los beneficiarios (AFPSECTOR/AFPSUBSECTOR)
         for (const s of af.sectoresPertenecen) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresPert.add(s); continue }
@@ -1574,7 +1458,7 @@ export class ImportarProyectoService {
           subsectoresCreados++
         }
 
-        // ── Sectores que la AF BENEFICIA (AFSECTOR/AFSUBSECTOR) ──
+        // sectores que la AF beneficia (AFSECTOR/AFSUBSECTOR)
         for (const s of af.sectoresBeneficia) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresBenef.add(s); continue }
@@ -1602,7 +1486,7 @@ export class ImportarProyectoService {
           subsectoresCreados++
         }
 
-        // ── Gestión del conocimiento (1:N pero el Excel trae solo un valor) ──
+        // gestion del conocimiento: el Excel trae un solo valor
         if (af.gestionConocimiento) {
           const gid = findInMap(gestionCat, af.gestionConocimiento)
           if (gid) {
@@ -1619,7 +1503,7 @@ export class ImportarProyectoService {
           }
         }
 
-        // ── Material de formación ──
+        // material de formacion
         if (af.material) {
           const mid = findInMap(materialesCat, af.material)
           if (mid) {
@@ -1636,7 +1520,7 @@ export class ImportarProyectoService {
           }
         }
 
-        // ── Recursos didácticos (el Excel trae uno solo en col 75) ──
+        // recursos didacticos: el Excel trae uno solo
         if (af.recursosDidacticos) {
           const rid = findInMap(recursosCat, af.recursosDidacticos)
           if (rid) {
@@ -1654,7 +1538,7 @@ export class ImportarProyectoService {
           }
         }
 
-        // ── Grupos de cobertura + AFGRUPOCOBERTURA (deptos por nombre) ──
+        // grupos de cobertura + AFGRUPOCOBERTURA
         const covAf = data.cobertura.filter(c => Number(c.numeroAF) === Number(af.consecutivo))
         for (let i = 0; i < covAf.length; i++) {
           const cov = covAf[i]
@@ -1669,13 +1553,11 @@ export class ImportarProyectoService {
           )
           gruposCreados++
 
-          // Cobertura presencial (un solo registro)
           if (cov.departamentoPresencial) {
             const did = findInMap(departamentosCat, cov.departamentoPresencial)
             if (!did) {
               noResueltos.departamentos.add(cov.departamentoPresencial)
             } else {
-              // Ciudad por nombre dentro del departamento (opcional)
               let ciudadId: number | null = null
               if (cov.ciudadPresencial) {
                 const ciu: Array<{ id: number }> = await qr.query(
@@ -1700,13 +1582,7 @@ export class ImportarProyectoService {
             }
           }
 
-          // Cobertura "secundaria" (lista de departamentos sin ciudad).
-          // Codigo de modalidad por AFGRUPOCOBERTURAMOD:
-          //   - Virtual (modal 4)         -> 'V'
-          //   - PAT (2) y Hibrida (3)     -> 'S' (Sincronicos: dep sin ciudad)
-          //   - Presencial (1)            -> no deberia llegar aqui, pero
-          //                                  caemos a 'S' como fallback seguro.
-          // modFormId es el id resuelto del MODALIDADFORMACION de esta AF.
+          // AFGRUPOCOBERTURAMOD: 'V' si la modalidad es virtual (4), 'S' en el resto
           const modSecundario = modFormId === 4 ? 'V' : 'S'
           for (const d of cov.departamentos) {
             const did = findInMap(departamentosCat, d.departamento)
@@ -1725,13 +1601,13 @@ export class ImportarProyectoService {
           }
         }
 
-        // ── UTs + actividades + perfiles ──
+        // UTs + actividades + perfiles
         const utsAf = data.uts.filter(u => Number(u.numeroAF) === Number(af.consecutivo))
         for (const ut of utsAf) {
           const [{ id: utId }] = await qr.query(
             `SELECT NVL(MAX(UNIDADTEMATICAID), 0) + 1 AS "id" FROM UNIDADTEMATICA`,
           )
-          // Mapeo de horas según modalidad de la AF (mismo criterio del proyecto vivo).
+          // las horas van a la columna de la modalidad de la AF
           const modUp = norm(af.modalidadFormacion)
           const esPat = modUp === 'PAT' || modUp.includes('ASISTIDA POR TECNOLOG')
           const esVir = modUp === 'VIRTUAL'
@@ -1743,9 +1619,7 @@ export class ImportarProyectoService {
             pp: esPre ? hp : 0, pv: esVir ? hp : 0, ppat: esPat ? hp : 0, phib: esHib ? hp : 0,
             tp: esPre ? ht : 0, tv: esVir ? ht : 0, tpat: esPat ? ht : 0, thib: esHib ? ht : 0,
           }
-          // Articulación territorial — el Excel solo trae el texto, así que
-          // resolvemos por nombre exacto contra el catálogo si la UT está
-          // marcada como articulación territorial.
+          // el Excel solo trae el texto de la articulacion territorial
           let articulacionId: number | null = null
           if (ut.esArticulacionTerritorial && ut.articulacionTerritorial) {
             articulacionId = findInMap(articulacionTerrCat, ut.articulacionTerritorial)
@@ -1772,9 +1646,7 @@ export class ImportarProyectoService {
           )
           utsCreadas++
 
-          // Actividades de la UT (lookup por nombre en UTACTIVIDADES). Si la
-          // actividad no existe en el catalogo, se inserta como "Otra" con el
-          // nombre original en ACTIVIDADUTOTRO (mismo patron que en GeneXus).
+          // si la actividad no esta en el catalogo va como "Otra" + ACTIVIDADUTOTRO
           for (const a of ut.actividades) {
             let aid = findInMap(utActCat, a)
             let textoOtro: string | null = null
@@ -1798,7 +1670,7 @@ export class ImportarProyectoService {
             actividadesCreadas++
           }
 
-          // Perfiles del capacitador (el rubro se resuelve por nombre del perfil).
+          // el perfil del capacitador se resuelve como rubro, por nombre
           for (const p of ut.perfiles) {
             if (!p.perfil) continue
             const rubroId = findRubro(p.perfil, p.perfil)
@@ -1818,7 +1690,7 @@ export class ImportarProyectoService {
           }
         }
 
-        // ── Rubros de la AF ──
+        // rubros de la AF
         const rubrosAf = data.rubros.filter(r => Number(r.numeroAF) === Number(af.consecutivo))
         for (const r of rubrosAf) {
           const rubroId = findRubro(r.idRubro, r.nombreRubro)
@@ -1894,9 +1766,7 @@ export class ImportarProyectoService {
     }
   }
 
-  // ╔════════════════════════════════════════════════════════════════════════╗
-  // ║ Parsers por hoja                                                        ║
-  // ╚════════════════════════════════════════════════════════════════════════╝
+  // parsers por hoja
 
   private toRows(ws: XLSX.WorkSheet): unknown[][] {
     return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false })
@@ -2051,26 +1921,19 @@ export class ImportarProyectoService {
       impactosProductividad:[r[28], r[29], r[30], r[31], r[32]].map(x => this.str(x)).filter((x): x is string => x !== null),
       mipymesEmpresas:      this.num(r[33]),
       mipymesTrabajadores:  this.num(r[34]),
-      // Col 36 (índice 35) — justificación MIPYMES.
       justificacionMipymes: this.str(r[35]),
       cadenaEmpresas:       this.num(r[36]),
       cadenaTrabajadores:   this.num(r[37]),
-      // Col 39 (índice 38) — justificación cadena productiva.
       justificacionCadena:  this.str(r[38]),
       trabajadoresMujeres:  this.num(r[39]),
       trabajadoresCampesinos: this.num(r[40]),
       trabajadoresDiscapacidad: this.num(r[41]),
       empresasBic:          this.num(r[42]),
-      // Cols 44-48 (índices 43-47) = SECTOR1..SECTOR5: sectores a los que
-      // PERTENECEN los beneficiarios (hasta 5).
       sectoresPertenecen:   [r[43], r[44], r[45], r[46], r[47]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Cols 49-53 (índices 48-52) = SUBSECTOR1..SUBSECTOR5.
       subsectoresPertenecen:[r[48], r[49], r[50], r[51], r[52]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Cols 54-58 (índices 53-57) = CLASIFICACION POR SECTOR: el sector que
-      // la AF beneficia (normalmente 1).
+      // en el Excel esta columna se llama CLASIFICACION POR SECTOR
       sectoresBeneficia:    [r[53], r[54], r[55], r[56], r[57]].map(x => this.str(x)).filter((x): x is string => x !== null),
       subsectoresBeneficia: [r[58], r[59], r[60], r[61], r[62]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Col 100 (índice 99) = JUSTIFICACIÓN SECTORES Y SUB-SECTORES.
       justificacionSectores: this.str(r[99]),
       componenteAlineacion: this.str(r[63]),
       descripcionAlineacion:this.str(r[64]),
@@ -2096,8 +1959,7 @@ export class ImportarProyectoService {
       efectos:              this.str(r[104]),
     })).filter(a =>
       a.consecutivo > 0
-      // Solo importamos las AFs que el proponente marcó "SI" en
-      // "DESEA INCLUIR ESTA ACCIÓN DE FORMACIÓN EN LA FORMULACIÓN DEL PROYECTO".
+      // solo entran las AFs marcadas "SI" para incluir en la formulacion
       && (a.incluirEnFormulacion ?? '').trim().toUpperCase() === 'SI'
     )
   }
@@ -2121,8 +1983,7 @@ export class ImportarProyectoService {
         { perfil: this.str(r[19]) ?? '', horas: this.num(r[20]) },
         { perfil: this.str(r[21]) ?? '', horas: this.num(r[22]) },
       ].filter(p => p.perfil !== ''),
-      // El Excel etiqueta esta columna como HABILIDAD TRANSVERSAL pero
-      // representa la articulación territorial (UT especial).
+      // en el Excel esta columna se llama HABILIDAD TRANSVERSAL
       articulacionTerritorial:    this.str(r[23]),
       esArticulacionTerritorial:  (this.str(r[24]) ?? '').trim().toUpperCase() === 'SI',
     })).filter(u => u.numeroAF > 0 && u.numeroUT > 0)
@@ -2156,7 +2017,6 @@ export class ImportarProyectoService {
     const rows = this.toRows(ws)
     return rows.slice(1).map(r => {
       const departamentos: Array<{ departamento: string; beneficiarios: number }> = []
-      // Hasta 25 pares de departamento/beneficiarios (col 6 a 55).
       for (let i = 0; i < 25; i++) {
         const d = this.str(r[5 + i * 2])
         const b = this.num(r[6 + i * 2])
@@ -2169,8 +2029,6 @@ export class ImportarProyectoService {
         ciudadPresencial:          this.str(r[3]),
         beneficiariosPresencial:   this.num(r[4]),
         departamentos,
-        // Col 56 (índice 55) — justificación de la relación de los
-        // beneficiarios con los lugares de ejecución planteados.
         justificacion:             this.str(r[55]),
       }
     }).filter(c => c.numeroAF > 0)

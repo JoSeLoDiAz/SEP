@@ -39,10 +39,7 @@ export class UsuariosAdminService {
 
     try {
       if (q) {
-        // Búsqueda con texto: 3 queries pequeñas independientes para que cada
-        // una use su propio plan eficiente; luego unión en memoria, dedupe y
-        // paginación. Esto es mucho más estable que un OR/EXISTS gigante
-        // sobre USUARIO ⨝ PERSONA ⨝ EMPRESA en una BD con 78k usuarios.
+        // 3 queries sueltas + unión en memoria: el OR/EXISTS único no escala con 78k usuarios
         const like = `%${q.toUpperCase()}%`
 
         const idsPorEmail: Array<{ id: number }> = await this.dataSource.query(
@@ -88,7 +85,6 @@ export class UsuariosAdminService {
           )
         }
       } else {
-        // Sin búsqueda: paginación nativa rápida.
         const totalRows: Array<{ T: number }> = await this.dataSource.query(
           `SELECT COUNT(*) AS "T" FROM USUARIO`,
         )
@@ -113,7 +109,7 @@ export class UsuariosAdminService {
       return { items: [], total, page: pagina, limit: tamPag }
     }
 
-    // Paso 2: enriquecer con nombre y perfiles, una sola query por dato.
+    // nombre y perfiles, una query por dato
     const ids = baseRows.map(r => Number(r.usuarioId))
     const emails = baseRows.map(r => r.email)
     const placeholdersIds    = ids.map((_, i) => `:${i + 1}`).join(',')
@@ -299,7 +295,7 @@ export class UsuariosAdminService {
     }
 
     if (cambios.predeterminado === true) {
-      // Solo uno puede ser predeterminado: desmarcamos los demás.
+      // solo un perfil puede quedar predeterminado
       await this.dataSource.query(
         `UPDATE USUARIOPERFIL SET PREDETERMINADO = 0 WHERE USUARIOID = :1`,
         [usuarioId],
@@ -374,7 +370,7 @@ export class UsuariosAdminService {
         [usuarioId, perfilId],
       )
 
-      // Datos PERSONA opcionales — si vienen los básicos se crea la fila.
+      // PERSONA es opcional
       if (dto.nombres?.trim() && dto.primerApellido?.trim() && dto.identificacion?.trim()) {
         const seqP: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
         const personaId = Number(seqP[0].NEXTVAL)

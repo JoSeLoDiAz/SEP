@@ -1,14 +1,4 @@
 -- v11_fuente_herramienta_estado.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Agrega el campo FUENTEHERRAMIENTAESTADO al catálogo de herramientas y
--- normaliza el listado para que coincida con el formulario oficial del
--- VBA del MinTrabajo (10 herramientas estándar).
---
--- Las herramientas previas (IDs 1..23) se marcan como ESTADO=0 (inactivas)
--- para conservar la integridad referencial con HERRAMIENTANECESIDAD —
--- las necesidades ya registradas siguen apuntando a su herramienta
--- original, pero el dropdown del formulario solo muestra las activas.
--- ──────────────────────────────────────────────────────────────────────────
 
 -- 1) Columna ESTADO: 1 = activa, 0 = inactiva.
 ALTER TABLE FUENTEHERRAMIENTA
@@ -18,7 +8,6 @@ ALTER TABLE FUENTEHERRAMIENTA
 UPDATE FUENTEHERRAMIENTA SET FUENTEHERRAMIENTAESTADO = 0;
 
 -- 3) Insertar las 10 herramientas oficiales (VBA MinTrabajo).
---    IDs 24..33 (siguientes al máximo actual = 23).
 INSERT INTO FUENTEHERRAMIENTA (FUENTEHERRAMIENTAID, FUENTEHERRAMIENTANOMBRE, FUENTEHERRAMIENTAESTADO)
   VALUES (24, 'ENCUESTAS', 1);
 INSERT INTO FUENTEHERRAMIENTA (FUENTEHERRAMIENTAID, FUENTEHERRAMIENTANOMBRE, FUENTEHERRAMIENTAESTADO)

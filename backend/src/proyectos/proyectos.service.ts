@@ -57,14 +57,11 @@ export class ProyectosService {
     return empresa.empresaId
   }
 
-  // ── Listar proyectos de la empresa ────────────────────────────────────────
+  // listar proyectos de la empresa
 
   async listar(email: string, perfilId?: number) {
     const empresaId = await this.getEmpresaId(email)
     const esAdmin = perfilId === 1
-    // Para el proponente enmascaramos el estado: si el proyecto está aprobado
-    // o rechazado pero la convocatoria todavía no publicó resultados, lo
-    // mostramos como "Confirmado" (1). El admin siempre ve el estado real.
     const estadoExpr = esAdmin
       ? 'p.PROYECTOESTADO'
       : `CASE
@@ -90,7 +87,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Detalle de un proyecto ────────────────────────────────────────────────
+  // detalle de un proyecto
 
   async getDetalle(proyectoId: number, perfilId?: number) {
     const rows = await this.dataSource.query(
@@ -116,9 +113,6 @@ export class ProyectosService {
     )
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
     const proy = rows[0]
-    // Si el proponente entra y los resultados aún no están publicados, lo
-    // mostramos como "Confirmado" (estado 1) sin motivo de rechazo. El admin
-    // siempre ve el estado real para poder gestionar la evaluación.
     if (this.debeOcultarResultados(perfilId, Number(proy.estado), Number(proy.resultadosPublicados))) {
       proy.estado = 1
       proy.motivoRechazo = null
@@ -126,12 +120,7 @@ export class ProyectosService {
     return proy
   }
 
-  /** Regla central: ¿debemos ocultar los resultados de evaluación al usuario?
-   *  Sí, cuando NO es administrador, el proyecto está aprobado/rechazado en BD
-   *  (estado 3 o 4) pero la convocatoria a la que pertenece todavía no está
-   *  publicada. Así el proponente sigue viendo el proyecto como "Confirmado"
-   *  hasta que SENA libere oficialmente toda la convocatoria de un solo
-   *  movimiento (la publicación es por convocatoria, no por proyecto). */
+  // la publicacion de resultados es por convocatoria, no por proyecto
   private debeOcultarResultados(perfilId: number | undefined, estadoReal: number, publicadosConvocatoria: number): boolean {
     const ADMIN = 1
     if (perfilId === ADMIN) return false
@@ -139,7 +128,7 @@ export class ProyectosService {
     return Number(publicadosConvocatoria) !== 1
   }
 
-  // ── Actualizar generalidades + objetivo ───────────────────────────────────
+  // actualizar generalidades + objetivo
 
   async actualizarProyecto(
     email: string,
@@ -161,8 +150,6 @@ export class ProyectosService {
     return { message: 'Proyecto actualizado correctamente' }
   }
 
-  /** Valida que el proyecto pueda editarse: rechaza si está aprobado/rechazado
-   *  (estado 3 o 4) o si tiene una versión marcada como FINAL no anulada. */
   private async validarEdicionPermitida(proyectoId: number): Promise<void> {
     const [r] = await this.dataSource.query(
       `SELECT p.PROYECTOESTADO AS "estado",
@@ -187,7 +174,6 @@ export class ProyectosService {
     }
   }
 
-  /** Variante: valida con un afId, resolviendo primero el proyectoId. */
   private async validarEdicionPermitidaPorAf(afId: number): Promise<void> {
     const [r] = await this.dataSource.query(
       `SELECT PROYECTOID AS "id" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
@@ -197,7 +183,6 @@ export class ProyectosService {
     await this.validarEdicionPermitida(Number(r.id))
   }
 
-  /** Variante: valida con un grupoId. */
   private async validarEdicionPermitidaPorGrupo(grupoId: number): Promise<void> {
     const [r] = await this.dataSource.query(
       `SELECT af.PROYECTOID AS "id"
@@ -210,7 +195,6 @@ export class ProyectosService {
     await this.validarEdicionPermitida(Number(r.id))
   }
 
-  /** Variante: valida con un utId. */
   private async validarEdicionPermitidaPorUt(utId: number): Promise<void> {
     const [r] = await this.dataSource.query(
       `SELECT PROYECTOIDUT AS "id" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`,
@@ -220,19 +204,13 @@ export class ProyectosService {
     await this.validarEdicionPermitida(Number(r.id))
   }
 
-  // ── Validación de completitud (antes de confirmar) ────────────────────────
+  // validacion de completitud (antes de confirmar)
 
-  /** Recorre todas las dimensiones del proyecto y devuelve la lista de
-   *  problemas que impiden confirmarlo. Si la lista viene vacía, el proyecto
-   *  está completo. */
   async validarCompletitudParaConfirmar(proyectoId: number): Promise<string[]> {
     const issues: string[] = []
 
     // 1. Empresa + representante + generalidades
-    // Para los CLOBs solo nos interesa saber si están vacíos: usamos
-    // DBMS_LOB.GETLENGTH (NUMBER) en vez de SUBSTR para evitar
-    // ORA-06502 cuando el contenido tiene caracteres multibyte y
-    // 4000 chars exceden los 4000 bytes de un VARCHAR2 estándar.
+    // GETLENGTH y no SUBSTR en los CLOB: con multibyte SUBSTR revienta con ORA-06502
     const [emp] = await this.dataSource.query(
       `SELECT e.EMPRESARAZONSOCIAL        AS "razonSocial",
               e.EMPRESAIDENTIFICACION     AS "nit",
@@ -298,8 +276,6 @@ export class ProyectosService {
     if (!Number(proy.objetivoLen)) issues.push('Proyecto: falta objetivo general.')
 
     // 3. AFs (mínimo 1) + completitud por AF
-    // Usamos GETLENGTH para los CLOBs (solo nos importa si están vacíos),
-    // así evitamos el ORA-06502 con contenido multibyte UTF-8.
     const afs = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID            AS "afId",
               af.ACCIONFORMACIONNUMERO        AS "numero",
@@ -426,9 +402,7 @@ export class ProyectosService {
             }
           }
 
-          // Mínimo de UTs por tipo de evento (regla del pliego SENA, ver
-          // validaciones del VBA en bt_siguiente_Click). Las CONFERENCIA y
-          // FORO están exentas de mínimo.
+          // minimo de UTs por tipo de evento (pliego SENA); CONFERENCIA y FORO exentas
           const tipoEventoUp = String(af.tipoEvento ?? '').toUpperCase().trim()
           const horasGrupo = Number(af.numHorasGrupo) || 0
           const totUTsN = Number(totUTs)
@@ -445,8 +419,7 @@ export class ProyectosService {
             )
           }
 
-          // QA #2 — Para CURSO o DIPLOMADO, si hay UT con articulación
-          // territorial, sus horas deben ser ≥ 5% del total horas del evento.
+          // QA #2 — UT de articulacion territorial: minimo 5% de horas en CURSO/DIPLOMADO
           if ((tipoEventoUp === 'CURSO' || tipoEventoUp === 'DIPLOMADO') && horasGrupo > 0) {
             const [{ horasArt }] = await this.dataSource.query(
               `SELECT NVL(SUM(
@@ -471,8 +444,7 @@ export class ProyectosService {
             }
           }
 
-          // QA #4 — Para TALLER (no aplica a PUESTO DE TRABAJO REAL ni BOOTCAMP),
-          // las horas prácticas deben ser ≥ 60% del total de horas de UTs.
+          // QA #4 — TALLER: horas practicas minimo 60% del total de UTs
           if (tipoEventoUp === 'TALLER' && horasGrupo > 0) {
             const [{ horasPrac, horasTeor }] = await this.dataSource.query(
               `SELECT NVL(SUM(
@@ -526,16 +498,13 @@ export class ProyectosService {
           issues.push(`Presupuesto: valor de Transferencia (${r.transferencia.porcValor.toFixed(2)}%) debe ser mínimo 1% del total (AFs + Gastos de Operación).`)
         }
       }
-    } catch { /* si falla la consulta de presupuesto, lo dejamos pasar y otras validaciones lo cubren */ }
+    } catch { /* otras validaciones lo cubren */ }
 
     return issues
   }
 
-  // ── Versionado del proyecto ──────────────────────────────────────────────
+  // versionado del proyecto
 
-  /** Construye un snapshot completo del proyecto para guardar como versión:
-   *  reporte base + detalle por AF (perfil, sectores, grupos+coberturas,
-   *  unidades temáticas, material, alineación, rubros, GO, transferencia). */
   async getProyectoSnapshot(proyectoId: number): Promise<Record<string, unknown>> {
     const reporte = await this.getReporteProyecto(proyectoId) as Record<string, any>
 
@@ -580,15 +549,12 @@ export class ProyectosService {
     return { ...reporte, accionesDetalle, snapshotFecha: new Date().toISOString() }
   }
 
-  /** Crea una nueva versión del proyecto con su snapshot inmutable y código
-   *  único. Devuelve el número y código de la versión recién creada. */
   async crearVersionProyecto(
     proyectoId: number, email: string, comentario?: string | null,
   ): Promise<{ versionNumero: number; versionCodigo: string }> {
     const snapshot = await this.getProyectoSnapshot(proyectoId)
     const snapshotJson = JSON.stringify(snapshot)
 
-    // Próximo número de versión para este proyecto
     const [{ next }] = await this.dataSource.query(
       `SELECT NVL(MAX(VERSIONNUMERO), 0) + 1 AS "next"
          FROM PROYECTOVERSION WHERE PROYECTOID = :1`,
@@ -623,12 +589,8 @@ export class ProyectosService {
     return { versionNumero, versionCodigo }
   }
 
-  /** Devuelve la versión "actual" del proyecto:
-   *  - Si hay versión marcada como FINAL, esa es la actual.
-   *  - Si no, la más reciente NO anulada.
-   *  - Si no hay ninguna, null. */
+  // la version actual es la FINAL; si no hay, la mas reciente no anulada
   async getUltimaVersion(proyectoId: number) {
-    // Primero intentar la marcada como FINAL
     const finals = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID AS "versionId",
               VERSIONNUMERO     AS "numero",
@@ -645,7 +607,6 @@ export class ProyectosService {
     )
     if (finals.length) return finals[0]
 
-    // Si no hay FINAL, devolvemos la más reciente NO anulada
     const rows = await this.dataSource.query(
       `SELECT * FROM (
           SELECT PROYECTOVERSIONID AS "versionId",
@@ -666,8 +627,7 @@ export class ProyectosService {
     return rows[0] ?? null
   }
 
-  /** Lista (para el admin SENA) proyectos que tengan al menos una versión
-   *  FINAL no anulada — son los que pueden generar el Excel oficial. */
+  // solo proyectos con version FINAL: son los que generan el Excel oficial
   async listarProyectosConVersionFinal() {
     return this.dataSource.query(
       `SELECT p.PROYECTOID                  AS "proyectoId",
@@ -695,8 +655,7 @@ export class ProyectosService {
     )
   }
 
-  /** Lista todas las versiones del proyecto (sin el snapshot pesado, solo
-   *  metadatos para mostrar en el historial). Más reciente primero. */
+  // sin el snapshot: solo metadatos para el historial
   async listarVersiones(proyectoId: number) {
     return this.dataSource.query(
       `SELECT PROYECTOVERSIONID  AS "versionId",
@@ -720,11 +679,8 @@ export class ProyectosService {
     )
   }
 
-  /** Marca una versión como FINAL (la "oficial" enviada a SECOP). Solo puede
-   *  haber una FINAL por proyecto. Marcar como FINAL **confirma** el proyecto:
-   *  cambia PROYECTOESTADO a 1 y registra la fecha de radicación. */
+  // marcar FINAL confirma el proyecto: pasa a estado 1 y queda radicado
   async marcarVersionFinal(proyectoId: number, versionId: number, email: string) {
-    // Verificar versión
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
          FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
@@ -741,8 +697,6 @@ export class ProyectosService {
       return { message: 'La versión ya está marcada como FINAL.', alreadyFinal: true }
     }
 
-    // Verificar estado del proyecto: solo se puede marcar FINAL si está
-    // en borrador (0) o reversado (2).
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado", CONVOCATORIAID AS "convocatoriaId", EMPRESAID AS "empresaId"
          FROM PROYECTO WHERE PROYECTOID = :1`,
@@ -756,8 +710,7 @@ export class ProyectosService {
       throw new BadRequestException('El proyecto está rechazado y no admite cambios.')
     }
 
-    // Unicidad: la empresa no puede tener otro proyecto confirmado/aprobado
-    // en la misma convocatoria al pasar este a estado 1.
+    // unicidad: un solo proyecto confirmado o aprobado por empresa y convocatoria
     const [{ duplicados }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "duplicados"
          FROM PROYECTO
@@ -777,7 +730,6 @@ export class ProyectosService {
         WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1`,
       [proyectoId],
     )
-    // Marcar esta como FINAL
     await this.dataSource.query(
       `UPDATE PROYECTOVERSION
           SET VERSIONESFINAL = 1,
@@ -786,7 +738,6 @@ export class ProyectosService {
         WHERE PROYECTOVERSIONID = :2`,
       [email, versionId],
     )
-    // Confirmar el proyecto: estado 1 + fecha de radicación
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO = 1, PROYECTOFECHARADICACION = SYSDATE
@@ -799,13 +750,7 @@ export class ProyectosService {
     }
   }
 
-  /** Quita la marca FINAL de una versión. **Reversa** el proyecto: cambia
-   *  PROYECTOESTADO a 2 y limpia la fecha de radicación. */
-  /** Acción del administrador SENA: revertir un proyecto Confirmado a estado
-   *  Subsanación (2). Desmarca la versión FINAL actual y limpia la fecha de
-   *  radicación. El proponente puede entonces editar y volver a marcar FINAL.
-   *  Cuando la convocatoria está cerrada, este estado se llama "Subsanación"
-   *  en la UI. */
+  // el estado 2 se llama "Subsanacion" en la UI
   async reversarProyectoComoAdmin(proyectoId: number, _adminEmail: string, _comentario?: string | null) {
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
@@ -824,7 +769,6 @@ export class ProyectosService {
     if (Number(proy.estado) !== 1) {
       throw new BadRequestException('Solo se pueden reversar proyectos confirmados (estado 1).')
     }
-    // Buscar la versión FINAL vigente del proyecto
     const [ver] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID AS "versionId"
          FROM PROYECTOVERSION
@@ -834,7 +778,6 @@ export class ProyectosService {
     if (!ver) {
       throw new BadRequestException('El proyecto está confirmado pero no hay versión FINAL marcada.')
     }
-    // Desmarca FINAL y deja al proyecto en estado 2 (Reversado/Subsanación)
     await this.dataSource.query(
       `UPDATE PROYECTOVERSION
           SET VERSIONESFINAL = 0,
@@ -869,7 +812,6 @@ export class ProyectosService {
       return { message: 'La versión no estaba marcada como FINAL.', wasNotFinal: true }
     }
 
-    // No se puede desmarcar si el proyecto ya fue aprobado/rechazado por SENA
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
       [proyectoId],
@@ -889,7 +831,6 @@ export class ProyectosService {
         WHERE PROYECTOVERSIONID = :1`,
       [versionId],
     )
-    // Reversar el proyecto: estado 2 (Reversado), limpia fecha de radicación
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO = 2, PROYECTOFECHARADICACION = NULL
@@ -902,7 +843,7 @@ export class ProyectosService {
     }
   }
 
-  /** Anula una versión (soft-delete). No se puede anular la versión FINAL. */
+  // anular es soft-delete; la version FINAL no se puede anular
   async anularVersion(proyectoId: number, versionId: number, email: string) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
@@ -930,7 +871,6 @@ export class ProyectosService {
     return { message: 'Versión anulada correctamente.' }
   }
 
-  /** Restaura una versión previamente anulada. */
   async restaurarVersion(proyectoId: number, versionId: number) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
@@ -955,8 +895,7 @@ export class ProyectosService {
     return { message: 'Versión restaurada correctamente.' }
   }
 
-  /** Verificación pública por código de versión. Devuelve metadatos
-   *  básicos sin requerir autenticación. */
+  // verificacion publica: no requiere autenticacion
   async verificarCodigoPublico(codigo: string) {
     const [row] = await this.dataSource.query(
       `SELECT pv.PROYECTOVERSIONID  AS "versionId",
@@ -1008,8 +947,7 @@ export class ProyectosService {
     }
   }
 
-  /** Devuelve una versión específica con su snapshot completo deserializado.
-   *  El snapshot ya tiene la misma forma que getReporteProyecto + accionesDetalle. */
+  // el snapshot tiene la misma forma que getReporteProyecto + accionesDetalle
   async getVersionSnapshot(versionId: number) {
     const [row] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID AS "versionId",
@@ -1061,11 +999,9 @@ export class ProyectosService {
     }
   }
 
-  // ── Aprobación de proyecto + restauración desde snapshot ────────────────
+  // aprobacion de proyecto + restauracion desde snapshot
 
-  /** Restaura todas las tablas vivas del proyecto desde el snapshot JSON de
-   *  una versión. DELETE de las tablas dependientes + INSERT manteniendo los
-   *  IDs originales del snapshot. Toda la operación es atómica. */
+  // restaura las tablas vivas desde el snapshot conservando los IDs originales
   async restaurarLiveDesdeSnapshot(proyectoId: number, versionId: number): Promise<void> {
     const versionData = await this.getVersionSnapshot(versionId)
     if (Number(versionData.proyectoId) !== Number(proyectoId)) {
@@ -1080,14 +1016,13 @@ export class ProyectosService {
     const contactos: any[] = Array.isArray(snap.contactos) ? snap.contactos : []
     const proyectoSnap = snap.proyecto as Record<string, any> | undefined
 
-    // Mapa rápido: afId → metadata básica (incluye IDs)
     const accionesById = new Map<number, any>()
     for (const a of acciones) accionesById.set(Number(a.afId), a)
 
     await this.dataSource.transaction(async (m) => {
       const q = (sql: string, params: any[] = []) => m.query(sql, params)
 
-      // ── DELETE en orden de FKs ──────────────────────────────────────────
+      // DELETE en orden de FKs
       const afIds: number[] = (await q(
         `SELECT ACCIONFORMACIONID AS "id" FROM ACCIONFORMACION WHERE PROYECTOID = :1`,
         [proyectoId],
@@ -1130,7 +1065,7 @@ export class ProyectosService {
       // Contactos del proyecto (no contactos generales de la empresa)
       await q(`DELETE FROM CONTACTOEMPRESA WHERE PROYECTOIDCONTACTOS = :1`, [proyectoId])
 
-      // ── UPDATE PROYECTO con datos del snapshot ──────────────────────────
+      // UPDATE PROYECTO con datos del snapshot
       if (proyectoSnap) {
         await q(
           `UPDATE PROYECTO
@@ -1141,15 +1076,12 @@ export class ProyectosService {
         )
       }
 
-      // ── INSERT CONTACTOEMPRESA ──────────────────────────────────────────
-      // El snapshot guarda contactos sin tipoIdentificacionId (solo nombre).
-      // Reusamos la EMPRESAID del proyecto.
+      // INSERT CONTACTOEMPRESA: el snapshot guarda el tipo de documento por nombre, no por id
       const [proy] = await q(
         `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = :1`, [proyectoId],
       )
       const empresaIdProy = Number(proy.empresaId)
       for (const c of contactos) {
-        // Buscar el TIPODOCUMENTOIDENTIDADID por nombre (snapshot guarda nombre)
         let tipoIdentId: number | null = null
         if (c.tipoDoc) {
           const tipoRows = await q(
@@ -1174,7 +1106,7 @@ export class ProyectosService {
         )
       }
 
-      // Fallback para snapshots viejos: buscar IDs por nombre si no vienen.
+      // fallback para snapshots viejos: buscar IDs por nombre si no vienen
       const lookupId = async (
         table: string, nameCol: string, idCol: string, name: string | null | undefined,
       ): Promise<number | null> => {
@@ -1186,7 +1118,7 @@ export class ProyectosService {
         return rows[0]?.id ? Number(rows[0].id) : null
       }
 
-      // ── INSERT por cada AF ──────────────────────────────────────────────
+      // INSERT por cada AF
       for (const det of detalles) {
         const afId = Number(det.afId)
         const meta = accionesById.get(afId) ?? {}
@@ -1200,7 +1132,6 @@ export class ProyectosService {
         const goAf = det.gastoOperacion ?? null
         const transAf = det.transferencia ?? null
 
-        // Resolver IDs faltantes en snapshots viejos buscando por nombre
         const tipoEventoId = meta.tipoEventoId
           ?? await lookupId('TIPOEVENTO', 'TIPOEVENTONOMBRE', 'TIPOEVENTOID', meta.tipoEvento)
         const modalidadFormacionId = meta.modalidadFormacionId
@@ -1222,7 +1153,6 @@ export class ProyectosService {
           )
         }
 
-        // ACCIONFORMACION (con todos los campos del snapshot)
         await q(
           `INSERT INTO ACCIONFORMACION
              (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
@@ -1429,7 +1359,6 @@ export class ProyectosService {
 
         // Gasto de operación (R09)
         if (goAf && Number(goAf.total) > 0) {
-          // Buscar el RUBROID correcto para R09 según convocatoria
           const [r09] = await q(
             `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
                FROM RUBRO r
@@ -1483,9 +1412,7 @@ export class ProyectosService {
     })
   }
 
-  /** Aprueba el proyecto (rol admin SENA): restaura las tablas vivas desde
-   *  la versión FINAL, registra el hash en PROYECTOAPROBADO y pasa el
-   *  estado a 3 (Aprobado). */
+  // aprobar restaura las tablas vivas desde la version FINAL y pasa a estado 3
   async aprobarProyecto(
     proyectoId: number,
     email: string,
@@ -1515,24 +1442,15 @@ export class ProyectosService {
       throw new BadRequestException('No hay versión marcada como FINAL en este proyecto.')
     }
 
-    // 2) Restaurar tablas vivas desde el snapshot FINAL.
-    //    Tiene su propia transacción interna; si falla, no avanza.
+    // 2) restaurar tablas vivas (transaccion propia; si falla, no avanza)
     await this.restaurarLiveDesdeSnapshot(proyectoId, Number(versionFinal.versionId))
 
-    // 3-5) Pasos siguientes en UNA transacción atómica.
-    //    Si falla alguno entre marcar AFs / insertar PROYECTOAPROBADO / cambiar
-    //    estado, se revierten juntos. La restauración del paso 2 ya quedó
-    //    commiteada, pero los reintentos son idempotentes (DELETE+INSERT en
-    //    PROYECTOAPROBADO y UPDATE de estado se pueden volver a aplicar).
+    // 3-5) van juntos; el paso 2 ya quedo commiteado pero reintentar es idempotente
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
     await qr.startTransaction()
     try {
-      // 3) Marcar AFs aprobadas/rechazadas. Por defecto TODAS aprobadas; las
-      // que el admin pasó en `afsRechazadas` quedan con ESTADO=0 + motivo. La
-      // columna ACCIONFORMACIONMOTIVORECHAZO almacena ambos casos (motivo de
-      // rechazo cuando ESTADO=0, concepto/observación cuando ESTADO=1) — el
-      // semantismo se decide por el estado.
+      // 3) MOTIVORECHAZO guarda el motivo si ESTADO=0 y el concepto si ESTADO=1
       await qr.query(
         `UPDATE ACCIONFORMACION
             SET ACCIONFORMACIONESTADOAPROBACION = 1,
@@ -1540,8 +1458,6 @@ export class ProyectosService {
           WHERE PROYECTOID = :1`,
         [proyectoId],
       )
-      // Conceptos opcionales sobre AFs aprobadas: el admin puede dejar una
-      // observación al proponente aun cuando aprueba la AF.
       const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
       for (const c of conceptos) {
         await qr.query(
@@ -1562,7 +1478,7 @@ export class ProyectosService {
         )
       }
 
-      // 4) Insertar en PROYECTOAPROBADO (con upsert manual: si ya existía borrar)
+      // 4) upsert manual en PROYECTOAPROBADO
       await qr.query(
         `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
       )
@@ -1575,10 +1491,7 @@ export class ProyectosService {
          versionFinal.hash, email, comentario?.trim() || null],
       )
 
-      // 5) Cambiar estado a 3 (Aprobado) y limpiar motivo previo. La
-      //    publicación de resultados al proponente NO se decide aquí: es por
-      //    convocatoria y la maneja el admin desde "Publicar resultados de la
-      //    convocatoria" cuando termina de evaluar todos los proyectos.
+      // 5) estado 3; publicar los resultados es aparte y por convocatoria
       await qr.query(
         `UPDATE PROYECTO
             SET PROYECTOESTADO        = 3,
@@ -1608,12 +1521,7 @@ export class ProyectosService {
     }
   }
 
-  /** Rechaza el proyecto completo (estado 4) con un motivo a nivel del proyecto.
-   *  Aun cuando el proyecto queda rechazado, el admin puede dar concepto
-   *  individual a cada AF: por defecto todas quedan rechazadas con el motivo
-   *  general, pero el admin puede pasar `afsAprobadas` (las que quiere marcar
-   *  con concepto positivo) y/o `afsRechazadas` (con motivo específico por AF).
-   *  Solo aplica si el proyecto está en estado 1 (Confirmado). */
+  // rechazo global (estado 4), pero admite concepto individual por AF
   async rechazarProyecto(
     proyectoId: number,
     _email: string,
@@ -1634,9 +1542,7 @@ export class ProyectosService {
       throw new BadRequestException('Solo se pueden rechazar proyectos en estado Confirmado.')
     }
 
-    // 1) Por defecto todas las AFs quedan rechazadas con el motivo general.
-    //    Es el comportamiento histórico: si el admin no especifica nada por AF,
-    //    interpretamos que el rechazo es total y uniforme.
+    // 1) por defecto todas las AFs quedan rechazadas con el motivo general
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION
           SET ACCIONFORMACIONESTADOAPROBACION = 0,
@@ -1645,9 +1551,7 @@ export class ProyectosService {
       [motivoTrim, proyectoId],
     )
 
-    // 2) AFs que el admin marcó con concepto POSITIVO aun cuando el proyecto
-    //    fue rechazado. El concepto/observación es opcional; si viene vacío
-    //    queda NULL en la columna.
+    // 2) AFs con concepto positivo aunque el proyecto quede rechazado
     const aprobadas = (afsAprobadas ?? []).filter(a => Number(a.afId) > 0)
     for (const a of aprobadas) {
       const concepto = (a.concepto ?? '').trim() || null
@@ -1672,8 +1576,7 @@ export class ProyectosService {
       )
     }
 
-    // 4) Estado del proyecto y motivo. La publicación al proponente la
-    //    controla el admin a nivel de convocatoria (no por proyecto).
+    // 4) estado y motivo del proyecto
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO        = 4,
@@ -1689,12 +1592,7 @@ export class ProyectosService {
     }
   }
 
-  /** Publica (1) o despublica (0) los resultados de evaluación de TODA la
-   *  convocatoria a la que pertenece el proyecto. La publicación es un acto
-   *  conjunto: en cuanto se publica, todos los proponentes con proyectos en
-   *  esa convocatoria ven simultáneamente el resultado de su proyecto y los
-   *  conceptos individuales por AF. Mientras esté despublicado, ningún
-   *  proponente ve nada del proceso de evaluación. */
+  // publica o despublica los resultados de TODA la convocatoria, no de este proyecto
   async publicarResultados(proyectoId: number, publicar: boolean) {
     const [proy] = await this.dataSource.query(
       `SELECT CONVOCATORIAID AS "convocatoriaId" FROM PROYECTO WHERE PROYECTOID = :1`,
@@ -1704,11 +1602,8 @@ export class ProyectosService {
     return this.publicarResultadosConvocatoria(Number(proy.convocatoriaId), publicar)
   }
 
-  // ── Gestión de convocatorias (admin) ─────────────────────────────────────
+  // gestion de convocatorias (admin)
 
-  /** Listado completo de convocatorias con estadísticas para el módulo admin
-   *  de "Gestión de Convocatorias". Incluye conteo de proyectos por estado
-   *  para que el admin sepa cuántos quedan por evaluar antes de publicar. */
   async listarConvocatoriasAdmin() {
     return this.dataSource.query(
       `SELECT cv.CONVOCATORIAID                                  AS "id",
@@ -1745,9 +1640,6 @@ export class ProyectosService {
     )
   }
 
-  /** Crea una nueva convocatoria con los campos NOT NULL del DDL.
-   *  El ID se asigna como NVL(MAX, 0)+1 (mismo patrón usado en el resto de
-   *  inserts del proyecto). */
   async crearConvocatoria(dto: {
     nombre: string
     anio: number
@@ -1860,9 +1752,7 @@ export class ProyectosService {
     return { message: 'Convocatoria actualizada correctamente.' }
   }
 
-  /** Cierra (estado=0, etiqueta='CERRADA') o abre (estado=1, etiqueta='ABIERTA')
-   *  la convocatoria. Esto bloquea la creación/edición de proyectos por parte
-   *  de proponentes en esa convocatoria. */
+  // cerrar bloquea que los proponentes creen o editen proyectos
   async toggleEstadoConvocatoria(id: number, abrir: boolean) {
     const [cv] = await this.dataSource.query(
       `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
@@ -1884,8 +1774,7 @@ export class ProyectosService {
     }
   }
 
-  /** Oculta (CONVOCATORIAOCULTAR=1) o muestra la convocatoria en el dropdown
-   *  de selección de convocatoria al crear un proyecto. */
+  // ocultar solo la saca del selector al crear un proyecto
   async toggleOcultarConvocatoria(id: number, ocultar: boolean) {
     const [cv] = await this.dataSource.query(
       `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
@@ -1904,7 +1793,6 @@ export class ProyectosService {
     }
   }
 
-  /** Variante directa por convocatoriaId. */
   async publicarResultadosConvocatoria(convocatoriaId: number, publicar: boolean) {
     const [cv] = await this.dataSource.query(
       `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
@@ -1916,7 +1804,6 @@ export class ProyectosService {
       `UPDATE CONVOCATORIA SET CONVOCATORIARESULTADOSPUBLICADOS = :1 WHERE CONVOCATORIAID = :2`,
       [flag, convocatoriaId],
     )
-    // Cuántos proyectos quedan visibles ahora.
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total"
          FROM PROYECTO WHERE CONVOCATORIAID = :1 AND PROYECTOESTADO IN (3, 4)`,
@@ -1932,11 +1819,9 @@ export class ProyectosService {
     }
   }
 
-  // ── Crear nueva versión del proyecto ─────────────────────────────────────
+  // crear nueva version del proyecto
 
-  /** Crea una nueva versión (snapshot) del proyecto. NO cambia el estado del
-   *  proyecto. La transición a estado 1 (Confirmado) ocurre solo cuando el
-   *  proponente marca explícitamente una versión como FINAL. */
+  // crear una version no cambia el estado; eso pasa al marcar FINAL
   async crearVersion(email: string, proyectoId: number, comentario?: string | null) {
     const empresaId = await this.getEmpresaId(email)
 
@@ -1948,7 +1833,6 @@ export class ProyectosService {
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
     const { estado, convocatoriaId } = rows[0]
 
-    // Estados que bloquean crear una nueva versión:
     if (Number(estado) === 1) {
       throw new BadRequestException('El proyecto tiene una versión FINAL marcada. Quita la marca FINAL para poder crear una nueva versión.')
     }
@@ -1959,9 +1843,7 @@ export class ProyectosService {
       throw new BadRequestException('El proyecto está rechazado y no admite nuevas versiones.')
     }
 
-    // Unicidad: la empresa no puede tener otro proyecto confirmado o
-    // aprobado en la misma convocatoria. Aplica también para versiones
-    // (porque el snapshot debe ser válido para enviar a SECOP).
+    // unicidad: un solo proyecto confirmado o aprobado por empresa y convocatoria
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total"
          FROM PROYECTO
@@ -1972,7 +1854,6 @@ export class ProyectosService {
     if (Number(total) > 0)
       throw new BadRequestException('Ya existe otro proyecto confirmado o aprobado en esta convocatoria.')
 
-    // Validación de completitud antes de generar el snapshot
     const issues = await this.validarCompletitudParaConfirmar(proyectoId)
     if (issues.length > 0) {
       throw new BadRequestException({
@@ -1981,7 +1862,6 @@ export class ProyectosService {
       })
     }
 
-    // Crear snapshot inmutable
     const nuevaVersion = await this.crearVersionProyecto(proyectoId, email, comentario)
 
     return {
@@ -1990,7 +1870,7 @@ export class ProyectosService {
     }
   }
 
-  // ── Catálogos ─────────────────────────────────────────────────────────────
+  // catalogos
 
   async getConvocatorias() {
     return this.dataSource.query(
@@ -2013,7 +1893,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Crear proyecto ────────────────────────────────────────────────────────
+  // crear proyecto
 
   async crear(email: string, dto: { convocatoriaId: number; modalidadId: number; nombre: string }) {
     const empresaId = await this.getEmpresaId(email)
@@ -2048,7 +1928,7 @@ export class ProyectosService {
     return { message: 'Proyecto creado correctamente', proyectoId: Number(id) }
   }
 
-  // ── Contactos del proyecto ────────────────────────────────────────────────
+  // contactos del proyecto
 
   async getContactosDelProyecto(proyectoId: number) {
     return this.dataSource.query(
@@ -2117,7 +1997,7 @@ export class ProyectosService {
     return { message: 'Contacto creado y asociado al proyecto' }
   }
 
-  // ── Acciones de Formación ─────────────────────────────────────────────────
+  // acciones de formacion
 
   async listarAFs(proyectoId: number, perfilId?: number) {
     const afs = await this.dataSource.query(
@@ -2136,8 +2016,6 @@ export class ProyectosService {
         ORDER BY af.ACCIONFORMACIONNUMERO ASC`,
       [proyectoId],
     )
-    // Para el proponente, si la convocatoria aún no publicó resultados,
-    // ocultamos el concepto y motivo individual de cada AF.
     const [proy] = await this.dataSource.query(
       `SELECT p.PROYECTOESTADO                                AS "estado",
               NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
@@ -2232,7 +2110,6 @@ export class ProyectosService {
 
   async actualizarAF(afId: number, dto: ActualizarAfDto) {
     await this.validarEdicionPermitidaPorAf(afId)
-    // Obtener estado actual para detectar cambios
     const [actual] = await this.dataSource.query(
       `SELECT TIPOEVENTOID AS "tipoEventoId", MODALIDADFORMACIONID AS "modalidadFormacionId",
               ACCIONFORMACIONNUMGRUPOS AS "numGrupos", PROYECTOID AS "proyectoId"
@@ -2362,7 +2239,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Catálogos Perfil Beneficiarios ───────────────────────────────────────
+  // catalogos perfil beneficiarios
 
   async getAreasFuncionales() {
     return this.dataSource.query(
@@ -2404,7 +2281,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Perfil Beneficiarios ──────────────────────────────────────────────────
+  // perfil beneficiarios
 
   async getPerfilBeneficiarios(afId: number) {
     const rows = await this.dataSource.query(
@@ -2638,7 +2515,7 @@ export class ProyectosService {
     return { message: 'Ocupación CUOC eliminada' }
   }
 
-  // ── Catálogos Sectores / Sub-sectores ─────────────────────────────────────
+  // catalogos sectores / sub-sectores
 
   async getSectoresAfCat() {
     return this.dataSource.query(
@@ -2654,7 +2531,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Sectores y Sub-sectores de la AF ─────────────────────────────────────
+  // sectores y sub-sectores de la AF
 
   async getSectoresYSubsectores(afId: number) {
     const rows = await this.dataSource.query(
@@ -2797,7 +2674,6 @@ export class ProyectosService {
 
   async eliminarAF(afId: number) {
     await this.validarEdicionPermitidaPorAf(afId)
-    // Solo bloquear si tiene rubros registrados
     const [{ totalRubros }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
       [afId],
@@ -2842,7 +2718,7 @@ export class ProyectosService {
     return { message: 'Acción de formación eliminada correctamente' }
   }
 
-  // ── Catálogos Unidades Temáticas ──────────────────────────────────────────
+  // catalogos unidades tematicas
 
   async getActividadesUT() {
     return this.dataSource.query(
@@ -2885,7 +2761,7 @@ export class ProyectosService {
     )
   }
 
-  // ── Unidades Temáticas CRUD ───────────────────────────────────────────────
+  // unidades tematicas CRUD
 
   private async getModalidadAF(afId: number): Promise<number> {
     const [row] = await this.dataSource.query(
@@ -2995,8 +2871,7 @@ export class ProyectosService {
     const modalidad = await this.getModalidadAF(afId)
     const h = this.horasParaColumnas(dto.horasPrac ?? null, dto.horasTeor ?? null, modalidad)
 
-    // QA #2 — Articulación territorial 5% (CURSO/DIPLOMADO): bloquea el save
-    // si la UT es articulación y sus horas son < 5% del total horas evento.
+    // QA #2 — articulacion territorial: minimo 5% de horas en CURSO/DIPLOMADO
     await this.validarArticulacion5pct(afId, dto.articulacionTerritorialId, dto.horasPrac, dto.horasTeor)
 
     const [{ nextNum }] = await this.dataSource.query(
@@ -3026,14 +2901,12 @@ export class ProyectosService {
        esArticulacion, dto.horasTransversal ?? null,
        dto.articulacionTerritorialId ?? null],
     )
-    // Después de guardar, calculamos warnings cumulativos (#1 mínimo UTs, #4
-    // 60% prácticas TALLER) para mostrarlos al usuario sin bloquear.
+    // los warnings cumulativos informan al usuario pero no bloquean
     const warnings = await this.calcularWarningsUTs(afId)
     return { message: 'Unidad temática creada correctamente', utId: nid, warnings }
   }
 
-  /** QA #2 — bloquea si la UT es de articulación territorial y sus horas
-   *  representan menos del 5% del total horas del evento, en CURSO/DIPLOMADO. */
+  // QA #2 — bloquea la UT de articulacion territorial bajo el 5% en CURSO/DIPLOMADO
   private async validarArticulacion5pct(
     afId: number,
     articulacionTerritorialId: number | null | undefined,
@@ -3063,8 +2936,7 @@ export class ProyectosService {
     }
   }
 
-  /** Calcula warnings cumulativos a nivel AF: mínimo de UTs y % horas prácticas
-   *  para TALLER. No bloquea — solo informa al frontend. */
+  // no bloquea: solo informa al frontend
   private async calcularWarningsUTs(afId: number): Promise<string[]> {
     const warnings: string[] = []
     const [af] = await this.dataSource.query(
@@ -3146,7 +3018,6 @@ export class ProyectosService {
     const h = this.horasParaColumnas(dto.horasPrac ?? null, dto.horasTeor ?? null, modalidad)
     const esArticulacion = dto.articulacionTerritorialId ? 1 : 0
 
-    // QA #2 — bloquea articulación territorial < 5% en CURSO/DIPLOMADO.
     await this.validarArticulacion5pct(afId, dto.articulacionTerritorialId, dto.horasPrac, dto.horasTeor)
 
     await this.dataSource.query(
@@ -3237,7 +3108,7 @@ export class ProyectosService {
     return { message: 'Perfil eliminado' }
   }
 
-  // ── Alineación de la AF ────────────────────────────────────────────────────
+  // alineacion de la AF
 
   async getRetoNacionales() {
     return this.dataSource.query(
@@ -3326,7 +3197,7 @@ export class ProyectosService {
     return { message: 'Alineación guardada' }
   }
 
-  // ── Geografía ───────────────────────────────────────────────────────────────
+  // geografia
 
   async getDepartamentos() {
     return this.dataSource.query(
@@ -3343,12 +3214,10 @@ export class ProyectosService {
     )
   }
 
-  // ── Grupos de cobertura ──────────────────────────────────────────────────────
+  // grupos de cobertura
 
   async getGruposCobertura(afId: number) {
-    // GROUP BY no funciona sobre CLOBs en Oracle, asi que separamos el
-    // SUM/COUNT en una subquery y traemos AFGRUPOJUSTIFICACION (CLOB)
-    // directamente. oracledb.fetchAsString lo entrega como string completo.
+    // GROUP BY no funciona sobre CLOB en Oracle: el SUM/COUNT va en una subquery
     const grupos = await this.dataSource.query(
       `SELECT g.AFGRUPOID AS "grupoId",
               g.AFGRUPONUMERO AS "grupoNumero",
@@ -3428,13 +3297,7 @@ export class ProyectosService {
     deptoId: number; ciudadId?: number | null; benef: number; modal: string; rural?: number
   }[]) {
     await this.validarEdicionPermitidaPorAf(afId)
-    // QA #5 — La suma de beneficiarios de todas las coberturas de un grupo
-    // debe coincidir exactamente con los beneficiarios esperados por grupo
-    // de la AF (ni más, ni menos). Los beneficiarios esperados dependen de
-    // la modalidad de la AF:
-    //   - Presencial puro: af.benefGrupo (presenciales)
-    //   - Virtual / PAT:    af.benefViGrupo (sincrónicos/virtuales)
-    //   - Híbrida:          af.benefGrupo + af.benefViGrupo
+    // QA #5 — la cobertura del grupo debe sumar exacto los beneficiarios esperados
     const [af] = await this.dataSource.query(
       `SELECT NVL(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
               NVL(af.ACCIONFORMACIONBENEFVIGRUPO, 0) AS "benefViGrupo",
@@ -3487,11 +3350,10 @@ export class ProyectosService {
     return { message: 'Cobertura guardada' }
   }
 
-  // ── Material de Formación ─────────────────────────────────────────────────
+  // material de formacion
 
   async getTiposAmbiente() {
-    // Solo items activos. Items con TIPOAMBIENTEACTIVO=0 quedan ocultos en
-    // el dropdown pero permanecen en BD por integridad referencial.
+    // los inactivos siguen en BD por integridad referencial
     return this.dataSource.query(
       `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre"
          FROM TIPOAMBIENTE
@@ -3501,7 +3363,6 @@ export class ProyectosService {
   }
 
   async getGestionConocimientos() {
-    // Filtrado por GESTIONCONOCIMIENTOESTADO (1=activo, 0=inactivo).
     return this.dataSource.query(
       `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre"
          FROM GESTIONCONOCIMIENTO
@@ -3529,8 +3390,7 @@ export class ProyectosService {
   }
 
   async getMaterialAF(afId: number) {
-    // CLOBs se devuelven directo como string gracias a oracledb.fetchAsString
-    // configurado en main.ts.
+    // los CLOB llegan como string por oracledb.fetchAsString (main.ts)
     const [af] = await this.dataSource.query(
       `SELECT TIPOAMBIENTEID AS "tipoAmbienteId",
               ACCIONFORMACIONJUSTMAT  AS "justMat",
@@ -3623,12 +3483,9 @@ export class ProyectosService {
     return { message: 'Recurso eliminado' }
   }
 
-  // ── Rubros ────────────────────────────────────────────────────────────────
+  // rubros
 
-  /** Mapea cada MODALIDADFORMACIONID al / los keyword(s) cortos que aparecen en
-   *  la columna RUBROMODALIDAD del catálogo de rubros. La columna guarda listas
-   *  como "PRESENCIAL,PRESENCIAL HÍBRIDA,PAT,VIRTUAL" — por eso buscamos por
-   *  keyword y no por el nombre completo de la modalidad. */
+  // RUBROMODALIDAD guarda listas tipo "PRESENCIAL,PAT,VIRTUAL": se busca por keyword
   private modalidadKeywords(modalidadId: number): string[] {
     switch (modalidadId) {
       case 1: return ['PRESENCIAL']                  // Presencial
@@ -3642,7 +3499,6 @@ export class ProyectosService {
   }
 
   async getRubrosCatalogo(afId: number) {
-    // Get convocatoria + modalidad of the AF
     const [af] = await this.dataSource.query(
       `SELECT af.MODALIDADFORMACIONID AS "modalidadId",
               mf.MODALIDADFORMACIONNOMBRE AS "modalidad",
@@ -3657,9 +3513,7 @@ export class ProyectosService {
     const convId: number = af.convocatoriaId
     const keywords = this.modalidadKeywords(Number(af.modalidadId))
 
-    // Construir filtro de modalidad: pasa si RUBROMODALIDAD es NULL/vacío
-    // o contiene CUALQUIERA de las keywords (OR). Para combinadas (ids 5,6)
-    // hay 2 keywords; para el resto, 1.
+    // pasa si RUBROMODALIDAD es NULL/vacio o contiene cualquiera de las keywords
     let filtroModalidad = `(r.RUBROMODALIDAD IS NULL OR r.RUBROMODALIDAD = '')`
     const params: unknown[] = [convId]
     if (keywords.length > 0) {
@@ -3866,13 +3720,10 @@ export class ProyectosService {
             numGrupos, totalRubro, cofSena, contraEspecie, contraDinero,
             valorMaximo, valorBenef, paquete } = dto
 
-    // Cantidad mínima 1: aunque el rubro sea intangible (ej. rubroid 365),
-    // siempre debe representar "al menos una unidad" en la BD.
+    // cantidad minima 1 aunque el rubro sea intangible
     const cantidad = Math.max(1, Number(dto.cantidad) || 1)
 
-    // ── Validaciones del pliego SENA por código de rubro ─────────────────
-    // Necesitamos el código del rubro (R01.x.x, R05.x, R012.x...) y los
-    // datos de la AF para aplicar las reglas.
+    // validaciones del pliego SENA por codigo de rubro
     const [rubroInfo] = await this.dataSource.query(
       `SELECT TRIM(RUBROCODIGO) AS "codigo", TRIM(RUBRONOMBRE) AS "nombre"
          FROM RUBRO WHERE RUBROID = :1`,
@@ -3891,8 +3742,7 @@ export class ProyectosService {
     const numGruposAF     = Number(afInfo?.numGrupos) || 0
     const totalHorasAF    = numHorasGrupoAF * numGruposAF
 
-    // QA #3 — Material de formación (R05.* excepto R05.3 que es Diagramación):
-    // las unidades no pueden superar el número de beneficiarios de la AF.
+    // QA #3 — R05.* (menos R05.3, Diagramacion): unidades <= beneficiarios de la AF
     if (codigo.startsWith('R05.') && !codigo.startsWith('R05.3') && numBenefAF > 0) {
       if (cantidad > numBenefAF) {
         throw new BadRequestException(
@@ -3901,8 +3751,7 @@ export class ProyectosService {
       }
     }
 
-    // QA #8 — R012 (Promoción y Divulgación): exclusivamente contrapartida
-    // en DINERO del conviniente. No admite SENA ni Especie.
+    // QA #8 — R012 solo admite contrapartida en dinero
     if (codigo.startsWith('R012')) {
       if (cofSena > 0 || contraEspecie > 0) {
         throw new BadRequestException(
@@ -3911,8 +3760,7 @@ export class ProyectosService {
       }
     }
 
-    // QA #9 — R014 (Alimentación y transporte sector agropecuario): a cargo
-    // de la contrapartida del conviniente (no admite Cofinanciación SENA).
+    // QA #9 — R014 no admite cofinanciacion SENA
     if (codigo.startsWith('R014')) {
       if (cofSena > 0) {
         throw new BadRequestException(
@@ -3928,16 +3776,14 @@ export class ProyectosService {
       )
     }
 
-    // QA #11 — R05.3 (Diagramación): se paga 1 sola vez por AF, sin importar
-    // unidades/páginas. Forzamos cantidad = 1 si viene en otro valor.
+    // QA #11 — R05.3 se paga una sola vez por AF
     if (codigo.startsWith('R05.3') && cantidad > 1) {
       throw new BadRequestException(
         `R05.3 (Diagramación) se paga una sola vez por acción de formación. La cantidad debe ser 1.`,
       )
     }
 
-    // QA #12 — Honorarios capacitador (R01.*): el # HORAS del rubro no puede
-    // superar el total de horas de la AF (horasGrupo × numGrupos).
+    // QA #12 — R01.*: las horas del rubro no pueden pasar del total de la AF
     if (codigo.startsWith('R01.') && totalHorasAF > 0 && numHoras > totalHorasAF) {
       throw new BadRequestException(
         `Las horas del rubro (${numHoras}h) no pueden superar el total de horas de la AF: ${totalHorasAF}h (${numHorasGrupoAF}h × ${numGruposAF} grupos).`,
@@ -4016,7 +3862,7 @@ export class ProyectosService {
     return { message: 'Rubro eliminado' }
   }
 
-  // ── Gastos de Operación ────────────────────────────────────────────────────
+  // gastos de operacion
 
   private async getRubroConvByCode(afId: number, codigo: string) {
     const [row] = await this.dataSource.query(
@@ -4075,7 +3921,7 @@ export class ProyectosService {
     return { afrubroid: nid }
   }
 
-  // ── Transferencia ──────────────────────────────────────────────────────────
+  // transferencia
 
   async getTransferencia(afId: number) {
     const [row] = await this.dataSource.query(
@@ -4116,22 +3962,10 @@ export class ProyectosService {
     return { afrubroid: nid }
   }
 
-  // ── Presupuesto General del Proyecto ──────────────────────────────────────
+  // presupuesto general del proyecto
 
-  /** Devuelve el resumen presupuestal completo del proyecto: lista de AFs con
-   *  totales por rubro, GO por AF, Transferencia por AF, totales generales y
-   *  estado de guardado. */
   async getPresupuestoProyecto(proyectoId: number, perfilId?: number) {
-    // Filtro de AFs: si el proyecto está aprobado/rechazado (estados 3 o 4),
-    // las AFs marcadas como rechazadas (ESTADOAPROBACION = 0) NO suman al
-    // presupuesto — los totales se recalculan automáticamente.
-    // Para los demás estados (0/1/2) todas las AFs suman como antes.
-    //
-    // Excepción: cuando el proponente está consultando un proyecto cuyos
-    // resultados aún no han sido publicados, NO aplicamos el filtro. El
-    // proponente debe ver el presupuesto exactamente igual a como lo dejó
-    // al confirmar; el ajuste por AFs rechazadas solo aparece cuando el
-    // SENA libera oficialmente la evaluación.
+    // las AFs rechazadas dejan de sumar solo cuando los resultados ya son publicos
     const [proyHeader] = await this.dataSource.query(
       `SELECT p.PROYECTOESTADO                                AS "estado",
               NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
@@ -4233,7 +4067,7 @@ export class ProyectosService {
       [proyectoId],
     )
 
-    // ── Cálculos de totales ───────────────────────────────────────────────
+    // calculos de totales
     const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0)
 
     // AFs: enriquecemos con %
@@ -4288,10 +4122,7 @@ export class ProyectosService {
       ? 'R09.1: cuando se trate de proyectos por valor superior a $200.000.000, el porcentaje máximo para este rubro será hasta el 10% del valor total de las acciones de formación del proyecto.'
       : 'R09.2: cuando se trate de proyectos por valor menor o igual a $200.000.000, el porcentaje máximo para este rubro será hasta el 16% del valor total de las acciones de formación del proyecto.'
 
-    // Transferencia
-    // El % del valor de transferencia se calcula sobre (AFs + GO), no solo
-    // sobre AFs (especificación de SENA: el mínimo del 1% aplica sobre el
-    // total de AFs + Gastos de Operación del proyecto).
+    // transferencia: el % del valor va sobre AFs + GO, no solo sobre AFs
     const baseTransPct = valorTotalAFs + goTotal
     const transRich = transPorAf.map((t: any) => {
       const beneficiarios = Number(t.beneficiarios) || 0
@@ -4309,8 +4140,7 @@ export class ProyectosService {
     const transTotalBenef = transRich.reduce((s: number, t: any) => s + t.beneficiarios, 0)
     const transTotalValor = transRich.reduce((s: number, t: any) => s + t.valor, 0)
 
-    // Totales del proyecto: la Transferencia (R015) se paga con contrapartida
-    // en dinero del proponente → se suma al total de Contra. Dinero.
+    // la transferencia se paga con contrapartida en dinero, por eso suma ahi
     const totalProyectoCofSena       = totalCofSena       + goTotalCofSena
     const totalProyectoContraEspecie = totalContraEspecie + goTotalContraEspecie
     const totalProyectoContraDinero  = totalContraDinero  + goTotalContraDinero + transTotalValor
@@ -4347,7 +4177,6 @@ export class ProyectosService {
         totalBeneficiarios: transTotalBenef,
         porcBeneficiarios:  pct(transTotalBenef, totalBeneficiarios),
         totalValor:         transTotalValor,
-        // % sobre (AFs + GO) — base correcta de la spec SENA, no solo AFs.
         porcValor:          pct(transTotalValor, baseTransPct),
       },
       totalProyecto: {
@@ -4361,8 +4190,6 @@ export class ProyectosService {
     }
   }
 
-  /** Valida y persiste el presupuesto del proyecto. Si alguna validación falla,
-   *  lanza BadRequestException con la lista de errores y NO guarda nada. */
   async guardarPresupuestoProyecto(proyectoId: number) {
     await this.validarEdicionPermitida(proyectoId)
     const r = await this.getPresupuestoProyecto(proyectoId)
@@ -4414,7 +4241,7 @@ export class ProyectosService {
       throw new BadRequestException({ message: 'No se puede guardar el presupuesto', errores })
     }
 
-    // ── Persistir ─────────────────────────────────────────────────────────
+    // persistir
     const [existing] = await this.dataSource.query(
       `SELECT PRESUPUESTOID AS "id" FROM PRESUPUESTO WHERE PROYECTOID = :1`,
       [proyectoId],
@@ -4478,12 +4305,8 @@ export class ProyectosService {
     return { id: nid, message: 'Presupuesto del proyecto guardado correctamente' }
   }
 
-  // ── Reporte completo del Proyecto ─────────────────────────────────────────
+  // reporte completo del proyecto
 
-  /** Devuelve el snapshot completo del proyecto para el reporte / impresión:
-   *  proyecto, empresa, contactos, análisis, sectores, AFs con detalle,
-   *  diagnósticos asociados (uno por cada necesidad distinta vinculada a las
-   *  AFs) y presupuesto general. */
   async getReporteProyecto(proyectoId: number, perfilId?: number) {
     // 1. Datos del proyecto + convocatoria + modalidad + empresaId
     const [proy] = await this.dataSource.query(
@@ -4567,9 +4390,7 @@ export class ProyectosService {
       [empresaId],
     )
 
-    // 4. Sectores / Subsectores
-    //    PERTENECE → tablas SECTORPEMPRESA / SUBSECTORPEMPRESA (FK *EMPRESAIDP*)
-    //    REPRESENTA → tablas SECTOREMPRESA / SUBSECTOREMPRESA (FK EMPRESAID)
+    // 4. sectores/subsectores: PERTENECE va en las tablas *PEMPRESA y REPRESENTA en las *EMPRESA
     const sectoresPertenece = await this.dataSource.query(
       `SELECT s.SECTORDESCRIPCION AS "nombre"
          FROM SECTORPEMPRESA sp JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
@@ -4659,8 +4480,7 @@ export class ProyectosService {
       }),
     )
 
-    // 8. Presupuesto general (reusa el método existente — perfilId propaga
-    //    el filtrado de AFs rechazadas según corresponda)
+    // 8. presupuesto general
     let presupuesto: unknown = null
     try { presupuesto = await this.getPresupuestoProyecto(proyectoId, perfilId) }
     catch { /* si falla, deja null y el frontend lo maneja */ }
@@ -4668,9 +4488,6 @@ export class ProyectosService {
     // 9. Versión actual (si existe)
     const versionActual = await this.getUltimaVersion(proyectoId).catch(() => null)
 
-    // Si los resultados aún no están publicados al proponente, enmascaramos
-    // estado, motivos y conceptos por AF para que vea el proyecto como
-    // "Confirmado", igual a como lo dejó al crear la versión FINAL.
     if (ocultarResult) {
       for (const a of acciones) {
         a.estadoAprobacion = null

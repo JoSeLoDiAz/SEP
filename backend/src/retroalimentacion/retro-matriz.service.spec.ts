@@ -1,19 +1,7 @@
 import { RetroMatrizService } from './retro-matriz.service'
 import type { NodoMatriz } from './retro-matriz.service'
 
-/**
- * Fidelidad del port de la matriz de retroalimentación.
- *
- * El motor viene de `helpers/eval/matriz.js` (FormularioInscripcionGGPC), que
- * ya corrió un ciclo real con las reglas que el área definió por correo. Este
- * archivo transcribe ese algoritmo tal como estaba y compara sus pares con los
- * del port, para que cualquier retoque futuro tenga que justificar la
- * diferencia en vez de introducirla sin querer.
- *
- * El escenario reproduce los casos que el original documentaba como reales:
- * un apoyo jurídico repartido entre grupos técnicos y el jurídico, un
- * transversal con alcance explícito, y varios pares del mismo rol y grupo.
- */
+// compara el port contra el motor original de `helpers/eval/matriz.js`
 
 type PersonaOriginal = {
   _id: string
@@ -41,12 +29,7 @@ const ESCENARIO: Array<[string, string, string, number[]]> = [
   ['Apoyo Presu G7',     'APOYO_PRESUPUESTAL', 'FINANCIERA', [7]],
 ]
 
-/**
- * Dos transversales, uno por área, porque se comportan distinto: al técnico
- * nadie lo evalúa (ninguna regla lo pone como evaluado), mientras que al
- * financiero sí lo evalúa su líder — regla que el motor original agregó
- * después, justamente para cerrar ese hueco.
- */
+// al transversal técnico nadie lo evalúa; al financiero sí lo evalúa su líder
 const TRANSVERSALES = [
   {
     nombre: 'Natalia Transversal',
@@ -65,7 +48,7 @@ const TRANSVERSALES = [
 ]
 const TRANSVERSAL = TRANSVERSALES[0]
 
-/** Transcripción literal de `calcularPares()` del sistema original. */
+// transcripción literal de `calcularPares()` del sistema original
 function calcularParesOriginal(personas: PersonaOriginal[]): Set<string> {
   const GRUPOS_TECNICOS = [1, 2, 3, 4, 5, 6]
   const AREA_GRUPOS: Record<string, number[]> = {
@@ -144,8 +127,7 @@ function calcularParesOriginal(personas: PersonaOriginal[]): Set<string> {
         if (c._id === p._id) continue
         if (c.rol === 'lider' && c.area === 'financiera' && c.grupos.includes(7)) agregar(p, c)
         if ((c.rol === 'apoyo_financiero' || c.rol === 'apoyo_presupuestal') && c.grupos.includes(7)) agregar(p, c)
-        // Regla agregada en el motor original: las líderes financieras
-        // también evalúan a los transversales de su área, que no tienen grupo.
+        // el transversal no tiene grupo, por eso queda fuera del filtro de arriba
         if (c.esTransversal && c.area === 'financiera') agregar(p, c)
       }
     }
@@ -201,8 +183,7 @@ describe('RetroMatrizService — fidelidad del port', () => {
     })),
   ]
 
-  // El servicio no toca la base de datos en `calcularSobre`, así que no hace
-  // falta levantar el módulo ni mockear el DataSource.
+  // `calcularSobre` no toca la BD: el DataSource no hace falta
   const service = new RetroMatrizService(null as never)
 
   it('produce exactamente los mismos pares que el motor original', () => {
@@ -235,8 +216,6 @@ describe('RetroMatrizService — fidelidad del port', () => {
   })
 
   it('alcanza al apoyo jurídico que trabaja en grupos técnicos', () => {
-    // Fernanda tiene área JURIDICA y grupos [1, 2, 8]: debe retroalimentar
-    // también al analista y a los evaluadores de sus grupos técnicos.
     const { pares } = service.calcularSobre(nodos)
     const fernanda = idDe.get('Fernanda ApoyoJur')!
     const suyos = pares.filter(p => p.evaluadorParticipacionId === fernanda)
@@ -249,7 +228,6 @@ describe('RetroMatrizService — fidelidad del port', () => {
     const natalia = idDe.get(TRANSVERSAL.nombre)!
     const suyos = pares.filter(p => p.evaluadorParticipacionId === natalia)
       .map(p => nombreDe.get(p.evaluadoParticipacionId)!)
-    // Su alcance es ANALISTA + EVALUADOR del área técnica, nada más.
     expect(suyos).toEqual(expect.arrayContaining(['Analista G1', 'Evaluador A G1']))
     expect(suyos).not.toEqual(expect.arrayContaining(['Lider Financiera']))
   })
@@ -267,8 +245,7 @@ describe('RetroMatrizService — fidelidad del port', () => {
   })
 
   it('permite forzar el alcance de un transversal desde la configuración', () => {
-    // Equivale al OVERRIDE_TRANSVERSAL del motor original, pero como dato de
-    // la convocatoria en vez de nombres propios hardcodeados en el código.
+    // equivale al OVERRIDE_TRANSVERSAL del motor original, pero como dato
     const reglas = {
       gruposPorArea: { TECNICA: [1, 2, 3, 4, 5, 6], FINANCIERA: [7], JURIDICA: [8] },
       apoyosDeGrupo: ['APOYO_TECNICO', 'APOYO_PRESUPUESTAL', 'APOYO_JURIDICO'],
@@ -282,7 +259,6 @@ describe('RetroMatrizService — fidelidad del port', () => {
     const suyos = pares.filter(p => p.evaluadorParticipacionId === natalia)
       .map(p => nombreDe.get(p.evaluadoParticipacionId)!)
 
-    // Su alcance en el nodo era ANALISTA + EVALUADOR; forzado queda solo LIDER.
     expect(suyos).toContain('Lider Tecnica')
     expect(suyos).not.toContain('Analista G1')
   })
@@ -305,9 +281,7 @@ describe('RetroMatrizService — fidelidad del port', () => {
   })
 
   it('la líder financiera retroalimenta al transversal de su área', () => {
-    // Regla agregada al motor original después del primer ciclo. El
-    // transversal no tiene grupo, así que el filtro por grupo 7 NO puede
-    // aplicársele: exigírselo era lo que lo dejaba sin evaluar.
+    // el transversal no tiene grupo: filtrarlo por grupo 7 lo dejaba sin evaluar
     const { pares } = service.calcularSobre(nodos)
     const lider = idDe.get('Lider Financiera')!
     const soraya = idDe.get('Soraya Transversal')!
@@ -319,10 +293,7 @@ describe('RetroMatrizService — fidelidad del port', () => {
   })
 
   it('a los transversales técnico y jurídico no los retroalimenta nadie', () => {
-    // DECISIÓN DEL ÁREA, confirmada: es intencional. Solo el transversal
-    // financiero recibe retroalimentación (de su líder). Este test existe para
-    // que, si algún día la matriz empieza a asignarles evaluadores, alguien
-    // tenga que venir aquí a cambiarlo a conciencia y no por accidente.
+    // intencional, decisión del área: solo el transversal financiero es evaluado
     const { stats } = service.calcularSobre(nodos)
     const sinEvaluar = stats.sinSerEvaluado.map(s => s.nombre)
     expect(sinEvaluar).toContain('Natalia Transversal')

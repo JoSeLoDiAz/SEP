@@ -10,8 +10,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Proyecto {
   proyectoId: number
   nombre: string
@@ -93,12 +91,9 @@ function perfilToForm(p: Perfil): FormState {
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
-  // convocatoria abierta. Estados 1/3/4 son solo lectura.
+  // estado 2 (subsanación) edita aunque la convocatoria esté cerrada
   return e === 2 || (e === 0 && p.convocatoriaEstado !== 0)
 }
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PerfilBeneficiariosPage() {
   const { id, afId } = useParams<{ id: string; afId: string }>()
@@ -109,27 +104,22 @@ export default function PerfilBeneficiariosPage() {
   const [perfil,    setPerfil]    = useState<Perfil | null>(null)
   const [loading,   setLoading]   = useState(true)
 
-  // Catálogos
   const [enfoques,     setEnfoques]     = useState<Opcion[]>([])
   const [areas,        setAreas]        = useState<Opcion[]>([])
   const [niveles,      setNiveles]      = useState<Opcion[]>([])
   const [cuocCat,      setCuocCat]      = useState<Opcion[]>([])
 
-  // Form
   const [form,      setForm]      = useState<FormState | null>(null)
   const [guardando, setGuardando] = useState(false)
 
-  // CUOC searchable dropdown
   const [cuocQuery, setCuocQuery] = useState('')
   const [cuocOpen,  setCuocOpen]  = useState(false)
   const cuocRef = useRef<HTMLDivElement>(null)
 
-  // Área "otro" text
   const [areaSelId,    setAreaSelId]    = useState('')
   const [areaOtroText, setAreaOtroText] = useState('')
   const [areaOtroOpen, setAreaOtroOpen] = useState(false)
 
-  // Toast
   const toastKey = useRef(0)
   const [toastK2, setToastK2] = useState(0)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
@@ -139,8 +129,6 @@ export default function PerfilBeneficiariosPage() {
     setToast({ tipo, msg })
     setToastK2(toastKey.current)
   }
-
-  // ── Load ──────────────────────────────────────────────────────────────────
 
   const cargar = useCallback(async () => {
     try {
@@ -179,23 +167,18 @@ export default function PerfilBeneficiariosPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-
   const editable = puedeEditar(proyecto)
 
-  // CUOC filtered by search
   const cuocFiltrados = useMemo(() => {
     if (!cuocQuery.trim()) return cuocCat.slice(0, 50)
     const q = cuocQuery.toLowerCase()
     return cuocCat.filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 50)
   }, [cuocCat, cuocQuery])
 
-  // Area "otro" option ID (id=11 is "Otra" based on catalog)
+  // 11 es el id de "Otra" en el catálogo, por si el nombre cambia
   const AREA_OTRA_ID = useMemo(() => {
     return areas.find(a => a.nombre.toLowerCase().includes('otr'))?.id ?? 11
   }, [areas])
-
-  // ── Field helper ──────────────────────────────────────────────────────────
 
   function set(field: keyof FormState, value: string) {
     setForm(prev => prev ? { ...prev, [field]: value } : prev)
@@ -204,8 +187,6 @@ export default function PerfilBeneficiariosPage() {
   function numericOnly(value: string) {
     return value.replace(/\D/g, '').slice(0, 4)
   }
-
-  // ── Áreas ─────────────────────────────────────────────────────────────────
 
   async function handleAgregarArea() {
     if (!areaSelId) { showToast('error', 'Seleccione un área funcional'); return }
@@ -234,8 +215,6 @@ export default function PerfilBeneficiariosPage() {
     } catch { showToast('error', 'Error al eliminar área') }
   }
 
-  // ── Niveles ───────────────────────────────────────────────────────────────
-
   const [nivelSelId, setNivelSelId] = useState('')
 
   async function handleAgregarNivel() {
@@ -258,8 +237,6 @@ export default function PerfilBeneficiariosPage() {
     } catch { showToast('error', 'Error al eliminar nivel') }
   }
 
-  // ── CUOC ──────────────────────────────────────────────────────────────────
-
   async function handleAgregarCuoc(cuocId: number) {
     try {
       await api.post(`/proyectos/${proyectoId}/acciones/${afIdNum}/cuoc`, { cuocId })
@@ -280,8 +257,6 @@ export default function PerfilBeneficiariosPage() {
     } catch { showToast('error', 'Error al eliminar CUOC') }
   }
 
-  // ── Guardar campos principales ────────────────────────────────────────────
-
   function validar(): string | null {
     if (!form) return null
     if (!perfil?.areas.length && !perfil?.niveles.length && !perfil?.cuoc.length)
@@ -292,19 +267,15 @@ export default function PerfilBeneficiariosPage() {
       return 'La justificación de niveles ocupacionales es obligatoria.'
     if (!form.afEnfoqueId)
       return 'Debe seleccionar el enfoque de la Acción de Formación.'
-    // Mipymes: todos o ninguno
     const m1 = form.mipymes.trim(), m2 = form.trabMipymes.trim(), m3 = form.mipymesD.trim()
     if ((m1 || m2 || m3) && !(m1 && m2 && m3))
       return 'Complete todos los campos de Empresas MiPymes o déjelos todos vacíos.'
-    // Cadena: todos o ninguno
     const c1 = form.cadenaProd.trim(), c2 = form.trabCadProd.trim(), c3 = form.cadenaProdD.trim()
     if ((c1 || c2 || c3) && !(c1 && c2 && c3))
       return 'Complete todos los campos de Cadena Productiva o déjelos todos vacíos.'
-    // Campesinos: ambos o ninguno
     const ca1 = form.numCampesino.trim(), ca2 = form.justCampesino.trim()
     if ((ca1 || ca2) && !(ca1 && ca2))
       return 'Complete el número y la justificación de trabajadores campesinos, o déjelos vacíos.'
-    // Popular: ambos o ninguno
     const p1 = form.numPopular.trim(), p2 = form.justPopular.trim()
     if ((p1 || p2) && !(p1 && p2))
       return 'Complete el número y la justificación de trabajadores de economía popular, o déjelos vacíos.'
@@ -346,8 +317,6 @@ export default function PerfilBeneficiariosPage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   const card     = 'bg-white rounded-2xl border border-neutral-200 shadow-sm p-5 flex flex-col gap-4'
   const labelCls = 'block text-sm font-medium text-neutral-700 mb-1'
   const inputCls = `w-full border border-neutral-300 rounded-xl px-3 py-2 text-sm
@@ -382,7 +351,6 @@ export default function PerfilBeneficiariosPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* ── Encabezado ───────────────────────────────────────────────────── */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <Users size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -407,7 +375,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       </div>
 
-      {/* ── Menú ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2">
         <Link href={`/panel/proyectos/${proyectoId}`}
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
@@ -432,7 +399,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       )}
 
-      {/* ── Card 1: Áreas Funcionales ─────────────────────────────────────── */}
       <div className={card}>
         <h2 className="text-xs font-semibold text-[#00304D] uppercase tracking-wider">
           Área(s) Funcional(es) a la que Pertenecen los Beneficiarios
@@ -489,7 +455,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       </div>
 
-      {/* ── Card 2: Niveles Ocupacionales ────────────────────────────────── */}
       <div className={card}>
         <h2 className="text-xs font-semibold text-[#00304D] uppercase tracking-wider">
           Niveles Ocupacionales de los Beneficiarios
@@ -533,7 +498,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       </div>
 
-      {/* ── Card 3: Clasificación CUOC ───────────────────────────────────── */}
       <div className={card}>
         <h2 className="text-xs font-semibold text-[#00304D] uppercase tracking-wider">
           Clasificación Unificada de Ocupaciones CUOC
@@ -587,7 +551,6 @@ export default function PerfilBeneficiariosPage() {
         )}
       </div>
 
-      {/* ── Card 4: Beneficiarios numéricos ──────────────────────────────── */}
       <div className={card}>
         <h2 className="text-xs font-semibold text-[#00304D] uppercase tracking-wider">Datos Numéricos de Beneficiarios</h2>
 
@@ -612,7 +575,6 @@ export default function PerfilBeneficiariosPage() {
           </div>
         </div>
 
-        {/* MiPymes */}
         <div className="border-t border-neutral-100 pt-4">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">MiPymes (si aplica)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -637,7 +599,6 @@ export default function PerfilBeneficiariosPage() {
           </div>
         </div>
 
-        {/* Cadena Productiva */}
         <div className="border-t border-neutral-100 pt-4">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Cadena Productiva (si aplica)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -662,7 +623,6 @@ export default function PerfilBeneficiariosPage() {
           </div>
         </div>
 
-        {/* Economía Campesina */}
         <div className="border-t border-neutral-100 pt-4">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Economía Campesina (si aplica)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -681,7 +641,6 @@ export default function PerfilBeneficiariosPage() {
           </div>
         </div>
 
-        {/* Economía Popular */}
         <div className="border-t border-neutral-100 pt-4">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Economía Popular (si aplica)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -701,7 +660,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       </div>
 
-      {/* ── Card 5: Enfoque ───────────────────────────────────────────────── */}
       <div className={card}>
         <h2 className="text-xs font-semibold text-[#00304D] uppercase tracking-wider">Enfoque de la Acción de Formación</h2>
         {!enfoques.length && (
@@ -719,7 +677,6 @@ export default function PerfilBeneficiariosPage() {
         </div>
       </div>
 
-      {/* ── Guardar ───────────────────────────────────────────────────────── */}
       {editable && (
         <div className="flex justify-end pb-4">
           <button onClick={handleGuardar} disabled={guardando}

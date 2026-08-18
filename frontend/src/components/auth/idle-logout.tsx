@@ -6,23 +6,15 @@ import { Clock, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-const IDLE_MINUTES = 20          // logout total tras inactividad
-const WARN_BEFORE_MINUTES = 2    // mostrar aviso 2 min antes
-const THROTTLE_MS = 1000         // resetear timer máximo 1 vez por segundo
+const IDLE_MINUTES = 20
+const WARN_BEFORE_MINUTES = 2
+const THROTTLE_MS = 1000
 
 const ACTIVITY_EVENTS: (keyof DocumentEventMap)[] = [
   'mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click', 'wheel'
 ]
 
-/**
- * Detecta inactividad del usuario y cierra la sesión automáticamente.
- * Mientras el usuario haga click, mueva el mouse, escriba o haga scroll
- * resetea el cronómetro. A los 18 min muestra un modal de aviso, a los
- * 20 min hace logout y redirige al login.
- *
- * Este componente es complementario al sliding-session JWT del backend.
- * El JWT caduca a los 30 min sin actividad real (defensa en profundidad).
- */
+// complementa el JWT sliding-session del backend, que caduca a los 30 min
 export function IdleLogout() {
   const router = useRouter()
   const [showWarning, setShowWarning] = useState(false)
@@ -66,13 +58,10 @@ export function IdleLogout() {
     logoutTimer.current = setTimeout(doLogout, logoutAt)
   }, [startWarningCountdown, doLogout])
 
-  // Listener throttled de actividad
   useEffect(() => {
     const onActivity = () => {
       const now = Date.now()
-      // Si el modal de aviso está abierto, NO resetear automáticamente
-      // (evita que click accidental cancele el aviso). El user debe usar
-      // el botón explícito.
+      // con el aviso abierto no se resetea solo: obliga a usar el botón
       if (showWarning) return
       if (now - lastActivity.current < THROTTLE_MS) return
       lastActivity.current = now

@@ -6,9 +6,9 @@ import Link from 'next/link'
 
 const PRIMARY = '#00304D'
 
-/** Chip de año que pinta la tarjeta: los 3 ciclos más recientes del evaluador. */
+// solo los 3 ciclos más recientes del evaluador
 export interface CicloResumido {
-  /** Lo único único: un evaluador puede tener dos ciclos en el mismo año. */
+  // un evaluador puede tener dos ciclos en el mismo año
   participacionId: number
   anio: number
   estadoCodigo: string | null
@@ -37,9 +37,7 @@ export interface EvaluadorItem {
   ciclos: CicloResumido[]
 }
 
-// El token llega en `estadoColor` (columna ESTADOPARTICIPACION.COLOR). Las
-// clases están escritas literales porque Tailwind no puede construirlas con
-// template strings: si se arman en runtime, no salen en el bundle.
+// clases literales: Tailwind no las incluye en el bundle si se arman en runtime
 const COLOR_ESTADO: Record<string, { chip: string; punto: string }> = {
   neutral: { chip: 'bg-neutral-100 text-neutral-700 border-neutral-200', punto: 'bg-neutral-400' },
   blue:    { chip: 'bg-blue-50 text-blue-700 border-blue-200',           punto: 'bg-blue-500' },
@@ -65,8 +63,7 @@ export function TarjetaEvaluador({ item }: { item: EvaluadorItem }) {
   const inicial = (item.nombres?.[0] ?? '?').toUpperCase()
   const fotoSrc = useFotoEvaluador(item.evaluadorId, item.tieneFoto)
 
-  // El backend no garantiza el orden de los ciclos dentro de la tarjeta; se
-  // ordenan aquí para que el año más reciente quede siempre primero.
+  // el backend no garantiza el orden de los ciclos
   const ciclos = [...item.ciclos].sort((a, b) => b.anio - a.anio)
 
   const alertas: Alerta[] = []
@@ -138,9 +135,6 @@ export function TarjetaEvaluador({ item }: { item: EvaluadorItem }) {
               const color = colorDe(c.estadoColor)
               return (
                 <span
-                  // Un evaluador puede tener DOS ciclos en el mismo año (p. ej.
-                  // FCE en el primer periodo y FEEC en el segundo), así que el
-                  // año solo no identifica el chip.
                   key={c.participacionId}
                   title={c.estadoCodigo ?? 'Sin estado'}
                   className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold tabular-nums ${color.chip}`}

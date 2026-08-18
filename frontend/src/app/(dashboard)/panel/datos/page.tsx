@@ -9,8 +9,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-// ── tipos ─────────────────────────────────────────────────────────────────────
-
 interface Lookup { id: number; nombre: string }
 interface DatosEmpresa {
   empresaId: number
@@ -43,8 +41,6 @@ interface DatosEmpresa {
   empresaRepCorreo: string
   empresaRepTel: string
 }
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function Field({ label, children, req }: { label: string; children: React.ReactNode; req?: boolean }) {
   return (
@@ -114,8 +110,6 @@ function SaveBtn({ loading, label = 'Actualizar' }: { loading: boolean; label?: 
   )
 }
 
-// ── Buscador CIIU (debounced) ─────────────────────────────────────────────────
-
 function CiiuSearch({ display, onChange }: {
   display: string; onChange: (id: number, nombre: string) => void
 }) {
@@ -168,13 +162,10 @@ function CiiuSearch({ display, onChange }: {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 export default function DatosBasicosPage() {
   const [data, setData] = useState<DatosEmpresa | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // lookups
   const [departamentos, setDepartamentos] = useState<Lookup[]>([])
   const [ciudades, setCiudades] = useState<Lookup[]>([])
   const [coberturas, setCoberturas] = useState<Lookup[]>([])
@@ -182,10 +173,8 @@ export default function DatosBasicosPage() {
   const [tamanos, setTamanos] = useState<Lookup[]>([])
   const [tiposDocRep, setTiposDocRep] = useState<Lookup[]>([])
 
-  // section loading
   const [saving, setSaving] = useState<Record<string, boolean>>({})
 
-  // toast
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const toastKey = useRef(0)
   const [toastKey2, setToastKey2] = useState(0)
@@ -196,7 +185,6 @@ export default function DatosBasicosPage() {
     setToastKey2(toastKey.current)
   }
 
-  // form state mirrors
   const [razonSocial, setRazonSocial] = useState('')
   const [sigla, setSigla] = useState('')
   const [nuevaClave, setNuevaClave] = useState('')
@@ -218,7 +206,6 @@ export default function DatosBasicosPage() {
   const [mesasEmpresa, setMesasEmpresa] = useState<{ id: number; nombre: string }[]>([])
   const [mesaSelId, setMesaSelId] = useState<number>(0)
   const [savingMesa, setSavingMesa] = useState(false)
-  // sectores/subsectores
   const [sectores, setSectores] = useState<Lookup[]>([])
   const [subsectores, setSubsectores] = useState<Lookup[]>([])
   const [sectPertId, setSectPertId] = useState(0)
@@ -235,8 +222,6 @@ export default function DatosBasicosPage() {
   const [repCargo, setRepCargo] = useState('')
   const [repCorreo, setRepCorreo] = useState('')
   const [repTel, setRepTel] = useState('')
-
-  // ── Load on mount ─────────────────────────────────────────────────────────
 
   useEffect(() => { document.title = 'Datos Básicos | SEP' }, [])
 
@@ -280,7 +265,6 @@ export default function DatosBasicosPage() {
         setSectoresRepresenta(sRepRes.data)
         setSubsectoresRepresenta(ssRepRes.data)
 
-        // populate form
         setRazonSocial(d.empresaRazonSocial ?? '')
         setSigla(d.empresaSigla ?? '')
         setIndicativo(String(d.empresaIndicativo ?? ''))
@@ -304,7 +288,6 @@ export default function DatosBasicosPage() {
         setRepCorreo(d.empresaRepCorreo ?? '')
         setRepTel(d.empresaRepTel ?? '')
 
-        // ciudades del departamento inicial
         if (d.departamentoEmpresaId) {
           const cRes = await api.get<Lookup[]>(`/empresa/ciudades?departamentoId=${d.departamentoEmpresaId}`)
           setCiudades(cRes.data)
@@ -340,8 +323,6 @@ export default function DatosBasicosPage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <Loader2 size={32} className="animate-spin text-[#00304D]" />
@@ -366,7 +347,6 @@ export default function DatosBasicosPage() {
         />
       )}
 
-      {/* Título */}
       <div>
         <h1 className="text-xl font-bold text-neutral-900">Datos Básicos</h1>
         <p className="text-xs text-neutral-400 mt-0.5">
@@ -375,7 +355,6 @@ export default function DatosBasicosPage() {
         <p className="text-[11px] text-red-500 mt-1">* Campos obligatorios</p>
       </div>
 
-      {/* ── 1. Datos de Identificación ──────────────────────────────────── */}
       <SectionCard icon={FileText} title="Datos de Identificación" color="#00304D">
         <form
           onSubmit={e => { e.preventDefault(); submit('identificacion', { empresaRazonSocial: razonSocial, empresaSigla: sigla }) }}
@@ -400,7 +379,6 @@ export default function DatosBasicosPage() {
         </form>
       </SectionCard>
 
-      {/* ── 2. Datos del Usuario ────────────────────────────────────────── */}
       <SectionCard icon={KeyRound} title="Datos del Usuario" color="#4A4A8A">
         <form
           onSubmit={e => { e.preventDefault(); if (!nuevaClave.trim()) return; submit('cambiar-clave', { nuevaClave }) }}
@@ -430,7 +408,6 @@ export default function DatosBasicosPage() {
         </form>
       </SectionCard>
 
-      {/* ── 3. Datos de Ubicación ───────────────────────────────────────── */}
       <SectionCard icon={MapPin} title="Datos de Ubicación Empresa / Gremio / Asociación" color="#006633">
         <form
           onSubmit={e => {
@@ -471,7 +448,6 @@ export default function DatosBasicosPage() {
         </form>
       </SectionCard>
 
-      {/* ── 4. Datos Generales ──────────────────────────────────────────── */}
       <SectionCard icon={BarChart3} title="Datos Generales de la Empresa / Gremio Proponente" color="#00304D">
         <form
           onSubmit={e => {
@@ -519,10 +495,8 @@ export default function DatosBasicosPage() {
         </form>
       </SectionCard>
 
-      {/* ── 5. Mesas Sectoriales ────────────────────────────────────────── */}
       <SectionCard icon={Handshake} title="Datos de Mesas Sectoriales" color="#1a6b3c">
         <div className="flex flex-col gap-5">
-          {/* Texto descriptivo */}
           <div className="text-sm text-neutral-700 leading-relaxed space-y-3">
             <p>
               Las <strong>Mesas Sectoriales</strong> son el espacio natural de concertación entre el sector productivo,
@@ -542,7 +516,6 @@ export default function DatosBasicosPage() {
             </p>
           </div>
 
-          {/* Botón externo */}
           <div className="flex justify-center">
             <a
               href="https://www.sena.edu.co/es-co/Empresarios/Paginas/mesasSectoriales.aspx"
@@ -555,7 +528,6 @@ export default function DatosBasicosPage() {
             </a>
           </div>
 
-          {/* Registrar mesa */}
           <div className="flex flex-col sm:flex-row gap-3 items-end">
             <div className="flex-1">
               <label className="text-xs font-semibold text-neutral-600 mb-1 block">
@@ -597,7 +569,6 @@ export default function DatosBasicosPage() {
             </button>
           </div>
 
-          {/* Tabla mesas registradas */}
           {mesasEmpresa.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-neutral-200">
               <table className="w-full text-sm">
@@ -636,7 +607,6 @@ export default function DatosBasicosPage() {
         </div>
       </SectionCard>
 
-      {/* ── 6. Datos Representante Legal ────────────────────────────────── */}
       <SectionCard icon={Scale} title="Datos Representante Legal Empresa / Gremio / Asociación" color="#B00020">
         <form
           onSubmit={e => {
@@ -671,7 +641,6 @@ export default function DatosBasicosPage() {
         </form>
       </SectionCard>
 
-      {/* Nota */}
       <p className="text-[11px] text-neutral-400 text-center pb-2">
         Todos los accesos y modificaciones son registrados y auditados — SEP GGPC SENA
       </p>

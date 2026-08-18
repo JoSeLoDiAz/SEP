@@ -4,12 +4,7 @@ import { DataSource, Repository } from 'typeorm'
 import * as XLSX from 'xlsx'
 import { Empresa } from '../auth/entities/empresa.entity'
 
-// ── Estados del convenio (CONVENIOSESTADO) ─────────────────────────────────
-// Hasta donde sabemos del legacy:
-//   1 → EN EJECUCIÓN (firmado y activo)
-//   0/null → otros estados intermedios
-// El admin maneja los estados al crear/cerrar el convenio. Esta capa no
-// les pone semántica de negocio: solo retorna lo que está en BD.
+// CONVENIOSESTADO: 1 = en ejecucion, 0/null = otros estados
 
 export interface BeneficiarioDedup {
   nro: number
@@ -63,9 +58,7 @@ export interface EmpresaBeneficiariaDto {
 }
 
 export interface DirectorBasicoDto {
-  // Datos básicos para crear/asociar persona como director.
-  // Si `personaId` viene seteado, se reusa la persona existente; si no, se
-  // crea una nueva PERSONA con los demás datos.
+  // si personaId viene, se reusa esa persona; si no, se crea una nueva
   personaId?: number | null
   tipoDocumentoId: number
   identificacion: string
@@ -92,10 +85,7 @@ export class ConveniosService {
     return empresa.empresaId
   }
 
-  /** Verifica que el convenio del proyecto esté EN EJECUCIÓN (estado=1). Si
-   *  no lo está, lanza 403: ningún módulo (beneficiarios, cronograma,
-   *  capacitadores, directores) permite cambios cuando el convenio terminó
-   *  o no entró en ejecución. Es público para que otros services lo usen. */
+  // 403 si el convenio no esta en ejecucion; la usan otros services
   async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.dataSource.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
@@ -111,11 +101,8 @@ export class ConveniosService {
     }
   }
 
-  // ── Listado para "Convenios" del proponente ───────────────────────────
+  // listado de convenios del proponente
 
-  /** Lista todos los convenios de la empresa logueada. Cada convenio se une
-   *  con su proyecto, convocatoria y modalidad para devolver un objeto plano
-   *  listo para pintar las tarjetas del listado. */
   async listarMisConvenios(email: string) {
     const empresaId = await this.getEmpresaId(email)
     return this.dataSource.query(
@@ -146,9 +133,7 @@ export class ConveniosService {
     )
   }
 
-  /** Indicador rápido: ¿la empresa tiene al menos un convenio? Lo usamos
-   *  para decidir si el header del proponente muestra "Conviniente" en lugar
-   *  de "Gremio / Empresa / Asociación". */
+  // decide si el header del proponente muestra "Conviniente"
   async empresaTieneConvenios(email: string): Promise<{ tieneConvenios: boolean; total: number }> {
     const empresaId = await this.getEmpresaId(email)
     const [{ total }] = await this.dataSource.query(
@@ -161,14 +146,7 @@ export class ConveniosService {
     return { tieneConvenios: Number(total) > 0, total: Number(total) }
   }
 
-  /** Detalle del convenio para la pantalla "Ejecución del Convenio". Trae los
-   *  datos generales del convenio + del proyecto + de la empresa para pintar
-   *  el header de la captura: Código de Proyecto, Nombre, Convocatoria,
-   *  Modalidad, Número de Convenio (SECOP II), Empresa.
-   *
-   *  La búsqueda es por `proyectoId` (no por convenioId): un proyecto tiene
-   *  máximo un convenio, así que la URL del frontend usa el código del
-   *  proyecto que el conviniente ya conoce. */
+  // busca por proyectoId: un proyecto tiene maximo un convenio
   async getDetalleConvenio(email: string, proyectoId: number, perfilId?: number) {
     const empresaId = await this.getEmpresaId(email)
     const [row] = await this.dataSource.query(
@@ -210,8 +188,7 @@ export class ConveniosService {
       [proyectoId],
     )
     if (!row) throw new NotFoundException('Convenio no encontrado para este proyecto')
-    // Proponente: sólo puede ver convenios de SU empresa.
-    // Admin / Interventor / SENA pueden ver cualquiera.
+    // los perfiles internos ven cualquier convenio; el proponente solo el suyo
     const ADMIN = 1, INTERVENTOR = 11, COORD_INTERV = 10
     const internos = perfilId === ADMIN || perfilId === INTERVENTOR || perfilId === COORD_INTERV
     if (!internos && Number(row.empresaId) !== empresaId) {
@@ -220,19 +197,14 @@ export class ConveniosService {
     return row
   }
 
-  // ── Beneficiarios del proyecto (ejecución) ────────────────────────────────
+  // beneficiarios del proyecto
 
-  /** Lista los beneficiarios del proyecto deduplicados por persona: un mismo
-   *  beneficiario puede estar en varias AFs/grupos pero aquí aparece una sola
-   *  vez (con la lista de AF·Grupo donde participa). Replica la lógica del
-   *  DataProvider `DPBeneficiariosProyecto` del legacy GeneXus. */
+  // dedup por persona: la misma persona puede estar en varias AF/grupos
   async getBeneficiariosProyecto(email: string, proyectoId: number, perfilId?: number) {
-    // Validar acceso (reusa la validación del detalle del convenio).
+    // valida acceso
     await this.getDetalleConvenio(email, proyectoId, perfilId)
 
-    // Estado de la convocatoria: el botón "Actualizar datos" solo se habilita
-    // para admin (1) siempre, y para la empresa proponente (7) si la
-    // convocatoria está abierta (estado = 1).
+    // "Actualizar datos": admin siempre; la empresa solo con convocatoria abierta
     const [conv] = await this.dataSource.query(
       `SELECT NVL(co.CONVOCATORIAESTADO, 0) AS "estado"
          FROM PROYECTO p
@@ -243,8 +215,7 @@ export class ConveniosService {
     const ADMIN = 1, EMPRESA = 7
     const convocatoriaAbierta = Number(conv?.estado) === 1
     const puedeActualizar = perfilId === ADMIN || (perfilId === EMPRESA && convocatoriaAbierta)
-    // Estado del convenio: si != 1 (EN EJECUCIÓN), los módulos del frontend
-    // deben mostrar solo lectura. El backend ya bloquea writes en los services.
+    // bandera para que el front pinte solo lectura
     const [cvEstado] = await this.dataSource.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
         WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
@@ -288,7 +259,6 @@ export class ConveniosService {
       [proyectoId],
     )
 
-    // Por persona, acumulamos los grupos activos e inactivos por separado.
     type Acum = {
       personaId: number
       tipoDocumentoId: number | null
@@ -327,11 +297,7 @@ export class ConveniosService {
       }
     }
 
-    // Listas separadas:
-    //   - beneficiarios: personas con al menos un grupo ACTIVO → solo grupos activos.
-    //   - inactivos: TODA persona con al menos un grupo INACTIVO, mostrando
-    //     solo sus grupos inactivos. Una persona puede aparecer en ambas listas
-    //     si tiene grupos en distintos estados.
+    // una persona sale en ambas listas si tiene grupos en distinto estado
     const beneficiarios: BeneficiarioDedup[] = []
     const inactivos: BeneficiarioDedup[] = []
     let nro = 0, nroInact = 0
@@ -368,7 +334,7 @@ export class ConveniosService {
 
     return {
       total: beneficiarios.length,
-      totalRegistros: rows.length, // cuántas filas AF·grupo en total (sin dedup)
+      totalRegistros: rows.length, // filas AF·grupo sin dedup
       puedeActualizar,
       convenioEnEjecucion,
       beneficiarios,
@@ -376,9 +342,6 @@ export class ConveniosService {
     }
   }
 
-  /** Genera un workbook Excel (.xlsx) con dos hojas: "Activos" e "Inactivos",
-   *  basado en la partición de `getBeneficiariosProyecto`. Devuelve un Buffer
-   *  que el controller pasa al cliente como descarga. */
   async getReporteBeneficiariosBuffer(email: string, proyectoId: number, perfilId?: number): Promise<Buffer> {
     const data = await this.getBeneficiariosProyecto(email, proyectoId, perfilId)
     const headers = ['N°', 'Tipo de Documento', 'Identificación', 'Nombre del Beneficiario', 'Estado', 'AFs / Grupos']
@@ -407,7 +370,6 @@ export class ConveniosService {
     const wb = XLSX.utils.book_new()
     const wsA = XLSX.utils.aoa_to_sheet(filasActivos)
     const wsI = XLSX.utils.aoa_to_sheet(filasInactivos)
-    // Anchos razonables
     const cols = [{ wch: 5 }, { wch: 22 }, { wch: 16 }, { wch: 36 }, { wch: 12 }, { wch: 50 }]
     ;(wsA as { [k: string]: unknown })['!cols'] = cols
     ;(wsI as { [k: string]: unknown })['!cols'] = cols
@@ -416,14 +378,8 @@ export class ConveniosService {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true }) as Buffer
   }
 
-  // ── Empresas beneficiarias (catálogo) ─────────────────────────────────────
-  //
-  // BENEFICIARIOEMPRESA es un catálogo global (no por proyecto). Una empresa
-  // se identifica por (tipoDocumento, número). Aquí garantizamos que NO se
-  // dupliquen: al "registrar" se actualiza si ya existe, o se crea si no.
+  // BENEFICIARIOEMPRESA es catalogo global; la clave logica es (tipoDoc, numero)
 
-  /** Lista todas las empresas beneficiarias, deduplicadas por (tipoDoc, número)
-   *  quedándose con el registro de menor id (el "original"). */
   async listarEmpresasBeneficiarias() {
     const rows: Array<{
       id: number; tipoDocumentoId: number; tipoDocumento: string | null
@@ -445,7 +401,7 @@ export class ConveniosService {
          LEFT JOIN TAMANOEMPRESA te ON te.TAMANOEMPRESAID = be.TAMANOEMPRESAID
         ORDER BY be.BENEFICIARIOEMPRESAID ASC`,
     )
-    // Dedup por (tipoDocId|numero) — primer registro (menor id) gana.
+    // dedup por (tipoDoc|numero): gana el de menor id
     const vistos = new Set<string>()
     const out: typeof rows = []
     for (const r of rows) {
@@ -457,8 +413,7 @@ export class ConveniosService {
     return out
   }
 
-  /** Busca una empresa beneficiaria por (tipoDoc, número). Devuelve el
-   *  registro de menor id o null si no existe. */
+  // devuelve el registro de menor id o null
   async buscarEmpresaBeneficiaria(tipoDocumentoId: number, numero: string) {
     const num = (numero ?? '').trim()
     if (!tipoDocumentoId || !num) return null
@@ -483,8 +438,7 @@ export class ConveniosService {
     return row ?? null
   }
 
-  /** Crea o actualiza una empresa beneficiaria. Si ya existe una con la misma
-   *  (tipoDoc, número), actualiza el registro de menor id (no crea otro). */
+  // si ya existe (tipoDoc, numero) actualiza el de menor id en vez de crear otro
   async guardarEmpresaBeneficiaria(dto: EmpresaBeneficiariaDto): Promise<{ mensaje: string; accion: 'creada' | 'actualizada'; empresaId: number }> {
     if (!dto.tipoDocumentoId) throw new BadRequestException('Seleccione el tipo de identificación.')
     const num = (dto.numero ?? '').trim()
@@ -504,7 +458,7 @@ export class ConveniosService {
       )
       return { mensaje: 'Empresa beneficiaria actualizada', accion: 'actualizada', empresaId: Number(existente.id) }
     }
-    // Nuevo registro. ID con NVL(MAX)+1 (la tabla no parece tener secuencia).
+    // id con NVL(MAX)+1: la tabla no tiene secuencia
     const [{ nid }] = await this.dataSource.query(
       `SELECT NVL(MAX(BENEFICIARIOEMPRESAID), 0) + 1 AS "nid" FROM BENEFICIARIOEMPRESA`,
     )
@@ -521,12 +475,7 @@ export class ConveniosService {
     return { mensaje: 'Empresa beneficiaria registrada exitosamente', accion: 'creada', empresaId: Number(nid) }
   }
 
-  // ── Catálogos para el módulo de beneficiarios ─────────────────────────────
-
-  /** Catálogos requeridos por la página de Registrar Beneficiario:
-   *  géneros, caracterizaciones, niveles ocupacionales, perfiles de
-   *  transferencia y rangos de edad. Todo en un solo call para minimizar
-   *  round-trips del front. */
+  // todos los catalogos de Registrar Beneficiario en un solo call
   async getCatalogosBeneficiario() {
     const [generos, caracterizaciones, niveles, perfilesTransf, rangosEdad, departamentos] = await Promise.all([
       this.dataSource.query(
@@ -562,17 +511,12 @@ export class ConveniosService {
     return { generos, caracterizaciones, niveles, perfilesTransf, rangosEdad, departamentos }
   }
 
-  // ── Asociar beneficiario a grupos (AFGRUPOBENEFICIARIO) ──────────────────
+  // asociar beneficiario a grupos (AFGRUPOBENEFICIARIO)
 
-  /** Lista las acciones de formación del proyecto con sus grupos y marca cuáles
-   *  ya tienen asociada a la persona (estado ACTIVO). El frontend pinta una
-   *  matriz tipo "AF × Grupo" para que el usuario marque/desmarque. */
   async getAccionesYGrupos(email: string, proyectoId: number, personaId: number) {
     await this.getDetalleConvenio(email, proyectoId)
 
-    // 1) AFs del proyecto. Incluimos el flag de transferencia para que el
-    //    front pueda mostrarlo (no filtramos: un beneficiario marcado como
-    //    "agente de transferencia" sí puede ir a AFs de transferencia).
+    // 1) AFs del proyecto; las de transferencia no se filtran a proposito
     const acciones: Array<{
       afId: number; numero: number | null; nombre: string | null
       transferencia: number | null
@@ -587,7 +531,7 @@ export class ConveniosService {
       [proyectoId],
     )
 
-    // 2) Grupos de cada AF.
+    // 2) grupos de cada AF
     const afIds = acciones.map(a => a.afId)
     let grupos: Array<{ afId: number; afGrupoId: number; numero: number | null }> = []
     if (afIds.length) {
@@ -602,7 +546,7 @@ export class ConveniosService {
       )
     }
 
-    // 3) Asociaciones actuales de esta persona en cualquier grupo del proyecto.
+    // 3) asociaciones actuales de la persona en el proyecto
     const asociaciones: Array<{
       afGrupoBeneficiarioId: number; afGrupoId: number; afId: number
       estado: string | null; ano: number | null
@@ -619,7 +563,7 @@ export class ConveniosService {
       [proyectoId, Number(personaId)],
     )
 
-    // 4) Armar respuesta: por AF, lista de grupos con flag "asociado".
+    // 4) respuesta por AF con el flag de asociado
     const asocByGrupo = new Map<number, typeof asociaciones[number]>()
     for (const a of asociaciones) asocByGrupo.set(Number(a.afGrupoId), a)
 
@@ -642,20 +586,14 @@ export class ConveniosService {
     }
   }
 
-  /** Asocia la persona a un grupo de AF. Valida:
-   *   1. El grupo pertenece al proyecto.
-   *   2. La persona tiene postulación vigente.
-   *   3. La persona NO está ya activa en otro grupo de la misma AF
-   *      (regla del legacy: una persona solo va en un grupo por AF).
-   *   4. Los beneficiarios "repetidos" (los que participan en más de una AF
-   *      del proyecto) no superan el 5% del total de beneficiarios. */
+  // reglas del legacy: un solo grupo por AF y maximo 5% de repetidos
   async asociarBeneficiarioAGrupo(email: string, proyectoId: number, personaId: number, afGrupoId: number) {
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
     if (!personaId) throw new BadRequestException('Falta personaId.')
     if (!afGrupoId) throw new BadRequestException('Selecciona el grupo.')
 
-    // 1) Validar que el grupo pertenezca al proyecto y resolver su AF.
+    // 1) el grupo debe ser del proyecto; de paso resuelve su AF
     const [g] = await this.dataSource.query(
       `SELECT g.AFGRUPOID         AS "id",
               g.ACCIONFORMACIONID AS "afId",
@@ -667,7 +605,7 @@ export class ConveniosService {
     )
     if (!g) throw new BadRequestException('El grupo no pertenece al proyecto.')
 
-    // 2) Validar que la persona tenga postulación al año vigente.
+    // 2) la persona necesita postulacion del año vigente
     const ano = new Date().getFullYear()
     const [postu] = await this.dataSource.query(
       `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = :1 AND POSTULACIONANO = :2 FETCH FIRST 1 ROW ONLY`,
@@ -675,8 +613,7 @@ export class ConveniosService {
     )
     if (!postu) throw new BadRequestException('La persona no tiene postulación vigente. Diligénciala antes de asociarla.')
 
-    // 3) Regla: una persona solo puede estar en UN grupo por AF. Si ya está
-    //    en otro grupo de la misma AF (activo), bloqueamos.
+    // 3) una persona solo puede estar activa en un grupo por AF
     const [yaEnAF] = await this.dataSource.query(
       `SELECT agb.AFGRUPOBENEFICIARIOID AS "id",
               g2.AFGRUPONUMERO          AS "grupoNumero"
@@ -689,7 +626,7 @@ export class ConveniosService {
       [Number(g.afId), Number(personaId)],
     )
     if (yaEnAF) {
-      // Si es exactamente el mismo grupo, lo informamos como "ya estaba".
+      // si es el mismo grupo, se responde "ya estaba" en vez de error
       if (Number(yaEnAF.id) && Number(g.id) === Number(afGrupoId)) {
         const [mismo] = await this.dataSource.query(
           `SELECT AFGRUPOBENEFICIARIOID AS "id" FROM AFGRUPOBENEFICIARIO
@@ -705,9 +642,7 @@ export class ConveniosService {
       )
     }
 
-    // 4) Regla del 5% — aplica cuando esta asociación deja a la persona
-    //    en >=2 AFs (es decir, ya estaba en alguna AF antes). Si era nueva
-    //    al proyecto (0 → 1) no afecta el conteo de repetidos.
+    // 4) regla del 5%: solo aplica si la persona ya estaba en alguna AF
     const conteos: Array<{ personaId: number; afsDistintas: number }> = await this.dataSource.query(
       `SELECT agb.PERSONAID                       AS "personaId",
               COUNT(DISTINCT af.ACCIONFORMACIONID) AS "afsDistintas"
@@ -721,11 +656,9 @@ export class ConveniosService {
     )
     const yaEra = Number(conteos.find(c => Number(c.personaId) === Number(personaId))?.afsDistintas) || 0
     if (yaEra >= 1) {
-      // La persona ya estaba en al menos una AF → con este insert pasaría a
-      //  estar en >=2 AFs (repetida). Verificar la cuota del proyecto.
-      const total = conteos.length // total de personas activas en el proyecto (no cambia)
+      // con este insert quedaria en >=2 AFs: revisar la cuota
+      const total = conteos.length // personas activas en el proyecto
       const repetidosActuales = conteos.filter(c => Number(c.afsDistintas) >= 2).length
-      // Si la persona aún no era repetida (estaba en 1), suma 1; si ya lo era, el conteo no cambia.
       const repetidosDespues = yaEra === 1 ? repetidosActuales + 1 : repetidosActuales
       if (total > 0 && repetidosDespues / total > 0.05) {
         const maxPerm = Math.floor(total * 0.05)
@@ -737,9 +670,7 @@ export class ConveniosService {
       }
     }
 
-    // 5) Upsert: si ya existe una fila para (persona, grupo) — sin importar
-    //    si está RETIRADO/PENDIENTE/etc. — la re-activamos. Esto evita crear
-    //    filas duplicadas cuando alguien vuelve a un grupo del que se retiró.
+    // 5) si ya hay fila para (persona, grupo) se re-activa, no se duplica
     const [existente] = await this.dataSource.query(
       `SELECT AFGRUPOBENEFICIARIOID AS "id",
               TRIM(AFGRUPOBENEESTADO) AS "estado"
@@ -766,7 +697,7 @@ export class ConveniosService {
       }
     }
 
-    // 6) Si no existe, insertar fila nueva con defaults para NOT NULL.
+    // 6) fila nueva con defaults para las columnas NOT NULL
     const [{ nid }] = await this.dataSource.query(
       `SELECT NVL(MAX(AFGRUPOBENEFICIARIOID), 0) + 1 AS "nid" FROM AFGRUPOBENEFICIARIO`,
     )
@@ -783,13 +714,13 @@ export class ConveniosService {
     return { mensaje: 'Beneficiario asociado al grupo.', afGrupoBeneficiarioId: Number(nid), sinCambios: false }
   }
 
-  /** Marca la asociación como RETIRADO (no se borra para mantener trazabilidad). */
+  // se marca RETIRADO, no se borra, para conservar trazabilidad
   async removerBeneficiarioDeGrupo(email: string, proyectoId: number, afGrupoBeneficiarioId: number) {
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
     if (!afGrupoBeneficiarioId) throw new BadRequestException('Falta el id de la asociación.')
 
-    // Validar que pertenezca al proyecto.
+    // la asociacion debe ser del proyecto
     const [a] = await this.dataSource.query(
       `SELECT agb.AFGRUPOBENEFICIARIOID AS "id"
          FROM AFGRUPOBENEFICIARIO agb
@@ -809,7 +740,6 @@ export class ConveniosService {
     return { mensaje: 'Asociación retirada.' }
   }
 
-  /** Ciudades de un departamento — para el cascading del registrar beneficiario. */
   async getCiudadesPorDepartamento(departamentoId: number) {
     if (!departamentoId) return []
     return this.dataSource.query(
@@ -820,11 +750,9 @@ export class ConveniosService {
     )
   }
 
-  // ── Beneficiario: persona + postulación ───────────────────────────────────
+  // beneficiario: persona + postulacion
 
-  /** Calcula RANGOEDADID a partir de la edad, replicando los rangos del
-   *  legacy GeneXus. Esto se hace tanto en el front (para preview) como en
-   *  el backend (al guardar, defensivo) para que siempre quede consistente. */
+  // rangos de RANGOEDADID calcados del legacy GeneXus
   private rangoEdadIdParaEdad(edad: number): number {
     if (edad <= 17) return 1
     if (edad <= 24) return 2
@@ -845,16 +773,7 @@ export class ConveniosService {
     return Math.max(0, edad)
   }
 
-  /** Busca la persona por (tipoDoc, identificación) y devuelve sus datos
-   *  básicos + la postulación más reciente + el estado contra el año vigente.
-   *  Año vigente = año actual del servidor (Bogotá ~UTC, fixed UTC en main).
-   *
-   *  Estados posibles:
-   *    - 'sin-persona'   : no existe persona con ese documento.
-   *    - 'sin-postulacion': existe persona pero nunca ha postulado.
-   *    - 'desactualizada': existe postulación pero de un año anterior.
-   *    - 'vigente'       : tiene postulación del año actual → puede asociarse.
-   */
+  // el año vigente sale del reloj del servidor (UTC fijo en main)
   async buscarPersonaConPostulacion(tipoDocumentoId: number, identificacion: string, proyectoId?: number) {
     if (!tipoDocumentoId || !(identificacion ?? '').trim()) {
       throw new BadRequestException('Faltan tipo de identificación y número.')
@@ -894,8 +813,7 @@ export class ConveniosService {
       return { estado: 'sin-persona' as const, anoVigente, persona: null, postulacion: null }
     }
 
-    // Postulación más reciente de esta persona + datos de la empresa
-    // beneficiaria (para precargar la sección "Empresa donde labora").
+    // postulacion mas reciente + empresa donde labora, para precargar el form
     const [postu] = await this.dataSource.query(
       `SELECT po.PERSONAID                       AS "personaId",
               po.POSTULACIONANO                   AS "ano",
@@ -928,8 +846,7 @@ export class ConveniosService {
     else if (Number(postu.ano) === anoVigente) estado = 'vigente'
     else estado = 'desactualizada'
 
-    // Conteo de asociaciones activas en este proyecto (para marcar el paso 3
-    // como completo en el stepper del frontend).
+    // el front lo usa para marcar como completo el paso 3 del stepper
     let asociacionesActivas = 0
     if (proyectoId && persona?.personaId) {
       const [c] = await this.dataSource.query(
@@ -948,16 +865,9 @@ export class ConveniosService {
     return { estado, anoVigente, persona, postulacion: postu ?? null, asociacionesActivas }
   }
 
-  /** Crea o actualiza una PERSONA con los datos extra que pide la postulación
-   *  de beneficiario: género, estrato, fecha de nacimiento, departamento/ciudad,
-   *  barrio, dirección, habeas data. Si `dto.personaId` viene, hace UPDATE;
-   *  si no, busca por (tipoDoc, identificación) y si existe actualiza ese
-   *  registro, en caso contrario crea una persona nueva.
-   *
-   *  Devuelve `{ personaId, accion }`. */
+  // sin personaId busca por (tipoDoc, identificacion) antes de crear
   async guardarPersonaBeneficiaria(email: string, _proyectoId: number, dto: PersonaBeneficiarioDto) {
     if (_proyectoId) await this.assertConvenioEnEjecucion(_proyectoId)
-    // Validaciones mínimas.
     if (!dto.tipoDocumentoId)               throw new BadRequestException('Seleccione el tipo de identificación.')
     if (!(dto.identificacion ?? '').trim()) throw new BadRequestException('Ingrese el número de identificación.')
     if (!(dto.nombres ?? '').trim())        throw new BadRequestException('Ingrese los nombres.')
@@ -968,8 +878,7 @@ export class ConveniosService {
     if (dto.estratoId != null && (Number(dto.estratoId) < 1 || Number(dto.estratoId) > 6)) {
       throw new BadRequestException('El estrato debe estar entre 1 y 6.')
     }
-    // Garantizar que la sesión tiene empresa válida (proponente). El campo
-    // no se guarda en PERSONA, pero validamos por consistencia con el flujo.
+    // no se guarda en PERSONA: solo valida que la sesion tenga empresa
     await this.getEmpresaId(email)
 
     const ident = String(dto.identificacion).trim()
@@ -983,7 +892,7 @@ export class ConveniosService {
     const habeas  = dto.habeasData ? 'SI' : 'NO'
     const fechaNac = (dto.fechaNacimiento ?? '').trim() || null  // YYYY-MM-DD
 
-    // Resolver personaId destino: si vino, UPDATE; si no, busca por documento.
+    // si no vino personaId, se busca por documento
     let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
     if (!personaId) {
       const [existente] = await this.dataSource.query(
@@ -1028,7 +937,6 @@ export class ConveniosService {
       return { mensaje: 'Persona actualizada', accion: 'actualizada' as const, personaId }
     }
 
-    // Crear nueva persona.
     const [{ nid }] = await this.dataSource.query(
       `SELECT NVL(MAX(PERSONAID), 0) + 1 AS "nid" FROM PERSONA`,
     )
@@ -1058,12 +966,10 @@ export class ConveniosService {
     return { mensaje: 'Persona registrada exitosamente', accion: 'creada' as const, personaId }
   }
 
-  /** Crea o actualiza la postulación del beneficiario. La PK lógica es
-   *  (PERSONAID, POSTULACIONANO) — la guardamos al año vigente. Los datos
-   *  de contacto se hardcodean al SENA / PFCE (igual que el legacy). */
+  // PK logica (PERSONAID, POSTULACIONANO); el contacto va fijo al SENA/PFCE como el legacy
   async guardarPostulacion(email: string, proyectoId: number, dto: PostulacionDto) {
     await this.assertConvenioEnEjecucion(proyectoId)
-    // Empresa proponente del proyecto (para IDEMPRESAP).
+    // empresa proponente para IDEMPRESAP
     const empresaId = await this.getEmpresaId(email).catch(() => null)
     const [proy] = await this.dataSource.query(
       `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = :1`,
@@ -1082,28 +988,25 @@ export class ConveniosService {
     if (!dto.perfilTrasferenciaId)  throw new BadRequestException('Falta perfil de transferencia.')
     if (!dto.postulacionTrasferencia) throw new BadRequestException('Indica si participará en transferencia.')
 
-    // Normalizar antiguedad: el legacy guarda 'S'/'N' en NCHAR.
+    // el legacy guarda antiguedad como 'S'/'N' en NCHAR
     const antig = String(dto.antiguedad).trim().toUpperCase().startsWith('S') ? 'S' : 'N'
-    // Normalizar transferencia: el legacy guarda 'SI'/'NO' en NVARCHAR2.
+    // transferencia va como 'SI'/'NO' en NVARCHAR2
     const transf = String(dto.postulacionTrasferencia).trim().toUpperCase().startsWith('S') ? 'SI' : 'NO'
 
-    // Rango de edad: si el front lo manda, lo usamos; si no, lo calculamos
-    // a partir de la fecha de nacimiento. Si nada, queda 0 (se rechaza abajo).
+    // si el front no manda rango, se calcula de la fecha de nacimiento
     let rangoEdadId = Number(dto.rangoEdadId) || 0
     if (!rangoEdadId && dto.fechaNacimiento) {
       const edad = this.edadDesdeFecha(dto.fechaNacimiento)
       if (edad > 0) rangoEdadId = this.rangoEdadIdParaEdad(edad)
     }
     if (!rangoEdadId) {
-      // Si todavía no hay rango (persona sin fecha nacimiento valida), no
-      // bloqueamos: lo dejamos en el último rango como fallback inocuo. El
-      // editor de la persona debería forzar la fecha de nacimiento antes.
+      // sin fecha valida no se bloquea: cae al ultimo rango como fallback
       rangoEdadId = 6
     }
 
     const ano = new Date().getFullYear()
 
-    // Upsert por (personaId, ano).
+    // upsert por (personaId, ano)
     const [exist] = await this.dataSource.query(
       `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = :1 AND POSTULACIONANO = :2`,
       [Number(dto.personaId), ano],
@@ -1156,16 +1059,11 @@ export class ConveniosService {
     return { mensaje: 'Postulación registrada exitosamente', accion: 'creada' as const, ano }
   }
 
-  // ── Director del convenio (Fase 1) ────────────────────────────────────────
+  // director del convenio
 
-  /** Trae todos los directores asociados al proyecto: el ACTIVO y los
-   *  inactivos (historial de cambios de director). El frontend pinta el
-   *  activo arriba y el historial colapsable abajo.
-   *
-   *  Devuelve `{ activo, historial }`. Si nunca se ha registrado un director,
-   *  ambos vienen vacíos. */
+  // devuelve el director ACTIVO y el historial de inactivos
   async getDirectores(email: string, proyectoId: number, perfilId?: number) {
-    // Validar acceso al convenio del proyecto.
+    // valida acceso
     await this.getDetalleConvenio(email, proyectoId, perfilId)
     const all = await this.dataSource.query(
       `SELECT d.DIRECTORID                                  AS "directorId",
@@ -1214,15 +1112,12 @@ export class ConveniosService {
     return { activo, historial, convenioEnEjecucion }
   }
 
-  /** Crea un director básico para el convenio (perfil empresa). Si no existe
-   *  una PERSONA con esa identificación, la crea; si ya existe, la reutiliza.
-   *  Marca cualquier director previo como INACTIVO antes de insertar. */
+  // crea la PERSONA si no existe e inactiva al director anterior
   async crearDirector(email: string, proyectoId: number, dto: DirectorBasicoDto) {
-    // Validar que existe convenio y que el usuario tiene acceso.
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
 
-    // 1) Resolver PERSONA: si dto.personaId viene → usar; si no, buscar por identificación.
+    // 1) resolver persona: por id, por identificacion, o crearla
     let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
     if (!personaId) {
       const [existente] = await this.dataSource.query(
@@ -1259,7 +1154,7 @@ export class ConveniosService {
       }
     }
 
-    // 2) Inactivar director ACTIVO previo si lo hay (un solo director activo).
+    // 2) solo puede haber un director activo por proyecto
     await this.dataSource.query(
       `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
                               DIREFECHAACTUALIZACION = SYSDATE
@@ -1267,7 +1162,7 @@ export class ConveniosService {
       [proyectoId],
     )
 
-    // 3) Insertar nuevo director con estado interventoría PENDIENTE.
+    // 3) entra con interventoria en PENDIENTE
     const [{ nid }] = await this.dataSource.query(
       `SELECT NVL(MAX(DIRECTORID), 0) + 1 AS "nid" FROM DIRECTORES`,
     )
@@ -1287,10 +1182,7 @@ export class ConveniosService {
     }
   }
 
-  /** Asocia una PERSONA existente como director del convenio. Esta es la
-   *  forma "moderna" de registrar director: primero se gestiona la persona
-   *  en el módulo de Hojas de Vida (con todos sus datos y archivos) y luego
-   *  se la asocia aquí. Inactiva el director ACTIVO previo si lo hay. */
+  // asocia una persona ya creada en Hojas de Vida como director
   async asociarDirector(email: string, proyectoId: number, personaId: number) {
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
@@ -1300,7 +1192,6 @@ export class ConveniosService {
     )
     if (!pp) throw new NotFoundException('La persona no existe.')
 
-    // No permitir asociar a la misma persona si ya está activa.
     const [ya] = await this.dataSource.query(
       `SELECT DIRECTORID AS "id" FROM DIRECTORES
         WHERE PROYECTOID = :1 AND PERSONAID = :2 AND TRIM(DIREESTADO) = 'ACTIVO'
@@ -1316,8 +1207,7 @@ export class ConveniosService {
       }
     }
 
-    // Validar: la persona NO puede ser director APROBADO en otro proyecto
-    // de la MISMA convocatoria (regla del legacy del SENA).
+    // regla SENA: no puede ser director APROBADO en otro proyecto de la misma convocatoria
     const [conflicto] = await this.dataSource.query(
       `SELECT d.PROYECTOID                AS "proyectoId",
               TRIM(p.PROYECTONOMBRE)      AS "proyectoNombre"
@@ -1364,7 +1254,6 @@ export class ConveniosService {
     }
   }
 
-  /** Aprueba o rechaza al director (solo interventor / coordinador interventoría). */
   async aprobarRechazarDirector(
     proyectoId: number,
     perfilId: number,
@@ -1376,8 +1265,7 @@ export class ConveniosService {
     if (perfilId !== INTERVENTOR && perfilId !== COORD_INTERV && perfilId !== ADMIN) {
       throw new ForbiddenException('Solo la interventoría puede aprobar o rechazar al director.')
     }
-    // Verificar que el proyecto tenga convenio asociado (de lo contrario no
-    // tiene sentido el flujo de director ↔ interventoría).
+    // sin convenio no aplica el flujo director-interventoria
     const [conv] = await this.dataSource.query(
       `SELECT CONVENIOSID AS "id" FROM CONVENIOS WHERE PROYECTOID = :1
          FETCH FIRST 1 ROW ONLY`,

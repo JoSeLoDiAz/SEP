@@ -8,24 +8,7 @@ import type { ProgresoCiclo } from './trayectoria.service'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: Record<string, unknown>) => any = require('pdfkit')
 
-/**
- * Ficha PDF del evaluador — la hoja de vida imprimible del banco.
- *
- * Es un documento de trabajo del gestor, no una constancia: se arma en vivo
- * contra la base (no hay snapshot ni consecutivo) y por eso lleva impreso que
- * es informativo. Certificar participación es tarea de `CertificadoService`.
- *
- * Dos reglas gobiernan el archivo:
- *
- *   - **Nunca revienta por datos incompletos.** La mayoría del banco está a
- *     medio llenar; una ficha que falla con un evaluador sin foto ni ciclos no
- *     sirve justamente para el caso en que más se necesita (ver qué falta).
- *     Todo valor ausente se imprime como "—" y toda sección vacía dice por qué.
- *   - **Una consulta por bloque, no una por fila.** Los ciclos salen de
- *     `TrayectoriaService.getTrayectoria`, que ya trae hitos y contadores de
- *     todos los años en dos consultas; los proyectos, de un solo SELECT
- *     agrupado en memoria.
- */
+// ficha imprimible del evaluador: informativa, no certifica (eso es CertificadoService)
 
 const PRIMARY = '#00304D'
 const VERDE = '#39A900'
@@ -39,11 +22,7 @@ const AMBAR_FONDO = '#FFF8EC'
 const VERDE_FONDO = '#F1F8EC'
 const BLANCO = '#FFFFFF'
 
-/**
- * Tokens de `ESTADOPARTICIPACION.COLOR` traducidos a hexadecimal. El catálogo
- * guarda el nombre de la paleta, no un color, porque quien lo consume de
- * primera mano es el panel (clases de Tailwind); el PDF necesita el valor.
- */
+// ESTADOPARTICIPACION.COLOR guarda el token de la paleta, no el hex
 const COLOR_ESTADO: Record<string, string> = {
   neutral: '#737373',
   blue: '#2563EB',
@@ -55,33 +34,22 @@ const COLOR_ESTADO: Record<string, string> = {
   red: '#DC2626',
 }
 
-/** Margen lateral y franja inferior reservada para el pie de página. */
+// margen lateral y franja reservada para el pie
 const M = 46
 const RESERVA_PIE = 42
-/**
- * Alto aproximado del bloque de un ciclo: título con sello + las 5 filas de la
- * grilla de 14 campos, ~24pt cada una. Se usa para no partirlo entre páginas.
- * Es una estimación, no una medida: si se queda corta el corte sigue siendo
- * legible porque la página nueva repite el año.
- */
+// alto estimado de un ciclo, para no partirlo entre paginas
 const ALTO_CICLO = 150
 const FOTO_W = 88
 const FOTO_H = 108
 
-/** Estado del dibujo: el documento y el cursor vertical. */
+// estado del dibujo: documento y cursor vertical
 interface Lienzo {
   doc: any
   y: number
   x: number
   ancho: number
-  /** Nombre del evaluador, para el encabezado de las páginas siguientes. */
   titular: string
-  /**
-   * Año que se está dibujando. Si un ciclo se parte entre dos páginas, la
-   * continuación repite el año: sin esto, la página siguiente mostraba
-   * "Aprobación del jefe: Registrada" sin decir de qué año, y en una hoja de
-   * vida con seis años eso no se puede reconstruir leyendo.
-   */
+  // si un ciclo se parte entre paginas, la continuacion repite este año
   anioActual?: number
 }
 
@@ -93,7 +61,7 @@ interface ProyectoCiclo {
   puntajeOtorgado: number | null
 }
 
-/** Forma de un año del rail (los marcadores de hueco se filtran antes). */
+// año del rail ya sin los marcadores de hueco
 interface AnioTrayectoria {
   anio: number
   participaciones: Array<Record<string, unknown>>
@@ -110,13 +78,8 @@ export class FichaPdfService {
     private readonly trayectoria: TrayectoriaService,
   ) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Entrada                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
   async generar(evaluadorId: number): Promise<{ buffer: Buffer; nombre: string }> {
-    // La ficha es la única lectura obligatoria: si el evaluador no existe,
-    // `getFicha` lanza el 404 y no se genera nada.
+    // si el evaluador no existe, getFicha lanza el 404 y no se genera nada
     const ficha = await this.evaluadores.getFicha(evaluadorId) as Record<string, unknown>
 
     const [resumen, trayectoria, estudios, experiencias, tics, foto, tieneCedula, proyectos] =
@@ -126,7 +89,7 @@ export class FichaPdfService {
         this.evaluadores.listarEstudios(evaluadorId),
         this.evaluadores.listarExperiencias(evaluadorId),
         this.evaluadores.listarTics(evaluadorId),
-        // Un evaluador sin foto es lo normal, no un error: 404 → sin foto.
+        // un evaluador sin foto es lo normal, no un error
         this.evaluadores.getFoto(evaluadorId).catch(() => null),
         this.tieneCedula(evaluadorId),
         this.proyectosPorCiclo(evaluadorId),
@@ -142,11 +105,6 @@ export class FichaPdfService {
     return { buffer, nombre: `Ficha_evaluador_${this.limpiarNombre(identificacion)}.pdf` }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Datos que no expone ningún servicio                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /** Alerta de la ficha: la cédula es el documento que traba todo lo demás. */
   private async tieneCedula(evaluadorId: number): Promise<boolean> {
     const filas: Array<{ tiene: number }> = await this.dataSource.query(
       `SELECT CASE WHEN EXISTS (
@@ -161,16 +119,10 @@ export class FichaPdfService {
     return Number(filas[0]?.tiene ?? 0) === 1
   }
 
-  /**
-   * Proyectos evaluados de todos los ciclos en una sola consulta. Pedirlos
-   * ciclo por ciclo (`getParticipacion`) sería un N+1 sobre un evaluador con
-   * seis años de historia, para pintar cuatro líneas por año.
-   */
+  // los proyectos de todos los ciclos en una sola consulta, para evitar el N+1
   private async proyectosPorCiclo(evaluadorId: number): Promise<Map<number, ProyectoCiclo[]>> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
-      // Igual que en la trayectoria: la empresa se resuelve contra el proyecto
-      // real. Las columnas de la tabla pivote solo se llenan en los registros
-      // históricos escritos a mano.
+      // las columnas de la pivote solo vienen llenas en los registros historicos
       `SELECT pp.PARTICIPACIONID   AS "participacionId",
               COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
                        TRIM(pp.NIT))                 AS "nit",
@@ -204,10 +156,6 @@ export class FichaPdfService {
     return mapa
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Documento                                                             ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
   private construirPdf(d: {
     ficha: Record<string, unknown>
     resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>
@@ -221,8 +169,7 @@ export class FichaPdfService {
     nombreCompleto: string
   }): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      // `bufferPages` permite volver sobre las páginas ya escritas al final
-      // para numerarlas: el total no se conoce hasta cerrar el contenido.
+      // bufferPages: el total de paginas no se sabe hasta cerrar el contenido
       const doc = new PDFDocument({
         size: 'LETTER', layout: 'portrait', margin: 0, bufferPages: true,
       })
@@ -301,11 +248,6 @@ export class FichaPdfService {
     })
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Bloques                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /** Abre página con la banda superior y, salvo la primera, el hilo de quién es. */
   private abrirPagina(l: Lienzo, primera = false) {
     const { doc } = l
     if (!primera) doc.addPage({ size: 'LETTER', layout: 'portrait', margin: 0 })
@@ -316,8 +258,7 @@ export class FichaPdfService {
     if (primera) return
 
     doc.font('Helvetica-Bold').fontSize(8.5).fillColor(PRIMARY)
-    // Sin recorte, un nombre largo se dibujaría por encima del rótulo de la
-    // derecha: `lineBreak: false` no respeta el ancho, solo evita el salto.
+    // lineBreak:false no respeta el ancho, por eso el recorte manual
     doc.text(this.recortar(doc, l.titular.toUpperCase(), l.ancho * 0.6), l.x, l.y, {
       width: l.ancho * 0.65, lineBreak: false,
     })
@@ -329,8 +270,7 @@ export class FichaPdfService {
     doc.moveTo(l.x, l.y).lineTo(l.x + l.ancho, l.y).lineWidth(0.7).stroke(GRIS_LINEA)
     l.y += 12
 
-    // Si el salto ocurrió en mitad de un año, se repite el año arriba. Lo que
-    // sigue son datos de ese ciclo y sin la banda quedan huérfanos.
+    // si el salto cayo en mitad de un año, se repite el año arriba
     if (l.anioActual != null) {
       doc.rect(l.x, l.y, l.ancho, 15).fill(PRIMARY)
       doc.font('Helvetica-Bold').fontSize(9).fillColor(BLANCO)
@@ -342,7 +282,7 @@ export class FichaPdfService {
     }
   }
 
-  /** Salta de página si lo que viene no cabe encima del pie. */
+  // salta de pagina si lo que viene no cabe encima del pie
   private asegurar(l: Lienzo, alto: number) {
     if (l.y + alto <= l.doc.page.height - RESERVA_PIE) return
     this.abrirPagina(l)
@@ -375,8 +315,7 @@ export class FichaPdfService {
     l.y += 16
 
     const yBloque = l.y
-    // Las iniciales salen de los campos, no del nombre armado: si la persona
-    // no tiene nombre registrado no deben inventarse letras del texto de relleno.
+    // iniciales de los campos, no del nombre armado (puede ser texto de relleno)
     const iniciales = [ficha.nombres, ficha.primerApellido]
       .map(v => this.txt(v, '').charAt(0)).join('').toUpperCase()
     this.retrato(l, yBloque, foto, iniciales)
@@ -384,8 +323,6 @@ export class FichaPdfService {
     const xTexto = l.x + FOTO_W + 14
     const anchoTexto = l.ancho - FOTO_W - 14
 
-    // El estado va como sello a la derecha: saber que la ficha es de alguien
-    // inactivo cambia la lectura de todo lo que sigue.
     const activo = Number(ficha.activo) === 1
     const anchoSello = this.sello(
       l, activo ? 'ACTIVO' : 'INACTIVO',
@@ -415,12 +352,10 @@ export class FichaPdfService {
       { k: 'Jefe inmediato', v: this.jefe(ficha) },
     ], 2, FOTO_W + 14)
 
-    // El bloque no puede cerrar por encima del retrato o la sección siguiente
-    // se dibujaría encima de la foto.
+    // no cerrar por encima del retrato o la siguiente seccion pisa la foto
     l.y = Math.max(l.y, yBloque + FOTO_H) + 14
   }
 
-  /** Foto del evaluador o, si no hay, un marco con sus iniciales. */
   private retrato(
     l: Lienzo, y: number,
     foto: { buffer: Buffer; mime: string; nombre: string | null } | null,
@@ -435,8 +370,7 @@ export class FichaPdfService {
           fit: [FOTO_W - 4, FOTO_H - 4], align: 'center', valign: 'center',
         })
       } catch {
-        // Una imagen corrupta o en un formato que pdfkit no lee (HEIC, TIFF)
-        // no puede tumbar la ficha completa: se cae al marco con iniciales.
+        // pdfkit revienta con imagenes corruptas o en HEIC/TIFF
         this.marcoVacio(l, y, iniciales)
       }
     } else {
@@ -484,19 +418,7 @@ export class FichaPdfService {
     l.y += alto + 14
   }
 
-  /**
-   * El recorrido año por año, en la primera página.
-   *
-   * Es la tabla por la que se pidió este cambio. Con 34 evaluadores de cinco
-   * hojas cada uno salen 170 páginas que nadie va a leer, y la herramienta
-   * termina siendo un archivador. Quien recibe esta ficha tiene una sola
-   * pregunta —¿lo convoco otra vez?— y necesita responderla sin pasar de la
-   * primera hoja: cuántos ciclos, cómo le fue en la prueba, cómo en la
-   * retroalimentación, y si lo recomendaron.
-   *
-   * El "recomendado" sale de la pregunta 10 del instrumento y va en su propia
-   * columna, no dentro del promedio: es la que decide.
-   */
+  // "recomendado" sale de la pregunta 10 del instrumento y no entra al promedio
   private recorrido(l: Lienzo, filas: Awaited<ReturnType<TrayectoriaService['getResumen']>>['recorrido']) {
     if (!filas?.length) return
     const { doc } = l
@@ -518,7 +440,6 @@ export class FichaPdfService {
     doc.text('RECORRIDO AÑO POR AÑO', l.x, l.y)
     l.y += 11
 
-    // Encabezado
     doc.roundedRect(l.x, l.y, l.ancho, altoFila, 2).fill(GRIS_FONDO)
     doc.font('Helvetica-Bold').fontSize(6.2).fillColor(GRIS_SUAVE)
     let x = l.x
@@ -529,7 +450,7 @@ export class FichaPdfService {
     l.y += altoFila
 
     for (const f of filas) {
-      // Sin porcentaje no se afirma nada: "sin evaluar" no es "no aprobada".
+      // sin porcentaje no se afirma nada: "sin evaluar" no es "no aprobada"
       const estado = f.pruebaAprobada === true ? 'Aprobada'
         : f.pruebaAprobada === false ? 'No aprobada'
         : (f.porcentaje != null || f.puntaje != null) ? 'Sin evaluar' : '—'
@@ -560,11 +481,7 @@ export class FichaPdfService {
     l.y += 12
   }
 
-  /**
-   * Lo que le falta a la ficha, arriba y en un recuadro. Es el bloque por el
-   * que el gestor imprime esto: si las alertas quedaran al final o mezcladas
-   * con el resto, nadie las vería.
-   */
+  // lo que le falta a la ficha, en recuadro y arriba de todo
   private alertas(
     l: Lienzo,
     ficha: Record<string, unknown>,
@@ -577,12 +494,7 @@ export class FichaPdfService {
     if (ficha.tieneFoto !== true) avisos.push('No tiene foto cargada.')
 
     const p = resumen.pruebaVigente
-    // Se distingue "no aprobada" de "sin evaluar". La ficha decia que la
-    // prueba NO FUE APROBADA cuando en realidad nadie la habia evaluado —
-    // falta el porcentaje o la nota de corte del ciclo—, y esto se imprime
-    // justo encima de la tabla que dice "Sin evaluar": el mismo documento se
-    // contradecia a si mismo, y la version impresa es la que se usa para
-    // decidir si se vuelve a convocar a alguien.
+    // sin porcentaje ni nota de corte no se puede afirmar que no aprobo
     const sinEvaluar = !!p && !p.aprobada
       && resumen.recorrido?.find(x => x.anio === p.anio)?.pruebaAprobada == null
 
@@ -646,7 +558,7 @@ export class FichaPdfService {
     l.y += 9
   }
 
-  /** Pares etiqueta/valor en rejilla. `sangria` deja libre la columna del retrato. */
+  // sangria deja libre la columna del retrato
   private grilla(
     l: Lienzo,
     pares: Array<{ k: string; v: string }>,
@@ -676,10 +588,7 @@ export class FichaPdfService {
     }
   }
 
-  /**
-   * Tabla con encabezado que se repite al cambiar de página. Sin la repetición,
-   * una lista larga de estudios deja columnas sin título en la hoja siguiente.
-   */
+  // tabla con encabezado que se repite al cambiar de pagina
   private tabla(
     l: Lienzo,
     columnas: Array<{ titulo: string; ancho: number; alineacion?: 'left' | 'right' | 'center' }>,
@@ -745,10 +654,7 @@ export class FichaPdfService {
     l.y = Number(doc.y) + 14
   }
 
-  /**
-   * Etiqueta redondeada. Devuelve su ancho para poder acomodar lo de al lado;
-   * el tope evita que un nombre de estado largo se coma el título del ciclo.
-   */
+  // devuelve el ancho del sello para acomodar lo que va al lado
   private sello(
     l: Lienzo, texto: string, fondo: string, color: string,
     x: number, y: number, anclaje: 'izquierda' | 'derecha' = 'izquierda',
@@ -767,11 +673,7 @@ export class FichaPdfService {
     return ancho
   }
 
-  /**
-   * Recorta con puntos suspensivos hasta que quepa en `ancho`. Se usa donde el
-   * texto se dibuja sin salto de línea, que en pdfkit ignora el ancho de la
-   * caja y se sale del margen en lugar de cortarse.
-   */
+  // con lineBreak:false pdfkit ignora el ancho de la caja y se sale del margen
   private recortar(doc: any, texto: string, ancho: number): string {
     if (ancho <= 0) return ''
     if (Number(doc.widthOfString(texto)) <= ancho) return texto
@@ -781,10 +683,6 @@ export class FichaPdfService {
     }
     return `${corte.trimEnd()}…`
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Trayectoria                                                           ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   private trayectoriaPdf(
     l: Lienzo,
@@ -797,9 +695,7 @@ export class FichaPdfService {
     }
 
     for (const fila of anios) {
-      // El rail intercala marcadores de hueco entre años no consecutivos; aquí
-      // se imprimen como una línea tenue en vez de descartarlos, porque un año
-      // sin participar también es información de trayectoria.
+      // los huecos del rail se imprimen: un año sin participar tambien informa
       if (fila.gap === true) {
         l.anioActual = undefined
         this.hueco(l, Number(fila.desde), Number(fila.hasta))
@@ -819,14 +715,7 @@ export class FichaPdfService {
             totalProyectos > 0 ? `${totalProyectos} proyecto${totalProyectos === 1 ? '' : 's'}` : null,
           ].filter(Boolean).join('   ·   ')
 
-      // El encabezado se dibuja con el año aún sin marcar: si el salto ocurre
-      // justo aquí, la banda del año se pinta entera en la página nueva y
-      // repetirla arriba sería decir dos veces lo mismo.
-      //
-      // Se reserva también el primer ciclo (ALTO_CICLO): un "2025" solo al pie
-      // de la página, con su contenido en la siguiente, obliga a repetir la
-      // banda y deja media hoja en blanco. Encabezado y primer ciclo viajan
-      // juntos, que es lo que se lee como un bloque.
+      // encabezado y primer ciclo viajan juntos: la banda no queda sola al pie
       l.anioActual = undefined
       this.encabezadoAnio(l, anio.anio, resumen, partes.length ? ALTO_CICLO : 0)
       l.anioActual = anio.anio
@@ -876,11 +765,7 @@ export class FichaPdfService {
     const hito = (codigo: string) => progreso?.hitos.find(h => h.codigo === codigo)
     const contadores = (p.contadores ?? {}) as Record<string, unknown>
 
-    // Se reserva el bloque ENTERO, no solo el encabezado. Con 72pt el ciclo se
-    // partía casi siempre: el año quedaba en una página y "aprobación del jefe
-    // / curso / prueba / certificado" en la siguiente. Si aun así no cabe
-    // —muchos proyectos—, el corte se sigue permitiendo y `abrirPagina` repite
-    // el año arriba.
+    // se reserva el bloque entero; si aun asi no cabe, abrirPagina repite el año
     this.asegurar(l, ALTO_CICLO)
 
     const estado = this.txt(p.estadoNombre, 'Sin estado')
@@ -970,14 +855,7 @@ export class FichaPdfService {
     l.y += 14
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Pie                                                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Se escribe al final sobre las páginas ya bufferizadas: el "de N" no existe
-   * hasta que se sabe cuántas páginas ocupó la trayectoria.
-   */
+  // se escribe al final: el "de N" no existe hasta cerrar el contenido
   private pie(doc: any) {
     const rango = doc.bufferedPageRange()
     const ancho = doc.page.width - M * 2
@@ -988,8 +866,7 @@ export class FichaPdfService {
 
       doc.rect(0, alto - 8, doc.page.width, 8).fill(VERDE)
       doc.font('Helvetica').fontSize(6.8).fillColor(GRIS_SUAVE)
-      // La nota va en una sola línea sin corte, así que se mantiene corta a
-      // propósito: si creciera, invadiría el número de página de la derecha.
+      // va en una sola linea sin corte: si crece, invade el numero de pagina
       doc.text(
         `Generada el ${this.fechaLarga(new Date())} · Documento informativo: ` +
         'refleja lo registrado a la fecha y no constituye certificación.',
@@ -1000,10 +877,6 @@ export class FichaPdfService {
       })
     }
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Utilidades                                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   private nombreCompleto(ficha: Record<string, unknown>): string {
     const partes = [ficha.nombres, ficha.primerApellido, ficha.segundoApellido]
@@ -1026,7 +899,7 @@ export class FichaPdfService {
     return detalle.length ? `${nombre} (${detalle.join(' · ')})` : nombre
   }
 
-  /** Texto del hito: distingue "no aprobado" de "sin registro". */
+  // distingue "no aprobado" de "sin registro"
   private resultado(cumplido: boolean | undefined, detalle?: string | null): string {
     const dato = (detalle ?? '').trim()
     if (cumplido) return dato ? `Aprobado · ${dato}` : 'Aprobado'
@@ -1040,28 +913,14 @@ export class FichaPdfService {
     return `${a} – ${b}`
   }
 
-  /**
-   * El color del estado viene del catálogo y pdfkit revienta con un valor que
-   * no sepa interpretar, así que solo se acepta hexadecimal o un token conocido.
-   *
-   * `ESTADOPARTICIPACION.COLOR` no guarda hexadecimal sino el token de la paleta
-   * (`green`, `red`, `amber`…) que el panel traduce a clases de Tailwind. Sin
-   * esta tabla el sello salía siempre azul institucional y un ciclo REVOCADO se
-   * veía igual que uno CERTIFICADO. Se usa el tono 600 y no el 500 del panel
-   * porque aquí el texto va en blanco sobre el relleno y en papel el 500 no
-   * alcanza a leerse.
-   */
+  // pdfkit revienta con un color que no entienda: solo hex o token conocido
   private colorEstado(valor: unknown): string {
     const s = typeof valor === 'string' ? valor.trim() : ''
     if (/^#[0-9A-Fa-f]{6}$/.test(s)) return s
     return COLOR_ESTADO[s.toLowerCase()] ?? PRIMARY
   }
 
-  /**
-   * Texto imprimible de un valor de la base. Lo que no sea fecha, número o
-   * cadena se trata como vacío: en una ficha impresa, un "[object Object]"
-   * (un LOB sin leer, por ejemplo) es peor que un guion.
-   */
+  // lo que no sea fecha, numero o cadena va vacio: un LOB sin leer imprimiria "[object Object]"
   private txt(valor: unknown, vacio = '—'): string {
     if (valor == null) return vacio
     if (valor instanceof Date) return this.fechaCorta(valor)
@@ -1086,7 +945,7 @@ export class FichaPdfService {
     })
   }
 
-  /** El nombre del archivo viaja en una cabecera HTTP: nada de rutas ni comillas. */
+  // el nombre viaja en una cabecera HTTP: nada de rutas ni comillas
   private limpiarNombre(valor: string): string {
     return valor.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
       || 'evaluador'

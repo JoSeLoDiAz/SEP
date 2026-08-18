@@ -16,7 +16,7 @@ import { CatalogosEvaluadorService } from './catalogos.service'
 import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { TrayectoriaService } from './trayectoria.service'
-import { AuditoriaService } from './auditoria.service'
+import { ControlCambiosService } from './control-cambios.service'
 import { CicloService } from './ciclo.service'
 import { CertificadoService } from './certificado.service'
 import { FichaPdfService } from './ficha-pdf.service'
@@ -31,20 +31,8 @@ const PERFIL_COORDINADOR = 2
 const PERFIL_GESTOR_EVALUADORES = 15
 const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
-/**
- * Ocho megas, para TODO lo que se suba: PDFs, fotos y correos.
- *
- * Un solo número a propósito. Antes la evidencia del ciclo aceptaba 20 MB y
- * todo lo demás 8, y como el mensaje de error dice "el máximo permitido es
- * 8 MB", el mismo correo entraba por una pantalla y era rechazado por otra
- * con un límite que no era el suyo. Con un único tope no hay nada que
- * explicar y el mensaje siempre dice la verdad.
- *
- * Lo cargado hoy cabe de sobra: el archivo más pesado de la base es de
- * 1,73 MB. Un .msg con adjuntos que no quepa se guarda sin ellos, o se
- * imprime a PDF.
- */
-const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // 8 MB
+// Tope único para todo lo que se suba: PDFs, fotos y correos.
+const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024
 
 @ApiTags('evaluadores')
 @Controller('evaluadores')
@@ -55,7 +43,7 @@ export class EvaluadoresController {
     private readonly service: EvaluadoresService,
     private readonly catalogos: CatalogosEvaluadorService,
     private readonly trayectoria: TrayectoriaService,
-    private readonly auditoria: AuditoriaService,
+    private readonly controlCambios: ControlCambiosService,
     private readonly ciclo: CicloService,
     private readonly certificados: CertificadoService,
     private readonly reportes: ReportesEvaluadorService,
@@ -63,26 +51,18 @@ export class EvaluadoresController {
   ) {}
 
 
-  /** Contexto de auditoría que acompaña a toda escritura del ciclo. */
+  // contexto que se registra en toda escritura del ciclo
   private ctx(user: JwtUser) {
     return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
   }
 
-  /**
-   * Sirve un BLOB. `descargar = true` fuerza el guardado con el nombre
-   * original; los .msg no se pueden previsualizar en el navegador, así que
-   * ahí siempre va como adjunto.
-   */
+  // Sirve un BLOB; los .msg no se previsualizan, siempre van como adjunto.
   private responderArchivo(
     res: Response, buffer: Buffer, mime: string, nombre: string, descargar: boolean,
   ) {
     const limpio = (nombre ?? '').trim() || 'archivo'
 
-    // Un correo guardado como .html o .mht es HTML, y servirlo en línea lo
-    // ejecutaría en el dominio del SEP: como el token vive en localStorage,
-    // bastaría un correo preparado para robar la sesión de quien lo abra.
-    // Esos archivos se fuerzan a descarga y se anuncian como binarios, de modo
-    // que el navegador los guarde en vez de interpretarlos.
+    // Un .html servido en línea correría en el dominio del SEP y robaría el token.
     const ejecutable = seEjecutaEnElNavegador(limpio, mime)
     const enLinea = descargar ? false : !ejecutable
 
@@ -97,17 +77,7 @@ export class EvaluadoresController {
     res.end(buffer)
   }
 
-  /**
-   * Único control de acceso del módulo.
-   *
-   * Decisión explícita: quien gestiona el banco de evaluadores lo gestiona
-   * completo — fichas, ciclos, matriz, resultados, certificados y auditoría.
-   * No hay funciones reservadas a un perfil dentro del módulo: repartirlas
-   * obligaba a que dos personas se turnaran para completar un mismo trámite.
-   *
-   * Lo único que queda fuera son los catálogos del sistema (`exigirAdmin`),
-   * que no son parte de la operación del banco sino de su configuración.
-   */
+  // Quien gestiona el banco lo gestiona completo; solo los catálogos son de admin.
   private exigirGestion(user: JwtUser) {
     if (!PERFILES_GESTION.includes(user.perfilId)) {
       throw new ForbiddenException('No tiene permisos para gestionar el banco de evaluadores')
@@ -121,21 +91,10 @@ export class EvaluadoresController {
   }
 
 
-  /**
-   * Borrar un ciclo completo lo puede hacer cualquiera que gestione el banco:
-   * el caso de todos los días es corregir una participación recién creada por
-   * error, y mandar eso a otro perfil convertía una corrección de segundos en
-   * un trámite.
-   *
-   * Los límites que quedan no son de permiso sino de integridad, y aplican
-   * igual a todos: un ciclo con certificado emitido no se borra nunca, y uno
-   * con historia avisa antes de arrastrarla.
-   */
+  // Sin distinción de perfil: los límites del borrado son de integridad, no de permiso.
   private puedeForzarBorrado(_user: JwtUser) {
     return true
   }
-
-  // ── Catálogos ──────────────────────────────────────────────────────────
 
   @Get('catalogos/roles')
   rolesCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
@@ -233,8 +192,6 @@ export class EvaluadoresController {
     return this.catalogos.actualizarTipoDocumentoEvaluador(id, dto)
   }
 
-  // Catálogo de tipos de documento para convocatorias (Fase 5).
-
   @Get('catalogos/tipos-documento-convocatoria')
   @ApiOperation({ summary: 'Catálogo de tipos de documento aplicables a una convocatoria' })
   tiposDocConvCat(@CurrentUser() user: JwtUser, @Query('soloActivos') soloActivos?: string) {
@@ -261,8 +218,7 @@ export class EvaluadoresController {
     return this.catalogos.actualizarTipoDocumentoConvocatoria(id, dto)
   }
 
-  // Catálogos del ciclo (v29). Solo lectura: son el vocabulario del proceso,
-  // no datos operativos — cambiarlos es una migración, no una pantalla.
+  // Catálogos del ciclo, solo lectura: cambiarlos es una migración, no una pantalla.
 
   @Get('catalogos/estados-participacion')
   @ApiOperation({ summary: 'Estados del año, para los filtros del banco y el select del ciclo' })
@@ -307,8 +263,6 @@ export class EvaluadoresController {
     return this.catalogos.listarModalidades(todos !== '1')
   }
 
-  // Catálogos para Fase 3 (regional / centro de formación / municipio)
-
   @Get('catalogos/regionales')
   @ApiOperation({ summary: 'Regionales del SENA (dropdown asignación del evaluador)' })
   regionalesCat(@CurrentUser() user: JwtUser, @Query('todos') todos?: string) {
@@ -340,8 +294,6 @@ export class EvaluadoresController {
     return this.catalogos.buscarCiudades(q ?? '', Number.isFinite(lim) ? lim : 20)
   }
 
-  // ── Búsqueda previa (al crear) ─────────────────────────────────────────
-
   @Get('buscar-persona')
   @ApiOperation({ summary: 'Buscar persona por documento — devuelve si ya es evaluador o si se puede precargar' })
   buscarPersona(
@@ -353,13 +305,11 @@ export class EvaluadoresController {
     return this.service.buscarPorDocumento(tipoDocumentoIdentidadId, doc)
   }
 
-  // ── Auditoría ──────────────────────────────────────────────────────────
-  // Va antes de @Get(':id') a propósito: si se declarara después, la ruta
-  // paramétrica se tragaría 'auditoria' y ParseIntPipe reventaría con 400.
+  // debe ir antes de @Get(':id') o la ruta paramétrica se traga 'control-cambios' y da 400
 
-  @Get('auditoria')
-  @ApiOperation({ summary: 'Log de auditoría del banco (coordinación y admin)' })
-  auditoriaGlobal(
+  @Get('control-cambios')
+  @ApiOperation({ summary: 'Control de cambios del banco (coordinación y admin)' })
+  controlCambiosGlobal(
     @CurrentUser() user: JwtUser,
     @Query('tabla') tabla?: string,
     @Query('operacion') operacion?: string,
@@ -370,17 +320,17 @@ export class EvaluadoresController {
     @Query('limit') limit = '50',
   ) {
     this.exigirGestion(user)
-    return this.auditoria.listar({
+    return this.controlCambios.listar({
       tabla, operacion, usuarioEmail, desde, hasta,
       page: Number(page), limit: Number(limit),
     })
   }
 
-  @Get('auditoria/:logId')
+  @Get('control-cambios/:logId')
   @ApiOperation({ summary: 'Snapshots antes/después de un registro del log' })
-  auditoriaDetalle(@CurrentUser() user: JwtUser, @Param('logId', ParseIntPipe) logId: number) {
+  controlCambiosDetalle(@CurrentUser() user: JwtUser, @Param('logId', ParseIntPipe) logId: number) {
     this.exigirGestion(user)
-    return this.auditoria.getDetalle(logId)
+    return this.controlCambios.getDetalle(logId)
   }
 
   @Get('buscar-proyectos')
@@ -392,16 +342,12 @@ export class EvaluadoresController {
     @Query('participacionId') participacionId?: string,
   ) {
     this.exigirGestion(user)
-    // Con la participación, la búsqueda se acota a los proyectos de SU
-    // convocatoria. Sin ella queda la búsqueda global, que sigue sirviendo
-    // para consultar pero no debería usarse al asignar.
+    // Con participación, la búsqueda se acota a los proyectos de SU convocatoria.
     const pid = Number(participacionId)
     return this.ciclo.buscarProyectos(
       q, Number(limit), Number.isFinite(pid) && pid > 0 ? pid : undefined,
     )
   }
-
-  // ── Listado y ficha ────────────────────────────────────────────────────
 
   @Get()
   @ApiOperation({ summary: 'Listado del banco con filtros por año, estado, proceso, rol y alertas' })
@@ -416,12 +362,7 @@ export class EvaluadoresController {
     return this.service.listar(busqueda, Number(page), Number(limit), this.leerFiltros(query))
   }
 
-  /**
-   * Los query params llegan como texto. Se descarta lo que no sea número para
-   * que un `?anio=abc` no termine como NaN en un bind de Oracle, y los
-   * booleanos solo cuentan si vienen explícitos — "no filtrar" y "filtrar por
-   * false" son cosas distintas.
-   */
+  // Descarta lo que no sea número: un `?anio=abc` no puede llegar como NaN a un bind.
   private leerFiltros(query: Record<string, string>) {
     const num = (v?: string) => {
       const n = Number(v)
@@ -485,8 +426,6 @@ export class EvaluadoresController {
     this.responderArchivo(res, buffer, 'application/pdf', nombre, true)
   }
 
-  // ── Trayectoria (vista por año) ────────────────────────────────────────
-
   @Get(':id/resumen')
   @ApiOperation({ summary: 'KPIs del evaluador para la cabecera de la ficha' })
   resumen(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
@@ -501,16 +440,16 @@ export class EvaluadoresController {
     return this.trayectoria.getTrayectoria(id)
   }
 
-  @Get(':id/auditoria')
-  @ApiOperation({ summary: 'Log de auditoría de este evaluador' })
-  auditoriaDeEvaluador(
+  @Get(':id/control-cambios')
+  @ApiOperation({ summary: 'Control de cambios de este evaluador' })
+  controlCambiosDeEvaluador(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
     @Query('page') page = '1',
     @Query('limit') limit = '50',
   ) {
     this.exigirGestion(user)
-    return this.auditoria.listar({ evaluadorId: id, page: Number(page), limit: Number(limit) })
+    return this.controlCambios.listar({ evaluadorId: id, page: Number(page), limit: Number(limit) })
   }
 
   @Get('participaciones/:pid/detalle')
@@ -549,8 +488,6 @@ export class EvaluadoresController {
     return this.service.cambiarEstado(id, Boolean(dto.activo))
   }
 
-  // ── Foto ───────────────────────────────────────────────────────────────
-
   @Post(':id/foto')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_ARCHIVO_BYTES },
@@ -565,15 +502,7 @@ export class EvaluadoresController {
     return this.service.subirFoto(id, file)
   }
 
-  /**
-   * La foto para VER en pantalla: va la miniatura, no la original.
-   *
-   * En las tarjetas del banco el retrato mide unos 100 píxeles, y mandar el
-   * archivo de 280 KB para eso hacía que una sola página bajara más de 2 MB
-   * — y que la foto más pesada se cortara a medio camino cuando la red no
-   * acompañaba. Para descargarla o imprimirla está `/foto/descargar`, que sí
-   * entrega el archivo tal como se subió.
-   */
+  // Para ver en pantalla va la miniatura; el archivo original en /foto/descargar.
   @Get(':id/foto')
   async getFoto(
     @CurrentUser() user: JwtUser,
@@ -585,13 +514,7 @@ export class EvaluadoresController {
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'private, max-age=300')
-    // Expone el nombre para que el frontend lo pueda leer via CORS.
-    //
-    // Va dentro de un try porque el nombre lo puso quien subió el archivo, y
-    // basta una tilde mal codificada para que `encodeURIComponent` reviente o
-    // para que Node rechace la cabecera. Sin esto, un nombre raro tumba la
-    // respuesta entera: la foto está perfecta en la base y no se ve, que es
-    // de lo más difícil de diagnosticar. El nombre es un adorno; la imagen no.
+    // En try: un nombre mal codificado hace que Node rechace la cabecera y tumbe la foto.
     if (nombre) {
       try {
         res.setHeader('X-Filename', encodeURIComponent(nombre))
@@ -611,13 +534,11 @@ export class EvaluadoresController {
   ) {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getFoto(id)
-    // Nombre por defecto si el registro no tiene el original (p. ej. filas antiguas).
     const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'
     const fallback = `evaluador_${id}_foto.${ext}`
     const nombreFinal = nombre?.trim() || fallback
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
-    // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
     res.setHeader(
       'Content-Disposition',
       contentDisposition(nombreFinal, false),
@@ -630,8 +551,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.service.borrarFoto(id)
   }
-
-  // ── Participaciones ────────────────────────────────────────────────────
 
   @Get(':id/participaciones')
   listarParticipaciones(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
@@ -646,7 +565,7 @@ export class EvaluadoresController {
     @Body() dto: ParticipacionDto,
   ) {
     this.exigirGestion(user)
-    // `usuarioEmail` sale del JWT, nunca del body: es la columna de auditoría.
+    // usuarioEmail sale del JWT, nunca del body: es la columna que queda registrada
     return this.service.crearParticipacion(id, { ...dto, usuarioEmail: user.email })
   }
 
@@ -685,8 +604,6 @@ export class EvaluadoresController {
     })
   }
 
-  // ── Hoja de vida (separada de Estudios) ────────────────────────────────
-
   @Get(':id/hoja-vida')
   @ApiOperation({ summary: 'Obtener metadatos de la hoja de vida del evaluador' })
   getHV(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
@@ -713,8 +630,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.service.eliminarHojaVida(id)
   }
-
-  // ── Estudios (diplomas, certificados — excluye HV) ─────────────────────
 
   @Get(':id/estudios')
   listarEstudios(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
@@ -763,8 +678,6 @@ export class EvaluadoresController {
     return this.service.eliminarEstudio(sid)
   }
 
-  // ── Experiencia laboral ────────────────────────────────────────────────
-
   @Get(':id/experiencia')
   listarExperiencias(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     this.exigirGestion(user)
@@ -811,8 +724,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.service.eliminarExperiencia(eid)
   }
-
-  // ── TIC ────────────────────────────────────────────────────────────────
 
   @Get(':id/tic')
   listarTics(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
@@ -861,8 +772,6 @@ export class EvaluadoresController {
     return this.service.eliminarTic(tid)
   }
 
-  // ── Pruebas de conocimiento ────────────────────────────────────────────
-
   @Get(':id/pruebas')
   listarPruebas(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     this.exigirGestion(user)
@@ -895,8 +804,6 @@ export class EvaluadoresController {
     return this.service.eliminarPrueba(pid)
   }
 
-  // ── Ciclo: aprobación del jefe ─────────────────────────────────────────
-
   @Post('participaciones/:pid/aprobacion')
   @ApiOperation({ summary: 'Registrar la autorización del jefe para este ciclo' })
   crearAprobacion(
@@ -920,8 +827,7 @@ export class EvaluadoresController {
 
   @Post('aprobaciones/:aid/evidencia')
   @ApiOperation({ summary: 'Subir el correo de autorización (.msg, .eml o PDF, hasta 20 MB)' })
-  // Sin filtro de tipo: lo valida el service contra las extensiones de correo.
-  // El filtro va igual, para que el nombre del .msg no llegue con la tilde rota.
+  // El tipo lo valida el service; el filtro solo evita que la tilde del nombre llegue rota.
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_ARCHIVO_BYTES },
     fileFilter: filtroSoloNombre,
@@ -951,8 +857,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.ciclo.eliminarAprobacion(aid, this.ctx(user))
   }
-
-  // ── Ciclo: capacitación ────────────────────────────────────────────────
 
   @Post('participaciones/:pid/capacitacion')
   @ApiOperation({ summary: 'Registrar el curso de formación del ciclo. APROBADO se deriva de la nota' })
@@ -1006,8 +910,6 @@ export class EvaluadoresController {
     return this.ciclo.eliminarCapacitacion(cid, this.ctx(user))
   }
 
-  // ── Ciclo: proyectos evaluados ─────────────────────────────────────────
-
   @Post('participaciones/:pid/proyectos')
   agregarProyecto(
     @CurrentUser() user: JwtUser,
@@ -1023,8 +925,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.ciclo.eliminarProyecto(ppid, this.ctx(user))
   }
-
-  // ── Certificados ───────────────────────────────────────────────────────
 
   @Post('participaciones/:pid/certificado')
   @ApiOperation({ summary: 'Emite el certificado del ciclo con consecutivo y código de verificación' })
@@ -1074,8 +974,6 @@ export class EvaluadoresController {
     return this.certificados.anular(cid, dto?.motivo ?? '', this.ctx(user))
   }
 
-  // ── Ciclo: grupos / mesas ──────────────────────────────────────────────
-
   @Put('participaciones/:pid/grupos')
   @ApiOperation({ summary: 'Reemplaza el conjunto de grupos del ciclo (set, no add)' })
   definirGrupos(
@@ -1086,8 +984,6 @@ export class EvaluadoresController {
     this.exigirGestion(user)
     return this.ciclo.definirGrupos(pid, dto?.grupos ?? [], this.ctx(user))
   }
-
-  // ── Documentos genéricos (cédula en Fase 1) ────────────────────────────
 
   @Get(':id/cedula')
   @ApiOperation({ summary: 'Shortcut — indica si el evaluador ya tiene cédula cargada' })
@@ -1118,10 +1014,7 @@ export class EvaluadoresController {
   @Post(':id/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_ARCHIVO_BYTES },
-    // Puerta laxa: aquí no se sabe todavía de qué tipo es el documento, y hay
-    // tipos que son correos (.msg, .eml, .html…). Quién puede subir qué lo
-    // decide el service contra las extensiones declaradas en el catálogo, que
-    // es donde sí se conoce el tipo.
+    // Puerta laxa: el tipo real lo valida el service contra el catálogo.
     fileFilter: filtroArchivo(
       f => f.mimetype === 'application/pdf' || MIMES_CORREO.includes(f.mimetype),
       'Tipo de archivo no soportado. Se acepta PDF, y correos en .msg, .eml, .html o .mht'),
@@ -1140,8 +1033,7 @@ export class EvaluadoresController {
     if (!Number.isFinite(tipoId) || tipoId <= 0) {
       throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
     }
-    // multipart manda todo como texto: los números hay que convertirlos y
-    // descartar los que no lo sean, o Oracle recibe NaN.
+    // multipart manda todo como texto: si no se descarta lo raro, Oracle recibe NaN.
     const anio = body.anioReferencia ? Number(body.anioReferencia) : undefined
     const participacionId = body.participacionId ? Number(body.participacionId) : undefined
     return this.service.subirDocumento(id, tipoId, file, {
@@ -1159,9 +1051,7 @@ export class EvaluadoresController {
   ) {
     this.exigirGestion(user)
     const { buffer, mime, nombre } = await this.service.getDocumentoArchivo(docId)
-    // Por el helper y no a mano: es el que decide que un correo en .html no
-    // se sirva en línea. Escribir las cabeceras aquí dejaba esta ruta fuera
-    // de esa protección justo cuando se empezaron a aceptar correos.
+    // Por el helper y no a mano: es el que evita servir un correo .html en línea.
     this.responderArchivo(res, buffer, mime, nombre, false)
   }
 
@@ -1176,7 +1066,6 @@ export class EvaluadoresController {
     const nombreFinal = nombre?.trim() || `documento_${docId}.pdf`
     res.setHeader('Content-Type', mime)
     res.setHeader('Content-Length', String(buffer.length))
-    // filename* (RFC 5987) preserva UTF-8 en navegadores modernos.
     res.setHeader(
       'Content-Disposition',
       contentDisposition(nombreFinal, false),

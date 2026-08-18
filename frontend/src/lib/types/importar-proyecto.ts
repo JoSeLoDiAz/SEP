@@ -1,12 +1,4 @@
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ Tipos compartidos del preview de importación de proyecto (formulador VBA). ║
-// ║ Espejo EXACTO de las interfaces del backend en                            ║
-// ║ backend/src/importar-proyecto/importar-proyecto.service.ts — el endpoint  ║
-// ║ POST /admin/importar-proyecto/preview devuelve el Excel parseado COMPLETO ║
-// ║ (todos los campos como texto, sin resolver contra catálogos). Estos tipos ║
-// ║ los consume tanto la pantalla de importación como el reporte de vista     ║
-// ║ previa (components/importar/reporte-preview.tsx).                         ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// espejo de las interfaces de backend/src/importar-proyecto/importar-proyecto.service.ts
 
 export interface ExcelBasicos {
   nit: string
@@ -128,15 +120,10 @@ export interface ExcelAF {
   trabajadoresCampesinos: number | null
   trabajadoresDiscapacidad: number | null
   empresasBic: number | null
-  /** Sectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   sectoresPertenecen: string[]
-  /** Subsectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   subsectoresPertenecen: string[]
-  /** Sector que la AF BENEFICIA (clasificación, normalmente 1). */
   sectoresBeneficia: string[]
-  /** Subsector que la AF BENEFICIA (clasificación, normalmente 1). */
   subsectoresBeneficia: string[]
-  /** Justificación de la elección de sectores y subsectores. */
   justificacionSectores: string | null
   componenteAlineacion: string | null
   descripcionAlineacion: string | null
@@ -173,9 +160,9 @@ export interface ExcelUT {
   actividades: string[]
   descripcionActividad: string | null
   perfiles: Array<{ perfil: string; horas: number | null }>
-  /** Texto de la articulación territorial (columna HABILIDAD TRANSVERSAL). */
+  /** columna del Excel: HABILIDAD TRANSVERSAL */
   articulacionTerritorial: string | null
-  /** True cuando la UT es de articulación territorial (col ES TRANSVERSAL = SI). */
+  /** columna del Excel: ES TRANSVERSAL = SI */
   esArticulacionTerritorial: boolean
 }
 
@@ -207,18 +194,17 @@ export interface ExcelCoberturaFila {
   ciudadPresencial: string | null
   beneficiariosPresencial: number | null
   departamentos: Array<{ departamento: string; beneficiarios: number }>
-  /** Justificación de la relación de los beneficiarios con los lugares de ejecución. */
   justificacion: string | null
 }
 
-/** Una AF con sus hijos ya agrupados (lo que devuelve el preview). */
+// af con sus hijos ya agrupados
 export type ExcelAFConDetalle = ExcelAF & {
   uts: ExcelUT[]
   rubros: ExcelRubro[]
   cobertura: ExcelCoberturaFila[]
 }
 
-// ── Preview enriquecido con BD ──────────────────────────────────────────────
+// preview enriquecido con bd
 
 export interface PreviewEmpresa {
   estado: 'nueva' | 'existente'

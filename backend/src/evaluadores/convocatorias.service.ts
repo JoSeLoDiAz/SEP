@@ -3,13 +3,10 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import type { MulterFile } from './evaluadores.service'
 
-// Tope de tamaño por archivo adjunto a la convocatoria (20 MB). Se aplica
-// tanto en el interceptor multer como en la validación defensiva del service.
+// Debe coincidir con el límite del interceptor multer.
 export const MAX_CONV_DOC_BYTES = 8 * 1024 * 1024
 
-// Extensiones que el catálogo puede declarar por defecto. Sólo se usan como
-// fallback si el catálogo trae la cadena vacía — el flujo real lee la lista
-// del registro en TIPODOCUMENTOCONV.
+// Sólo aplica si TIPODOCUMENTOCONV trae la lista vacía.
 const EXTENSIONES_FALLBACK = ['pdf']
 
 export interface ConvocatoriaCrearDto {
@@ -20,15 +17,7 @@ export interface ConvocatoriaCrearDto {
   fechaInicio?: string | null
   fechaFin?: string | null
   observaciones?: string | null
-  /**
-   * Convocatoria REAL del SEP sobre la que se monta este ciclo (v40).
-   *
-   * El ciclo de evaluadores no es una convocatoria aparte: es la capa de
-   * reglas —cortes, certificación, matriz— que se le pone encima a una
-   * convocatoria que ya existe, con su programa, presupuesto y fechas. Sin
-   * atarlo, el gestor teclea un nombre libre que no coincide con el oficial y
-   * los dos mundos dejan de cuadrar.
-   */
+  /** Convocatoria real del SEP sobre la que se monta el ciclo (v40). */
   convocatoriaSepId?: number | null
 }
 
@@ -67,10 +56,6 @@ export interface ListarConvocatoriasQuery {
 export class ConvocatoriasService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Listado / Ficha                                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
   async listar(query: ListarConvocatoriasQuery = {}) {
     const pagina = Math.max(1, Number(query.page) || 1)
     const tamPag = Math.min(100, Math.max(1, Number(query.limit) || 20))
@@ -89,8 +74,7 @@ export class ConvocatoriasService {
     }
     const q = (query.busqueda ?? '').trim()
     if (q) {
-      // Escapar comodines LIKE (% _ \) para que el usuario no dispare wildcards
-      // por accidente al tipear caracteres especiales.
+      // Escapa % _ \ para que el usuario no dispare wildcards sin querer.
       const esc = q.toUpperCase().replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
       params.push(`%${esc}%`)
       conds.push(`UPPER(c.NOMBRE) LIKE :${params.length} ESCAPE '\\'`)
@@ -172,8 +156,7 @@ export class ConvocatoriasService {
     )
     if (!rows[0]) throw new NotFoundException('Convocatoria no encontrada')
 
-    // Conteo por tipo de documento — el frontend lo usa para poblar el bloque
-    // "documentos disponibles" en la ficha.
+    // Incluye los tipos con cero documentos: el front los pinta igual.
     const porTipo: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT TRIM(t.CODIGO) AS "tipoCodigo",
               TRIM(t.NOMBRE) AS "tipoNombre",
@@ -216,18 +199,13 @@ export class ConvocatoriasService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Crear / Actualizar / Desactivar                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
   async crear(dto: ConvocatoriaCrearDto) {
     this.validarAnio(dto.anio)
     if (!dto.nombre?.trim()) {
       throw new BadRequestException('El nombre de la convocatoria es obligatorio')
     }
 
-    // ID por MAX+1 (mismo patrón que EVALUADORDOCUMENTO — tabla pequeña, sin
-    // secuencia dedicada). Suficiente porque no hay concurrencia alta.
+    // ID por MAX+1: no hay secuencia para esta tabla.
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
       `SELECT NVL(MAX(CONVOCATORIAID), 0) + 1 AS "NUEVO" FROM EVALUADORCONVOCATORIA`,
     )
@@ -268,8 +246,7 @@ export class ConvocatoriasService {
     if (dto.anio !== undefined) this.validarAnio(dto.anio)
 
     if (dto.convocatoriaSepId !== undefined) {
-      // El año a comparar es el que va a quedar: si vienen los dos en el mismo
-      // PUT, manda el nuevo; si solo cambia la convocatoria, el que ya tiene.
+      // El año a comparar es el que quedará tras el PUT, no el actual.
       const actual: Array<{ anio: number }> = await this.dataSource.query(
         `SELECT ANIO AS "anio" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`,
         [convocatoriaId],
@@ -280,7 +257,7 @@ export class ConvocatoriasService {
       )
     }
 
-    // UPDATE dinámico — mismo patrón que EvaluadoresService.actualizar.
+    // UPDATE dinámico.
     const sets: string[] = []
     const params: unknown[] = []
     const map: Array<[keyof ConvocatoriaActualizarDto, string, (v: unknown) => unknown]> = [
@@ -305,8 +282,7 @@ export class ConvocatoriasService {
       }
     }
 
-    // La modalidad llega como código y hay que resolverla contra el catálogo
-    // (la columna de texto se dropeó en la v36), así que va fuera del mapa.
+    // Llega como código y hay que resolverlo contra el catálogo, por eso va fuera del mapa.
     if (dto.modalidadPart !== undefined) {
       params.push(await this.idModalidad(dto.modalidadPart))
       sets.push(`MODALIDADPARTID = :${params.length}`)
@@ -320,8 +296,7 @@ export class ConvocatoriasService {
         params,
       )
     } catch (e) {
-      // Reasignar la convocatoria del SEP puede chocar con el mismo índice
-      // único que al crear: si ya hay otro ciclo de ese periodo sobre ella.
+      // Reasignar puede chocar con el mismo índice único que al crear.
       this.traducirDuplicado(e, dto.convocatoriaSepId)
     }
     return { message: 'Convocatoria actualizada' }
@@ -340,11 +315,7 @@ export class ConvocatoriasService {
     return { message: activo ? 'Convocatoria activada' : 'Convocatoria desactivada', activo }
   }
 
-  /**
-   * Traduce el código de modalidad al id del catálogo MODALIDADPART (v29).
-   * La columna de texto que había aquí se dropeó en la v36; el front sigue
-   * enviando 'PRESENCIAL' / 'PAT' / 'VIRTUAL' y no tiene por qué conocer ids.
-   */
+  /** El front envía 'PRESENCIAL' / 'PAT' / 'VIRTUAL'; aquí se traduce al id de MODALIDADPART. */
   private async idModalidad(codigo?: string | null): Promise<number | null> {
     const c = (codigo ?? '').toString().trim().toUpperCase()
     if (!c) return null
@@ -363,21 +334,7 @@ export class ConvocatoriasService {
     }
   }
 
-  /**
-   * Comprueba que la convocatoria del SEP exista y que el año coincida.
-   *
-   * La FK de la v40 ya impide apuntar a una que no existe, pero devolvería un
-   * ORA-02291 crudo. Y el año NO lo cubre ninguna restricción: montar el ciclo
-   * 2026 sobre la convocatoria 2024 es un error silencioso que solo se nota
-   * meses después, cuando los certificados salen con el año equivocado.
-   */
-  /**
-   * Traduce el choque del índice único de la v40 a un mensaje que se entienda.
-   *
-   * Sin esto, intentar abrir un segundo ciclo sobre la misma convocatoria y el
-   * mismo periodo devuelve un 500 "Internal server error": la gestora no sabe
-   * qué hizo mal ni que el ciclo ya existe.
-   */
+  /** Sin esto, el ORA-00001 del índice único sale como 500 sin explicación. */
   private traducirDuplicado(e: unknown, sepId: number | null | undefined): never {
     const msg = (e as { message?: string })?.message ?? ''
     if (/ORA-00001/.test(msg) && /UQ_EVALCONV_SEP_PERIODO/i.test(msg)) {
@@ -390,6 +347,7 @@ export class ConvocatoriasService {
     throw e as Error
   }
 
+  /** Ninguna restricción de BD cubre el año: si no se valida aquí, pasa silencioso. */
   private async validarConvocatoriaSep(sepId: number | null | undefined, anio: number) {
     if (sepId == null) return
 
@@ -409,10 +367,6 @@ export class ConvocatoriasService {
       )
     }
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Documentos                                                            ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   async listarDocumentos(convocatoriaId: number, tipoCodigo?: string) {
     const conds: string[] = [`d.CONVOCATORIAID = :1`]
@@ -463,7 +417,6 @@ export class ConvocatoriasService {
     )
     if (!ok[0]) throw new NotFoundException('Convocatoria no encontrada')
 
-    // Leer el catálogo para validar extensión permitida.
     const tipo: Array<{ extensiones: string; codigo: string }> = await this.dataSource.query(
       `SELECT TRIM(EXTENSIONESPERMITIDAS) AS "extensiones",
               TRIM(CODIGO)                AS "codigo"
@@ -483,7 +436,7 @@ export class ConvocatoriasService {
       )
     }
 
-    // ID por MAX+1 — mismo patrón que EVALUADORDOCUMENTO.
+    // ID por MAX+1: no hay secuencia para esta tabla.
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
       `SELECT NVL(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM CONVOCATORIADOCUMENTO`,
     )
@@ -566,15 +519,7 @@ export class ConvocatoriasService {
     return { mensaje: 'Documento eliminado' }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Helpers                                                               ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Extrae la extensión (sin punto, minúsculas) del nombre original.
-   * Los archivos .msg del Outlook a veces llegan con doble extensión — la
-   * última pieza es la que vale.
-   */
+  /** Toma la última pieza: los .msg de Outlook llegan con doble extensión. */
   private extraerExtension(nombre: string | undefined): string | null {
     if (!nombre) return null
     const limpio = nombre.trim().toLowerCase()

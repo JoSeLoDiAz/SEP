@@ -16,8 +16,6 @@ interface MulterFile {
 export class CapacitadoresService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Bloquea escrituras cuando el convenio del proyecto no está EN EJECUCIÓN
-   *  (estado != 1). Se usa en todos los métodos que modifican capacitadores. */
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
@@ -33,7 +31,6 @@ export class CapacitadoresService {
     }
   }
 
-  /** Resuelve el proyectoId desde un capacitador y aplica el guard. */
   private async assertConvenioActivoPorCapacitador(capacitadorId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT PROYECTOID AS "proyectoId" FROM CAPACITADOR
@@ -43,8 +40,6 @@ export class CapacitadoresService {
     if (!row) throw new BadRequestException('Capacitador no encontrado.')
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
-
-  // ── Personas naturales ────────────────────────────────────────────────────
 
   async listarPersonas(proyectoId: number) {
     return this.ds.query(
@@ -92,8 +87,6 @@ export class CapacitadoresService {
     return { capacitadorId: id }
   }
 
-  // ── Empresas jurídicas ────────────────────────────────────────────────────
-
   async listarEmpresas(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID              AS "capacitadorId",
@@ -140,8 +133,6 @@ export class CapacitadoresService {
     return { capacitadorId: id }
   }
 
-  // ── Toggle estado ─────────────────────────────────────────────────────────
-
   async toggleEstado(capacitadorId: number, nuevoEstado: 'ACTIVO' | 'INACTIVO') {
     await this.assertConvenioActivoPorCapacitador(capacitadorId)
     const [cap]: any[] = await this.ds.query(
@@ -170,8 +161,6 @@ export class CapacitadoresService {
         ORDER BY TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) ASC`,
     )
   }
-
-  // ── Empresa capacitadora — búsqueda / creación ────────────────────────────
 
   async buscarEmpresa(tipoDocId: number, identificacion: string) {
     const rows: any[] = await this.ds.query(
@@ -264,8 +253,6 @@ export class CapacitadoresService {
     return { ok: true }
   }
 
-  // ── HV Empresa ────────────────────────────────────────────────────────────
-
   async getHVEmpresa(empresaId: number) {
     const rows: any[] = await this.ds.query(
       `SELECT HVEMPRESAID                   AS "hvEmpresaId",
@@ -299,8 +286,6 @@ export class CapacitadoresService {
     )
     return { hvEmpresaId: id }
   }
-
-  // ── Documentos PDF empresa ─────────────────────────────────────────────────
 
   async listarDocumentosEmpresa(empresaId: number, tipo?: string, num?: number) {
     let sql = `SELECT DOCUMENTOSCAPJURIDICOID          AS "docId",
@@ -353,8 +338,6 @@ export class CapacitadoresService {
     )
     return { ok: true }
   }
-
-  // ── Otros documentos empresa ───────────────────────────────────────────────
 
   async listarDocsAdicionalesEmpresa(empresaId: number) {
     const rows: any[] = await this.ds.query(

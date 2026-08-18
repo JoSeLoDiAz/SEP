@@ -4,22 +4,7 @@ import {
 import type { Response } from 'express'
 import { traducirErrorOracle } from '../db/errores'
 
-/**
- * Convierte los errores de Oracle en mensajes que el usuario pueda resolver.
- *
- * Sin esto, cualquier dato que no cumpla una restricción de la base sale a la
- * pantalla como "Internal server error": ni qué campo, ni qué pasa, ni qué
- * hacer. Las gestoras del banco se toparon con eso varias veces —un equipo
- * evaluador de 124 caracteres, un puntaje de 26450— y cada vez tocó revisar
- * el log del servidor para saber qué era.
- *
- * Va como filtro GLOBAL y no dentro de cada servicio a propósito: el problema
- * no era de un formulario sino de todos, y traducir caso por caso deja fuera
- * al siguiente que se escriba.
- *
- * Lo que no reconoce se re-emite como 500 y se registra completo en el log:
- * un error de verdad del servidor no debe disfrazarse de "dato inválido".
- */
+// filtro global: traduce errores de Oracle a mensajes que el usuario entienda
 @Catch()
 export class OracleErrorFilter implements ExceptionFilter {
   private readonly log = new Logger('Oracle')
@@ -27,12 +12,7 @@ export class OracleErrorFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<Response>()
 
-    // Si la respuesta ya salió, no hay nada que contestar: solo se anota.
-    //
-    // Intentar mandar el JSON encima lanzaba ERR_HTTP_HEADERS_SENT dentro del
-    // propio filtro, y esa segunda excepción mataba la conexión a medio envío.
-    // Con un archivo grande el navegador se quedaba con un 200 y el cuerpo
-    // cortado. Callarse aquí deja que lo que ya iba en camino termine de salir.
+    // responder aquí lanza ERR_HTTP_HEADERS_SENT y corta la descarga en curso
     if (res.headersSent) {
       this.log.error(
         'Error después de haber respondido; la respuesta sigue su curso: ' +
@@ -41,7 +21,6 @@ export class OracleErrorFilter implements ExceptionFilter {
       return
     }
 
-    // Las HttpException ya llevan su mensaje pensado: no se tocan.
     if (exception instanceof HttpException) {
       const status = exception.getStatus()
       const cuerpo = exception.getResponse()
@@ -52,8 +31,6 @@ export class OracleErrorFilter implements ExceptionFilter {
 
     const traducido = traducirErrorOracle(exception)
     if (traducido) {
-      // Se deja también el original en el log: el mensaje que ve el usuario
-      // es deliberadamente corto y quien revise después necesita el detalle.
       this.log.warn(`${(exception as Error)?.message ?? exception}`)
       const status = traducido.getStatus()
       const cuerpo = traducido.getResponse()

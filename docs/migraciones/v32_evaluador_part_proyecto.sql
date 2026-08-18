@@ -1,26 +1,6 @@
 -- v32_evaluador_part_proyecto.sql
--- ──────────────────────────────────────────────────────────────────────────
--- EVALUADORPARTPROYECTO — proyectos que el evaluador evaluó en un ciclo.
---
--- Mata el CLOB EVALUADORPARTICIPACION.PROYECTOSEVALUADOS, que es texto libre
--- y por tanto no se puede contar, filtrar ni cruzar con la tabla PROYECTO.
---
--- Tres formas de referenciar el proyecto, en cascada, para que el histórico
--- 2021-2023 también entre sin bloquear el cargue:
---   1) PROYECTOID  → FK a PROYECTO           (proyecto que llegó a ejecutarse)
---   2) GUARDADOID  → FK a CONVPROYGUARDADO   (proyecto solo formulado, v28)
---   3) NIT + RAZONSOCIAL + NOMBREPROYECTO    (texto, histórico sin sistema)
---
--- El CHECK exige al menos una de las tres. La migración de datos del CLOB va
--- al final de este archivo y es re-ejecutable.
---
--- Idempotente. Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. Tabla                                                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. Tabla
 
 BEGIN
   EXECUTE IMMEDIATE q'[CREATE TABLE EVALUADORPARTPROYECTO (
@@ -59,10 +39,7 @@ COMMENT ON COLUMN EVALUADORPARTPROYECTO.GUARDADOID IS
 COMMENT ON COLUMN EVALUADORPARTPROYECTO.PUNTAJEOTORGADO IS
   'Puntaje que ESTE evaluador le dio al proyecto (no el consolidado de la mesa).';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Secuencia e índices                                                  ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. Secuencia e índices
 
 BEGIN
   EXECUTE IMMEDIATE 'CREATE SEQUENCE EVALUADORPARTPROYECTO_SEQ START WITH 1 INCREMENT BY 1 NOCACHE';
@@ -93,16 +70,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. MIGRACIÓN DEL CLOB PROYECTOSEVALUADOS                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Parte el texto libre por salto de línea, punto y coma o pipe, y crea una
--- fila por fragmento no vacío en NOMBREPROYECTO.
---
--- Re-ejecutable: solo procesa participaciones que todavía no tengan filas en
--- EVALUADORPARTPROYECTO. La columna PROYECTOSEVALUADOS NO se dropea aquí —
--- eso queda para la v36, después de que la gestión de evaluadores valide el resultado.
+-- 3. MIGRACIÓN DEL CLOB PROYECTOSEVALUADOS
 
 DECLARE
   v_texto   CLOB;
@@ -150,10 +118,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. GRANTS y SINÓNIMOS                                                   ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 4. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON EVALUADORPARTPROYECTO     TO SEP_APP;
 GRANT SELECT                         ON EVALUADORPARTPROYECTO     TO SEP_LECTOR;

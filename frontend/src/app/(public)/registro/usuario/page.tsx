@@ -1,5 +1,7 @@
 'use client'
 
+import { CabeceraPagina } from '@/components/public/cabecera-pagina'
+import { CampoClave } from '@/components/public/campo-clave'
 import { HabeasDataModal } from '@/components/public/registro/habeas-data-modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
@@ -9,6 +11,18 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 interface TipoDoc { id: number; nombre: string; sigla: string }
+
+const etiqueta = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-neutral-500'
+const campo = 'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm transition focus:border-cerulean-500 focus:outline-none focus:ring-2 focus:ring-cerulean-500/30'
+
+function Subtitulo({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-4 flex items-center gap-2">
+      <span className="h-4 w-1 rounded-full bg-lime-500" aria-hidden="true" />
+      <h2 className="text-xs font-bold uppercase tracking-wide text-cerulean-500">{children}</h2>
+    </div>
+  )
+}
 
 export default function RegistroUsuarioPage() {
   const router = useRouter()
@@ -87,7 +101,7 @@ export default function RegistroUsuarioPage() {
   }
 
   return (
-    <>
+    <div className="flex flex-col">
       <ToastBetowa
         show={toast}
         onClose={() => setToast(false)}
@@ -98,158 +112,169 @@ export default function RegistroUsuarioPage() {
       />
       <HabeasDataModal open={habeasOpen} onClose={() => setHabeasOpen(false)} />
 
-      <div className="max-w-2xl mx-auto px-4 py-10">
-        <Link href="/login" className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-cerulean-500 transition-colors mb-6 w-fit">
-          <ArrowLeft size={14} /> Volver al inicio de sesión
+      <CabeceraPagina
+        icono={UserPlus}
+        titulo="Registrarse como usuario"
+        descripcion="Crea tu cuenta para inscribirte a eventos y descargar tus certificados."
+      />
+
+      <div className="bg-gradient-to-br from-celeste-50 via-white to-lime-50">
+        <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-6">
+        <Link
+          href="/login"
+          className="mb-4 inline-flex w-fit items-center gap-1.5 text-xs text-neutral-500 transition hover:text-cerulean-500"
+        >
+          <ArrowLeft size={14} aria-hidden="true" />
+          Volver al inicio de sesión
         </Link>
 
-        {/* Título sección */}
-        <div className="bg-[#00304D] text-white px-6 py-4 rounded-xl flex items-center gap-3 mb-8 shadow-md">
-          <UserPlus size={22} />
-          <h1 className="font-semibold text-lg">Registrarse como Usuario</h1>
-          <span className="text-white/60 text-sm ml-1">— Persona natural</span>
-        </div>
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm sm:p-6">
+          <Subtitulo>Datos personales</Subtitulo>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-neutral-200 rounded-2xl shadow-sm p-8 flex flex-col gap-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="tipoDocumento" className={etiqueta}>Tipo de identificación *</label>
+              <select
+                id="tipoDocumento"
+                value={form.tipoDocumentoIdentidadId}
+                onChange={(e) => set('tipoDocumentoIdentidadId', Number(e.target.value))}
+                className={campo}
+              >
+                {tiposDoc.length === 0 && <option value={0}>Cargando...</option>}
+                {tiposDoc.map((t) => (
+                  <option key={t.id} value={t.id}>{t.nombre} {t.sigla ? `(${t.sigla})` : ''}</option>
+                ))}
+              </select>
+            </div>
 
-          {/* Tipo documento */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-700">Tipo de Identificación *</label>
-            <select
-              value={form.tipoDocumentoIdentidadId}
-              onChange={(e) => set('tipoDocumentoIdentidadId', Number(e.target.value))}
-              className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500 bg-white"
-            >
-              {tiposDoc.length === 0 && <option value={0}>Cargando...</option>}
-              {tiposDoc.map((t) => (
-                <option key={t.id} value={t.id}>{t.nombre} {t.sigla ? `(${t.sigla})` : ''}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Identificación */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-700">Número de Identificación *</label>
-            <input
-              type="number"
-              value={form.personaIdentificacion}
-              onChange={(e) => set('personaIdentificacion', e.target.value)}
-              placeholder="1234567890"
-              className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
-            />
-          </div>
-
-          {/* Nombres */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-700">Nombres *</label>
-            <input
-              type="text"
-              value={form.personaNombres}
-              onChange={(e) => set('personaNombres', e.target.value)}
-              placeholder="Juan Carlos"
-              className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
-            />
-          </div>
-
-          {/* Apellidos */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-neutral-700">Primer Apellido *</label>
+            <div>
+              <label htmlFor="identificacion" className={etiqueta}>Número de identificación *</label>
               <input
+                id="identificacion"
+                type="number"
+                value={form.personaIdentificacion}
+                onChange={(e) => set('personaIdentificacion', e.target.value)}
+                placeholder="1234567890"
+                className={campo}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label htmlFor="nombres" className={etiqueta}>Nombres *</label>
+              <input
+                id="nombres"
+                type="text"
+                value={form.personaNombres}
+                onChange={(e) => set('personaNombres', e.target.value)}
+                placeholder="Juan Carlos"
+                autoComplete="given-name"
+                className={campo}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="primerApellido" className={etiqueta}>Primer apellido *</label>
+              <input
+                id="primerApellido"
                 type="text"
                 value={form.personaPrimerApellido}
                 onChange={(e) => set('personaPrimerApellido', e.target.value)}
                 placeholder="Gómez"
-                className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
+                autoComplete="family-name"
+                className={campo}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-neutral-700">Segundo Apellido</label>
+
+            <div>
+              <label htmlFor="segundoApellido" className={etiqueta}>Segundo apellido</label>
               <input
+                id="segundoApellido"
                 type="text"
                 value={form.personaSegundoApellido}
                 onChange={(e) => set('personaSegundoApellido', e.target.value)}
                 placeholder="Martínez (opcional)"
-                className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
+                className={campo}
               />
             </div>
           </div>
 
-          {/* Email */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-700">Correo Electrónico *</label>
-            <input
-              type="email"
-              value={form.usuarioEmail}
-              onChange={(e) => set('usuarioEmail', e.target.value)}
-              placeholder="correo@ejemplo.com"
-              autoComplete="email"
-              className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
-            />
+          <div className="my-6 h-px bg-neutral-100" />
+
+          <Subtitulo>Datos de acceso</Subtitulo>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label htmlFor="email" className={etiqueta}>Correo electrónico *</label>
+              <input
+                id="email"
+                type="email"
+                value={form.usuarioEmail}
+                onChange={(e) => set('usuarioEmail', e.target.value)}
+                placeholder="correo@ejemplo.com"
+                autoComplete="email"
+                className={campo}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label htmlFor="clave" className={etiqueta}>Contraseña *</label>
+              <CampoClave
+                id="clave"
+                value={form.usuarioClave}
+                onChange={(v) => set('usuarioClave', v)}
+                autoComplete="new-password"
+              />
+            </div>
           </div>
 
-          {/* Contraseña */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-700">Contraseña *</label>
-            <input
-              type="password"
-              value={form.usuarioClave}
-              onChange={(e) => set('usuarioClave', e.target.value)}
-              placeholder="Mínimo 8 caracteres"
-              autoComplete="new-password"
-              className="w-full border border-neutral-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cerulean-500"
-            />
-          </div>
-
-          {/* Habeas Data */}
-          <div className="flex items-start gap-3 bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+          <div className="mt-5 flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
             <input
               id="habeas"
               type="checkbox"
               checked={form.habeasData}
               onChange={(e) => set('habeasData', e.target.checked)}
-              className="mt-0.5 w-4 h-4 accent-lime-500 cursor-pointer flex-shrink-0"
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-lime-500"
             />
-            <label htmlFor="habeas" className="text-xs text-neutral-600 cursor-pointer">
+            <label htmlFor="habeas" className="cursor-pointer text-xs leading-relaxed text-neutral-600">
               Acepto los Términos y Condiciones y autorizo el tratamiento de mis datos personales
               conforme a la Ley 1581 de 2012.{' '}
               <button
                 type="button"
                 onClick={() => setHabeasOpen(true)}
-                className="text-cerulean-500 underline hover:text-cerulean-700 font-semibold"
+                className="font-semibold text-cerulean-500 underline transition hover:text-cerulean-700"
               >
                 Ver Habeas Data
               </button>
             </label>
           </div>
 
-          {/* Error */}
           {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
-              <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+            <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
               {error}
             </div>
           )}
 
-          {/* Botones */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-1">
-            <Link
-              href="/login"
-              className="flex-1 text-center px-4 py-2.5 border border-neutral-300 text-neutral-600 font-semibold text-sm rounded-xl hover:bg-neutral-50 transition-colors"
-            >
-              Volver
-            </Link>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row-reverse">
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 bg-lime-500 hover:bg-lime-600 disabled:opacity-60 text-white font-semibold text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+              aria-busy={loading}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-lime-500 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
             >
-              {loading && <Loader2 size={15} className="animate-spin" />}
+              {loading && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
               {loading ? 'Registrando...' : 'Registrarse'}
             </button>
+            <Link
+              href="/login"
+              className="inline-flex flex-1 items-center justify-center rounded-lg border border-neutral-300 px-6 py-2.5 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-50"
+            >
+              Volver
+            </Link>
           </div>
         </form>
       </div>
-    </>
+      </div>
+    </div>
   )
 }

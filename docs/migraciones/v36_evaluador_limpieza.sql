@@ -1,26 +1,6 @@
 -- v36_evaluador_limpieza.sql
--- ──────────────────────────────────────────────────────────────────────────
--- ⚠️  NO EJECUTAR TODAVÍA.  ⚠️
---
--- Esta es la ÚNICA migración destructiva del rediseño. Elimina las columnas
--- que quedaron sin uso después de v29-v35. Se ejecuta cuando se cumplan las
--- tres condiciones:
---
---   1. Al menos un sprint completo con el módulo nuevo en producción.
---   2. La gestión de evaluadores validó que la migración del CLOB PROYECTOSEVALUADOS (v32) quedó
---      correcta — es la única cuyo dato no se puede reconstruir.
---   3. Backup del schema tomado el mismo día.
---
--- Antes de correrla, ejecutar la sección 0 (verificación) y confirmar que
--- todos los contadores dan lo esperado.
---
--- Ejecutar como SEPLOCAL.
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 0. VERIFICACIÓN PREVIA — correr esto primero y leer la salida           ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 0. VERIFICACIÓN PREVIA — correr esto primero y leer la salida
 
 SET SERVEROUTPUT ON;
 
@@ -34,8 +14,6 @@ DECLARE
   v_otrosest         NUMBER;
 
   -- Los contadores sobre columnas que esta misma migración dropea tienen que
-  -- ir por SQL dinámico: si ya se corrió una vez, la columna no existe y el
-  -- script no compilaría.
   FUNCTION contar(p_sql VARCHAR2) RETURN NUMBER IS
     v NUMBER;
   BEGIN
@@ -89,9 +67,6 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE('───────────────────────────────────────────────────');
 
   -- ⚠️ Este bloque tenía un defecto en su primera versión: imprimía el
-  -- contador de EVALUADORQUIENAPRUEBA pero NO lo incluía en la condición de
-  -- aborto, así que dejó dropear una columna con texto sin migrar. Corregido:
-  -- ahora cada contador impreso también bloquea.
   IF v_part_sin_estado > 0 THEN
     RAISE_APPLICATION_ERROR(-20001,
       'v36 ABORTADA: hay ' || v_part_sin_estado || ' participaciones sin ESTADOPARTID. Correr la v34 primero.');
@@ -126,11 +101,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. DROP de columnas muertas                                             ║
--- ╚════════════════════════════════════════════════════════════════════════╝
--- Idempotente: ORA-00904 = la columna ya no existe.
+-- 1. DROP de columnas muertas
 
 DECLARE
   PROCEDURE drop_col(p_tabla VARCHAR2, p_col VARCHAR2) IS
@@ -166,25 +137,6 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. Lo que se conserva a propósito (no borrar)                           ║
--- ╚════════════════════════════════════════════════════════════════════════╝
---
---   EVALUADOR.EVALUADORPROFESION   — resumen para el listado, la búsqueda y
---   EVALUADOR.EVALUADORPOSGRADO      el PDF de la ficha. Duplican parcialmente
---                                    EVALUADORESTUDIO, pero el formulario los
---                                    autosugiere desde ahí en vez de pedirlos
---                                    dos veces. Borrarlos obligaría a un JOIN
---                                    con agregación en todas las pantallas.
---
---   EVALUADORDOCUMENTO.ANIOREFERENCIA — sigue sirviendo para documentos con año
---                                    pero sin ciclo asociado (histórico suelto).
---
---   EVALUADORPARTICIPACION.MESA    — texto libre a propósito: la nomenclatura de
---   EVALUADORPARTICIPACION.EQUIPOEVALUADOR  mesas cambia año a año y no vale la
---                                    pena un catálogo que nadie va a mantener.
---                                    El dato estructurado del grupo ya está en
---                                    EVALUADORPARTGRUPO.
+-- 2. Lo que se conserva a propósito (no borrar)
 
 COMMIT;

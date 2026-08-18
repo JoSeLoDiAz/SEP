@@ -6,17 +6,7 @@ import { useEffect, useState } from 'react'
 
 const PRIMARY = '#00304D'
 
-/**
- * Ve la ficha del evaluador sin tener que descargarla.
- *
- * Muestra el MISMO PDF que se imprime, no una copia en HTML: una segunda
- * versión de la ficha se desincroniza del PDF a la primera vez que alguien
- * cambie uno de los dos, y entonces lo que se ve en pantalla deja de ser lo
- * que va a salir impreso.
- *
- * El archivo se pide con el token en la cabecera y se muestra desde memoria,
- * así que la vista no obliga a exponer la ficha en una URL abierta.
- */
+// muestra el mismo PDF que se imprime: se pide con token y se sirve desde memoria, sin URL pública
 export function VisorFicha({
   evaluadorId, nombre, identificacion, onCerrar,
 }: {
@@ -34,7 +24,7 @@ export function VisorFicha({
 
     api.get(`/evaluadores/${evaluadorId}/ficha.pdf`, {
       responseType: 'blob',
-      // La ficha recorre toda la trayectoria y embebe la foto.
+      // la ficha recorre la trayectoria y embebe la foto: tarda
       timeout: 60_000,
     })
       .then(r => {
@@ -46,12 +36,10 @@ export function VisorFicha({
 
     return () => {
       vivo = false
-      // Sin esto el PDF se queda en memoria del navegador después de cerrar.
       if (creada) URL.revokeObjectURL(creada)
     }
   }, [evaluadorId])
 
-  // Escape cierra: es un visor a pantalla casi completa y es lo que se espera.
   useEffect(() => {
     const alTeclear = (e: KeyboardEvent) => { if (e.key === 'Escape') onCerrar() }
     window.addEventListener('keydown', alTeclear)

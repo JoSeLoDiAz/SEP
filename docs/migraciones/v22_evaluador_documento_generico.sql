@@ -1,25 +1,6 @@
 -- v22_evaluador_documento_generico.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Documentos genéricos por evaluador (cédula, autorización, confidencialidad,
--- experiencias, certificados, ...).
---
--- Diseño:
---   - TIPODOCUMENTOEVAL  — catálogo de tipos de documento del evaluador,
---                          extensible desde el panel admin.
---   - EVALUADORDOCUMENTO — tabla 1:N con el PDF en BLOB. Un mismo evaluador
---                          puede tener varios documentos de un mismo tipo si
---                          el tipo admite multiplicidad (ADMITEMULTIPLE = 1).
---
--- Fase 1: solo se siembra el tipo CEDULA. Los demás tipos se agregan desde
--- el admin (o en una migración v23+ cuando se defina el resto del bloque).
---
--- Ejecutar como SEPLOCAL (owner del schema).
--- ──────────────────────────────────────────────────────────────────────────
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 1. TIPODOCUMENTOEVAL — catálogo de tipos de documento                    ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 1. TIPODOCUMENTOEVAL — catálogo de tipos de documento
 
 CREATE TABLE TIPODOCUMENTOEVAL (
   TIPODOCUMENTOEVALID  NUMBER(10)     NOT NULL,
@@ -39,10 +20,7 @@ COMMENT ON COLUMN TIPODOCUMENTOEVAL.ADMITEMULTIPLE IS
 COMMENT ON COLUMN TIPODOCUMENTOEVAL.ORDEN IS
   'Orden de visualización en el listado del evaluador (menor primero).';
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 2. EVALUADORDOCUMENTO — PDF por evaluador                                ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 2. EVALUADORDOCUMENTO — PDF por evaluador
 
 CREATE TABLE EVALUADORDOCUMENTO (
   DOCUMENTOID           NUMBER(10)     NOT NULL,
@@ -64,23 +42,14 @@ CREATE TABLE EVALUADORDOCUMENTO (
 CREATE INDEX IX_EVALDOC_EVAL ON EVALUADORDOCUMENTO (EVALUADORID);
 CREATE INDEX IX_EVALDOC_TIPO ON EVALUADORDOCUMENTO (TIPODOCUMENTOEVALID);
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 3. SEED — solo CEDULA en Fase 1                                          ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 3. SEED — solo CEDULA en Fase 1
 
 -- El resto de tipos (autorización tratamiento datos, confidencialidad,
--- certificados de experiencia, certificados de estudios, etc.) se cargan en
--- Fase 2 o desde el panel admin. Se usa ID literal 1 para el tipo CEDULA
--- porque es el único que el backend referencia por código en Fase 1.
 INSERT INTO TIPODOCUMENTOEVAL
   (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIPLE, ORDEN)
   VALUES (1, N'CEDULA', N'Documento de identificación', 0, 10);
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ 4. GRANTS y SINÓNIMOS                                                    ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- 4. GRANTS y SINÓNIMOS
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TIPODOCUMENTOEVAL  TO SEP_APP;
 GRANT SELECT                         ON TIPODOCUMENTOEVAL  TO SEP_LECTOR;

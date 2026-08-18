@@ -1,27 +1,9 @@
 -- v39_menu_banco_evaluadores.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Menú lateral para los perfiles del banco de evaluadores.
---
--- El problema: los perfiles 15 (GESTOR EVALUADORES) y 9 (EVALUADORGFCE) no
--- tenían NINGUNA fila en MENU. La barra lateral se arma con
--- `SELECT ... FROM MENU WHERE PERFILID = :perfil`, así que a la gestora le
--- salía solo "Convenios" —que el frontend agrega en duro— y no tenía cómo
--- llegar a convocatorias, catálogos ni retroalimentación. Entraba al banco
--- únicamente porque el panel la redirige allí, y de ahí no podía moverse.
---
--- Las URL nuevas se guardan como RUTA REAL (/panel/...) y no como un .aspx
--- inventado. El frontend ya resuelve directamente cualquier URL que empiece
--- por "/", de modo que agregar una opción al menú en adelante es sembrar una
--- fila: sin tocar código ni desplegar.
---
--- Idempotente: se puede correr varias veces. Ejecutar como SEPLOCAL.
--- ──────────────────────────────────────────────────────────────────────────
 
 SET SERVEROUTPUT ON;
 
 DECLARE
   -- MENXPADRE = 0 significa "opción de primer nivel", que es lo único que
-  -- consulta el backend hoy.
   TYPE t_item IS RECORD (
     perfil  NUMBER,
     descr   NVARCHAR2(40),
@@ -33,7 +15,7 @@ DECLARE
   TYPE t_items IS TABLE OF t_item;
 
   v_items t_items := t_items(
-    -- ── Gestor de evaluadores (perfil 15) ────────────────────────────────
+    -- Gestor de evaluadores (perfil 15)
     t_item(15, N'Banco de Evaluadores', 1, N'/panel/evaluadores',
                N'fa-shield-check', N'EVALUADORES'),
     t_item(15, N'Convocatorias',        2, N'/panel/evaluadores/convocatorias',
@@ -41,9 +23,7 @@ DECLARE
     t_item(15, N'Catálogos',            3, N'/panel/evaluadores/catalogos',
                N'fa-sliders',      N'EVALUADORES'),
 
-    -- ── Evaluador (perfil 9) ─────────────────────────────────────────────
-    -- Solo lo suyo: entra a diligenciar su retroalimentación. El banco es de
-    -- la gestora, no de él.
+    -- Evaluador (perfil 9)
     t_item(9,  N'Mi retroalimentación', 1, N'/panel/retroalimentacion',
                N'fa-sitemap',      N'EVALUADOR')
   );
@@ -61,7 +41,6 @@ BEGIN
 
     IF v_existe > 0 THEN
       -- Ya está: se refresca lo cosmético por si cambió el nombre o el ícono,
-      -- pero no se duplica la fila.
       UPDATE MENU
          SET MENUXDESC  = v_items(i).descr,
              MENUXPOSI  = v_items(i).posi,
@@ -88,10 +67,7 @@ BEGIN
 END;
 /
 
-
--- ╔════════════════════════════════════════════════════════════════════════╗
--- ║ Verificación                                                            ║
--- ╚════════════════════════════════════════════════════════════════════════╝
+-- Verificación
 
 DECLARE
   v_g NUMBER; v_e NUMBER;

@@ -1,21 +1,4 @@
 -- El dinamizador de la mesa, escrito a mano.
---
--- Hasta ahora la participación solo podía apuntar a una PERSONA registrada
--- (DINAMIZADORPERSONAID). La ficha mostraba "Dinamizó", el PDF lo imprimía…
--- y nunca se llenó: 0 de 102 participaciones lo tienen, porque no había
--- ningún formulario donde ponerlo. Quien dinamiza una mesa no siempre está
--- en el banco ni hace falta que lo esté, así que se guarda el nombre tal
--- cual, igual que EQUIPOEVALUADOR.
---
--- La columna vieja NO se borra. Está vacía y no estorba, y quitarla sería un
--- cambio destructivo a cambio de nada. El backend lee la nueva y, si viene
--- vacía, cae en el nombre de la persona enlazada — así una fila antigua
--- (ninguna hoy) seguiría viéndose.
---
--- 500 caracteres, los mismos que MESA y EQUIPOEVALUADOR: un nombre cabe de
--- sobra y no hay razón para que este campo se corte antes que sus hermanos.
---
--- Idempotente. Ejecutar como SEPLOCAL (agrega columna).
 
 SET SERVEROUTPUT ON;
 

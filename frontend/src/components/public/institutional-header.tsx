@@ -1,63 +1,37 @@
-// Header institucional: SENA | SEP | Ministerio de Trabajo + fecha
 import Image from 'next/image'
+import Link from 'next/link'
 import { CurrentDate } from './current-date'
-
-function SenaLogo() {
-  return (
-    <Image
-      src="/images/sena-logo.svg"
-      alt="SENA"
-      width={90}
-      height={90}
-      priority
-    />
-  )
-}
-
-function TrabajoLogo() {
-  return (
-    <Image
-      src="/images/layout_set_logo_mintrabajo.png"
-      alt="Ministerio del Trabajo"
-      width={140}
-      height={80}
-      priority
-      className="object-contain"
-    />
-  )
-}
-
 
 export function InstitutionalHeader() {
   return (
-    <header className="w-full bg-white border-b border-neutral-200 py-3 px-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-        {/* SENA — más pequeño en móvil */}
-        <div className="flex-shrink-0">
-          <Image src="/images/sena-logo.svg" alt="SENA" width={90} height={90} priority
-            className="w-12 h-12 sm:w-16 sm:h-16 md:w-[90px] md:h-[90px] object-contain" />
-        </div>
+    <header className="w-full border-b border-neutral-200 bg-white" role="banner">
+      <div className="mx-auto flex w-full max-w-[100rem] items-center gap-3 px-4 py-3 sm:gap-5 sm:px-6 lg:px-8">
+        <Link href="/inicio" className="shrink-0" aria-label="SEP — Inicio">
+          <Image
+            src="/images/sena-logo.svg"
+            alt="SENA"
+            width={90}
+            height={90}
+            priority
+            className="h-10 w-10 object-contain sm:h-14 sm:w-14 lg:h-[72px] lg:w-[72px]"
+          />
+        </Link>
 
-        {/* Separador */}
-        <div className="w-px h-10 sm:h-14 bg-neutral-200 flex-shrink-0" />
+        <div className="h-9 w-px shrink-0 bg-neutral-200 sm:h-12" />
 
-        {/* Título — escala en móvil */}
-        <div className="flex-1 text-center px-1">
-          <h1 className="text-cerulean-500 text-sm sm:text-lg md:text-2xl font-extrabold leading-tight tracking-wide uppercase">
-            Sistema Especializado de
+        {/* min-w-0: deja que el titulo encoja en vez de empujar la pagina */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11px] font-bold uppercase leading-tight tracking-wide text-lime-500 sm:text-xs">
+            Servicio Nacional de Aprendizaje
+          </p>
+          <h1 className="text-sm font-extrabold uppercase leading-tight tracking-wide text-cerulean-500 sm:text-lg lg:text-2xl">
+            Sistema Especializado de Proyectos
           </h1>
-          <h1 className="text-cerulean-500 text-sm sm:text-lg md:text-2xl font-extrabold leading-tight tracking-wide uppercase">
-            Proyectos — SEP
-          </h1>
+          <p className="mt-0.5 hidden text-[11px] text-neutral-500 lg:block">
+            <CurrentDate />
+          </p>
         </div>
 
-        {/* Fecha + Trabajo */}
-        <div className="flex flex-col items-end gap-1 sm:gap-2 flex-shrink-0">
-          <CurrentDate />
-          <Image src="/images/layout_set_logo_mintrabajo.png" alt="Ministerio del Trabajo"
-            width={140} height={80} priority
-            className="w-20 sm:w-28 md:w-[140px] object-contain h-auto" />
-        </div>
       </div>
     </header>
   )

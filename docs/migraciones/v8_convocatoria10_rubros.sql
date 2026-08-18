@@ -1,9 +1,4 @@
--- =============================================================================
 -- Migración: Convocatoria 10 + Rubros FCE-2026 + Estructura RUBRO/AFRUBRO1
--- Versión: 8.0
--- Fecha: 2026-04-21
--- Autor: JoSeLoDiAz
--- =============================================================================
 
 -- 1. RUBROPAQUETE NUMBER -> NVARCHAR2(10) (codigos descriptivos PA01..PA15)
 ALTER TABLE RUBRO ADD RUBROPAQUETE_COD NVARCHAR2(10);
@@ -18,12 +13,6 @@ ALTER TABLE RUBRO DROP COLUMN RUBROPAQUETE;
 ALTER TABLE RUBRO RENAME COLUMN RUBROPAQUETE_COD TO RUBROPAQUETE;
 
 -- Referencia paquetes:
--- PA01=Horas capacitador  PA02=Unidades traduccion  PA03=Dias alquiler salon
--- PA04=Unidades cuadernos PA05=Fijo sin multiplicador PA06=Dias alojamiento
--- PA07=Virtual global/benef PA08=Capacitador x dia   PA09=Lider/especial
--- PA10=Material impreso/digital x unidad  PA11=Hora/beneficiario
--- PA13=Dias/unidades promo PA14=Minutos video PA15=% gastos operacion
--- TRANSF=Transferencia de conocimiento
 
 -- 2. RUBROMODALIDAD: lista modalidades permitidas separadas por coma
 ALTER TABLE RUBRO ADD RUBROMODALIDAD NVARCHAR2(300);

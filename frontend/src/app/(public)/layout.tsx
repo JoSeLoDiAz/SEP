@@ -10,9 +10,12 @@ export default function PublicLayout({
 }) {
   return (
     <div className="flex flex-col min-h-screen">
-      <GovBar />
-      <InstitutionalHeader />
-      <PublicNav />
+      {/* anclado arriba: el menu sigue accesible al bajar */}
+      <div className="sticky top-0 z-40 shadow-sm">
+        <GovBar />
+        <InstitutionalHeader />
+        <PublicNav />
+      </div>
       <main className="flex-1 bg-white">{children}</main>
       <PublicFooter />
     </div>

@@ -7,13 +7,7 @@ import { useEffect, useState } from 'react'
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
 
-/**
- * Estado de la barra de filtros del banco.
- *
- * `''` significa "filtro sin usar" y no viaja al backend. Los booleanos solo
- * viajan cuando están en true porque el backend distingue "no filtrar" de
- * "filtrar por false": mandar `sinFoto=false` pediría los que SÍ tienen foto.
- */
+// '' y false no viajan al backend: mandar sinFoto=false pediría los que sí tienen foto
 export interface FiltrosBanco {
   anio: number | ''
   procesoId: number | ''
@@ -45,11 +39,7 @@ export const FILTROS_VACIOS: FiltrosBanco = {
 interface CatalogoItem { id: number; nombre: string }
 interface EstadoItem { codigo: string; nombre: string }
 
-/**
- * Traduce la barra a los query params del listado. El botón de exportar reusa
- * esta misma función, así el Excel sale con exactamente la consulta que hay en
- * pantalla y no con el banco entero.
- */
+// exportar reusa esta función para que el Excel salga con los filtros de pantalla
 export function paramsDeFiltros(filtros: FiltrosBanco, busqueda: string): Record<string, string> {
   const p: Record<string, string> = {}
   const q = busqueda.trim()
@@ -63,14 +53,12 @@ export function paramsDeFiltros(filtros: FiltrosBanco, busqueda: string): Record
   if (filtros.centroId !== '') p.centroId = String(filtros.centroId)
   if (filtros.sinCedula) p.sinCedula = 'true'
   if (filtros.sinFoto) p.sinFoto = 'true'
-  // "Sin prueba vigente" no es un flag propio del backend: es el negativo de
-  // `pruebaVigente`, que solo filtra cuando llega explícito.
+  // no hay flag sinPrueba en el backend: es pruebaVigente=false
   if (filtros.sinPrueba) p.pruebaVigente = 'false'
   if (filtros.incluirInactivos) p.incluirInactivos = 'true'
   return p
 }
 
-/** Cuántos filtros hay puestos — decide si se muestra "limpiar". */
 export function contarFiltros(filtros: FiltrosBanco): number {
   return Object.values(filtros).filter(v => v !== '' && v !== false).length
 }
@@ -84,11 +72,7 @@ export function BarraFiltrosBanco({
   onExportar, exportando, cargando,
 }: {
   busqueda: string
-  /**
-   * Lo que se está filtrando ahora mismo, que no es lo mismo que lo tecleado:
-   * el listado no cambia hasta pulsar "Buscar". El chip debe reflejar lo que
-   * el usuario está viendo, no lo que va escribiendo.
-   */
+  // lo que ya se está filtrando, no lo tecleado: el listado solo cambia al pulsar Buscar
   busquedaAplicada: string
   onBusquedaChange: (valor: string) => void
   onBuscar: () => void
@@ -109,9 +93,7 @@ export function BarraFiltrosBanco({
   const [estados, setEstados] = useState<EstadoItem[]>([])
   const [catalogosFallaron, setCatalogosFallaron] = useState(false)
 
-  // Los años salen de los datos, no de una ventana móvil calculada aquí: el
-  // histórico llega a 2020 y con `anioActual + 1 - i` ese año no aparecía en
-  // la lista, así que era imposible filtrar por él desde la pantalla.
+  // los años salen del backend: el histórico llega a 2020 y no cabe en una ventana móvil
   const [anios, setAnios] = useState<number[]>([])
 
   useEffect(() => {
@@ -133,15 +115,11 @@ export function BarraFiltrosBanco({
         setEstados(e.data)
         setAnios(y.data)
       })
-      // Un catálogo caído deja los selects vacíos. El listado sigue usable, pero
-      // hay que decirlo: unos selects en "Todos" sin explicación se leen como
-      // "no hay nada que filtrar", que es distinto de "no se pudo cargar".
       .catch(() => { if (vivo) setCatalogosFallaron(true) })
     return () => { vivo = false }
   }, [])
 
-  // Los centros dependen de la regional elegida: sin regional la lista completa
-  // es inmanejable en un select, así que el filtro queda deshabilitado.
+  // centros dependen de la regional: sin ella el select queda deshabilitado
   useEffect(() => {
     if (filtros.regionalId === '') { setCentros([]); return }
     let vivo = true
@@ -154,8 +132,7 @@ export function BarraFiltrosBanco({
   const nombreDe = (lista: CatalogoItem[], id: number | '') =>
     id === '' ? '' : (lista.find(x => x.id === id)?.nombre ?? `#${id}`)
 
-  // Cada chip lleva el estado que queda al quitarlo: evita repetir la lógica de
-  // dependencias (quitar regional obliga a soltar el centro).
+  // cada chip lleva el estado resultante al quitarlo (quitar regional suelta el centro)
   const chips: Array<{ clave: string; texto: string; siguiente: FiltrosBanco }> = []
   if (filtros.anio !== '') chips.push({ clave: 'anio', texto: `Año ${filtros.anio}`, siguiente: { ...filtros, anio: '' } })
   if (filtros.procesoId !== '') chips.push({ clave: 'proceso', texto: nombreDe(procesos, filtros.procesoId), siguiente: { ...filtros, procesoId: '' } })
@@ -176,7 +153,6 @@ export function BarraFiltrosBanco({
 
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm">
-      {/* Búsqueda + acciones */}
       <form
         onSubmit={(e) => { e.preventDefault(); onBuscar() }}
         className="p-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
@@ -212,7 +188,6 @@ export function BarraFiltrosBanco({
         </div>
       </form>
 
-      {/* Selects */}
       {catalogosFallaron && (
         <p className="border-t border-neutral-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
           No se pudieron cargar las listas de los filtros. El buscador y las alertas
@@ -301,7 +276,6 @@ export function BarraFiltrosBanco({
         </div>
       </div>
 
-      {/* Inactivos + filtros aplicados */}
       <div className="border-t border-neutral-100 px-3 py-2.5 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -326,9 +300,6 @@ export function BarraFiltrosBanco({
           </span>
         ) : (
           <>
-            {/* La búsqueda de texto también es un criterio: sin este chip, quien
-                buscó un apellido y obtuvo resultados no tenía forma de volver al
-                listado completo salvo borrar el campo a mano. */}
             {hayBusqueda && (
               <button
                 type="button"

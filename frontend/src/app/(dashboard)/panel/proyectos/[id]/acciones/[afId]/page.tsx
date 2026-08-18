@@ -11,8 +11,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Proyecto {
   proyectoId: number
   nombre: string
@@ -85,8 +83,6 @@ interface SectoresData {
   subsectoresAf: SubSectorAf[]
 }
 
-// ── Unidades Temáticas types ──────────────────────────────────────────────────
-
 interface UTResumen {
   utId: number
   numero: number
@@ -157,8 +153,6 @@ function tieneActividadVirtualOAumentada(actividades: UTActividad[]) {
 interface Opcion    { id: number; nombre: string }
 interface Necesidad { id: number; nombre: string; numero: number | null }
 
-// ── Cascading maps ────────────────────────────────────────────────────────────
-
 const EVENTO_MODALIDADES: Record<number, number[]> = {
   1: [1, 2, 3],
   2: [1, 3],
@@ -182,7 +176,7 @@ const EVENTO_METODOLOGIAS: Record<number, number[]> = {
 const MOD_CON_VIRTUAL = new Set([3, 4, 5, 6])
 const MOD_SOLO_VIRTUAL = new Set([4])
 
-// ── Alert messages (full VBA text) ────────────────────────────────────────────
+// textos de alerta copiados literalmente del VBA original
 
 function getMensajeAlerta(eventoId: number | null, modalidadId: number | null): string | null {
   if (!eventoId) return null
@@ -219,8 +213,6 @@ function getMensajeAlerta(eventoId: number | null, modalidadId: number | null): 
   }
   return null
 }
-
-// ── Validation ────────────────────────────────────────────────────────────────
 
 function validarCampos(form: FormState, proyectoModalidadId: number | null): string | null {
   if (!form.nombre.trim()) return 'El nombre de la acción de formación es obligatorio.'
@@ -313,10 +305,7 @@ function validarCampos(form: FormState, proyectoModalidadId: number | null): str
   return null
 }
 
-// ── Form State ────────────────────────────────────────────────────────────────
-
 interface FormState {
-  // AF campos
   necesidadFormacionId: string
   nombre: string
   justnec: string
@@ -330,9 +319,7 @@ interface FormState {
   numGrupos: string
   benefGrupo: string
   benefViGrupo: string
-  // Sectores y sub-sectores
   justSecSub: string
-  // Perfil beneficiarios
   afEnfoqueId: string
   justAreas: string
   justNivelesOcu: string
@@ -389,8 +376,7 @@ function buildForm(af: AFDetalle, perfil: Perfil, justSec?: string | null): Form
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const e = Number(p.estado)
-  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
-  // convocatoria abierta. Estados 1/3/4 son solo lectura.
+  // estado 2 = subsanación (editable); 0 exige convocatoria abierta; 1/3/4 solo lectura
   return e === 2 || (e === 0 && p.convocatoriaEstado !== 0)
 }
 function mensajeNoEditable(p: Proyecto | null): string {
@@ -418,7 +404,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
 
   const err: Record<string, string> = {}
 
-  // ── Horas ─────────────────────────────────────────────────────────────────
   if (form.numHorasGrupo !== '') {
     if (horas <= 0) {
       err.horas = 'Ingrese un número de horas válido (mayor que 0)'
@@ -440,7 +425,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
     }
   }
 
-  // ── Grupos ────────────────────────────────────────────────────────────────
   if (form.numGrupos !== '') {
     if (grupos <= 0) {
       err.grupos = 'Ingrese un número de grupos válido (mayor que 0)'
@@ -451,7 +435,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
     }
   }
 
-  // ── Beneficiarios presenciales ────────────────────────────────────────────
   if (form.benefGrupo !== '' && !esSoloVirtual) {
     if (benef <= 0) {
       err.benef = 'Ingrese un número de beneficiarios válido (mayor que 0)'
@@ -465,7 +448,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
         if ((e === 5 || e === 6) && (benef < 20 || benef > 30)) err.benef = 'Entre 20 y 30 beneficiarios'
       }
     } else {
-      // Modalidad híbrida: validar total presencial + sincrónico
       const total = benef + benefVi
       if ((e === 1 || e === 2)) {
         if (total > 250)              err.benef = 'Total presencial + sincrónico no puede superar 250'
@@ -475,7 +457,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
     }
   }
 
-  // ── Beneficiarios virtuales / sincrónicos ─────────────────────────────────
   if (form.benefViGrupo !== '' && MOD_CON_VIRTUAL.has(m)) {
     if (benefVi <= 0) {
       err.benefVi = 'Ingrese un número de beneficiarios válido (mayor que 0)'
@@ -490,9 +471,6 @@ function getFieldErrors(form: FormState, proyectoModalidadId: number | null) {
   return err
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
-// ── Helper component: dropdown buscable para selects largos ────────────────
 function SearchableSelect({
   value, onChange, options, placeholder = '— Seleccione —',
   searchPlaceholder = 'Buscar…', disabled = false,
@@ -565,7 +543,7 @@ export default function AFDetallePage() {
   const [perfil,    setPerfil]    = useState<Perfil | null>(null)
   const [loading,   setLoading]   = useState(true)
 
-  // Catálogos
+  // catálogos
   const [tiposEvento,  setTiposEvento]  = useState<Opcion[]>([])
   const [modalidades,  setModalidades]  = useState<Opcion[]>([])
   const [metodologias, setMetodologias] = useState<Opcion[]>([])
@@ -581,56 +559,48 @@ export default function AFDetallePage() {
   const [form,      setForm]      = useState<FormState | null>(null)
   const [guardando, setGuardando] = useState(false)
 
-  // Necesidad dropdown
   const [necQuery, setNecQuery] = useState('')
   const [necOpen,  setNecOpen]  = useState(false)
   const necRef = useRef<HTMLDivElement>(null)
 
-  // CUOC dropdown
   const [cuocQuery, setCuocQuery] = useState('')
   const [cuocOpen,  setCuocOpen]  = useState(false)
   const cuocRef = useRef<HTMLDivElement>(null)
 
-  // Área selects
   const [areaSelId,        setAreaSelId]        = useState('')
   const [areaOtroText,     setAreaOtroText]      = useState('')
   const [nivelSelId,       setNivelSelId]        = useState('')
-  // Sector selects
   const [sectorBenefSelId,    setSectorBenefSelId]    = useState('')
   const [subsectorBenefSelId, setSubsectorBenefSelId] = useState('')
   const [sectorAfSelId,       setSectorAfSelId]       = useState('')
   const [subsectorAfSelId,    setSubsectorAfSelId]    = useState('')
 
-  // ── Unidades Temáticas state ──────────────────────────────────────────────
+  // estado de unidades temáticas
   const [actividadesCat,    setActividadesCat]    = useState<Opcion[]>([])
   const [rubrosCat,         setRubrosCat]         = useState<Opcion[]>([])
   const [articulacionesCat, setArticulacionesCat] = useState<Opcion[]>([])
   const [uts,               setUts]               = useState<UTResumen[]>([])
   const [detalleUT,         setDetalleUT]         = useState<UTDetalle | null>(null)
   const [expandedUtId,      setExpandedUtId]      = useState<number | null>(null)
-  // Creación: paso 1 = tipo, paso 2 = nombre/articulación
+  // creación en dos pasos: tipo, luego nombre/articulación
   const [creandoUT,         setCreandoUT]         = useState(false)
   const [nuevoUtEsArt,      setNuevoUtEsArt]      = useState<boolean | null>(null) // null=no elegido
   const [nuevoUtNombre,     setNuevoUtNombre]     = useState('')
   const [nuevoUtArtId,      setNuevoUtArtId]      = useState('')
   const [savingNuevoUT,     setSavingNuevoUT]     = useState(false)
-  // Edición detalle
   const [utDetForm,         setUtDetForm]         = useState<UTDetFormState | null>(null)
   const [savingUTDet,       setSavingUTDet]       = useState(false)
-  // Actividades
   const [actSelUT,          setActSelUT]          = useState('')
   const [actOtroUT,         setActOtroUT]         = useState('')
   const [actAddingUT,       setActAddingUT]       = useState(false)
   const [actBusqueda,       setActBusqueda]       = useState('')
   const [actDropdownOpen,   setActDropdownOpen]   = useState(false)
   const actDropRef = useRef<HTMLDivElement>(null)
-  // Perfil capacitador
   const [perfilAddUT,       setPerfilAddUT]       = useState({ rubroId: '', horasCap: '' })
   const [perfilAddingUT,    setPerfilAddingUT]    = useState(false)
-  // Confirmación inline de eliminación
   const [deletingUtId,      setDeletingUtId]      = useState<number | null>(null)
 
-  // ── Alineación state ─────────────────────────────────────────────────────
+  // estado de alineación
   interface AlineacionData { compod: string | null; justificacion: string | null; resDesem: string | null; resForm: string | null; componenteId: number | null; componenteNombre: string | null; retoNacionalId: number | null }
   const [retosCat,         setRetosCat]         = useState<Opcion[]>([])
   const [afComponentesCat, setAfComponentesCat] = useState<Opcion[]>([])
@@ -646,7 +616,7 @@ export default function AFDetallePage() {
   const [alinForm, setAlinForm] = useState({ compod: '', justificacion: '', resDesem: '', resForm: '' })
   const [savingAlin, setSavingAlin] = useState(false)
 
-  // ── Cobertura state ───────────────────────────────────────────────────────
+  // estado de cobertura
   interface GrupoCobertura {
     grupoId: number; grupoNumero: number; justificacion: string | null
     totalBenef: number; numCoberturas: number
@@ -667,14 +637,14 @@ export default function AFDetallePage() {
   const [grupoJust,      setGrupoJust]      = useState<Record<number, string>>({})
   const [savingJust,     setSavingJust]     = useState<number | null>(null)
   const [coberturas,     setCoberturas]     = useState<Record<number, CobEntry[]>>({})
-  // form per grupo: presencial row + virtual rows
+  // un form por grupo: fila presencial + filas virtuales
   const [cobPres,        setCobPres]        = useState<Record<number, CobRow>>({})
   const [cobVirt,        setCobVirt]        = useState<Record<number, CobRow[]>>({})
   const [savingCob,      setSavingCob]      = useState<number | null>(null)
   const [creatingGrupo,  setCreatingGrupo]  = useState(false)
   const [deletingGrupo,  setDeletingGrupo]  = useState<number | null>(null)
 
-  // ── Material de Formación state ───────────────────────────────────────────
+  // estado de material de formación
   interface RecursoEntry { rdafId: number; recursoId: number; nombre: string }
   interface MaterialData {
     tipoAmbienteId: number | null; gestionConocimientoId: number | null
@@ -695,7 +665,6 @@ export default function AFDetallePage() {
   const [addingRecurso,       setAddingRecurso]       = useState(false)
   const [savingMat,           setSavingMat]           = useState(false)
 
-  // Toast
   const toastKey = useRef(0)
   const [toastK2, setToastK2] = useState(0)
   const [toast,   setToast]   = useState<{ tipo: 'success' | 'warning' | 'error'; msg: string } | null>(null)
@@ -705,8 +674,6 @@ export default function AFDetallePage() {
     setToast({ tipo, msg })
     setToastK2(toastKey.current)
   }
-
-  // ── Load ──────────────────────────────────────────────────────────────────
 
   const cargar = useCallback(async () => {
     try {
@@ -795,7 +762,7 @@ export default function AFDetallePage() {
     }
   }, [proyectoId, afIdNum])
 
-  // Recarga parcial — no toca el form ni el resto del estado
+  // recarga parcial: no toca el form ni el resto del estado
   async function recargarPerfil() {
     try {
       const r = await api.get<Perfil>(`/proyectos/${proyectoId}/acciones/${afIdNum}/beneficiarios`)
@@ -826,8 +793,6 @@ export default function AFDetallePage() {
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
-
-  // ── Derived ───────────────────────────────────────────────────────────────
 
   const editable    = puedeEditar(proyecto)
   const eventoId    = form ? Number(form.tipoEventoId) || null : null
@@ -881,8 +846,6 @@ export default function AFDetallePage() {
 
   const AREA_OTRA_ID = useMemo(() => areasCat.find(a => a.nombre.toLowerCase().includes('otr'))?.id ?? 11, [areasCat])
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   function set(field: keyof FormState, value: string) {
     setForm(prev => prev ? { ...prev, [field]: value } : prev)
   }
@@ -908,8 +871,6 @@ export default function AFDetallePage() {
       numHorasGrupo: '', numGrupos: '', benefGrupo: '', benefViGrupo: '',
     } : prev)
   }
-
-  // ── Áreas / Niveles / CUOC ────────────────────────────────────────────────
 
   async function handleAgregarArea() {
     if (!areaSelId) { showToast('error', 'Seleccione un área funcional'); return }
@@ -959,8 +920,6 @@ export default function AFDetallePage() {
     try { await api.delete(`/proyectos/${proyectoId}/acciones/${afIdNum}/cuoc/${ocAfId}`); await recargarPerfil() }
     catch { showToast('error', 'Error al eliminar CUOC') }
   }
-
-  // ── Sectores / Sub-sectores ───────────────────────────────────────────────
 
   async function handleAgregarSectorBenef() {
     if (!sectorBenefSelId) { showToast('error', 'Seleccione un sector'); return }
@@ -1022,7 +981,7 @@ export default function AFDetallePage() {
     catch { showToast('error', 'Error al eliminar sub-sector AF') }
   }
 
-  // ── Unidades Temáticas handlers ───────────────────────────────────────────
+  // unidades temáticas
 
   async function cargarUTs() {
     try {
@@ -1081,7 +1040,6 @@ export default function AFDetallePage() {
   async function handleGuardarUTDet() {
     if (!expandedUtId || !utDetForm || !detalleUT) return
 
-    // ── Validaciones ─────────────────────────────────────────────────────────
     const horasPracNum = utDetForm.horasPrac ? Number(utDetForm.horasPrac) : 0
     const horasTeorNum = utDetForm.horasTeor ? Number(utDetForm.horasTeor) : 0
 
@@ -1093,8 +1051,7 @@ export default function AFDetallePage() {
     const totalUtHoras = horasPracNum + horasTeorNum
     if (totalUtHoras <= 0) return showToast('error', 'Debe ingresar las horas de la unidad temática.')
 
-    // Verificar que horas UT no superen las horas por grupo de la AF
-    // (las UTs se formulan por grupo y se replican en cada uno)
+    // las UTs se formulan por grupo y se replican en cada uno
     if (af?.numHorasGrupo) {
       const horasOtrasUts = uts
         .filter(u => u.utId !== expandedUtId)
@@ -1110,23 +1067,20 @@ export default function AFDetallePage() {
     if (!utDetForm.competencias.trim()) return showToast('error', 'La competencia por adquirir es obligatoria.')
     if (detalleUT.actividades.length === 0) return showToast('error', 'Debe agregar al menos una actividad de aprendizaje.')
 
-    // Descripción requerida si hay actividad virtual o aumentada
     if (tieneActividadVirtualOAumentada(detalleUT.actividades) && !utDetForm.justActividad.trim())
       return showToast('error', 'La descripción de actividades de aprendizaje es obligatoria cuando hay actividades virtuales o aumentadas.')
 
-    // Validar perfil de capacitador vs horas UT
     const tipoEventoId = af?.tipoEventoId ?? null
     const totalPerfilHoras = detalleUT.perfiles.reduce((s, p) => s + (p.horasCap ?? 0), 0)
     if (tipoEventoId === 9) {
-      // TALLER-BOOTCAMP: perfil ≤ ut×2 (puede no llenar el total)
+      // evento 9 = TALLER-BOOTCAMP: el perfil llega hasta ut×2
       if (totalPerfilHoras > totalUtHoras * 2)
         return showToast('error', `Las horas del perfil (${totalPerfilHoras}h) no pueden superar el doble de las horas de la UT (${totalUtHoras * 2}h) para TALLER-BOOTCAMP.`)
     } else if (tipoEventoId === 2) {
-      // FORO: perfil ≤ ut×4
+      // evento 2 = FORO: el perfil llega hasta ut×4
       if (totalPerfilHoras > totalUtHoras * 4)
         return showToast('error', `Las horas del perfil (${totalPerfilHoras}h) no pueden superar cuatro veces las horas de la UT (${totalUtHoras * 4}h) para FORO.`)
     } else {
-      // Demás eventos: perfil debe igualar exactamente las horas de la UT
       if (totalPerfilHoras === 0)
         return showToast('error', `Debe agregar el perfil de capacitador con ${totalUtHoras}h en total (igual a las horas de la UT).`)
       if (totalPerfilHoras < totalUtHoras)
@@ -1149,7 +1103,7 @@ export default function AFDetallePage() {
       showToast('success', 'Unidad temática guardada')
       setExpandedUtId(null); setDetalleUT(null); setUtDetForm(null)
       await cargarUTs()
-      // Avisos cumulativos del backend (mínimo UTs, 60% prácticas TALLER).
+      // warnings del backend: mínimo de UTs, 60% prácticas en TALLER
       const warnings = r.data?.warnings ?? []
       warnings.forEach((w, i) => setTimeout(() => showToast('warning', w), 700 * (i + 1)))
     } catch (e: unknown) {
@@ -1208,7 +1162,6 @@ export default function AFDetallePage() {
     const horasCapNum = Number(perfilAddUT.horasCap)
     if (!perfilAddUT.horasCap || horasCapNum <= 0) { showToast('error', 'Ingrese las horas'); return }
     if (!Number.isInteger(horasCapNum)) { showToast('error', 'Las horas del capacitador deben ser un número entero.'); return }
-    // Validar horas capacitador ≤ horas UT actual
     if (utDetForm && detalleUT) {
       const horasUt = (utDetForm.horasPrac ? Number(utDetForm.horasPrac) : 0) + (utDetForm.horasTeor ? Number(utDetForm.horasTeor) : 0)
       const yaAsignadas = detalleUT.perfiles.reduce((s, p) => s + (p.horasCap ?? 0), 0)
@@ -1256,7 +1209,7 @@ export default function AFDetallePage() {
     }
   }
 
-  // ── Alineación handlers ───────────────────────────────────────────────────
+  // alineación
 
   async function handleCargarComponentesByReto(retoId: string) {
     setAlinRetoSel(retoId)
@@ -1292,7 +1245,7 @@ export default function AFDetallePage() {
     } finally { setSavingAlin(false) }
   }
 
-  // ── Cobertura handlers ────────────────────────────────────────────────────
+  // cobertura
 
   async function cargarGrupos() {
     try {
@@ -1423,7 +1376,7 @@ export default function AFDetallePage() {
     } finally { setSavingCob(null) }
   }
 
-  // ── Material de Formación handlers ───────────────────────────────────────
+  // material de formación
 
   async function handleAgregarRecurso() {
     if (!recursoSelId) return showToast('error', 'Seleccione un recurso didáctico')
@@ -1472,7 +1425,7 @@ export default function AFDetallePage() {
     } finally { setSavingMat(false) }
   }
 
-  // ── Guardar (unificado AF + Perfil) ───────────────────────────────────────
+  // guarda AF, perfil y sectores en una sola pasada
 
   async function handleGuardar() {
     if (!form || !af) return
@@ -1480,7 +1433,6 @@ export default function AFDetallePage() {
     const errAf = validarCampos(form, proyecto?.modalidadId ?? null)
     if (errAf) { showToast('error', errAf); return }
 
-    // Validaciones sectores
     if (!sectoresData || sectoresData.sectoresBenef.length === 0)
       return showToast('error', 'Debe agregar al menos un Sector de beneficiarios.')
     if (sectoresData.subsectoresBenef.length === 0)
@@ -1492,7 +1444,6 @@ export default function AFDetallePage() {
     if (!form.justSecSub.trim())
       return showToast('error', 'La justificación de sectores y sub-sectores es obligatoria.')
 
-    // Validaciones perfil
     const m1 = form.mipymes.trim(), m2 = form.trabMipymes.trim(), m3 = form.mipymesD.trim()
     if ((m1 || m2 || m3) && !(m1 && m2 && m3)) {
       showToast('error', 'Complete todos los campos de MiPymes o déjelos todos vacíos.'); return
@@ -1565,8 +1516,6 @@ export default function AFDetallePage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   if (loading) {
     return <div className="flex justify-center items-center h-64"><Loader2 size={32} className="animate-spin text-[#00304D]" /></div>
   }
@@ -1594,7 +1543,6 @@ export default function AFDetallePage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* Encabezado */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <ClipboardList size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -1612,7 +1560,6 @@ export default function AFDetallePage() {
         <GuiaAFBoton />
       </div>
 
-      {/* Menú */}
       <div className="flex flex-wrap gap-2">
         <Link href={`/panel/proyectos/${proyectoId}`}
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
@@ -1644,7 +1591,7 @@ export default function AFDetallePage() {
         </div>
       )}
 
-      {/* ── Card 1: Información básica ─────────────────────────────────────── */}
+      {/* card 1: información básica */}
       <div className={card}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -1722,7 +1669,7 @@ export default function AFDetallePage() {
         </div>
       </div>
 
-      {/* ── Card 2: Datos del Evento ────────────────────────────────────────── */}
+      {/* card 2: datos del evento */}
       <div className={card}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -1763,7 +1710,7 @@ export default function AFDetallePage() {
         )}
       </div>
 
-      {/* ── Card 3: Grupos y Beneficiarios ─────────────────────────────────── */}
+      {/* card 3: grupos y beneficiarios */}
       <div className={card}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -1818,7 +1765,7 @@ export default function AFDetallePage() {
         </div>
       </div>
 
-      {/* ── Card 4: Perfil de Beneficiarios ────────────────────────────────── */}
+      {/* card 4: perfil de beneficiarios */}
       <div className={card}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -1827,7 +1774,6 @@ export default function AFDetallePage() {
           <h2 className="text-sm font-bold text-neutral-800">Perfil de los Beneficiarios</h2>
         </div>
 
-        {/* Áreas funcionales */}
         <div className="flex flex-col gap-3">
           <p className={secTitle}>Área(s) Funcional(es) <span className="font-normal text-neutral-400">(máx. 5)</span></p>
           {editable && perfil.areas.length < 5 && (
@@ -1870,7 +1816,6 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* Niveles ocupacionales */}
         <div className="flex flex-col gap-3">
           <p className={secTitle}>Niveles Ocupacionales <span className="font-normal text-neutral-400">(máx. 3)</span></p>
           {editable && (
@@ -1905,7 +1850,6 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* CUOC */}
         <div className="flex flex-col gap-3">
           <p className={secTitle}>Clasificación Unificada de Ocupaciones CUOC <span className="font-normal text-neutral-400">(máx. 20)</span></p>
           {editable && (
@@ -1947,7 +1891,6 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* Datos numéricos — orden: discapacidad, mujeres, BIC */}
         <div className="flex flex-col gap-3">
           <p className={secTitle}>Datos Numéricos de Beneficiarios</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1972,7 +1915,6 @@ export default function AFDetallePage() {
           </div>
         </div>
 
-        {/* MiPymes */}
         <div className="border-t border-neutral-100 pt-2 flex flex-col gap-3">
           <p className={secTitle}>MiPymes <span className="font-normal text-neutral-400">(si aplica)</span></p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1995,7 +1937,6 @@ export default function AFDetallePage() {
           </div>
         </div>
 
-        {/* Cadena Productiva */}
         <div className="border-t border-neutral-100 pt-2 flex flex-col gap-3">
           <p className={secTitle}>Cadena Productiva <span className="font-normal text-neutral-400">(si aplica)</span></p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2018,7 +1959,6 @@ export default function AFDetallePage() {
           </div>
         </div>
 
-        {/* Economía Campesina */}
         <div className="border-t border-neutral-100 pt-2 flex flex-col gap-3">
           <p className={secTitle}>Economía Campesina <span className="font-normal text-neutral-400">(si aplica)</span></p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2036,7 +1976,6 @@ export default function AFDetallePage() {
           </div>
         </div>
 
-        {/* Economía Popular */}
         <div className="border-t border-neutral-100 pt-2 flex flex-col gap-3">
           <p className={secTitle}>Economía Popular <span className="font-normal text-neutral-400">(si aplica)</span></p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2056,7 +1995,6 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* Enfoque */}
         <div className="flex flex-col gap-2">
           <p className={secTitle}>Enfoque de la Acción de Formación</p>
           <div>
@@ -2069,7 +2007,7 @@ export default function AFDetallePage() {
         </div>
       </div>
 
-      {/* ── Card 5: Sectores y Sub-sectores ────────────────────────────────── */}
+      {/* card 5: sectores y sub-sectores */}
       <div className={card}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -2078,13 +2016,11 @@ export default function AFDetallePage() {
           <h2 className="text-sm font-bold text-neutral-800">Sectores y Sub-sectores</h2>
         </div>
 
-        {/* Sectores a los cuales pertenecen los beneficiarios */}
         <div>
           <p className="text-xs font-semibold text-neutral-600 mb-3 uppercase tracking-wide">
             Sectores a los cuales pertenecen las empresas donde se desempeñan los trabajadores beneficiarios
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* Sector(es) beneficiarios — max 5 */}
             <div className="flex flex-col gap-2">
               <p className={secTitle}>Sector(es)</p>
               {editable && (
@@ -2111,7 +2047,6 @@ export default function AFDetallePage() {
               )}
             </div>
 
-            {/* Sub-sector(es) beneficiarios — max 5 */}
             <div className="flex flex-col gap-2">
               <p className={secTitle}>Sub-sector(es)</p>
               {editable && (
@@ -2142,13 +2077,11 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* Clasificación por sector y sub-sector de la AF */}
         <div>
           <p className="text-xs font-semibold text-neutral-600 mb-3 uppercase tracking-wide">
             Clasificación por sector y sub-sector de la Acción de Formación, según la temática desarrollada
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* Sector AF — max 1 */}
             <div className="flex flex-col gap-2">
               <p className={secTitle}>Clasificación por Sector(es) <span className="font-normal text-neutral-400">(máx. 1)</span></p>
               {editable && !(sectoresData && sectoresData.sectoresAf.length >= 1) && (
@@ -2175,7 +2108,6 @@ export default function AFDetallePage() {
               )}
             </div>
 
-            {/* Sub-sector AF — max 1 */}
             <div className="flex flex-col gap-2">
               <p className={secTitle}>Clasificación por Sub-sector(es) <span className="font-normal text-neutral-400">(máx. 1)</span></p>
               {editable && !(sectoresData && sectoresData.subsectoresAf.length >= 1) && (
@@ -2206,7 +2138,6 @@ export default function AFDetallePage() {
 
         <div className="border-t border-neutral-100" />
 
-        {/* Justificación sectores/sub-sectores */}
         <div>
           <label className={label}>
             Justificación de los sectores y sub-sectores a beneficiar <span className="text-red-500">*</span>
@@ -2219,7 +2150,6 @@ export default function AFDetallePage() {
         </div>
       </div>
 
-      {/* ── Guardar ───────────────────────────────────────────────────────────── */}
       {editable && (
         <div className="flex justify-end pb-2">
           <button onClick={handleGuardar} disabled={guardando}
@@ -2230,7 +2160,7 @@ export default function AFDetallePage() {
         </div>
       )}
 
-      {/* ── Card 6: Unidades Temáticas ─────────────────────────────────────── */}
+      {/* card 6: unidades temáticas */}
       {(() => {
         const hLabels = labelHorasUT(af.modalidadFormacionId)
         const esConfOForo = [1, 2].includes(Number(form.tipoEventoId))
@@ -2247,7 +2177,6 @@ export default function AFDetallePage() {
 
         return (
           <div className={card}>
-            {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -2283,10 +2212,9 @@ export default function AFDetallePage() {
               )}
             </div>
 
-            {/* ── Paso de creación ── */}
             {creandoUT && (
               <div className="p-4 bg-[#00304D]/5 rounded-xl border border-[#00304D]/20 flex flex-col gap-4">
-                {/* Paso 1: tipo */}
+                {/* paso 1: tipo */}
                 {nuevoUtEsArt === null && (
                   <>
                     <p className="text-sm font-medium text-[#00304D]">¿De qué tipo es la nueva Unidad Temática?</p>
@@ -2307,7 +2235,7 @@ export default function AFDetallePage() {
                   </>
                 )}
 
-                {/* Paso 2a: Articulación → dropdown */}
+                {/* paso 2a: articulación */}
                 {nuevoUtEsArt === true && (
                   <div className="flex flex-col gap-3">
                     <p className="text-xs font-semibold text-violet-700 uppercase tracking-wide">Articulación Territorial para el Desarrollo</p>
@@ -2329,7 +2257,7 @@ export default function AFDetallePage() {
                   </div>
                 )}
 
-                {/* Paso 2b: Estándar → texto */}
+                {/* paso 2b: nombre libre */}
                 {nuevoUtEsArt === false && (
                   <div className="flex flex-col gap-3">
                     <div>
@@ -2351,7 +2279,6 @@ export default function AFDetallePage() {
               </div>
             )}
 
-            {/* Lista vacía */}
             {uts.length === 0 && !creandoUT && (
               <div className="text-center py-8 text-neutral-400 text-xs flex flex-col items-center gap-2">
                 <BookOpen size={24} className="text-neutral-200" />
@@ -2359,7 +2286,6 @@ export default function AFDetallePage() {
               </div>
             )}
 
-            {/* ── Lista de UTs ── */}
             <div className="flex flex-col gap-3">
               {uts.map(ut => {
                 const isExpanded = expandedUtId === ut.utId
@@ -2368,7 +2294,6 @@ export default function AFDetallePage() {
 
                 return (
                   <div key={ut.utId} className="border border-neutral-200 rounded-xl overflow-hidden">
-                    {/* Cabecera UT */}
                     <div className="flex items-center gap-3 px-4 py-3 bg-neutral-50">
                       <div className="w-7 h-7 rounded-lg bg-[#00304D]/10 flex items-center justify-center flex-shrink-0">
                         <span className="text-xs font-bold text-[#00304D]">{ut.numero}</span>
@@ -2396,7 +2321,6 @@ export default function AFDetallePage() {
                           )}
                         </div>
                       ) : (
-                        /* Confirmación inline sin alert del navegador */
                         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-1.5">
                           <span className="text-xs text-red-700 font-medium">¿Eliminar esta UT y sus datos?</span>
                           <button onClick={() => handleConfirmarEliminarUT(ut.utId)}
@@ -2407,14 +2331,12 @@ export default function AFDetallePage() {
                       )}
                     </div>
 
-                    {/* ── Formulario de detalle ── */}
                     {isExpanded && (
                       <div className="p-4 flex flex-col gap-5 border-t border-neutral-100">
                         {!detalleUT || !utDetForm ? (
                           <div className="flex justify-center py-6"><Loader2 className="animate-spin text-neutral-300" size={22} /></div>
                         ) : (
                           <>
-                            {/* Articulación territorial en modo lectura (si es de ese tipo) */}
                             {detalleUT.articulacionTerritorialId && (
                               <div className="flex items-center gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-xl">
                                 <span className="text-xs font-bold text-violet-700">Articulación Territorial:</span>
@@ -2422,7 +2344,6 @@ export default function AFDetallePage() {
                               </div>
                             )}
 
-                            {/* Horas */}
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <label className={label}>{hLabels.prac}</label>
@@ -2438,7 +2359,6 @@ export default function AFDetallePage() {
                               </div>
                             </div>
 
-                            {/* Contenido */}
                             <div>
                               <label className={label}>Contenido de la Unidad Temática</label>
                               <textarea disabled={!editable} value={utDetForm.contenido}
@@ -2447,7 +2367,6 @@ export default function AFDetallePage() {
                               <p className="text-xs text-neutral-400 text-right mt-0.5">{(utDetForm.contenido ?? '').length}/3000</p>
                             </div>
 
-                            {/* Actividades de aprendizaje */}
                             <div className="flex flex-col gap-2">
                               <p className={secTitle}>Actividades de aprendizaje ({detalleUT.actividades.length})</p>
                               <div className="flex flex-wrap gap-2 mb-1">
@@ -2515,7 +2434,6 @@ export default function AFDetallePage() {
                               })()}
                             </div>
 
-                            {/* Descripción de actividades (solo si virtual o aumentada) */}
                             {mostrarDescVirtual && (
                               <div>
                                 <label className={label}>Descripción de las actividades de aprendizaje</label>
@@ -2527,7 +2445,6 @@ export default function AFDetallePage() {
                               </div>
                             )}
 
-                            {/* Competencia por adquirir */}
                             <div>
                               <label className={label}>Competencia por adquirir</label>
                               <textarea disabled={!editable} value={utDetForm.competencias}
@@ -2536,7 +2453,6 @@ export default function AFDetallePage() {
                               <p className="text-xs text-neutral-400 text-right mt-0.5">{(utDetForm.competencias ?? '').length}/3000</p>
                             </div>
 
-                            {/* Perfil de capacitador */}
                             <div className="flex flex-col gap-2">
                               <p className={secTitle}>Perfil de capacitador ({detalleUT.perfiles.length})</p>
                               {detalleUT.perfiles.length > 0 && (
@@ -2583,7 +2499,6 @@ export default function AFDetallePage() {
                               )}
                             </div>
 
-                            {/* Guardar / Cerrar UT */}
                             <div className="flex gap-2 pt-1 border-t border-neutral-100">
                               {editable && (
                                 <button onClick={handleGuardarUTDet} disabled={savingUTDet}
@@ -2609,9 +2524,7 @@ export default function AFDetallePage() {
         )
       })()}
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Card 7 — Alineación de la Acción de Formación
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* card 7: alineación */}
       {(() => {
         const alinRetoFiltrados = retosCat.filter(r =>
           !alinRetoBusq || r.nombre.toLowerCase().includes(alinRetoBusq.toLowerCase()),
@@ -2635,11 +2548,9 @@ export default function AFDetallePage() {
 
             <div className="p-6 flex flex-col gap-6">
 
-              {/* ── Componente estratégico único ── */}
               <div className="flex flex-col gap-3">
                 <p className={secTitle}>Componente Estratégico</p>
 
-                {/* Reto Nacional — combobox buscable */}
                 <div>
                   <label className={label}>Reto Nacional</label>
                   <div className="relative" ref={alinRetoRef}>
@@ -2680,7 +2591,6 @@ export default function AFDetallePage() {
                   </div>
                 </div>
 
-                {/* Componente buscable */}
                 <div>
                   <label className={label}>Componente Estratégico</label>
                   <div className="relative" ref={alinCompRef}>
@@ -2722,7 +2632,6 @@ export default function AFDetallePage() {
                 </div>
               </div>
 
-              {/* ── Justificación de la Alineación ── */}
               <div>
                 <label className={label}>Justificación de la Alineación de Formación</label>
                 <p className="text-[10px] text-neutral-400 mb-1">Máx. 3000 caracteres</p>
@@ -2733,7 +2642,6 @@ export default function AFDetallePage() {
                 <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.compod ?? '').length}/3000</p>
               </div>
 
-              {/* ── ¿Por qué es especializada? ── */}
               <div>
                 <label className={label}>¿Por qué la Acción de Formación es Especializada?</label>
                 <p className="text-[10px] text-neutral-400 mb-1">Máx. 3000 caracteres</p>
@@ -2744,7 +2652,6 @@ export default function AFDetallePage() {
                 <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.justificacion ?? '').length}/3000</p>
               </div>
 
-              {/* ── Resultados Desempeño ── */}
               <div>
                 <label className={label}>Resultados — Impacto en el desempeño del trabajador y aplicación de conocimientos en el puesto de trabajo</label>
                 <p className="text-[10px] text-neutral-400 mb-1">Máx. 5000 caracteres</p>
@@ -2755,7 +2662,6 @@ export default function AFDetallePage() {
                 <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.resDesem ?? '').length}/5000</p>
               </div>
 
-              {/* ── Resultados Productividad ── */}
               <div>
                 <label className={label}>Resultados — Impacto en la productividad y competitividad de las empresas y gremios</label>
                 <p className="text-[10px] text-neutral-400 mb-1">Máx. 5000 caracteres</p>
@@ -2766,7 +2672,6 @@ export default function AFDetallePage() {
                 <p className="text-xs text-neutral-400 text-right mt-0.5">{(alinForm.resForm ?? '').length}/5000</p>
               </div>
 
-              {/* ── Guardar ── */}
               {editable && (
                 <div className="flex pt-1 border-t border-neutral-100">
                   <button onClick={handleGuardarAlineacion} disabled={savingAlin}
@@ -2782,9 +2687,7 @@ export default function AFDetallePage() {
         )
       })()}
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Card 8 — Cobertura de la Acción de Formación
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* card 8: cobertura */}
       {(() => {
         const mod = af.modalidadFormacionId
         const esPresencial  = mod === 1
@@ -2805,7 +2708,6 @@ export default function AFDetallePage() {
 
             <div className="p-6 flex flex-col gap-4">
 
-              {/* Referencia de beneficiarios esperados */}
               <div className="flex flex-wrap gap-3">
                 {(esPresencial || esPat || esHibrida) && (
                   <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-xs text-blue-800">
@@ -2821,14 +2723,12 @@ export default function AFDetallePage() {
                 )}
               </div>
 
-              {/* Grupos */}
               {grupos.map(grupo => {
                 const isExpanded = expandedGrupo === grupo.grupoId
                 const isDeleting = deletingGrupo === grupo.grupoId
                 const isSavingJ  = savingJust === grupo.grupoId
                 const isSavingC  = savingCob  === grupo.grupoId
 
-                // Totales calculados en el formulario
                 let formTotalPres = 0
                 let formTotalVirt = 0
                 if (esPresencial) {
@@ -2844,7 +2744,6 @@ export default function AFDetallePage() {
 
                 return (
                   <div key={grupo.grupoId} className="border border-neutral-200 rounded-xl overflow-hidden">
-                    {/* Header del grupo */}
                     <div
                       className="flex items-center gap-3 px-4 py-3 bg-neutral-50 hover:bg-neutral-100 transition cursor-pointer select-none"
                       onClick={() => handleExpandGrupo(grupo.grupoId)}
@@ -2886,11 +2785,9 @@ export default function AFDetallePage() {
                       </div>
                     </div>
 
-                    {/* Contenido expandido */}
                     {isExpanded && (
                       <div className="p-4 flex flex-col gap-5 border-t border-neutral-100">
 
-                        {/* ── Formulario de cobertura según modalidad ── */}
                         <div>
                           <p className={secTitle}>
                             {esPresencial && 'Cobertura presencial (departamento + ciudad)'}
@@ -2899,7 +2796,6 @@ export default function AFDetallePage() {
                             {esHibrida && 'Cobertura presencial e-híbrida'}
                           </p>
 
-                          {/* PRESENCIAL (1): un solo par depto+ciudad */}
                           {esPresencial && (() => {
                             const row = cobPres[grupo.grupoId] ?? { deptoId: null, ciudadId: null, benef: '', rural: 0 }
                             return (
@@ -2939,7 +2835,6 @@ export default function AFDetallePage() {
                             )
                           })()}
 
-                          {/* PAT (2) / VIRTUAL (4): múltiples filas sólo departamento */}
                           {(esPat || esVirtual) && (() => {
                             const rows = cobVirt[grupo.grupoId] ?? [{ deptoId: null, ciudadId: null, benef: '', rural: 0 }]
                             const total = rows.reduce((s, r) => s + (Number(r.benef) || 0), 0)
@@ -2994,14 +2889,12 @@ export default function AFDetallePage() {
                             )
                           })()}
 
-                          {/* HÍBRIDA (3/5/6): presencial + sincrónico */}
                           {esHibrida && (() => {
                             const pRow = cobPres[grupo.grupoId] ?? { deptoId: null, ciudadId: null, benef: '', rural: 0 }
                             const sRows = cobVirt[grupo.grupoId] ?? [{ deptoId: null, ciudadId: null, benef: '', rural: 0 }]
                             const sTotal = sRows.reduce((s, r) => s + (Number(r.benef) || 0), 0)
                             return (
                               <div className="flex flex-col gap-5">
-                                {/* Presencial */}
                                 <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-3">
                                   <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Presencial</p>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3035,7 +2928,6 @@ export default function AFDetallePage() {
                                   </div>
                                 </div>
 
-                                {/* Sincrónico */}
                                 <div className="bg-purple-50 rounded-xl p-4 flex flex-col gap-3">
                                   <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">Sincrónico (virtual)</p>
                                   {sRows.map((row, idx) => {
@@ -3088,7 +2980,6 @@ export default function AFDetallePage() {
                           })()}
                         </div>
 
-                        {/* Guardar cobertura */}
                         {editable && (
                           <div className="flex pt-2 border-t border-neutral-100">
                             <button onClick={() => handleSaveCoberturas(grupo.grupoId)} disabled={isSavingC}
@@ -3099,7 +2990,6 @@ export default function AFDetallePage() {
                           </div>
                         )}
 
-                        {/* Justificación de la cobertura del grupo (después de las coberturas) */}
                         <div className="pt-4 border-t border-neutral-100">
                           <label className={label}>Justificación de la cobertura del grupo</label>
                           <textarea
@@ -3128,7 +3018,6 @@ export default function AFDetallePage() {
                 )
               })}
 
-              {/* Agregar grupo */}
               {editable && (
                 <div className="flex">
                   <button onClick={handleCrearGrupo} disabled={creatingGrupo || grupos.length >= (af.numGrupos ?? 20)}
@@ -3151,9 +3040,7 @@ export default function AFDetallePage() {
         )
       })()}
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Card 9 — Material de Formación
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* card 9: material de formación */}
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200">
         <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
           <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center">
@@ -3164,7 +3051,6 @@ export default function AFDetallePage() {
 
         <div className="p-6 flex flex-col gap-5">
 
-          {/* Tipo de ambiente + Gestión + Material */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className={label}>Tipo de Ambiente de Aprendizaje</label>
@@ -3195,7 +3081,6 @@ export default function AFDetallePage() {
             </div>
           </div>
 
-          {/* Recursos Didácticos */}
           <div>
             <p className={secTitle}>Recursos Didácticos</p>
             <div className="flex flex-wrap gap-2 mb-2">
@@ -3230,7 +3115,6 @@ export default function AFDetallePage() {
             )}
           </div>
 
-          {/* Justificación material */}
           <div>
             <label className={label}>Justificación del tipo de material de formación y recursos didácticos (si aplica)</label>
             <p className="text-[10px] text-neutral-400 mb-1">Máx. 3000 caracteres</p>
@@ -3241,7 +3125,6 @@ export default function AFDetallePage() {
             <p className="text-xs text-neutral-400 text-right mt-0.5">{(matForm.justMat ?? '').length}/3000</p>
           </div>
 
-          {/* Insumos */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={label}>Insumos y/o equipos especializados (solo si aplica)</label>
@@ -3263,7 +3146,6 @@ export default function AFDetallePage() {
             </div>
           </div>
 
-          {/* Guardar */}
           {editable && (
             <div className="flex pt-1 border-t border-neutral-100">
               <button onClick={handleGuardarMaterial} disabled={savingMat}
@@ -3277,7 +3159,6 @@ export default function AFDetallePage() {
         </div>
       </div>
 
-      {/* Navegación a Rubros */}
       <div className="flex justify-between items-center pt-2 pb-6">
         <button onClick={() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })}
           className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-neutral-50 transition">

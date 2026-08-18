@@ -6,24 +6,12 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { enBloques } from '../common/db/binds'
 
-/**
- * Sábana del banco de evaluadores.
- *
- * Sale con los MISMOS filtros que el listado en pantalla: lo que se exporta es
- * lo que se está viendo. Si el Excel trajera siempre todo, quien filtró por
- * "2026 sin cédula" y descargó tendría que volver a filtrar en Excel, y la
- * mitad de las veces olvidaría hacerlo.
- *
- * Dos hojas:
- *   1. Evaluadores — una fila por persona, con sus totales y alertas
- *   2. Ciclos      — una fila por participación, para tabla dinámica por año
- */
+// sábana del banco de evaluadores: hoja 1 por persona, hoja 2 por participación
 
 const NAVY = 'FF00304D'
 const VERDE = 'FF39A900'
 const BLANCO = 'FFFFFFFF'
 
-/** Tope de cordura de la exportación. El banco real ronda las decenas. */
 const MAX_FILAS = 5000
 
 type ItemBanco = Awaited<ReturnType<EvaluadoresService['listar']>>['items'][number]
@@ -38,8 +26,7 @@ export class ReportesEvaluadorService {
   async sabanaBanco(
     busqueda: string, filtros: EvaluadorFiltros,
   ): Promise<{ buffer: Buffer; nombre: string }> {
-    // El 5º argumento sube el tope por página, que para la UI es 100. Sin él
-    // la sábana saldría con 100 filas y sin decir que faltaban las demás.
+    // el 5º argumento sube el tope por página, que por defecto es 100
     const { items, total } = await this.evaluadores.listar(busqueda, 1, MAX_FILAS, filtros, MAX_FILAS)
 
     const wb = new ExcelJS.Workbook()
@@ -54,10 +41,7 @@ export class ReportesEvaluadorService {
     return { buffer, nombre: `Banco_evaluadores${sufijo}.xlsx` }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Hoja 1 — Evaluadores                                                  ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
+  // hoja 1 — evaluadores
   private hojaEvaluadores(
     wb: ExcelJS.Workbook,
     items: ItemBanco[],
@@ -65,13 +49,9 @@ export class ReportesEvaluadorService {
   ) {
     const s = wb.addWorksheet('1. Evaluadores', { views: [{ state: 'frozen', ySplit: 3 }] })
 
-    // Fila 1: qué filtros produjeron este archivo. Sin esto, dos sábanas
-    // distintas se ven idénticas y nadie sabe cuál mira.
     const activos = Object.entries(ctx.filtros)
       .filter(([, v]) => v !== undefined && v !== null && v !== '')
       .map(([k, v]) => `${k}=${v}`)
-    // Si el filtro dio más de lo que cabe, hay que decirlo: un archivo de 5000
-    // filas que anuncia 6200 registros parece completo y no lo está.
     const truncado = ctx.total > items.length
       ? ` · ⚠ TRUNCADO: se exportaron ${items.length} de ${ctx.total}`
       : ''
@@ -87,9 +67,7 @@ export class ReportesEvaluadorService {
     const columnas: Array<[string, number]> = [
       ['Identificación', 16], ['Nombres', 22], ['Apellidos', 24], ['Correo', 30],
       ['Cargo', 22], ['Profesión', 26], ['Regional', 22],
-      // "ciclos válidos": el promedio excluye los ciclos en estado negativo
-      // (DECLINO, NO_APROBO, REVOCADO). La hoja 2 muestra el valor crudo de
-      // cada ciclo, así que sin este rótulo las dos hojas parecen no cuadrar.
+      // "ciclos válidos": el promedio excluye DECLINO, NO_APROBO y REVOCADO
       ['Ciclos', 9], ['Último año', 11], ['Proyectos', 11], ['Retroalim. (ciclos válidos)', 22],
       ['Cédula', 10], ['Foto', 9], ['Prueba vigente', 14], ['Estado', 10],
     ]
@@ -117,8 +95,6 @@ export class ReportesEvaluadorService {
         it.pruebaVigente ? 'Sí' : 'NO',
         it.activo ? 'Activo' : 'Inactivo',
       ])
-      // Las carencias van resaltadas: la sábana se usa sobre todo para
-      // detectar qué falta, y buscar "NO" a ojo en 80 filas no funciona.
       const rojo = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFD6D6' } }
       if (!it.tieneCedula) fila.getCell(12).fill = rojo
       if (!it.tieneFoto) fila.getCell(13).fill = rojo
@@ -129,20 +105,7 @@ export class ReportesEvaluadorService {
     s.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: columnas.length } }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Hoja 2 — Ciclos                                                       ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Una fila por participación. Es la hoja que sirve para tabla dinámica:
-   * cuántos evaluaron por año, por proceso, por mesa, cuántos quedaron en
-   * cada estado.
-   *
-   * Los filtros de ciclo se aplican TAMBIÉN aquí, no solo al escoger a las
-   * personas. Sin eso, filtrar por 2025 traía a las personas que participaron
-   * en 2025 pero con todos sus años encima, y una tabla dinámica sobre esta
-   * hoja daba totales que no cuadraban con la cabecera de la hoja 1.
-   */
+  // hoja 2 — una fila por participación; los filtros de ciclo se reaplican aquí
   private async hojaCiclos(
     wb: ExcelJS.Workbook, evaluadorIds: number[], filtros: EvaluadorFiltros,
   ) {
@@ -173,9 +136,7 @@ export class ReportesEvaluadorService {
 
     const filas: Array<Record<string, unknown>> = []
     for (const bloque of enBloques(evaluadorIds)) {
-      // IN con lista de binds: Oracle no acepta un array como un solo parámetro.
-      // Los binds del ciclo van DESPUÉS de los ids, y por eso se numeran a
-      // partir de `bloque.length`: con bind posicional el orden es el contrato.
+      // Oracle no acepta un array en el IN: binds posicionales, y los del filtro numeran desde bloque.length
       const marcadores = bloque.map((_, i) => `:${i + 1}`).join(',')
       const extra: unknown[] = []
       const bind = (v: unknown) => { extra.push(v); return `:${bloque.length + extra.length}` }
@@ -221,8 +182,7 @@ export class ReportesEvaluadorService {
       ))
     }
 
-    // Se ordena en memoria: con varios bloques, cada consulta trae su propio
-    // orden y concatenarlas dejaría la hoja mezclada.
+    // orden en memoria: cada bloque llega ordenado por su cuenta
     filas.sort((a, b) =>
       Number(b.anio) - Number(a.anio) ||
       String(a.evaluador ?? '').localeCompare(String(b.evaluador ?? ''), 'es'))

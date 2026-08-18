@@ -44,7 +44,7 @@ const TABLA_LEGIBLE: Record<string, string> = {
   RETRORESPUESTA: 'Retroalimentación',
 }
 
-export function AuditoriaEvaluador({
+export function ControlCambiosEvaluador({
   evaluadorId, setToast,
 }: {
   evaluadorId: number
@@ -63,7 +63,7 @@ export function AuditoriaEvaluador({
       setCargando(true)
       try {
         const r = await api.get<{ items: Fila[]; total: number }>(
-          `/evaluadores/${evaluadorId}/auditoria`, { params: { limit: 100 } },
+          `/evaluadores/${evaluadorId}/control-cambios`, { params: { limit: 100 } },
         )
         if (!vivo) return
         setItems(r.data?.items ?? [])
@@ -71,10 +71,10 @@ export function AuditoriaEvaluador({
       } catch (err) {
         if (!vivo) return
         // 403 no es un error que valga la pena gritar: significa que este perfil
-        // simplemente no ve auditoría. Se explica en pantalla y ya.
+        // simplemente no ve el registro. Se explica en pantalla y ya.
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 403) setSinPermiso(true)
-        else setToast({ tipo: 'error', msg: 'No se pudo cargar la auditoría' })
+        else setToast({ tipo: 'error', msg: 'No se pudo cargar el control de cambios' })
       } finally {
         if (vivo) setCargando(false)
       }
@@ -87,7 +87,7 @@ export function AuditoriaEvaluador({
     setAbierto(logId)
     if (!tieneSnapshot || detalles[logId]) return
     try {
-      const r = await api.get<Detalle>(`/evaluadores/auditoria/${logId}`)
+      const r = await api.get<Detalle>(`/evaluadores/control-cambios/${logId}`)
       setDetalles(prev => ({ ...prev, [logId]: r.data }))
     } catch {
       setToast({ tipo: 'error', msg: 'No se pudo cargar el detalle del registro' })
@@ -98,7 +98,7 @@ export function AuditoriaEvaluador({
     return (
       <section className="rounded-2xl border border-neutral-200 bg-white px-5 py-12 text-center shadow-sm">
         <ShieldAlert size={28} className="mx-auto text-neutral-300" />
-        <p className="mt-3 text-sm font-semibold text-neutral-600">Auditoría restringida</p>
+        <p className="mt-3 text-sm font-semibold text-neutral-600">Control de cambios restringido</p>
         {/* Decía "solo coordinación y administración", y era falso: el backend
             autoriza a los tres perfiles de gestión, incluida la gestora de
             evaluadores. El mensaje le decía que algo no era suyo cuando sí lo es. */}
@@ -132,7 +132,7 @@ export function AuditoriaEvaluador({
           <p className="text-sm text-neutral-400">Sin movimientos registrados todavía.</p>
           <p className="mt-1 text-[11px] text-neutral-400">
             Se registran aprobaciones, calificaciones, cambios de estado, certificados y
-            retroalimentación. Los cargues de documentos no se auditan.
+            retroalimentación. Los cargues de documentos no quedan registrados.
           </p>
         </div>
       ) : (

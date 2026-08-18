@@ -3,23 +3,11 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { bindRepetido } from '../common/db/binds'
 
-/**
- * Trayectoria del evaluador — la vista por año del banco.
- *
- * Mientras `EvaluadoresService` sigue siendo el CRUD plano de la ficha, este
- * servicio arma la vista agregada que consume el panel: el rail de años, el
- * estado de cada ciclo y el detalle de un ciclo concreto.
- *
- * Regla que gobierna todo el archivo: **una llamada por pantalla**. El rail
- * completo sale de dos consultas, no de una por participación.
- */
-
-/** Hito del checklist de un ciclo. Se calcula, nunca se guarda. */
+// hito del checklist: se calcula, no se guarda
 export interface Hito {
   codigo: string
   nombre: string
   cumplido: boolean
-  /** Detalle corto para el tooltip (ej. "Puntaje 92 / mínimo 80"). */
   detalle?: string | null
 }
 
@@ -29,7 +17,7 @@ export interface ProgresoCiclo {
   hitos: Hito[]
 }
 
-/** Códigos del catálogo ESTADOPARTICIPACION (v29). */
+// catálogo ESTADOPARTICIPACION
 const ESTADO = {
   POSTULADO: 'POSTULADO',
   AUTORIZADO: 'AUTORIZADO',
@@ -41,7 +29,6 @@ const ESTADO = {
   CERTIFICADO: 'CERTIFICADO',
 } as const
 
-/** Filas crudas de los contadores por participación. */
 interface ContadoresRow {
   participacionId: number
   tieneInvitacion: number
@@ -60,7 +47,7 @@ interface ContadoresRow {
   retroRecibidas: number
   retroPromedio: number | null
   tieneCertificado: number
-  /** Certificado de un año anterior, cargado como documento en vez de emitido. */
+  // cargado como documento, no emitido
   certificadoCargado: number
 }
 
@@ -68,16 +55,10 @@ interface ContadoresRow {
 export class TrayectoriaService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Resumen — los KPIs del hero                                           ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
   async getResumen(evaluadorId: number) {
     await this.exigirEvaluador(evaluadorId)
 
-    // Los estados con ESNEGATIVO = 1 (declinó / no aprobó / revocado) se
-    // excluyen del promedio de desempeño: un año en que no participó no debe
-    // contar como mala calificación.
+    // ESNEGATIVO = 1 no entra al promedio
     const resumen = bindRepetido(
       `SELECT
          (SELECT COUNT(DISTINCT pa.ANIO)
@@ -119,8 +100,7 @@ export class TrayectoriaService {
 
     const r = rows[0] ?? {}
 
-    // Prueba vigente = la más reciente aprobada. "Vigente" se interpreta como
-    // del año en curso o del anterior; más atrás se considera vencida.
+    // vigente = aprobada del año en curso o el anterior
     const pruebaRows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pr.ANIO           AS "anio",
               pr.PUNTAJEMAYOR   AS "puntaje",
@@ -136,13 +116,6 @@ export class TrayectoriaService {
     const anioActual = new Date().getFullYear()
     const aprobada = ultimaPrueba ? this.esPruebaAprobada(ultimaPrueba) : false
 
-    // El recorrido año por año, para la franja de la ficha.
-    //
-    // Un solo dato —la última prueba, el promedio de retroalimentación— no
-    // basta para decidir si se vuelve a convocar a alguien: no dice si mejoró,
-    // si lleva años pasando, ni si ese promedio bajo viene de un año suelto.
-    // Se pidió expresamente ver la prueba de 2021 a 2026 y la
-    // retroalimentación de 2024 a 2026.
     const recorrido = await this.recorridoPorAnio(evaluadorId)
 
     return {
@@ -166,18 +139,7 @@ export class TrayectoriaService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Trayectoria — el rail de años                                         ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Devuelve los años del evaluador en orden descendente. Cada año trae sus
-   * participaciones con estado, progreso y contadores.
-   *
-   * Incluye además los años que solo tienen pruebas sueltas (histórico
-   * 2021-2023 sin participación asociada): en el rail salen marcados como
-   * `soloPrueba` en vez de desaparecer.
-   */
+  // años en orden descendente; los que solo tienen prueba salen como soloPrueba
   async getTrayectoria(evaluadorId: number) {
     await this.exigirEvaluador(evaluadorId)
 
@@ -203,7 +165,7 @@ export class TrayectoriaService {
       }
     })
 
-    // Años con prueba pero sin ninguna participación → histórico suelto.
+    // años con prueba y sin participación
     const aniosConParticipacion = new Set(items.map(i => i.anio))
     const sueltosRows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pr.ANIO          AS "anio",
@@ -238,7 +200,6 @@ export class TrayectoriaService {
     for (const s of sueltosRows) {
       const anio = Number(s.anio)
       if (aniosConParticipacion.has(anio)) {
-        // El año ya existe: las pruebas sueltas se anotan pero no lo marcan.
         const y = anios.get(anio)!
         y.pruebasSueltas = Number(s.pruebas)
         continue
@@ -254,8 +215,7 @@ export class TrayectoriaService {
 
     const ordenados = [...anios.values()].sort((a, b) => b.anio - a.anio)
 
-    // Los huecos se marcan explícitamente para que el rail no comprima la
-    // línea de tiempo: un año en blanco entre dos activos es información.
+    // los huecos van marcados para que el rail no comprima la línea de tiempo
     const conGaps: Array<Record<string, unknown>> = []
     for (let i = 0; i < ordenados.length; i++) {
       conGaps.push(ordenados[i])
@@ -273,19 +233,7 @@ export class TrayectoriaService {
     return { evaluadorId, anios: conGaps }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Detalle de un ciclo                                                   ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Todo lo del año en una sola respuesta: ficha, aprobación, capacitación,
-   * pruebas, grupos, proyectos, documentos propios y heredados.
-   *
-   * Los documentos vienen en tres bloques porque significan cosas distintas:
-   *   - propios      → EVALUADORDOCUMENTO con este PARTICIPACIONID
-   *   - heredados    → CONVOCATORIADOCUMENTO del ciclo (compartidos, solo lectura)
-   *   - permanentes  → EVALUADORDOCUMENTO sin participación (cédula, HV)
-   */
+  // todo el ciclo en una respuesta
   async getParticipacion(participacionId: number) {
     const cabecera = await this.cargarCabecera(participacionId)
     if (!cabecera) throw new NotFoundException('Participación no encontrada')
@@ -335,15 +283,7 @@ export class TrayectoriaService {
     }
   }
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Checklist y estado sugerido                                           ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
-
-  /**
-   * Los nueve hitos del ciclo. Todos se derivan de los datos cargados — nadie
-   * marca casillas, así que el progreso no puede mentir respecto de los
-   * archivos que hay en el sistema.
-   */
+  // los hitos se derivan de los datos, nadie marca casillas
   private calcularProgreso(
     cabecera: Record<string, unknown>,
     c: ContadoresRow | undefined,
@@ -385,9 +325,6 @@ export class TrayectoriaService {
           : null,
       },
       {
-        // El nombre menciona el proceso porque la condición lo exige: sin él
-        // el hito no enciende, y decir solo "mesa y equipo" hacía parecer que
-        // faltaba algo distinto de lo que realmente faltaba.
         codigo: 'ASIGNACION',
         nombre: 'Asignación a proceso, mesa y equipo',
         cumplido: n(c?.tieneAsignacion) > 0,
@@ -403,9 +340,7 @@ export class TrayectoriaService {
       {
         codigo: 'RETROALIMENTO',
         nombre: 'Retroalimentación diligenciada',
-        // Solo cuenta como hito si le asignaron pares. Sin asignaciones no hay
-        // nada que diligenciar, y marcarlo en rojo sería culpar al evaluador
-        // de algo que no depende de él.
+        // sin asignaciones no hay nada que diligenciar
         cumplido: n(c?.retroAsignadas) > 0 && n(c?.retroPendientes) === 0,
         detalle: n(c?.retroAsignadas) > 0
           ? `${n(c?.retroAsignadas) - n(c?.retroPendientes)} de ${n(c?.retroAsignadas)}`
@@ -415,8 +350,6 @@ export class TrayectoriaService {
         codigo: 'CERTIFICADO',
         nombre: 'Certificado emitido',
         cumplido: n(c?.tieneCertificado) > 0 || n(c?.certificadoCargado) > 0,
-        // Se distingue: uno lo emitió el SEP con consecutivo y código de
-        // verificación; el otro es el documento de un año anterior, cargado.
         detalle: n(c?.tieneCertificado) > 0
           ? undefined
           : n(c?.certificadoCargado) > 0 ? 'Cargado de un año anterior' : undefined,
@@ -430,11 +363,7 @@ export class TrayectoriaService {
     }
   }
 
-  /**
-   * Estado que el checklist sugiere. El estado real lo declara una persona
-   * (DECLINO no se deduce de nada), así que esto solo alimenta el aviso de
-   * "el estado guardado no coincide con lo que hay cargado".
-   */
+  // sugerencia: el estado real lo declara una persona (DECLINO no se deduce)
   private sugerirEstado(progreso: ProgresoCiclo): string {
     const tiene = (cod: string) => progreso.hitos.find(h => h.codigo === cod)?.cumplido ?? false
 
@@ -447,18 +376,9 @@ export class TrayectoriaService {
     return ESTADO.POSTULADO
   }
 
-  /**
-   * Un renglón por año con lo que hace falta para decidir: la prueba y la
-   * retroalimentación.
-   *
-   * Se parte de los AÑOS EN QUE PARTICIPÓ, no de los años en que hay prueba.
-   * Así los huecos se ven: un año en el que estuvo en el banco y no presentó
-   * prueba aparece vacío, que es justamente lo que hay que notar. Si se
-   * listaran solo los años con datos, ese año simplemente no existiría.
-   */
+  // parte de los años en que participó, no de los años con prueba: así se ven los huecos
   private async recorridoPorAnio(evaluadorId: number) {
-    // `bindRepetido` porque el id aparece seis veces: Oracle numera los binds
-    // por posición y repetirlos a mano es la forma más fácil de desalinearlos.
+    // el id va seis veces y Oracle numera los binds por posición
     const { sql, params } = bindRepetido(
       `SELECT a.ANIO AS "anio",
               (SELECT pr.EFECTIVIDAD FROM EVALUADORPRUEBA pr
@@ -473,8 +393,6 @@ export class TrayectoriaService {
               (SELECT pr.APROBADA FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
                 ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "aprobada",
-              -- Cuántas veces la presentó. Se pidió expresamente: "aprobado
-              -- 88 %, 2 intentos" dice mucho más que solo el porcentaje.
               (SELECT pr.INTENTOS FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
                 ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "intentos",
@@ -482,11 +400,7 @@ export class TrayectoriaService {
                  FROM RETRORESPUESTA rr
                  JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
                 WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "retro",
-              -- La pregunta 10 es "¿Recomendaría la participación de esta
-              -- persona en futuros procesos?". Se pidió expresamente verla
-              -- suelta: es la que responde de un vistazo si vale la pena
-              -- volver a convocar, y queda enterrada en el promedio de las
-              -- doce. Va aparte, con su propio número.
+              -- pregunta 10 = ¿recomendaría a esta persona?, va aparte del promedio
               (SELECT ROUND(AVG(ri.CALIFICACION), 2)
                  FROM RETRORESPUESTAITEM ri
                  JOIN RETRORESPUESTA rr ON rr.RETRORESPUESTAID = ri.RETRORESPUESTAID
@@ -506,14 +420,7 @@ export class TrayectoriaService {
       porcentaje: f.porcentaje != null ? Number(f.porcentaje) : null,
       puntaje: f.puntaje != null ? Number(f.puntaje) : null,
       intentos: f.intentos != null ? Number(f.intentos) : null,
-      // null = SIN EVALUAR, y no es lo mismo que reprobada.
-      //
-      // De las 66 pruebas cargadas, 64 no tienen porcentaje ni nota de corte:
-      // se registraron cuando la aprobación aún no se calculaba. Marcarlas en
-      // rojo como "no aprobada" sería afirmar algo que nadie comprobó, sobre
-      // gente que probablemente sí pasó — y encima en la pantalla que se usa
-      // para decidir a quién se vuelve a convocar. Solo se decide cuando hay
-      // con qué: un aprobado explícito, o porcentaje y corte.
+      // null = sin evaluar, distinto de reprobada
       pruebaAprobada: f.aprobada != null
         ? Number(f.aprobada) === 1
         : (f.porcentaje != null && f.minimo != null
@@ -526,15 +433,10 @@ export class TrayectoriaService {
 
   private esPruebaAprobada(p: Record<string, unknown>): boolean {
     if (Number(p.aprobada ?? 0) === 1) return true
-    // El histórico anterior a v34 no tiene APROBADA; se infiere del corte
-    // cuando ambos valores existen.
+    // el histórico anterior a v34 no tiene APROBADA: se infiere del corte
     if (p.puntaje == null || p.minimo == null) return false
     return Number(p.puntaje) >= Number(p.minimo)
   }
-
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║ Consultas                                                             ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
   private async exigirEvaluador(evaluadorId: number) {
     if (!evaluadorId || Number.isNaN(evaluadorId)) {
@@ -546,7 +448,7 @@ export class TrayectoriaService {
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
   }
 
-  /** Columnas comunes de una participación, con todos los catálogos resueltos. */
+  // columnas de una participación con los catálogos resueltos
   private readonly SELECT_PARTICIPACION = `
     SELECT pa.PARTICIPACIONID          AS "participacionId",
            pa.EVALUADORID              AS "evaluadorId",
@@ -569,10 +471,7 @@ export class TrayectoriaService {
            NVL(es.ESNEGATIVO, 0)       AS "estadoNegativo",
            pa.CONVOCATORIAID           AS "convocatoriaId",
            TRIM(cv.NOMBRE)             AS "convocatoriaNombre",
-           -- Las notas de corte del ciclo. Van al detalle para que la pantalla
-           -- pueda avisar ANTES de registrar: sin ellas, ni el curso ni la
-           -- prueba pueden marcarse aprobados y el hito se queda apagado sin
-           -- que nada explique por qué.
+           -- sin notas de corte no hay cómo marcar aprobado el curso ni la prueba
            cv.CALIFICACIONMINIMACURSO  AS "corteCurso",
            cv.PUNTAJEMINIMOPRUEBA      AS "cortePrueba",
            NVL(pa.ESTRANSVERSAL, 0)    AS "esTransversal",
@@ -582,7 +481,10 @@ export class TrayectoriaService {
            TRIM(pa.MESA)               AS "mesa",
            TRIM(pa.EQUIPOEVALUADOR)    AS "equipoEvaluador",
            pa.DINAMIZADORPERSONAID     AS "dinamizadorPersonaId",
-           TRIM(di.PERSONANOMBRES) || ' ' || TRIM(di.PERSONAPRIMERAPELLIDO) AS "dinamizadorNombre"
+           -- primero el texto libre (v51); si no hay, el nombre de la persona relacionada.
+           -- TO_NCHAR: DINAMIZADOR es VARCHAR2 y los nombres NVARCHAR2
+           TRIM(COALESCE(TO_NCHAR(pa.DINAMIZADOR),
+                         TRIM(di.PERSONANOMBRES) || ' ' || TRIM(di.PERSONAPRIMERAPELLIDO))) AS "dinamizadorNombre"
       FROM EVALUADORPARTICIPACION pa
       LEFT JOIN ROLEVALUADOR         r  ON r.ROLEVALUADORID  = pa.ROLEVALUADORID
       LEFT JOIN PROCESOEVAL          pe ON pe.PROCESOID      = pa.PROCESOID
@@ -624,12 +526,7 @@ export class TrayectoriaService {
     }
   }
 
-  /**
-   * Un solo SELECT con subconsultas escalares para todos los ciclos del
-   * evaluador. Evita el N+1 que tendría el frontend si pidiera cada bloque por
-   * separado, y como el N por evaluador es de una decena de filas, el costo de
-   * las escalares es despreciable frente a diez round-trips.
-   */
+  // un solo SELECT con escalares para todos los ciclos, evita el N+1
   private async cargarContadores(evaluadorId: number): Promise<ContadoresRow[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "participacionId",
@@ -686,16 +583,10 @@ export class TrayectoriaService {
          (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr
            WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroPromedio",
 
-         -- Cuenta el emitido por el sistema Y el cargado a mano. Los años
-         -- anteriores al módulo tienen su certificado en papel y no se van a
-         -- reemitir: si solo se mirara EVALUADORCERTIFICADO, un ciclo de 2025
-         -- se quedaría para siempre en 8 de 9 aunque el documento esté ahí.
          (SELECT COUNT(*) FROM EVALUADORCERTIFICADO ce
            WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID
              AND ce.ANULADO = 0)                                      AS "tieneCertificado",
-         -- Se acepta también el que quedó sin participación pero con el año
-         -- marcado: así se cargaron los históricos desde la pestaña general
-         -- de Documentos, y exigirles la participación los dejaría sin contar.
+         -- los históricos se cargaron sin participación, solo con año
          (SELECT COUNT(*) FROM EVALUADORDOCUMENTO dc
             JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
            WHERE TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
@@ -828,23 +719,13 @@ export class TrayectoriaService {
     return rows.map(r => ({ ...r, partAlcanceId: Number(r.partAlcanceId) }))
   }
 
-  /**
-   * Los proyectos que evaluó en un ciclo.
-   *
-   * El NIT y la razón social se resuelven contra el proyecto real, no contra
-   * la copia de la tabla pivote: al asignar desde la pantalla solo se guarda
-   * el identificador, así que esas columnas quedan vacías y la lista salía
-   * entera como "Sin identificar". La copia solo manda para los registros
-   * históricos escritos a mano, que no apuntan a ningún proyecto.
-   */
+  // el NIT y la razón social salen del proyecto real; la copia de la pivote solo sirve para históricos
   private async cargarProyectos(participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pp.PARTPROYECTOID     AS "partProyectoId",
               pp.PROYECTOID         AS "proyectoId",
               pp.GUARDADOID         AS "guardadoId",
-              -- TO_NCHAR sobre el NIT: en EMPRESA es NUMBER y las otras dos
-              -- son NVARCHAR2. Sin igualar el juego de caracteres, el COALESCE
-              -- falla con ORA-12704 y la pestaña entera se cae.
+              -- TO_NCHAR: el NIT es NUMBER en EMPRESA y NVARCHAR2 en las otras (ORA-12704)
               COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
                        TRIM(pp.NIT))                    AS "nit",
               COALESCE(TRIM(em.EMPRESARAZONSOCIAL), TRIM(g.RAZONSOCIAL),
@@ -893,11 +774,7 @@ export class TrayectoriaService {
     return rows.map(r => ({ ...r, documentoId: Number(r.documentoId), ambito: 'PROPIO' }))
   }
 
-  /**
-   * Documentos generales del ciclo. Viven una sola vez en la convocatoria y se
-   * muestran en la ficha de todos sus evaluadores — por eso van marcados como
-   * solo lectura: editarlos desde aquí afectaría a los demás sin que se note.
-   */
+  // viven en la convocatoria y los comparten todos sus evaluadores: solo lectura
   private async cargarDocumentosHeredados(convocatoriaId: number | null) {
     if (!convocatoriaId) return []
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -931,9 +808,7 @@ export class TrayectoriaService {
               TRIM(te.CODIGO)           AS "tipoCodigo",
               TRIM(te.NOMBRE)           AS "tipoNombre",
               TRIM(ed.DOCUMENTODESCRIPCION) AS "descripcion",
-              -- Hace falta afuera: un documento permanente marcado con año
-              -- pertenece a ese ciclo aunque se haya cargado desde la pestaña
-              -- general, y así la pestaña del año puede reconocerlo.
+              -- un permanente con año pertenece a ese ciclo
               ed.ANIOREFERENCIA         AS "anioReferencia",
               TRIM(ed.ARCHIVONOMBRE)    AS "archivoNombre",
               TRIM(ed.ARCHIVOMIME)      AS "mime",

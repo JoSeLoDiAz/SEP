@@ -1,17 +1,4 @@
 -- v13_tipoambiente_normalizar.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Normaliza el catálogo TIPOAMBIENTE para que coincida con el formulario
--- oficial del VBA del MinTrabajo (11 ítems en mayúsculas).
---
--- La columna TIPOAMBIENTEACTIVO ya existe (NUMBER(1), 1=activo, 0=inactivo).
--- Esta migración:
---   1) Cambia los nombres de los IDs 1..11 a mayúsculas según el VBA.
---   2) Inactiva los IDs 12..15 (combinaciones con AULA VIRTUAL que NO están
---      en el listado oficial del MinTrabajo).
---
--- Las AF que ya apuntan a esos IDs siguen funcionando — el dropdown del
--- formulario solo mostrará los 11 activos.
--- ──────────────────────────────────────────────────────────────────────────
 
 -- 1) Renombrar IDs 1..11 a mayúsculas según VBA MinTrabajo.
 UPDATE TIPOAMBIENTE SET TIPOAMBIENTENOMBRE = 'AULAS BÁSICAS (ESPACIOS FÍSICOS EN FINCAS Y TALLERES, INSTITUCIONES BÁSICA Y MEDIA, SALONES COMUNALES)' WHERE TIPOAMBIENTEID = 1;

@@ -1,16 +1,6 @@
--- =============================================================================
 -- Migración: Actualización de Retos Nacionales y Componentes Estratégicos
--- Versión: 5.0
--- Fecha: 2026-04-20
--- Autor: JoSeLoDiAz
--- Descripción: Actualiza nombres de RETONACIONAL (1,3,7), agrega reto 9,
---              reemplaza componentes estratégicos (IDs 775-875) por la lista
---              oficial actualizada (92 componentes, IDs 876-967).
--- =============================================================================
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Actualizar nombres de RETONACIONAL existentes
--- ─────────────────────────────────────────────────────────────────────────────
 
 UPDATE RETONACIONAL SET RETONACIONALNOMBRE = 'AGROECOLOGÍA, AGRICULTURA, AGROINDUSTRIA, BIOECONOMÍA, SOSTENIBILIDAD Y GESTIÓN AMBIENTAL (BASES DEL PLAN NACIONAL DE DESARROLLO, COLOMBIA POTENCIA MUNDIAL DE LA VIDA 2022 – 2026 Y ESTRATEGIA PRIORIZADA POR LA DIRECCIÓN DEL SISTEMA NACIONAL DE FORMACIÓN PARA EL TRABAJO DEL SENA - DSNFT)'
   WHERE RETONACIONALID = 1;
@@ -21,24 +11,17 @@ UPDATE RETONACIONAL SET RETONACIONALNOMBRE = 'SALUD, SERVICIOS DE CUIDADO Y REIN
 UPDATE RETONACIONAL SET RETONACIONALNOMBRE = 'TRANSICIÓN ENERGÉTICA Y MINERÍA SUSTENTABLE (BASES DEL PLAN NACIONAL DE DESARROLLO, COLOMBIA POTENCIA MUNDIAL DE LA VIDA 2022 – 2026)'
   WHERE RETONACIONALID = 7;
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Insertar Reto Nacional 9
--- ─────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO RETONACIONAL (RETONACIONALID, RETONACIONALNOMBRE, RETONACIONALESTADO)
   VALUES (9, 'DESARROLLO TERRITORIAL Y AGENDAS DEPARTAMENTALES', 1);
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Limpiar componentes anteriores (IDs 775-875)
--- ─────────────────────────────────────────────────────────────────────────────
 
 DELETE FROM AFALINEACION WHERE COMPONENTE BETWEEN 775 AND 875;
 DELETE FROM AFCOMPONENTE  WHERE AFCOMPONENTEID BETWEEN 775 AND 875;
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- 4. Insertar nuevos componentes estratégicos (IDs 876-967)
---    AFCOMPONENTEESTADO = 1 (Activo)
--- ─────────────────────────────────────────────────────────────────────────────
 
 -- Reto 1: Agroecología, Agricultura, Agroindustria, Bioeconomía (44 items, IDs 876-919)
 INSERT INTO AFCOMPONENTE (AFCOMPONENTEID, AFCOMPONENTENOMBRE, AFCOMPONENTEESTADO, RETONACIONALID) VALUES (876, 'AGROINDUSTRIA CAMPESINA E INFRAESTRUCTURA PRODUCTIVA - DSNFT.', 1, 1);

@@ -18,14 +18,10 @@ import { UpsertCronogramaDto } from './dto/upsert-cronograma.dto'
 export class CronogramaController {
   constructor(private readonly svc: CronogramaService) {}
 
-  // ── Introspección (dev / debug) ───────────────────────────────────────────
-
   @Get('describe')
   describeTables() {
     return this.svc.describeTables()
   }
-
-  // ── Cascada: AF → Grupo → UT ──────────────────────────────────────────────
 
   @Get('proyecto/:proyectoId/acciones')
   listarAcciones(@Param('proyectoId', ParseIntPipe) proyectoId: number) {
@@ -42,8 +38,6 @@ export class CronogramaController {
     return this.svc.listarUnidades(afId)
   }
 
-  // ── Cronograma por grupo+UT ───────────────────────────────────────────────
-
   @Get('buscar')
   buscarCronograma(
     @Query('grupoId', ParseIntPipe) grupoId: number,
@@ -52,8 +46,6 @@ export class CronogramaController {
     return this.svc.buscarCronograma(grupoId, utId)
   }
 
-  // ── Crear/actualizar cabecera del cronograma (Fase 2) ─────────────────────
-
   @Post('proyecto/:proyectoId')
   upsertCronograma(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -61,8 +53,6 @@ export class CronogramaController {
   ) {
     return this.svc.upsertCronograma(proyectoId, dto)
   }
-
-  // ── Exportar cronograma a Excel (Fase 4) ──────────────────────────────────
 
   @Get('proyecto/:proyectoId/exportar')
   async exportarCronograma(
@@ -75,8 +65,6 @@ export class CronogramaController {
     res.send(buffer)
   }
 
-  // ── Sesiones y actividades ────────────────────────────────────────────────
-
   @Get(':cronogramaId/sesiones-presenciales')
   sesionesPresenciales(@Param('cronogramaId', ParseIntPipe) id: number) {
     return this.svc.sesionesPresenciales(id)
@@ -87,8 +75,6 @@ export class CronogramaController {
     return this.svc.sesionesVirtuales(id)
   }
 
-  // ── Catálogos para Fase 3 (capacitadores aprobados, perfiles UT) ──────────
-
   @Get('proyecto/:proyectoId/capacitadores-aprobados')
   capacitadoresAprobados(@Param('proyectoId', ParseIntPipe) proyectoId: number) {
     return this.svc.listarCapacitadoresAprobados(proyectoId)
@@ -98,8 +84,6 @@ export class CronogramaController {
   perfilesUT(@Param('utId', ParseIntPipe) utId: number) {
     return this.svc.listarPerfilesUT(utId)
   }
-
-  // ── Sesión presencial (Fase 3) ────────────────────────────────────────────
 
   @Get(':cronogramaId/coberturas-grupo')
   coberturasGrupo(@Param('cronogramaId', ParseIntPipe) cronogramaId: number) {
@@ -127,8 +111,6 @@ export class CronogramaController {
     return this.svc.eliminarSesionPresencial(sesionId)
   }
 
-  // ── Actividad virtual (Fase 4) ────────────────────────────────────────────
-
   @Post(':cronogramaId/sesion-virtual')
   agregarSesionVirtual(
     @Param('cronogramaId', ParseIntPipe) cronogramaId: number,
@@ -149,8 +131,6 @@ export class CronogramaController {
   eliminarSesionVirtual(@Param('actividadId', ParseIntPipe) actividadId: number) {
     return this.svc.eliminarSesionVirtual(actividadId)
   }
-
-  // ── Radicar (Fase 4) ──────────────────────────────────────────────────────
 
   @Get('proyecto/:proyectoId/radicados')
   radicados(@Param('proyectoId', ParseIntPipe) proyectoId: number) {

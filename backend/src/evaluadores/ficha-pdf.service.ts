@@ -450,11 +450,12 @@ export class FichaPdfService {
       { k: 'Ciclos', v: String(r.totalParticipaciones) },
       { k: 'Proyectos', v: String(r.totalProyectos) },
       { k: 'Certificados', v: String(r.totalCertificados) },
-      { k: 'Retro. prom.', v: r.promedioRetro != null ? r.promedioRetro.toFixed(2) : '—' },
+      { k: 'Promedio retroalimentación', v: r.promedioRetro != null ? r.promedioRetro.toFixed(2) : '—' },
       { k: 'Prueba vigente', v: r.pruebaVigente?.vigente ? String(r.pruebaVigente.anio) : '—' },
     ]
 
-    const alto = 42
+    // 48 y no 42: los rotulos largos ocupan dos lineas
+    const alto = 48
     this.asegurar(l, alto + 12)
     const gap = 8
     const ancho = (l.ancho - gap * (datos.length - 1)) / datos.length
@@ -464,9 +465,9 @@ export class FichaPdfService {
       doc.roundedRect(x, l.y, ancho, alto, 3).fill(GRIS_FONDO)
       doc.font('Helvetica-Bold').fontSize(14).fillColor(PRIMARY)
       doc.text(kpi.v, x, l.y + 8, { width: ancho, align: 'center', lineBreak: false })
-      doc.font('Helvetica').fontSize(6.3).fillColor(GRIS_SUAVE)
+      doc.font('Helvetica').fontSize(5.9).fillColor(GRIS_SUAVE)
       doc.text(kpi.k.toUpperCase(), x + 3, l.y + 27, {
-        width: ancho - 6, align: 'center', lineBreak: false,
+        width: ancho - 6, align: 'center', lineGap: 0.5,
       })
     })
 
@@ -479,12 +480,12 @@ export class FichaPdfService {
     const { doc } = l
 
     const COLS = [
-      { t: 'Año', w: 32 },
-      { t: 'Prueba', w: 46 },
-      { t: 'Intentos', w: 40 },
-      { t: 'Estado', w: 62 },
-      { t: 'Curso', w: 56 },
-      { t: 'Retro.', w: 42 },
+      { t: 'Año', w: 30 },
+      { t: 'Prueba', w: 44 },
+      { t: 'Intentos', w: 42 },
+      { t: 'Estado', w: 60 },
+      { t: 'Curso', w: 52 },
+      { t: 'Retroalimentación', w: 82 },
       { t: 'Recomendado', w: 0 },   // el resto
     ]
     COLS[COLS.length - 1].w = l.ancho - COLS.reduce((a, c) => a + c.w, 0)
@@ -520,7 +521,7 @@ export class FichaPdfService {
         f.intentos != null ? String(f.intentos) : '—',
         estado,
         f.curso != null
-          ? `${f.curso}${f.cursoAprobado === false ? ' (no apr.)' : ''}`
+          ? `${f.curso}${f.cursoAprobado === false ? ' (no aprobado)' : ''}`
           : '—',
         f.retro != null ? `${f.retro}/5` : '—',
         reco,
@@ -585,8 +586,8 @@ export class FichaPdfService {
     // tres promedios en fila
     const datos = [
       ['PROMEDIO PRUEBA', s.promPrueba != null ? `${Math.round(s.promPrueba)}%` : '—'],
-      ['PROMEDIO RETRO.', s.promRetro != null ? `${s.promRetro.toFixed(1)}/5` : '—'],
-      ['MÁX. INTENTOS', s.maxIntentos ? String(s.maxIntentos) : '—'],
+      ['PROMEDIO RETROALIMENTACIÓN', s.promRetro != null ? `${s.promRetro.toFixed(1)}/5` : '—'],
+      ['MÁXIMO DE INTENTOS', s.maxIntentos ? String(s.maxIntentos) : '—'],
     ]
     const anchoCol = (l.ancho - 24) / 3
     datos.forEach(([rot, val], i) => {

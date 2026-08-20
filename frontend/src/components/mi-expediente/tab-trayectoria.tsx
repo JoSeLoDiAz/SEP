@@ -155,7 +155,8 @@ export default function TabTrayectoria({ setToast }: { setToast: SetToast }) {
                   <th className="px-4 py-2 text-right">Prueba (%)</th>
                   <th className="px-4 py-2 text-right">Intentos</th>
                   <th className="px-4 py-2 text-left">Estado</th>
-                  <th className="px-4 py-2 text-right">Retro.</th>
+                  <th className="px-4 py-2 text-right">Curso</th>
+                  <th className="px-4 py-2 text-right">Retroalimentación</th>
                   <th className="px-4 py-2 text-right">Recomendado</th>
                 </tr>
               </thead>
@@ -178,6 +179,12 @@ export default function TabTrayectoria({ setToast }: { setToast: SetToast }) {
                         <span className={`${CHIP} bg-red-50 text-red-700`}>No aprobada</span>
                       ) : (
                         <span className={`${CHIP} bg-neutral-100 text-neutral-700`}>Sin evaluar</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right text-[13px] tabular-nums text-neutral-800">
+                      {r.curso != null ? r.curso : '—'}
+                      {r.cursoAprobado === false && (
+                        <span className="ml-1 text-[10px] font-bold uppercase text-red-600">No aprobado</span>
                       )}
                     </td>
                     <td className="px-4 py-2 text-right text-[13px] tabular-nums text-neutral-800">

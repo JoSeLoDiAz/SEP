@@ -68,6 +68,8 @@ export interface RecorridoAnio {
   porcentaje: number | null
   puntaje: number | null
   intentos: number | null
+  curso: number | null
+  cursoAprobado: boolean | null
   pruebaAprobada: boolean | null // null = sin evaluar
   retro: number | null
   recomendado: number | null

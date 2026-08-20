@@ -76,6 +76,8 @@ interface Resumen {
     porcentaje: number | null
     puntaje: number | null
     pruebaAprobada: boolean | null
+    curso: number | null
+    cursoAprobado: boolean | null
     retro: number | null
   }>
 }
@@ -271,7 +273,7 @@ function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
       </p>
       <div className="flex min-w-max gap-2">
         {recorrido.map(r => (
-          <div key={r.anio} className="w-[124px] shrink-0 rounded-xl border border-neutral-100 px-3 py-2">
+          <div key={r.anio} className="w-[136px] shrink-0 rounded-xl border border-neutral-100 px-3 py-2">
             <p className="text-[13px] font-bold" style={{ color: PRIMARY }}>{r.anio}</p>
 
             <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Prueba</p>
@@ -286,7 +288,17 @@ function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
               </span>
             )}
 
-            <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Retro</p>
+            <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Curso</p>
+            <p className="text-[13px] font-semibold text-neutral-800">
+              {r.curso != null ? String(r.curso) : '—'}
+              {r.cursoAprobado === false && (
+                <span className="ml-1 text-[9px] font-bold uppercase text-red-600">No aprobado</span>
+              )}
+            </p>
+
+            <p className="mt-2 text-[9px] font-semibold uppercase leading-tight tracking-wide text-neutral-400">
+              Retroalimentación
+            </p>
             <p className="text-[13px] font-semibold text-neutral-800">
               {r.retro != null ? `${r.retro} / 5` : '—'}
             </p>

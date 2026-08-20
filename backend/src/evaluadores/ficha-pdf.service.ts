@@ -34,6 +34,9 @@ const COLOR_ESTADO: Record<string, string> = {
   red: '#DC2626',
 }
 
+// a partir de aqui los intentos de una prueba se consideran senal de alarma
+const INTENTOS_ALARMA = 4
+
 // margen lateral y franja reservada para el pie
 const M = 46
 const RESERVA_PIE = 42
@@ -188,6 +191,7 @@ export class FichaPdfService {
       this.cabecera(l, d.ficha, d.foto, d.nombreCompleto)
       this.kpis(l, d.resumen)
       this.recorrido(l, d.resumen.recorrido)
+      this.veredicto(l, d.resumen)
       this.alertas(l, d.ficha, d.resumen, d.tieneCedula)
 
       this.titulo(l, 'Formación académica')
@@ -481,6 +485,94 @@ export class FichaPdfService {
     l.y += 12
   }
 
+  // promedios y concepto: lo que mira quien decide si convocar
+  private senales(resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>) {
+    const filas = resumen.recorrido ?? []
+    const prom = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+
+    const pruebas = filas.map(f => f.porcentaje).filter((n): n is number => n != null)
+    const retros = filas.map(f => f.retro).filter((n): n is number => n != null)
+    const maxIntentos = filas.reduce((m, f) => Math.max(m, f.intentos ?? 0), 0)
+    const anioMaxIntentos = filas.find(f => (f.intentos ?? 0) === maxIntentos)?.anio ?? null
+    const reprobados = filas.filter(f => f.pruebaAprobada === false).map(f => f.anio)
+
+    const p = resumen.pruebaVigente
+    const promPrueba = prom(pruebas)
+    const promRetro = prom(retros)
+
+    // el concepto solo baja de "recomendado": nunca sube por promedio alto
+    const reparos: string[] = []
+    if (maxIntentos >= INTENTOS_ALARMA) {
+      reparos.push(`necesitó ${maxIntentos} intentos en la prueba de ${anioMaxIntentos}`)
+    }
+    if (reprobados.length) {
+      reparos.push(`no aprobó la prueba de ${reprobados.join(', ')}`)
+    }
+    if (promRetro != null && promRetro < 3.5) {
+      reparos.push(`la retroalimentación promedio es ${promRetro.toFixed(1)}/5`)
+    }
+    if (p && p.aprobada && !p.vigente) {
+      reparos.push(`su prueba aprobada más reciente es de ${p.anio}`)
+    }
+
+    let concepto: string
+    let detalle: string
+    let color: string
+    if (!p || (p && !p.aprobada)) {
+      concepto = 'NO RECOMENDADO'
+      detalle = p ? `La última prueba (${p.anio}) no está aprobada.` : 'No registra prueba de conocimiento.'
+      color = AMBAR
+    } else if (reparos.length) {
+      concepto = 'RECOMENDADO CON REPAROS'
+      detalle = `Aprobó la prueba de ${p.anio}, pero ${reparos.join('; ')}.`
+      color = AMBAR
+    } else {
+      concepto = 'RECOMENDADO'
+      detalle = `Prueba de ${p.anio} aprobada y vigente.`
+      color = VERDE
+    }
+
+    return { promPrueba, promRetro, maxIntentos, anioMaxIntentos, reprobados, concepto, detalle, color }
+  }
+
+  private veredicto(l: Lienzo, resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>) {
+    if (!resumen.recorrido?.length) return
+    const { doc } = l
+    const s = this.senales(resumen)
+
+    const anchoTexto = l.ancho - 24
+    doc.font('Helvetica').fontSize(8.2)
+    const altoDetalle = Number(doc.heightOfString(s.detalle, { width: anchoTexto }))
+    const alto = 46 + altoDetalle
+
+    this.asegurar(l, alto + 14)
+
+    doc.roundedRect(l.x, l.y, l.ancho, alto, 3).fill(GRIS_FONDO)
+    doc.rect(l.x, l.y, 3, alto).fill(s.color)
+
+    // tres promedios en fila
+    const datos = [
+      ['PROMEDIO PRUEBA', s.promPrueba != null ? `${Math.round(s.promPrueba)}%` : '—'],
+      ['PROMEDIO RETRO.', s.promRetro != null ? `${s.promRetro.toFixed(1)}/5` : '—'],
+      ['MÁX. INTENTOS', s.maxIntentos ? String(s.maxIntentos) : '—'],
+    ]
+    const anchoCol = (l.ancho - 24) / 3
+    datos.forEach(([rot, val], i) => {
+      const x = l.x + 12 + anchoCol * i
+      doc.font('Helvetica').fontSize(5.8).fillColor(GRIS_SUAVE)
+      doc.text(rot, x, l.y + 8, { width: anchoCol - 6, lineBreak: false, characterSpacing: 0.3 })
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(PRIMARY)
+      doc.text(val, x, l.y + 16, { width: anchoCol - 6, lineBreak: false })
+    })
+
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(s.color)
+    doc.text(s.concepto, l.x + 12, l.y + 33, { width: anchoTexto, characterSpacing: 0.4 })
+    doc.font('Helvetica').fontSize(8.2).fillColor(NEGRO)
+    doc.text(s.detalle, l.x + 12, l.y + 43, { width: anchoTexto })
+
+    l.y += alto + 14
+  }
+
   // lo que le falta a la ficha, en recuadro y arriba de todo
   private alertas(
     l: Lienzo,
@@ -512,6 +604,21 @@ export class FichaPdfService {
       )
     } else if (!p.vigente) {
       avisos.push(`La prueba aprobada más reciente es de ${p.anio}: está vencida para la vigencia actual.`)
+    }
+
+    // desempeño: lo que no se ve mirando solo la última prueba
+    const s = this.senales(resumen)
+    if (s.maxIntentos >= INTENTOS_ALARMA) {
+      avisos.push(
+        `Necesitó ${s.maxIntentos} intentos para la prueba de ${s.anioMaxIntentos}: ` +
+        'conviene revisarlo antes de convocarlo.',
+      )
+    }
+    if (s.reprobados.length) {
+      avisos.push(`No aprobó la prueba de ${s.reprobados.join(', ')}.`)
+    }
+    if (s.promRetro != null && s.promRetro < 3.5) {
+      avisos.push(`La retroalimentación promedio es ${s.promRetro.toFixed(1)}/5.`)
     }
 
     const { doc } = l

@@ -422,7 +422,7 @@ export class EvaluadoresController {
     @Res() res: Response,
   ) {
     this.exigirGestion(user)
-    const { buffer, nombre } = await this.fichaPdf.generar(id)
+    const { buffer, nombre } = await this.fichaPdf.generar(id, { revelarNombres: true })
     this.responderArchivo(res, buffer, 'application/pdf', nombre, true)
   }
 

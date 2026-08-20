@@ -81,7 +81,11 @@ export class FichaPdfService {
     private readonly trayectoria: TrayectoriaService,
   ) {}
 
-  async generar(evaluadorId: number): Promise<{ buffer: Buffer; nombre: string }> {
+  // revelarNombres solo lo pide la gestora: en la ficha que baja el evaluador va en false
+  async generar(
+    evaluadorId: number,
+    opciones: { revelarNombres?: boolean } = {},
+  ): Promise<{ buffer: Buffer; nombre: string }> {
     // si el evaluador no existe, getFicha lanza el 404 y no se genera nada
     const ficha = await this.evaluadores.getFicha(evaluadorId) as Record<string, unknown>
 
@@ -98,14 +102,59 @@ export class FichaPdfService {
         this.proyectosPorCiclo(evaluadorId),
       ])
 
+    const retro = await this.retroRecibida(evaluadorId, opciones.revelarNombres === true)
+
     const nombreCompleto = this.nombreCompleto(ficha)
     const buffer = await this.construirPdf({
       ficha, resumen, trayectoria, estudios, experiencias, tics,
-      foto, tieneCedula, proyectos, nombreCompleto,
+      foto, tieneCedula, proyectos, nombreCompleto, retro,
     })
 
     const identificacion = this.txt(ficha.identificacion, String(evaluadorId))
     return { buffer, nombre: `Ficha_evaluador_${this.limpiarNombre(identificacion)}.pdf` }
+  }
+
+  // el anonimato es del formulario: si esta activo, solo la gestora ve los nombres
+  private async retroRecibida(evaluadorId: number, revelarNombres: boolean) {
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT pe.ANIO              AS "anio",
+              r.PROMEDIO           AS "promedio",
+              NVL(fo.RESULTADOANONIMO, 1) AS "anonimo",
+              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
+              TRIM(rol.ROLEVALUADORNOMBRE) AS "rol",
+              TRIM(ar.NOMBRE)      AS "area",
+              (SELECT LISTAGG(TRIM(i.COMENTARIO), ' | ') WITHIN GROUP (ORDER BY i.PREGUNTANUMERO)
+                 FROM RETRORESPUESTAITEM i
+                WHERE i.RETRORESPUESTAID = r.RETRORESPUESTAID
+                  AND i.COMENTARIO IS NOT NULL
+                  AND TRIM(i.COMENTARIO) IS NOT NULL)                AS "comentario"
+         FROM RETRORESPUESTA r
+         JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = r.PARTEVALUADOID
+         LEFT JOIN RETROFORMULARIO fo ON fo.CONVOCATORIAID = pe.CONVOCATORIAID AND fo.ACTIVO = 1
+         LEFT JOIN EVALUADORPARTICIPACION pc ON pc.PARTICIPACIONID = r.PARTEVALUADORID
+         LEFT JOIN EVALUADOR e ON e.EVALUADORID = pc.EVALUADORID
+         LEFT JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
+         LEFT JOIN ROLEVALUADOR   rol ON rol.ROLEVALUADORID = pc.ROLEVALUADORID
+         LEFT JOIN AREAEVALUACION ar  ON ar.AREAID = pc.AREAID
+        WHERE pe.EVALUADORID = :1
+        ORDER BY pe.ANIO DESC, r.FECHAENVIO`,
+      [evaluadorId],
+    )
+
+    return filas.map((f, i) => {
+      const anonimo = Number(f.anonimo) === 1
+      const nombre = (!anonimo || revelarNombres) && f.nombre
+        ? String(f.nombre).trim()
+        : `Calificador ${i + 1}`
+      return {
+        anio: Number(f.anio),
+        nombre,
+        rol: this.txt(f.rol, ''),
+        area: this.txt(f.area, ''),
+        promedio: f.promedio != null ? Number(f.promedio) : null,
+        comentario: this.txt(f.comentario, ''),
+      }
+    })
   }
 
   private async tieneCedula(evaluadorId: number): Promise<boolean> {
@@ -170,6 +219,7 @@ export class FichaPdfService {
     tieneCedula: boolean
     proyectos: Map<number, ProyectoCiclo[]>
     nombreCompleto: string
+    retro: Awaited<ReturnType<FichaPdfService['retroRecibida']>>
   }): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       // bufferPages: el total de paginas no se sabe hasta cerrar el contenido
@@ -193,6 +243,7 @@ export class FichaPdfService {
       this.recorrido(l, d.resumen.recorrido)
       this.veredicto(l, d.resumen)
       this.alertas(l, d.ficha, d.resumen, d.tieneCedula)
+      this.retroalimentacion(l, d.retro)
 
       this.titulo(l, 'Formación académica')
       this.tabla(l,
@@ -428,11 +479,12 @@ export class FichaPdfService {
     const { doc } = l
 
     const COLS = [
-      { t: 'Año', w: 34 },
-      { t: 'Prueba', w: 52 },
-      { t: 'Intentos', w: 42 },
-      { t: 'Estado', w: 66 },
-      { t: 'Retro.', w: 46 },
+      { t: 'Año', w: 32 },
+      { t: 'Prueba', w: 46 },
+      { t: 'Intentos', w: 40 },
+      { t: 'Estado', w: 62 },
+      { t: 'Curso', w: 56 },
+      { t: 'Retro.', w: 42 },
       { t: 'Recomendado', w: 0 },   // el resto
     ]
     COLS[COLS.length - 1].w = l.ancho - COLS.reduce((a, c) => a + c.w, 0)
@@ -467,6 +519,9 @@ export class FichaPdfService {
         f.porcentaje != null ? `${f.porcentaje}%` : f.puntaje != null ? `${f.puntaje} pts` : '—',
         f.intentos != null ? String(f.intentos) : '—',
         estado,
+        f.curso != null
+          ? `${f.curso}${f.cursoAprobado === false ? ' (no apr.)' : ''}`
+          : '—',
         f.retro != null ? `${f.retro}/5` : '—',
         reco,
       ]
@@ -500,7 +555,6 @@ export class FichaPdfService {
     const promPrueba = prom(pruebas)
     const promRetro = prom(retros)
 
-    // el concepto solo baja de "recomendado": nunca sube por promedio alto
     const reparos: string[] = []
     if (maxIntentos >= INTENTOS_ALARMA) {
       reparos.push(`necesitó ${maxIntentos} intentos en la prueba de ${anioMaxIntentos}`)
@@ -515,24 +569,7 @@ export class FichaPdfService {
       reparos.push(`su prueba aprobada más reciente es de ${p.anio}`)
     }
 
-    let concepto: string
-    let detalle: string
-    let color: string
-    if (!p || (p && !p.aprobada)) {
-      concepto = 'NO RECOMENDADO'
-      detalle = p ? `La última prueba (${p.anio}) no está aprobada.` : 'No registra prueba de conocimiento.'
-      color = AMBAR
-    } else if (reparos.length) {
-      concepto = 'RECOMENDADO CON REPAROS'
-      detalle = `Aprobó la prueba de ${p.anio}, pero ${reparos.join('; ')}.`
-      color = AMBAR
-    } else {
-      concepto = 'RECOMENDADO'
-      detalle = `Prueba de ${p.anio} aprobada y vigente.`
-      color = VERDE
-    }
-
-    return { promPrueba, promRetro, maxIntentos, anioMaxIntentos, reprobados, concepto, detalle, color }
+    return { promPrueba, promRetro, maxIntentos, anioMaxIntentos, reprobados, reparos }
   }
 
   private veredicto(l: Lienzo, resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>) {
@@ -540,15 +577,10 @@ export class FichaPdfService {
     const { doc } = l
     const s = this.senales(resumen)
 
-    const anchoTexto = l.ancho - 24
-    doc.font('Helvetica').fontSize(8.2)
-    const altoDetalle = Number(doc.heightOfString(s.detalle, { width: anchoTexto }))
-    const alto = 46 + altoDetalle
+    const alto = 32
 
     this.asegurar(l, alto + 14)
-
     doc.roundedRect(l.x, l.y, l.ancho, alto, 3).fill(GRIS_FONDO)
-    doc.rect(l.x, l.y, 3, alto).fill(s.color)
 
     // tres promedios en fila
     const datos = [
@@ -564,11 +596,6 @@ export class FichaPdfService {
       doc.font('Helvetica-Bold').fontSize(11).fillColor(PRIMARY)
       doc.text(val, x, l.y + 16, { width: anchoCol - 6, lineBreak: false })
     })
-
-    doc.font('Helvetica-Bold').fontSize(8).fillColor(s.color)
-    doc.text(s.concepto, l.x + 12, l.y + 33, { width: anchoTexto, characterSpacing: 0.4 })
-    doc.font('Helvetica').fontSize(8.2).fillColor(NEGRO)
-    doc.text(s.detalle, l.x + 12, l.y + 43, { width: anchoTexto })
 
     l.y += alto + 14
   }
@@ -650,6 +677,46 @@ export class FichaPdfService {
     }
 
     l.y += alto + 16
+  }
+
+  private retroalimentacion(l: Lienzo, filas: Awaited<ReturnType<FichaPdfService['retroRecibida']>>) {
+    if (!filas.length) return
+    const { doc } = l
+    const anchoTexto = l.ancho - 8
+
+    this.asegurar(l, 40)
+    doc.font('Helvetica-Bold').fontSize(7).fillColor(PRIMARY)
+    doc.text('RETROALIMENTACIÓN RECIBIDA', l.x, l.y)
+    l.y += 12
+
+    for (const r of filas) {
+      const quien = [r.nombre, r.rol, r.area].filter(Boolean).join(' · ')
+      const nota = r.promedio != null ? `${r.promedio}/5` : '—'
+
+      doc.font('Helvetica').fontSize(7.4)
+      const altoCom = r.comentario
+        ? Number(doc.heightOfString(r.comentario, { width: anchoTexto - 10 })) + 2
+        : 0
+      this.asegurar(l, 16 + altoCom)
+
+      doc.font('Helvetica-Bold').fontSize(7.2).fillColor(NEGRO)
+      doc.text(`${r.anio} · ${quien}`, l.x, l.y, { width: anchoTexto - 40, lineBreak: false })
+      doc.font('Helvetica-Bold').fontSize(7.2).fillColor(PRIMARY)
+      doc.text(nota, l.x + l.ancho - 40, l.y, { width: 36, align: 'right', lineBreak: false })
+      l.y += 9
+
+      if (r.comentario) {
+        doc.font('Helvetica').fontSize(7.4).fillColor(GRIS_TEXTO)
+        doc.text(`“${r.comentario}”`, l.x + 8, l.y, { width: anchoTexto - 10 })
+        l.y = Number(doc.y) + 3
+      }
+
+      doc.moveTo(l.x, l.y).lineTo(l.x + l.ancho, l.y)
+        .lineWidth(0.3).strokeColor('#ECEFF1').stroke()
+      l.y += 5
+    }
+
+    l.y += 8
   }
 
   private titulo(l: Lienzo, texto: string) {

@@ -77,10 +77,16 @@ export class TrayectoriaService {
             FROM EVALUADORPARTPROYECTO pp
             JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = pp.PARTICIPACIONID
            WHERE pa.EVALUADORID = :ev)                                 AS "totalProyectos",
-         (SELECT COUNT(*)
-            FROM EVALUADORCERTIFICADO c
-            JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = c.PARTICIPACIONID
-           WHERE pa.EVALUADORID = :ev AND c.ANULADO = 0)               AS "totalCertificados",
+         -- cuenta los emitidos y los cargados a mano (los historicos llegaron asi)
+         ((SELECT COUNT(*)
+             FROM EVALUADORCERTIFICADO c
+             JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = c.PARTICIPACIONID
+            WHERE pa.EVALUADORID = :ev AND c.ANULADO = 0)
+        + (SELECT COUNT(*)
+             FROM EVALUADORDOCUMENTO dc
+             JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
+            WHERE dc.EVALUADORID = :ev
+              AND TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'))      AS "totalCertificados",
          (SELECT ROUND(AVG(rr.PROMEDIO), 2)
             FROM RETRORESPUESTA rr
             JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = rr.PARTEVALUADOID
@@ -378,7 +384,7 @@ export class TrayectoriaService {
 
   // parte de los años en que participó, no de los años con prueba: así se ven los huecos
   private async recorridoPorAnio(evaluadorId: number) {
-    // el id va seis veces y Oracle numera los binds por posición
+    // el id se repite en cada subconsulta y Oracle numera los binds por posición
     const { sql, params } = bindRepetido(
       `SELECT a.ANIO AS "anio",
               (SELECT pr.EFECTIVIDAD FROM EVALUADORPRUEBA pr
@@ -406,7 +412,15 @@ export class TrayectoriaService {
                  JOIN RETRORESPUESTA rr ON rr.RETRORESPUESTAID = ri.RETRORESPUESTAID
                  JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
                 WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO
-                  AND ri.PREGUNTANUMERO = 10)                        AS "recomendado"
+                  AND ri.PREGUNTANUMERO = 10)                        AS "recomendado",
+              (SELECT MAX(ca.CALIFICACION)
+                 FROM EVALUADORCAPACITACION ca
+                 JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = ca.PARTICIPACIONID
+                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "curso",
+              (SELECT MAX(ca.APROBADO)
+                 FROM EVALUADORCAPACITACION ca
+                 JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = ca.PARTICIPACIONID
+                WHERE pe.EVALUADORID = :ev AND pe.ANIO = a.ANIO)     AS "cursoAprobado"
          FROM (SELECT DISTINCT pa.ANIO
                  FROM EVALUADORPARTICIPACION pa
                 WHERE pa.EVALUADORID = :ev) a
@@ -420,6 +434,8 @@ export class TrayectoriaService {
       porcentaje: f.porcentaje != null ? Number(f.porcentaje) : null,
       puntaje: f.puntaje != null ? Number(f.puntaje) : null,
       intentos: f.intentos != null ? Number(f.intentos) : null,
+      curso: f.curso != null ? Number(f.curso) : null,
+      cursoAprobado: f.cursoAprobado != null ? Number(f.cursoAprobado) === 1 : null,
       // null = sin evaluar, distinto de reprobada
       pruebaAprobada: f.aprobada != null
         ? Number(f.aprobada) === 1

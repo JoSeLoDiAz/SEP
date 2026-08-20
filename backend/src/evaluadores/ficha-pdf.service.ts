@@ -540,7 +540,7 @@ export class FichaPdfService {
     l.y += 12
   }
 
-  // promedios y concepto: lo que mira quien decide si convocar
+  // promedios y señales: los datos que mira quien decide si convocar
   private senales(resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>) {
     const filas = resumen.recorrido ?? []
     const prom = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null

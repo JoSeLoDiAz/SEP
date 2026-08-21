@@ -9,6 +9,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator'
 import { RetroalimentacionService } from './retroalimentacion.service'
 import type { RespuestaEnviada } from './retroalimentacion.service'
 import { RetroReporteService } from './retro-reporte.service'
+import { RetroHistoricoService } from './retro-historico.service'
+import type { RetroHistoricaDto } from './retro-historico.service'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
@@ -26,6 +28,7 @@ export class RetroalimentacionController {
   constructor(
     private readonly service: RetroalimentacionService,
     private readonly reportes: RetroReporteService,
+    private readonly historico: RetroHistoricoService,
   ) {}
 
   private exigirGestion(user: JwtUser) {
@@ -197,5 +200,67 @@ export class RetroalimentacionController {
   resultados(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
     this.exigirGestion(user)
     return this.service.resultados(pid, user.perfilId, user.email)
+  }
+
+  // cargue del histórico: años anteriores al 2026, que nunca se diligenciaron en el sistema
+
+  @Get('historico/participaciones/:pid/instrumento')
+  @ApiOperation({ summary: 'Preguntas y escala del año de esa participación, para la pantalla de cargue' })
+  histInstrumento(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+    this.exigirGestion(user)
+    return this.historico.instrumento(pid)
+  }
+
+  @Get('historico/participaciones/:pid/companeros')
+  @ApiOperation({ summary: 'Quiénes estuvieron ese mismo año, para escoger quién calificó' })
+  histCompaneros(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+    this.exigirGestion(user)
+    return this.historico.companeros(pid)
+  }
+
+  @Get('historico/participaciones/:pid/registradas')
+  @ApiOperation({ summary: 'Lo ya cargado para esa persona, para no repetir filas' })
+  histRegistradas(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+    this.exigirGestion(user)
+    return this.historico.registradas(pid)
+  }
+
+  @Post('historico')
+  @ApiOperation({ summary: 'Registra a mano una retroalimentación de un año anterior' })
+  histRegistrar(@CurrentUser() user: JwtUser, @Body() body: RetroHistoricaDto) {
+    this.exigirGestion(user)
+    return this.historico.registrar(body, this.ctx(user))
+  }
+
+  @Get('historico/modelos')
+  @ApiOperation({ summary: 'Convocatorias anteriores que ya tienen su hoja registrada' })
+  histModelos(@CurrentUser() user: JwtUser) {
+    this.exigirGestion(user)
+    return this.historico.modelos()
+  }
+
+  @Put('historico/convocatorias/:cid/preguntas')
+  @ApiOperation({ summary: 'Registra las preguntas de la hoja de esa convocatoria' })
+  histPreguntas(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() body: { preguntas: Array<{ texto: string; tipo: string }> },
+  ) {
+    this.exigirGestion(user)
+    return this.historico.guardarPreguntas(cid, body, this.ctx(user))
+  }
+
+  @Post('historico/convocatorias/:cid/preguntas/copiar')
+  @ApiOperation({ summary: 'Copia la hoja de otra convocatoria como punto de partida' })
+  histCopiar(
+    @CurrentUser() user: JwtUser,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Body() body: { origenConvocatoriaId: number },
+  ) {
+    this.exigirGestion(user)
+    if (!body?.origenConvocatoriaId) {
+      throw new BadRequestException('Indique de qué convocatoria quiere copiar las preguntas')
+    }
+    return this.historico.copiarPreguntas(cid, Number(body.origenConvocatoriaId), this.ctx(user))
   }
 }

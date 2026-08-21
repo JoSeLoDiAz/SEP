@@ -3,6 +3,7 @@
 import api from '@/lib/api'
 import { abrirArchivo, descargarArchivoConNombreDelServidor } from '@/lib/descargar-archivo'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { CargueRetroHistorica } from './cargue-retro-historica'
 import {
   AlertTriangle, Award, BadgeCheck, Briefcase, CalendarDays, Check, CheckCircle2,
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
@@ -872,7 +873,9 @@ function PanelSubTabs({
       {subTab === 'proyectos' && (
         <TabProyectos detalle={detalle} setToast={setToast} onRecargar={onRecargar} />
       )}
-      {subTab === 'retroalimentacion' && <TabRetroalimentacion detalle={detalle} />}
+      {subTab === 'retroalimentacion' && (
+        <TabRetroalimentacion detalle={detalle} onRecargar={onRecargar} />
+      )}
       {subTab === 'certificado' && (
         <TabCertificado
           evaluadorId={evaluadorId}
@@ -2143,13 +2146,28 @@ function TabProyectos({
   )
 }
 
-function TabRetroalimentacion({ detalle }: { detalle: Detalle }) {
+function TabRetroalimentacion({
+  detalle, onRecargar,
+}: { detalle: Detalle; onRecargar: () => void }) {
+  return (
+    <>
+      <ResumenRetroalimentacion detalle={detalle} />
+      <CargueRetroHistorica
+        participacionId={detalle.participacionId}
+        anio={detalle.anio}
+        onRecargar={onRecargar}
+      />
+    </>
+  )
+}
+
+function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
   const r = detalle.retroalimentacion
 
-  // el instrumento existe desde 2024: antes, 0 recibidas no es mal desempeño
-  if (r.recibidas === 0 && detalle.anio < 2024) {
+  // el instrumento en línea existe desde 2026: lo anterior se transcribe abajo
+  if (r.recibidas === 0 && detalle.anio < 2026) {
     return (
-      <Vacio texto={`Sin retroalimentación — ${detalle.anio} es anterior al inicio del instrumento (2024).`} />
+      <Vacio texto={`Sin retroalimentación registrada para ${detalle.anio}.`} />
     )
   }
   if (r.recibidas === 0 && r.asignadas === 0) {

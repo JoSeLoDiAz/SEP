@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, ForbiddenException, Get, Param, ParseIntPipe,
+  BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, ParseIntPipe,
   Post, Put, Req, Res, UseGuards,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
@@ -218,11 +218,11 @@ export class RetroalimentacionController {
     return this.historico.companeros(pid)
   }
 
-  @Get('historico/participaciones/:pid/registradas')
-  @ApiOperation({ summary: 'Lo ya cargado para esa persona, para no repetir filas' })
-  histRegistradas(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+  @Get('historico/participaciones/:pid/realizadas')
+  @ApiOperation({ summary: 'Las que esa persona ya hizo, para no repetir filas' })
+  histRealizadas(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
     this.exigirGestion(user)
-    return this.historico.registradas(pid)
+    return this.historico.realizadas(pid)
   }
 
   @Post('historico')
@@ -248,6 +248,13 @@ export class RetroalimentacionController {
   ) {
     this.exigirGestion(user)
     return this.historico.guardarPreguntas(cid, body, this.ctx(user))
+  }
+
+  @Delete('historico/convocatorias/:cid/preguntas')
+  @ApiOperation({ summary: 'Quita las preguntas para volver a registrarlas' })
+  histBorrarPreguntas(@CurrentUser() user: JwtUser, @Param('cid', ParseIntPipe) cid: number) {
+    this.exigirGestion(user)
+    return this.historico.borrarPreguntas(cid, this.ctx(user))
   }
 
   @Post('historico/convocatorias/:cid/preguntas/copiar')

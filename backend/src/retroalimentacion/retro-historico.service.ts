@@ -9,9 +9,9 @@ export interface CtxUsuario {
 }
 
 export interface RetroHistoricaDto {
-  // participación de quien calificó
+  // participación de quien hizo la retroalimentación
   evaluadorParticipacionId: number
-  // participación de quien fue calificado
+  // participación de quien la recibió
   evaluadoParticipacionId: number
   // { '1': 5, '2': 4, ... } solo las preguntas de escala
   escalas: Record<string, number>
@@ -35,7 +35,7 @@ export class RetroHistoricoService {
     private readonly controlCambios: ControlCambiosService,
   ) {}
 
-  // el instrumento y la escala salen de la convocatoria de quien fue calificado
+  // el instrumento y la escala salen de la convocatoria de esa participación
   private async contexto(participacionId: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT f.RETROFORMULARIOID AS "formularioId",
@@ -96,6 +96,11 @@ export class RetroHistoricoService {
       )
     }
     const preguntas = await this.preguntas(ctx.formularioId)
+    // las de todo el ciclo, no solo las de esta persona: cambiar la hoja las invalidaría a todas
+    const cargadas: Array<{ n: number }> = await this.dataSource.query(
+      `SELECT COUNT(*) AS "n" FROM RETRORESPUESTA WHERE RETROFORMULARIOID = :1`,
+      [ctx.formularioId],
+    )
     return {
       anio: ctx.anio,
       convocatoriaId: ctx.convocatoriaId,
@@ -105,6 +110,8 @@ export class RetroHistoricoService {
       preguntas,
       // sin preguntas no se puede cargar nada: primero hay que registrar la hoja del año
       faltaRegistrarPreguntas: preguntas.length === 0,
+      cargadasEnElCiclo: Number(cargadas[0].n),
+      puedeCambiarPreguntas: Number(cargadas[0].n) === 0,
       modelos: preguntas.length === 0 ? await this.modelos(ctx.convocatoriaId) : [],
     }
   }
@@ -234,6 +241,53 @@ export class RetroHistoricoService {
     }
   }
 
+  // deja la convocatoria sin preguntas, para volver a registrarlas desde cero
+  async borrarPreguntas(convocatoriaId: number, ctx: CtxUsuario) {
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT f.RETROFORMULARIOID AS "formularioId", cv.ANIO AS "anio",
+              (SELECT COUNT(*) FROM RETRORESPUESTA r
+                WHERE r.RETROFORMULARIOID = f.RETROFORMULARIOID) AS "respuestas"
+         FROM EVALUADORCONVOCATORIA cv
+         LEFT JOIN RETROFORMULARIO f
+                ON f.CONVOCATORIAID = cv.CONVOCATORIAID AND f.ACTIVO = 1
+        WHERE cv.CONVOCATORIAID = :1`,
+      [convocatoriaId],
+    )
+    const f = filas[0]
+    if (!f) throw new NotFoundException('Esa convocatoria no existe')
+    if (f.formularioId == null) {
+      throw new BadRequestException('Esa convocatoria no tiene instrumento de retroalimentación')
+    }
+    if (Number(f.anio) >= ANIO_EN_LINEA) {
+      throw new BadRequestException(`Las preguntas de ${f.anio} no se tocan desde aquí.`)
+    }
+    if (Number(f.respuestas) > 0) {
+      throw new ConflictException(
+        `Ya hay ${f.respuestas} retroalimentaciones cargadas con estas preguntas: ` +
+        'primero habría que quitarlas.',
+      )
+    }
+
+    const formularioId = Number(f.formularioId)
+    const antes = await this.preguntas(formularioId)
+    await this.dataSource.query(
+      `DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :1`, [formularioId])
+
+    await this.controlCambios.registrar({
+      tabla: 'RETROPREGUNTA', operacion: 'DELETE', registroId: formularioId,
+      usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
+      comentario: `Quitó las ${antes.length} preguntas de ${f.anio} (convocatoria ${convocatoriaId}) para rehacerlas`,
+      valorAntes: antes.map(p => ({ texto: p.texto, tipo: p.tipo })),
+    })
+
+    return {
+      convocatoriaId,
+      anio: Number(f.anio),
+      quitadas: antes.length,
+      message: `Se quitaron las ${antes.length} preguntas de ${f.anio}`,
+    }
+  }
+
   // copia la hoja de otra convocatoria como punto de partida
   async copiarPreguntas(destinoId: number, origenId: number, ctx: CtxUsuario) {
     if (destinoId === origenId) {
@@ -286,61 +340,61 @@ export class RetroHistoricoService {
     }))
   }
 
-  // lo ya cargado para esa persona, para que el equipo no repita filas
-  async registradas(participacionId: number) {
+  // las que esa persona ya hizo, para que el equipo no repita filas
+  async realizadas(participacionId: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT r.RETRORESPUESTAID AS "respuestaId",
-              r.PARTEVALUADORID  AS "evaluadorParticipacionId",
+              r.PARTEVALUADOID   AS "destinatarioParticipacionId",
               r.PROMEDIO         AS "promedio",
               r.FECHAENVIO       AS "fecha",
               a.MOTIVOREGLA      AS "motivo",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "califico"
+              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "destinatario"
          FROM RETRORESPUESTA r
          JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
-         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADORID
+         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADOID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
-        WHERE r.PARTEVALUADOID = :1
+        WHERE r.PARTEVALUADORID = :1
         ORDER BY r.FECHAENVIO DESC`,
       [participacionId],
     )
     return filas.map(f => ({
       respuestaId: Number(f.respuestaId),
-      evaluadorParticipacionId: Number(f.evaluadorParticipacionId),
+      destinatarioParticipacionId: Number(f.destinatarioParticipacionId),
       promedio: f.promedio == null ? null : Number(f.promedio),
       fecha: f.fecha ? new Date(f.fecha as string).toISOString() : null,
-      califico: String(f.califico ?? '').replace(/\s+/g, ' ').trim(),
+      destinatario: String(f.destinatario ?? '').replace(/\s+/g, ' ').trim(),
       historica: String(f.motivo ?? '').startsWith('HISTORICO'),
     }))
   }
 
   async registrar(dto: RetroHistoricaDto, ctx: CtxUsuario) {
-    const calificador = Number(dto.evaluadorParticipacionId)
-    const calificado = Number(dto.evaluadoParticipacionId)
-    if (!calificador || !calificado) {
-      throw new BadRequestException('Falta indicar quién calificó y a quién')
+    const autor = Number(dto.evaluadorParticipacionId)
+    const destinatario = Number(dto.evaluadoParticipacionId)
+    if (!autor || !destinatario) {
+      throw new BadRequestException('Falta indicar quién hizo la retroalimentación y a quién')
     }
-    if (calificador === calificado) {
-      throw new BadRequestException('Nadie puede calificarse a sí mismo')
+    if (autor === destinatario) {
+      throw new BadRequestException('Nadie se retroalimenta a sí mismo')
     }
 
-    const meta = await this.contexto(calificado)
+    const meta = await this.contexto(destinatario)
     if (meta.anio >= ANIO_EN_LINEA) {
       throw new BadRequestException(
         `${meta.anio} se diligencia en el sistema, no se carga a mano.`,
       )
     }
 
-    // quien califica tiene que ser del mismo ciclo: si no, la nota no significa nada
+    // ambos tienen que ser del mismo ciclo: si no, la retroalimentación no significa nada
     const otro: Array<{ anio: number; convocatoriaId: number }> = await this.dataSource.query(
       `SELECT ANIO AS "anio", CONVOCATORIAID AS "convocatoriaId"
          FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
-      [calificador],
+      [autor],
     )
-    if (!otro[0]) throw new NotFoundException('La participación de quien calificó no existe')
+    if (!otro[0]) throw new NotFoundException('La participación de quien la hizo no existe')
     if (Number(otro[0].convocatoriaId) !== meta.convocatoriaId) {
       throw new BadRequestException(
-        `Quien calificó no es de la misma convocatoria (${otro[0].anio} contra ${meta.anio}): ` +
+        `No son de la misma convocatoria (${otro[0].anio} contra ${meta.anio}): ` +
         'la retroalimentación se hace entre quienes estuvieron en el mismo ciclo.',
       )
     }
@@ -348,10 +402,10 @@ export class RetroHistoricoService {
     const repetida: Array<{ n: number }> = await this.dataSource.query(
       `SELECT COUNT(*) AS "n" FROM RETRORESPUESTA
         WHERE PARTEVALUADORID = :1 AND PARTEVALUADOID = :2`,
-      [calificador, calificado],
+      [autor, destinatario],
     )
     if (Number(repetida[0].n) > 0) {
-      throw new ConflictException('Esa calificación ya está registrada')
+      throw new ConflictException('Esa retroalimentación ya está registrada')
     }
 
     const preguntas = await this.preguntas(meta.formularioId)
@@ -391,7 +445,7 @@ export class RetroHistoricoService {
            (RETROSESIONID, RETROFORMULARIOID, PARTICIPACIONID, FECHAINICIO, FECHAENVIO,
             DURACIONMINUTOS, MINUTOSTRANSCURRIDOS, SEEXCEDIO, USUARIOEMAIL)
          VALUES (:1, :2, :3, SYSDATE, SYSDATE, :4, 0, 0, :5)`,
-        [sesionId, meta.formularioId, calificador, meta.duracion, ctx.usuarioEmail],
+        [sesionId, meta.formularioId, autor, meta.duracion, ctx.usuarioEmail],
       )
 
       const asignacionId = await siguiente('RETROASIGNACION_SEQ')
@@ -400,7 +454,7 @@ export class RetroHistoricoService {
            (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
             ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION)
          VALUES (:1, :2, :3, :4, N'ENVIADA', N'MANUAL', :5, :6)`,
-        [asignacionId, meta.formularioId, calificador, calificado, MOTIVO_HISTORICO, ctx.usuarioEmail],
+        [asignacionId, meta.formularioId, autor, destinatario, MOTIVO_HISTORICO, ctx.usuarioEmail],
       )
 
       const id = await siguiente('RETRORESPUESTA_SEQ')
@@ -409,7 +463,7 @@ export class RetroHistoricoService {
            (RETRORESPUESTAID, RETROSESIONID, RETROASIGNACIONID, RETROFORMULARIOID,
             PARTEVALUADORID, PARTEVALUADOID, PUNTAJEESCALA, PUNTAJEMAXIMO, PROMEDIO, FECHAENVIO)
          VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
-        [id, sesionId, asignacionId, meta.formularioId, calificador, calificado, suma, maximo, promedio],
+        [id, sesionId, asignacionId, meta.formularioId, autor, destinatario, suma, maximo, promedio],
       )
       await m.query(
         `UPDATE RETROASIGNACION SET RETRORESPUESTAID = :1 WHERE RETROASIGNACIONID = :2`,
@@ -444,9 +498,9 @@ export class RetroHistoricoService {
 
     await this.controlCambios.registrar({
       tabla: 'RETRORESPUESTA', operacion: 'INSERT', registroId: respuestaId,
-      participacionId: calificado, evaluadorId: meta.evaluadorId,
+      participacionId: destinatario, evaluadorId: meta.evaluadorId,
       usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
-      comentario: `Cargó a mano la retroalimentación ${meta.anio} que hizo la participación ${calificador}`,
+      comentario: `Cargó a mano la retroalimentación ${meta.anio} que hizo la participación ${autor}`,
       valorDespues: { escalas: dto.escalas, textos: dto.textos ?? {}, promedio },
     })
 

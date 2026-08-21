@@ -22,8 +22,9 @@ export interface RetroHistoricaDto {
 const ANIO_EN_LINEA = 2026
 // ORIGEN solo acepta AUTOMATICA o MANUAL, asi que el histórico se marca en el motivo
 const MOTIVO_HISTORICO = 'HISTORICO - transcrita de las hojas del año'
-// los tres que acepta CK_RETROPREG_TIPO
-const TIPOS_PREGUNTA = ['ESCALA', 'TEXTO_POR_PERSONA', 'TEXTO_GENERAL']
+// CK_RETROPREG_TIPO acepta tres, pero TEXTO_GENERAL es del ciclo y se guarda en
+// RETROSUGERENCIA una sola vez: el cargue va persona por persona y no sabria donde ponerlo
+const TIPOS_PREGUNTA = ['ESCALA', 'TEXTO_POR_PERSONA']
 // RETROPREGUNTA.TEXTO es NVARCHAR2(2000) bytes, o sea 1000 caracteres
 const MAX_TEXTO_PREGUNTA = 1000
 
@@ -124,6 +125,22 @@ export class RetroHistoricoService {
     return f[0]?.nombre ?? null
   }
 
+  private async nombres(participaciones: number[]) {
+    const lista = participaciones.filter(Boolean)
+    if (lista.length === 0) return new Map<number, string>()
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT pa.PARTICIPACIONID AS "pid",
+              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre"
+         FROM EVALUADORPARTICIPACION pa
+         JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
+         JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
+        WHERE pa.PARTICIPACIONID IN (${lista.map((_, i) => `:${i + 1}`).join(', ')})`,
+      lista,
+    )
+    return new Map(filas.map(f =>
+      [Number(f.pid), String(f.nombre ?? '').replace(/\s+/g, ' ').trim()]))
+  }
+
   // convocatorias anteriores que ya tienen su hoja registrada, para copiarlas
   async modelos(excluirConvocatoriaId?: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -191,9 +208,15 @@ export class RetroHistoricoService {
       throw new BadRequestException('Escriba al menos una pregunta de la hoja de ese año')
     }
     for (const p of limpias) {
+      if (p.tipo === 'TEXTO_GENERAL') {
+        throw new BadRequestException(
+          'Las preguntas sobre el proceso no se cargan aquí: esta pantalla registra lo de ' +
+          'cada persona. Déjela por fuera de la hoja.',
+        )
+      }
       if (!TIPOS_PREGUNTA.includes(p.tipo)) {
         throw new BadRequestException(
-          `"${p.tipo}" no es un tipo de pregunta válido. Use ${TIPOS_PREGUNTA.join(', ')}.`,
+          `"${p.tipo}" no es un tipo de pregunta válido. Use ${TIPOS_PREGUNTA.join(' o ')}.`,
         )
       }
       if (p.texto.length > MAX_TEXTO_PREGUNTA) {
@@ -481,7 +504,7 @@ export class RetroHistoricoService {
       }
 
       // las de texto guardan la respuesta literal de la hoja: SÍ/NO, Presencial/PAT
-      for (const p of preguntas.filter(x => x.tipo !== 'ESCALA')) {
+      for (const p of preguntas.filter(x => x.tipo === 'TEXTO_POR_PERSONA')) {
         const texto = (dto.textos?.[String(p.numero)] ?? '').trim()
         if (!texto) continue
         const itemId = await siguiente('RETRORESPUESTAITEM_SEQ')
@@ -496,13 +519,23 @@ export class RetroHistoricoService {
       return id
     })
 
-    await this.controlCambios.registrar({
-      tabla: 'RETRORESPUESTA', operacion: 'INSERT', registroId: respuestaId,
-      participacionId: destinatario, evaluadorId: meta.evaluadorId,
-      usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
-      comentario: `Cargó a mano la retroalimentación ${meta.anio} que hizo la participación ${autor}`,
-      valorDespues: { escalas: dto.escalas, textos: dto.textos ?? {}, promedio },
-    })
+    // queda en las dos fichas: en la de quien la hizo, que es desde donde se carga,
+    // y en la de quien la recibió, que es a quien describe
+    const quien = await this.contexto(autor)
+    const nombres = await this.nombres([autor, destinatario])
+    const detalle = `${nombres.get(autor) ?? autor} retroalimentó a ${nombres.get(destinatario) ?? destinatario}`
+    for (const [participacion, evaluador] of [
+      [autor, quien.evaluadorId],
+      [destinatario, meta.evaluadorId],
+    ] as const) {
+      await this.controlCambios.registrar({
+        tabla: 'RETRORESPUESTA', operacion: 'INSERT', registroId: respuestaId,
+        participacionId: participacion, evaluadorId: evaluador,
+        usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
+        comentario: `Cargó a mano la retroalimentación de ${meta.anio}: ${detalle}`,
+        valorDespues: { escalas: dto.escalas, textos: dto.textos ?? {}, promedio },
+      })
+    }
 
     return { respuestaId, promedio, anio: meta.anio, message: 'Retroalimentación registrada' }
   }

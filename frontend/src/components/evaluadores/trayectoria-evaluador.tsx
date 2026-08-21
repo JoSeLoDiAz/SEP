@@ -2167,7 +2167,7 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
   // el instrumento en línea existe desde 2026: lo anterior se transcribe abajo
   if (r.recibidas === 0 && detalle.anio < 2026) {
     return (
-      <Vacio texto={`Sin retroalimentación registrada para ${detalle.anio}.`} />
+      <Vacio texto={`Sin retroalimentación recibida en ${detalle.anio}. Abajo se carga la que esta persona le hizo a sus compañeros.`} />
     )
   }
   if (r.recibidas === 0 && r.asignadas === 0) {
@@ -2179,8 +2179,8 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
           Todavía no se ha generado la matriz de este ciclo
         </p>
         <p className="mx-auto mt-1 max-w-md text-[12px] text-neutral-500">
-          La matriz se arma para todo el ciclo de una vez —define quién evalúa a quién—, así que
-          no se genera desde aquí sino desde la convocatoria.
+          La matriz se arma para todo el ciclo de una vez —define quién retroalimenta a quién—,
+          así que no se genera desde aquí sino desde la convocatoria.
         </p>
         {detalle.convocatoriaId ? (
           <Link
@@ -2223,7 +2223,7 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
       />
       <p className="text-[11px] text-neutral-400 sm:col-span-3">
         El detalle por criterio y los comentarios llegan con el módulo de retroalimentación.
-        Quién calificó no se muestra: el instrumento es anónimo para el evaluado.
+        No se muestra quién escribió cada una: la hoja es anónima para quien la recibe.
       </p>
     </div>
   )

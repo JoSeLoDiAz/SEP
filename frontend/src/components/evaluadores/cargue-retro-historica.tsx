@@ -11,8 +11,7 @@ const PERFILES_GESTION = [1, 2, 15]
 
 const TIPOS: Array<{ id: string; etiqueta: string; ayuda: string }> = [
   { id: 'ESCALA', etiqueta: 'Nota', ayuda: 'se responde con un número de la escala' },
-  { id: 'TEXTO_POR_PERSONA', etiqueta: 'Texto sobre la persona', ayuda: 'por ejemplo SÍ / NO, Presencial / PAT' },
-  { id: 'TEXTO_GENERAL', etiqueta: 'Texto sobre el proceso', ayuda: 'no se guarda por persona sino del ciclo' },
+  { id: 'TEXTO_POR_PERSONA', etiqueta: 'Texto', ayuda: 'por ejemplo SÍ / NO, Presencial / PAT' },
 ]
 
 interface Pregunta {
@@ -88,6 +87,7 @@ export function CargueRetroHistorica({
   async function traer() {
     setCargando(true)
     setError(null)
+    setAviso(null)
     try {
       const [i, c, r] = await Promise.all([
         api.get<Instrumento>(`/retroalimentacion/historico/participaciones/${participacionId}/instrumento`),
@@ -377,7 +377,9 @@ function CargueDeNotas({
   // a quien ya retroalimento no vuelve a la lista, y nadie se retroalimenta a si mismo
   const disponibles = useMemo(() => {
     const usados = new Set(realizadas.map(r => r.destinatarioParticipacionId))
-    return companeros.filter(c => c.participacionId !== participacionId && !usados.has(c.participacionId))
+    const yo = companeros.find(c => c.participacionId === participacionId)?.evaluadorId
+    return companeros.filter(c =>
+      c.participacionId !== participacionId && c.evaluadorId !== yo && !usados.has(c.participacionId))
   }, [companeros, realizadas, participacionId])
 
   const escalaPreguntas = instrumento.preguntas.filter(p => p.tipo === 'ESCALA')
@@ -403,22 +405,36 @@ function CargueDeNotas({
         escalas,
         textos,
       })
+    } catch (err) {
+      setAviso({ tipo: 'error', msg: mensaje(err, 'No se pudo guardar la retroalimentación') })
+      setGuardando(false)
+      return
+    }
+
+    // ya quedó guardada: si el refresco falla, el aviso no puede decir que no se guardó
+    try {
       const r = await api.get<Realizada[]>(
         `/retroalimentacion/historico/participaciones/${participacionId}/realizadas`)
       setRealizadas(r.data)
       setAviso({
         tipo: 'ok',
         msg: seguir
-          ? `Guardada la de ${nombre}. Siga con la siguiente persona.`
-          : `Guardada la de ${nombre}.`,
+          ? `Guardada la retroalimentación a ${nombre}. Siga con la siguiente persona.`
+          : `Guardada la retroalimentación a ${nombre}.`,
       })
-      limpiar()
-      if (!seguir) setFormulario(false)
+    } catch {
+      setAviso({
+        tipo: 'ok',
+        msg: `Guardada la retroalimentación a ${nombre}, pero no se pudo refrescar la lista. Recargue la página.`,
+      })
+    }
+
+    limpiar()
+    setGuardando(false)
+    // recargar el ciclo desmonta este panel: solo al cerrar, para no cortar el encadenado
+    if (!seguir) {
+      setFormulario(false)
       onRecargar()
-    } catch (err) {
-      setAviso({ tipo: 'error', msg: mensaje(err, 'No se pudo registrar') })
-    } finally {
-      setGuardando(false)
     }
   }
 
@@ -465,7 +481,9 @@ function CargueDeNotas({
           </button>
           {faltan > 0 && (
             <span className="text-[11px] text-neutral-500">
-              Quedan {faltan} personas del ciclo por cargar.
+              {faltan === 1
+                ? 'Queda 1 persona del ciclo sin cargar.'
+                : `Quedan ${faltan} personas del ciclo sin cargar.`}
             </span>
           )}
           {instrumento.puedeCambiarPreguntas ? (
@@ -477,7 +495,8 @@ function CargueDeNotas({
             </button>
           ) : (
             <span className="ml-auto text-[11px] text-neutral-400">
-              Las preguntas ya no se cambian: hay {instrumento.cargadasEnElCiclo} cargadas en el ciclo.
+              Las preguntas quedaron fijas: ya hay {instrumento.cargadasEnElCiclo} retroalimentaciones
+              cargadas en esta convocatoria.
             </span>
           )}
         </div>
@@ -586,9 +605,13 @@ function CargueDeNotas({
             >
               Guardar y cerrar
             </button>
-            {!completo && (
+            {!completo ? (
               <span className="text-[11px] text-neutral-500">
                 Falta la persona o alguna de las {escalaPreguntas.length} notas.
+              </span>
+            ) : faltan <= 1 && (
+              <span className="text-[11px] text-neutral-500">
+                Es la última persona del ciclo: guarde y cierre.
               </span>
             )}
           </div>
@@ -597,8 +620,8 @@ function CargueDeNotas({
 
       {faltan === 0 && !formulario && (
         <p className="mt-3 text-[11px] text-neutral-500">
-          Ya quedó cargado todo el equipo de {instrumento.anio} que hay en el banco. Si falta
-          alguien, primero cárguelo como evaluador y vuelva aquí.
+          No queda nadie más del ciclo de {instrumento.anio} a quien cargarle. Si en la hoja
+          aparece alguien que no salió en la lista, primero hay que cargarlo como evaluador.
         </p>
       )}
     </>

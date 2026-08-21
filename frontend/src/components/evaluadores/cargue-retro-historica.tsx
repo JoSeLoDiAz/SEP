@@ -2,7 +2,7 @@
 
 import api from '@/lib/api'
 import { getSepUsuario } from '@/lib/auth'
-import { AlertTriangle, Check, Copy, History, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, Copy, History, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 const PRIMARY = '#00304D'
@@ -36,6 +36,8 @@ interface Instrumento {
   escalaMax: number
   preguntas: Pregunta[]
   faltaRegistrarPreguntas: boolean
+  cargadasEnElCiclo: number
+  puedeCambiarPreguntas: boolean
   modelos: Modelo[]
 }
 interface Companero {
@@ -46,12 +48,12 @@ interface Companero {
   rol: string | null
   area: string | null
 }
-interface Registrada {
+interface Realizada {
   respuestaId: number
-  evaluadorParticipacionId: number
+  destinatarioParticipacionId: number
   promedio: number | null
   fecha: string | null
-  califico: string
+  destinatario: string
   historica: boolean
 }
 
@@ -63,7 +65,7 @@ function atajos(texto: string): string[] {
   return []
 }
 
-// cargue a mano de las retroalimentaciones de los anios anteriores, desde las hojas del GGPC
+// cargue a mano de las retroalimentaciones que esta persona hizo en un año anterior
 export function CargueRetroHistorica({
   participacionId, anio, onRecargar,
 }: {
@@ -78,9 +80,10 @@ export function CargueRetroHistorica({
   const [cargando, setCargando] = useState(false)
   const [instrumento, setInstrumento] = useState<Instrumento | null>(null)
   const [companeros, setCompaneros] = useState<Companero[]>([])
-  const [registradas, setRegistradas] = useState<Registrada[]>([])
+  const [realizadas, setRealizadas] = useState<Realizada[]>([])
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'error'; msg: string } | null>(null)
+  const [rehacer, setRehacer] = useState(false)
 
   async function traer() {
     setCargando(true)
@@ -89,11 +92,12 @@ export function CargueRetroHistorica({
       const [i, c, r] = await Promise.all([
         api.get<Instrumento>(`/retroalimentacion/historico/participaciones/${participacionId}/instrumento`),
         api.get<Companero[]>(`/retroalimentacion/historico/participaciones/${participacionId}/companeros`),
-        api.get<Registrada[]>(`/retroalimentacion/historico/participaciones/${participacionId}/registradas`),
+        api.get<Realizada[]>(`/retroalimentacion/historico/participaciones/${participacionId}/realizadas`),
       ])
       setInstrumento(i.data)
       setCompaneros(c.data)
-      setRegistradas(r.data)
+      setRealizadas(r.data)
+      setRehacer(false)
     } catch (err) {
       setError(mensaje(err, 'No se pudo abrir el cargue del histórico'))
     } finally {
@@ -110,6 +114,8 @@ export function CargueRetroHistorica({
 
   if (!puede) return null
 
+  const registrando = instrumento?.faltaRegistrarPreguntas || rehacer
+
   return (
     <div className="mx-5 mb-5 rounded-xl border border-dashed border-neutral-300 bg-neutral-50/60">
       <button
@@ -118,7 +124,7 @@ export function CargueRetroHistorica({
       >
         <History size={16} className="text-neutral-500" />
         <span className="text-[13px] font-semibold text-neutral-700">
-          Cargar la retroalimentación de {anio}
+          Cargar las retroalimentaciones que hizo en {anio}
         </span>
         <span className="ml-auto text-[11px] text-neutral-500">{abierto ? 'Ocultar' : 'Abrir'}</span>
       </button>
@@ -126,9 +132,9 @@ export function CargueRetroHistorica({
       {abierto && (
         <div className="border-t border-neutral-200 px-4 py-4">
           <p className="text-[12px] text-neutral-600">
-            {anio} nunca se diligenció en el sistema. Aquí se transcribe lo que quedó en la hoja
-            de <span className="font-semibold">{instrumento?.convocatoria ?? 'esa convocatoria'}</span>,
-            indicando en cada caso quién hizo la evaluación.
+            {anio} nunca se diligenció en el sistema. Aquí se transcribe, persona por persona, lo
+            que esta evaluadora o evaluador escribió en la hoja
+            de <span className="font-semibold">{instrumento?.convocatoria ?? 'esa convocatoria'}</span>.
           </p>
 
           {cargando && (
@@ -141,9 +147,11 @@ export function CargueRetroHistorica({
           {aviso && <Nota tipo={aviso.tipo} texto={aviso.msg} />}
 
           {instrumento && !cargando && (
-            instrumento.faltaRegistrarPreguntas ? (
+            registrando ? (
               <RegistroDePreguntas
                 instrumento={instrumento}
+                rehaciendo={rehacer}
+                onCancelar={() => setRehacer(false)}
                 onListo={async msg => {
                   setAviso({ tipo: 'ok', msg })
                   await traer()
@@ -155,9 +163,10 @@ export function CargueRetroHistorica({
                 participacionId={participacionId}
                 instrumento={instrumento}
                 companeros={companeros}
-                registradas={registradas}
-                setRegistradas={setRegistradas}
+                realizadas={realizadas}
+                setRealizadas={setRealizadas}
                 setAviso={setAviso}
+                onRehacerPreguntas={() => { setAviso(null); setRehacer(true) }}
                 onRecargar={onRecargar}
               />
             )
@@ -170,15 +179,19 @@ export function CargueRetroHistorica({
 
 // paso previo: cada convocatoria tuvo su propia hoja, asi que hay que registrarla antes de cargar
 function RegistroDePreguntas({
-  instrumento, onListo, onError,
+  instrumento, rehaciendo, onCancelar, onListo, onError,
 }: {
   instrumento: Instrumento
+  rehaciendo: boolean
+  onCancelar: () => void
   onListo: (msg: string) => Promise<void>
   onError: (msg: string) => void
 }) {
-  const [filas, setFilas] = useState<Array<{ texto: string; tipo: string }>>([
-    { texto: '', tipo: 'ESCALA' },
-  ])
+  const [filas, setFilas] = useState<Array<{ texto: string; tipo: string }>>(
+    rehaciendo && instrumento.preguntas.length > 0
+      ? instrumento.preguntas.map(p => ({ texto: p.texto, tipo: p.tipo }))
+      : [{ texto: '', tipo: 'ESCALA' }],
+  )
   const [guardando, setGuardando] = useState(false)
   const [copiando, setCopiando] = useState(false)
   const [origen, setOrigen] = useState('')
@@ -219,7 +232,10 @@ function RegistroDePreguntas({
     <div className="mt-4">
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
         <p className="flex items-center gap-2 text-[13px] font-semibold text-amber-900">
-          <AlertTriangle size={15} /> Falta registrar las preguntas de {instrumento.anio}
+          <AlertTriangle size={15} />
+          {rehaciendo
+            ? `Corregir las preguntas de ${instrumento.anio}`
+            : `Falta registrar las preguntas de ${instrumento.anio}`}
         </p>
         <p className="mt-1 text-[12px] text-amber-800">
           La hoja cambió de un proceso a otro, así que las preguntas se guardan en cada
@@ -230,7 +246,7 @@ function RegistroDePreguntas({
           <li><span className="font-semibold">1.</span> Abra la hoja de retroalimentación que llenó el equipo ese año.</li>
           <li><span className="font-semibold">2.</span> Copie cada pregunta tal como está escrita, en el mismo orden.</li>
           <li><span className="font-semibold">3.</span> Marque si se respondía con una nota de {instrumento.escalaMin} a {instrumento.escalaMax} o con texto.</li>
-          <li><span className="font-semibold">4.</span> Guarde. Desde ahí ya puede cargar las notas de cada persona.</li>
+          <li><span className="font-semibold">4.</span> Guarde. Desde ahí ya puede cargar las respuestas persona por persona.</li>
         </ol>
       </div>
 
@@ -261,6 +277,9 @@ function RegistroDePreguntas({
             {copiando ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
             Copiar
           </button>
+          <p className="w-full text-[11px] text-amber-700">
+            Revísela antes de guardar: si el proceso usó otra hoja, las preguntas no sirven.
+          </p>
         </div>
       )}
 
@@ -316,6 +335,14 @@ function RegistroDePreguntas({
             {guardando ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
             Guardar las preguntas
           </button>
+          {rehaciendo && (
+            <button
+              onClick={onCancelar}
+              className="rounded-xl border border-neutral-300 px-3 py-2 text-[13px] font-semibold text-neutral-700 transition hover:bg-neutral-50"
+            >
+              Cancelar
+            </button>
+          )}
           {!completo && (
             <span className="text-[11px] text-neutral-500">
               Escriba al menos una pregunta, y que una de ellas sea de nota.
@@ -327,57 +354,66 @@ function RegistroDePreguntas({
   )
 }
 
-// ya con las preguntas registradas: se transcribe lo que puso cada evaluador
+// ya con las preguntas registradas: se transcribe lo que esta persona escribio de cada companero
 function CargueDeNotas({
-  participacionId, instrumento, companeros, registradas, setRegistradas, setAviso, onRecargar,
+  participacionId, instrumento, companeros, realizadas, setRealizadas,
+  setAviso, onRehacerPreguntas, onRecargar,
 }: {
   participacionId: number
   instrumento: Instrumento
   companeros: Companero[]
-  registradas: Registrada[]
-  setRegistradas: (r: Registrada[]) => void
+  realizadas: Realizada[]
+  setRealizadas: (r: Realizada[]) => void
   setAviso: (a: { tipo: 'ok' | 'error'; msg: string } | null) => void
+  onRehacerPreguntas: () => void
   onRecargar: () => void
 }) {
   const [formulario, setFormulario] = useState(false)
-  const [califico, setCalifico] = useState('')
+  const [destinatario, setDestinatario] = useState('')
   const [escalas, setEscalas] = useState<Record<string, number>>({})
   const [textos, setTextos] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
 
-  // quien ya califico no vuelve a la lista, y nadie se califica a si mismo
+  // a quien ya retroalimento no vuelve a la lista, y nadie se retroalimenta a si mismo
   const disponibles = useMemo(() => {
-    const usados = new Set(registradas.map(r => r.evaluadorParticipacionId))
+    const usados = new Set(realizadas.map(r => r.destinatarioParticipacionId))
     return companeros.filter(c => c.participacionId !== participacionId && !usados.has(c.participacionId))
-  }, [companeros, registradas, participacionId])
+  }, [companeros, realizadas, participacionId])
 
   const escalaPreguntas = instrumento.preguntas.filter(p => p.tipo === 'ESCALA')
   const textoPreguntas = instrumento.preguntas.filter(p => p.tipo !== 'ESCALA')
-  const completo = califico !== '' && escalaPreguntas.every(p => escalas[String(p.numero)] != null)
+  const completo = destinatario !== '' && escalaPreguntas.every(p => escalas[String(p.numero)] != null)
 
   function limpiar() {
-    setCalifico('')
+    setDestinatario('')
     setEscalas({})
     setTextos({})
   }
 
-  async function guardar() {
+  // seguir = deja el formulario abierto y en blanco para la siguiente persona
+  async function guardar(seguir: boolean) {
     if (!completo) return
     setGuardando(true)
     setAviso(null)
+    const nombre = disponibles.find(c => c.participacionId === Number(destinatario))?.nombre ?? ''
     try {
       await api.post('/retroalimentacion/historico', {
-        evaluadorParticipacionId: Number(califico),
-        evaluadoParticipacionId: participacionId,
+        evaluadorParticipacionId: participacionId,
+        evaluadoParticipacionId: Number(destinatario),
         escalas,
         textos,
       })
-      const r = await api.get<Registrada[]>(
-        `/retroalimentacion/historico/participaciones/${participacionId}/registradas`)
-      setRegistradas(r.data)
-      setAviso({ tipo: 'ok', msg: 'Retroalimentación registrada' })
+      const r = await api.get<Realizada[]>(
+        `/retroalimentacion/historico/participaciones/${participacionId}/realizadas`)
+      setRealizadas(r.data)
+      setAviso({
+        tipo: 'ok',
+        msg: seguir
+          ? `Guardada la de ${nombre}. Siga con la siguiente persona.`
+          : `Guardada la de ${nombre}.`,
+      })
       limpiar()
-      setFormulario(false)
+      if (!seguir) setFormulario(false)
       onRecargar()
     } catch (err) {
       setAviso({ tipo: 'error', msg: mensaje(err, 'No se pudo registrar') })
@@ -386,46 +422,75 @@ function CargueDeNotas({
     }
   }
 
+  const faltan = disponibles.length
+
   return (
     <>
-      {registradas.length > 0 && (
-        <ul className="mt-4 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
-          {registradas.map(r => (
-            <li key={r.respuestaId} className="flex items-center gap-3 px-3 py-2">
-              <Check size={14} className="shrink-0 text-emerald-600" />
-              <span className="min-w-0 flex-1 truncate text-[12px] text-neutral-700">{r.califico}</span>
-              {r.historica && (
-                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500">
-                  histórico
+      {realizadas.length > 0 && (
+        <>
+          <p className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            Ya cargadas ({realizadas.length})
+          </p>
+          <ul className="mt-1 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
+            {realizadas.map(r => (
+              <li key={r.respuestaId} className="flex items-center gap-3 px-3 py-2">
+                <Check size={14} className="shrink-0 text-emerald-600" />
+                <span className="min-w-0 flex-1 truncate text-[12px] text-neutral-700">
+                  {r.destinatario}
                 </span>
-              )}
-              <span className="text-[12px] font-bold" style={{ color: PRIMARY }}>
-                {r.promedio != null ? `${r.promedio} / ${instrumento.escalaMax}` : '—'}
-              </span>
-            </li>
-          ))}
-        </ul>
+                {r.historica && (
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500">
+                    histórico
+                  </span>
+                )}
+                <span className="text-[12px] font-bold" style={{ color: PRIMARY }}>
+                  {r.promedio != null ? `${r.promedio} / ${instrumento.escalaMax}` : '—'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       {!formulario ? (
-        <button
-          onClick={() => { setFormulario(true); setAviso(null) }}
-          disabled={disponibles.length === 0}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ backgroundColor: INSTITUTIONAL }}
-        >
-          <Plus size={15} /> Registrar quién evaluó
-        </button>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => { setFormulario(true); setAviso(null) }}
+            disabled={faltan === 0}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ backgroundColor: INSTITUTIONAL }}
+          >
+            <Plus size={15} />
+            {realizadas.length === 0 ? 'Cargar la primera' : 'Cargar la de otra persona'}
+          </button>
+          {faltan > 0 && (
+            <span className="text-[11px] text-neutral-500">
+              Quedan {faltan} personas del ciclo por cargar.
+            </span>
+          )}
+          {instrumento.puedeCambiarPreguntas ? (
+            <button
+              onClick={onRehacerPreguntas}
+              className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-semibold text-neutral-600 underline-offset-2 hover:underline"
+            >
+              <Pencil size={13} /> Corregir las preguntas de {instrumento.anio}
+            </button>
+          ) : (
+            <span className="ml-auto text-[11px] text-neutral-400">
+              Las preguntas ya no se cambian: hay {instrumento.cargadasEnElCiclo} cargadas en el ciclo.
+            </span>
+          )}
+        </div>
       ) : (
         <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                Quién hizo esta evaluación
+                ¿A quién le hizo esta retroalimentación?
               </label>
               <select
-                value={califico}
-                onChange={e => setCalifico(e.target.value)}
+                value={destinatario}
+                onChange={e => setDestinatario(e.target.value)}
                 className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
               >
                 <option value="">Seleccione a la persona…</option>
@@ -506,26 +571,33 @@ function CargueDeNotas({
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              onClick={guardar}
-              disabled={!completo || guardando}
+              onClick={() => guardar(true)}
+              disabled={!completo || guardando || faltan <= 1}
               className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               style={{ backgroundColor: INSTITUTIONAL }}
             >
               {guardando ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-              Guardar
+              Guardar y seguir con otra
+            </button>
+            <button
+              onClick={() => guardar(false)}
+              disabled={!completo || guardando}
+              className="rounded-xl border border-neutral-300 px-4 py-2.5 text-[13px] font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Guardar y cerrar
             </button>
             {!completo && (
               <span className="text-[11px] text-neutral-500">
-                Faltan la persona que evaluó o alguna de las {escalaPreguntas.length} notas.
+                Falta la persona o alguna de las {escalaPreguntas.length} notas.
               </span>
             )}
           </div>
         </div>
       )}
 
-      {disponibles.length === 0 && !formulario && (
+      {faltan === 0 && !formulario && (
         <p className="mt-3 text-[11px] text-neutral-500">
-          Ya está registrado todo el equipo de {instrumento.anio} que hay en el banco. Si falta
+          Ya quedó cargado todo el equipo de {instrumento.anio} que hay en el banco. Si falta
           alguien, primero cárguelo como evaluador y vuelva aquí.
         </p>
       )}

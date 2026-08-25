@@ -47,13 +47,15 @@ interface Companero {
   rol: string | null
   area: string | null
 }
-interface Realizada {
+interface Recibida {
   respuestaId: number
-  destinatarioParticipacionId: number
+  autorParticipacionId: number
   promedio: number | null
   fecha: string | null
-  destinatario: string
+  autor: string
   historica: boolean
+  escalas: Record<string, number>
+  textos: Record<string, string>
 }
 
 // sugerencias segun lo que pregunta la hoja: son un atajo, el campo sigue siendo libre
@@ -64,7 +66,7 @@ function atajos(texto: string): string[] {
   return []
 }
 
-// cargue a mano de las retroalimentaciones que esta persona hizo en un año anterior
+// cargue a mano de las retroalimentaciones que esta persona recibió en un año anterior
 export function CargueRetroHistorica({
   participacionId, anio, onRecargar,
 }: {
@@ -79,10 +81,20 @@ export function CargueRetroHistorica({
   const [cargando, setCargando] = useState(false)
   const [instrumento, setInstrumento] = useState<Instrumento | null>(null)
   const [companeros, setCompaneros] = useState<Companero[]>([])
-  const [realizadas, setRealizadas] = useState<Realizada[]>([])
+  const [recibidas, setRecibidas] = useState<Recibida[]>([])
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'error'; msg: string } | null>(null)
   const [rehacer, setRehacer] = useState(false)
+  const [cambiado, setCambiado] = useState(false)
+
+  // el ciclo se recarga al cerrar, no en cada guardado: recargarlo desmonta este panel
+  function alternar() {
+    if (abierto && cambiado) {
+      setCambiado(false)
+      onRecargar()
+    }
+    setAbierto(v => !v)
+  }
 
   async function traer() {
     setCargando(true)
@@ -92,11 +104,11 @@ export function CargueRetroHistorica({
       const [i, c, r] = await Promise.all([
         api.get<Instrumento>(`/retroalimentacion/historico/participaciones/${participacionId}/instrumento`),
         api.get<Companero[]>(`/retroalimentacion/historico/participaciones/${participacionId}/companeros`),
-        api.get<Realizada[]>(`/retroalimentacion/historico/participaciones/${participacionId}/realizadas`),
+        api.get<Recibida[]>(`/retroalimentacion/historico/participaciones/${participacionId}/recibidas`),
       ])
       setInstrumento(i.data)
       setCompaneros(c.data)
-      setRealizadas(r.data)
+      setRecibidas(r.data)
       setRehacer(false)
     } catch (err) {
       setError(mensaje(err, 'No se pudo abrir el cargue del histórico'))
@@ -119,12 +131,12 @@ export function CargueRetroHistorica({
   return (
     <div className="mx-5 mb-5 rounded-xl border border-dashed border-neutral-300 bg-neutral-50/60">
       <button
-        onClick={() => setAbierto(v => !v)}
+        onClick={alternar}
         className="flex w-full items-center gap-2 px-4 py-3 text-left"
       >
         <History size={16} className="text-neutral-500" />
         <span className="text-[13px] font-semibold text-neutral-700">
-          Cargar las retroalimentaciones que hizo en {anio}
+          Retroalimentación que recibió en {anio}
         </span>
         <span className="ml-auto text-[11px] text-neutral-500">{abierto ? 'Ocultar' : 'Abrir'}</span>
       </button>
@@ -132,9 +144,9 @@ export function CargueRetroHistorica({
       {abierto && (
         <div className="border-t border-neutral-200 px-4 py-4">
           <p className="text-[12px] text-neutral-600">
-            {anio} nunca se diligenció en el sistema. Aquí se transcribe, persona por persona, lo
-            que esta evaluadora o evaluador escribió en la hoja
-            de <span className="font-semibold">{instrumento?.convocatoria ?? 'esa convocatoria'}</span>.
+            {anio} nunca se diligenció en el sistema. Aquí se registra la retroalimentación que le
+            hicieron a esta persona en <span className="font-semibold">{instrumento?.convocatoria ?? 'esa convocatoria'}</span>,
+            y quién se la hizo.
           </p>
 
           {cargando && (
@@ -163,11 +175,12 @@ export function CargueRetroHistorica({
                 participacionId={participacionId}
                 instrumento={instrumento}
                 companeros={companeros}
-                realizadas={realizadas}
-                setRealizadas={setRealizadas}
+                recibidas={recibidas}
+                setRecibidas={setRecibidas}
                 setAviso={setAviso}
                 onRehacerPreguntas={() => { setAviso(null); setRehacer(true) }}
-                onRecargar={onRecargar}
+                onCambio={() => setCambiado(true)}
+                recargarTodo={traer}
               />
             )
           )}
@@ -354,42 +367,72 @@ function RegistroDePreguntas({
   )
 }
 
-// ya con las preguntas registradas: se transcribe lo que esta persona escribio de cada companero
+// ya con las preguntas registradas: se transcribe lo que le escribieron a esta persona
 function CargueDeNotas({
-  participacionId, instrumento, companeros, realizadas, setRealizadas,
-  setAviso, onRehacerPreguntas, onRecargar,
+  participacionId, instrumento, companeros, recibidas, setRecibidas,
+  setAviso, onRehacerPreguntas, onCambio, recargarTodo,
 }: {
   participacionId: number
   instrumento: Instrumento
   companeros: Companero[]
-  realizadas: Realizada[]
-  setRealizadas: (r: Realizada[]) => void
+  recibidas: Recibida[]
+  setRecibidas: (r: Recibida[]) => void
   setAviso: (a: { tipo: 'ok' | 'error'; msg: string } | null) => void
   onRehacerPreguntas: () => void
-  onRecargar: () => void
+  onCambio: () => void
+  recargarTodo: () => Promise<void>
 }) {
-  const [formulario, setFormulario] = useState(false)
-  const [destinatario, setDestinatario] = useState('')
+  // null = cerrado, 'nueva' = cargando una, o el id de la que se está corrigiendo
+  const [modo, setModo] = useState<null | 'nueva' | number>(null)
+  const [autor, setAutor] = useState('')
   const [escalas, setEscalas] = useState<Record<string, number>>({})
   const [textos, setTextos] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
+  const [porQuitar, setPorQuitar] = useState<Recibida | null>(null)
 
-  // a quien ya retroalimento no vuelve a la lista, y nadie se retroalimenta a si mismo
+  // quien ya se la hizo no vuelve a la lista, y nadie se retroalimenta a sí mismo
   const disponibles = useMemo(() => {
-    const usados = new Set(realizadas.map(r => r.destinatarioParticipacionId))
+    const usados = new Set(recibidas.map(r => r.autorParticipacionId))
     const yo = companeros.find(c => c.participacionId === participacionId)?.evaluadorId
     return companeros.filter(c =>
       c.participacionId !== participacionId && c.evaluadorId !== yo && !usados.has(c.participacionId))
-  }, [companeros, realizadas, participacionId])
+  }, [companeros, recibidas, participacionId])
 
   const escalaPreguntas = instrumento.preguntas.filter(p => p.tipo === 'ESCALA')
   const textoPreguntas = instrumento.preguntas.filter(p => p.tipo !== 'ESCALA')
-  const completo = destinatario !== '' && escalaPreguntas.every(p => escalas[String(p.numero)] != null)
 
-  function limpiar() {
-    setDestinatario('')
+  const corrigiendo = typeof modo === 'number'
+  const enCurso = corrigiendo ? recibidas.find(r => r.respuestaId === modo) ?? null : null
+  const completo = (corrigiendo || autor !== '')
+    && escalaPreguntas.every(p => escalas[String(p.numero)] != null)
+
+  function cerrar() {
+    setModo(null)
+    setAutor('')
     setEscalas({})
     setTextos({})
+  }
+
+  function abrirNueva() {
+    setAviso(null)
+    setAutor('')
+    setEscalas({})
+    setTextos({})
+    setModo('nueva')
+  }
+
+  function abrirCorreccion(r: Recibida) {
+    setAviso(null)
+    setAutor('')
+    setEscalas({ ...r.escalas })
+    setTextos({ ...r.textos })
+    setModo(r.respuestaId)
+  }
+
+  async function refrescar() {
+    const r = await api.get<Recibida[]>(
+      `/retroalimentacion/historico/participaciones/${participacionId}/recibidas`)
+    setRecibidas(r.data)
   }
 
   // seguir = deja el formulario abierto y en blanco para la siguiente persona
@@ -397,14 +440,21 @@ function CargueDeNotas({
     if (!completo) return
     setGuardando(true)
     setAviso(null)
-    const nombre = disponibles.find(c => c.participacionId === Number(destinatario))?.nombre ?? ''
+    const nombre = corrigiendo
+      ? enCurso?.autor ?? ''
+      : disponibles.find(c => c.participacionId === Number(autor))?.nombre ?? ''
+
     try {
-      await api.post('/retroalimentacion/historico', {
-        evaluadorParticipacionId: participacionId,
-        evaluadoParticipacionId: Number(destinatario),
-        escalas,
-        textos,
-      })
+      if (corrigiendo) {
+        await api.put(`/retroalimentacion/historico/${modo}`, { escalas, textos })
+      } else {
+        await api.post('/retroalimentacion/historico', {
+          evaluadorParticipacionId: Number(autor),
+          evaluadoParticipacionId: participacionId,
+          escalas,
+          textos,
+        })
+      }
     } catch (err) {
       setAviso({ tipo: 'error', msg: mensaje(err, 'No se pudo guardar la retroalimentación') })
       setGuardando(false)
@@ -413,77 +463,140 @@ function CargueDeNotas({
 
     // ya quedó guardada: si el refresco falla, el aviso no puede decir que no se guardó
     try {
-      const r = await api.get<Realizada[]>(
-        `/retroalimentacion/historico/participaciones/${participacionId}/realizadas`)
-      setRealizadas(r.data)
+      await refrescar()
       setAviso({
         tipo: 'ok',
-        msg: seguir
-          ? `Guardada la retroalimentación a ${nombre}. Siga con la siguiente persona.`
-          : `Guardada la retroalimentación a ${nombre}.`,
+        msg: corrigiendo
+          ? `Corregida la que le hizo ${nombre}.`
+          : seguir
+            ? `Guardada la que le hizo ${nombre}. Siga con la siguiente.`
+            : `Guardada la que le hizo ${nombre}.`,
       })
     } catch {
       setAviso({
         tipo: 'ok',
-        msg: `Guardada la retroalimentación a ${nombre}, pero no se pudo refrescar la lista. Recargue la página.`,
+        msg: `Se guardó, pero no se pudo refrescar la lista. Recargue la página.`,
       })
     }
 
-    limpiar()
     setGuardando(false)
-    // recargar el ciclo desmonta este panel: solo al cerrar, para no cortar el encadenado
-    if (!seguir) {
-      setFormulario(false)
-      onRecargar()
+    onCambio()
+    if (seguir && !corrigiendo) {
+      setAutor('')
+      setEscalas({})
+      setTextos({})
+    } else {
+      cerrar()
     }
   }
 
-  const faltan = disponibles.length
+  async function quitar(r: Recibida) {
+    setGuardando(true)
+    setAviso(null)
+    try {
+      await api.delete(`/retroalimentacion/historico/${r.respuestaId}`)
+      if (modo === r.respuestaId) cerrar()
+      // se recarga todo: al quedar el ciclo sin cargas, las preguntas se vuelven a poder cambiar
+      await recargarTodo()
+      setAviso({ tipo: 'ok', msg: `Se quitó la que le hizo ${r.autor}.` })
+      onCambio()
+    } catch (err) {
+      setAviso({ tipo: 'error', msg: mensaje(err, 'No se pudo quitar la retroalimentación') })
+    } finally {
+      setGuardando(false)
+      setPorQuitar(null)
+    }
+  }
 
   return (
     <>
-      {realizadas.length > 0 && (
+      {recibidas.length > 0 && (
         <>
           <p className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-            Ya cargadas ({realizadas.length})
+            Ya cargadas ({recibidas.length})
           </p>
           <ul className="mt-1 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
-            {realizadas.map(r => (
-              <li key={r.respuestaId} className="flex items-center gap-3 px-3 py-2">
+            {recibidas.map(r => (
+              <li key={r.respuestaId} className="flex items-center gap-2 px-3 py-2">
                 <Check size={14} className="shrink-0 text-emerald-600" />
                 <span className="min-w-0 flex-1 truncate text-[12px] text-neutral-700">
-                  {r.destinatario}
+                  {r.autor}
                 </span>
-                {r.historica && (
-                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500">
-                    histórico
-                  </span>
-                )}
                 <span className="text-[12px] font-bold" style={{ color: PRIMARY }}>
                   {r.promedio != null ? `${r.promedio} / ${instrumento.escalaMax}` : '—'}
                 </span>
+                {r.historica ? (
+                  <>
+                    <button
+                      onClick={() => abrirCorreccion(r)}
+                      className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                      aria-label={`Corregir la que le hizo ${r.autor}`}
+                      title="Corregir"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => setPorQuitar(r)}
+                      className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Quitar la que le hizo ${r.autor}`}
+                      title="Quitar"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </>
+                ) : (
+                  <span
+                    className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500"
+                    title="La diligenció la persona en el sistema, no se corrige a mano"
+                  >
+                    del sistema
+                  </span>
+                )}
               </li>
             ))}
           </ul>
         </>
       )}
 
-      {!formulario ? (
+      {porQuitar && (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-[12px] text-red-900">
+            ¿Quitar la retroalimentación que <span className="font-semibold">{porQuitar.autor}</span> le
+            hizo? Se borra con sus respuestas y no se puede deshacer.
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => quitar(porQuitar)}
+              disabled={guardando}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
+            >
+              {guardando ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Sí, quitarla
+            </button>
+            <button
+              onClick={() => setPorQuitar(null)}
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-neutral-600 transition hover:bg-neutral-100"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {modo === null ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
-            onClick={() => { setFormulario(true); setAviso(null) }}
-            disabled={faltan === 0}
+            onClick={abrirNueva}
+            disabled={disponibles.length === 0}
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ backgroundColor: INSTITUTIONAL }}
           >
             <Plus size={15} />
-            {realizadas.length === 0 ? 'Cargar la primera' : 'Cargar la de otra persona'}
+            {recibidas.length === 0 ? 'Cargar la primera' : 'Cargar la de otra persona'}
           </button>
-          {faltan > 0 && (
+          {disponibles.length === 0 && (
             <span className="text-[11px] text-neutral-500">
-              {faltan === 1
-                ? 'Queda 1 persona del ciclo sin cargar.'
-                : `Quedan ${faltan} personas del ciclo sin cargar.`}
+              Ya están registrados todos los del ciclo que hay en el banco.
             </span>
           )}
           {instrumento.puedeCambiarPreguntas ? (
@@ -505,23 +618,27 @@ function CargueDeNotas({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                ¿A quién le hizo esta retroalimentación?
+                {corrigiendo ? 'Se la hizo' : '¿Quién le hizo esta retroalimentación?'}
               </label>
-              <select
-                value={destinatario}
-                onChange={e => setDestinatario(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
-              >
-                <option value="">Seleccione a la persona…</option>
-                {disponibles.map(c => (
-                  <option key={c.participacionId} value={c.participacionId}>
-                    {c.nombre}{c.rol ? ` · ${c.rol}` : ''}
-                  </option>
-                ))}
-              </select>
+              {corrigiendo ? (
+                <p className="text-sm font-semibold text-neutral-800">{enCurso?.autor}</p>
+              ) : (
+                <select
+                  value={autor}
+                  onChange={e => setAutor(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
+                >
+                  <option value="">Seleccione a la persona…</option>
+                  {disponibles.map(c => (
+                    <option key={c.participacionId} value={c.participacionId}>
+                      {c.nombre}{c.rol ? ` · ${c.rol}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <button
-              onClick={() => { setFormulario(false); limpiar() }}
+              onClick={cerrar}
               className="mt-5 rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600"
               aria-label="Cancelar"
             >
@@ -589,40 +706,49 @@ function CargueDeNotas({
           </ul>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => guardar(true)}
-              disabled={!completo || guardando || faltan <= 1}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ backgroundColor: INSTITUTIONAL }}
-            >
-              {guardando ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-              Guardar y seguir con otra
-            </button>
-            <button
-              onClick={() => guardar(false)}
-              disabled={!completo || guardando}
-              className="rounded-xl border border-neutral-300 px-4 py-2.5 text-[13px] font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Guardar y cerrar
-            </button>
+            {corrigiendo ? (
+              <button
+                onClick={() => guardar(false)}
+                disabled={!completo || guardando}
+                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ backgroundColor: INSTITUTIONAL }}
+              >
+                {guardando ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                Guardar la corrección
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => guardar(true)}
+                  disabled={!completo || guardando || disponibles.length <= 1}
+                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ backgroundColor: INSTITUTIONAL }}
+                >
+                  {guardando ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                  Guardar y seguir con otra
+                </button>
+                <button
+                  onClick={() => guardar(false)}
+                  disabled={!completo || guardando}
+                  className="rounded-xl border border-neutral-300 px-4 py-2.5 text-sm font-bold text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Guardar y cerrar
+                </button>
+              </>
+            )}
             {!completo ? (
               <span className="text-[11px] text-neutral-500">
-                Falta la persona o alguna de las {escalaPreguntas.length} notas.
+                {corrigiendo
+                  ? `Falta alguna de las ${escalaPreguntas.length} notas.`
+                  : `Falta la persona o alguna de las ${escalaPreguntas.length} notas.`}
               </span>
-            ) : faltan <= 1 && (
+            ) : !corrigiendo && disponibles.length <= 1 && (
               <span className="text-[11px] text-neutral-500">
-                Es la última persona del ciclo: guarde y cierre.
+                Es la última del ciclo: guarde y cierre.
               </span>
             )}
           </div>
         </div>
-      )}
-
-      {faltan === 0 && !formulario && (
-        <p className="mt-3 text-[11px] text-neutral-500">
-          No queda nadie más del ciclo de {instrumento.anio} a quien cargarle. Si en la hoja
-          aparece alguien que no salió en la lista, primero hay que cargarlo como evaluador.
-        </p>
       )}
     </>
   )

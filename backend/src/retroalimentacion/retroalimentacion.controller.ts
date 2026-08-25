@@ -218,11 +218,29 @@ export class RetroalimentacionController {
     return this.historico.companeros(pid)
   }
 
-  @Get('historico/participaciones/:pid/realizadas')
-  @ApiOperation({ summary: 'Las que esa persona ya hizo, para no repetir filas' })
-  histRealizadas(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+  @Get('historico/participaciones/:pid/recibidas')
+  @ApiOperation({ summary: 'Las que esa persona recibió, con quién se la hizo y las respuestas' })
+  histRecibidas(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
     this.exigirGestion(user)
-    return this.historico.realizadas(pid)
+    return this.historico.recibidas(pid)
+  }
+
+  @Put('historico/:rid')
+  @ApiOperation({ summary: 'Corrige una retroalimentación cargada a mano' })
+  histEditar(
+    @CurrentUser() user: JwtUser,
+    @Param('rid', ParseIntPipe) rid: number,
+    @Body() body: { escalas: Record<string, number>; textos?: Record<string, string> },
+  ) {
+    this.exigirGestion(user)
+    return this.historico.editar(rid, body, this.ctx(user))
+  }
+
+  @Delete('historico/:rid')
+  @ApiOperation({ summary: 'Quita una retroalimentación cargada por equivocación' })
+  histEliminar(@CurrentUser() user: JwtUser, @Param('rid', ParseIntPipe) rid: number) {
+    this.exigirGestion(user)
+    return this.historico.eliminar(rid, this.ctx(user))
   }
 
   @Post('historico')

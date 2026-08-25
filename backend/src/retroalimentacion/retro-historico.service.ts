@@ -363,32 +363,57 @@ export class RetroHistoricoService {
     }))
   }
 
-  // las que esa persona ya hizo, para que el equipo no repita filas
-  async realizadas(participacionId: number) {
+  // las que esta persona RECIBIO, con quien se la hizo y las respuestas, para poder corregirlas
+  async recibidas(participacionId: number) {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT r.RETRORESPUESTAID AS "respuestaId",
-              r.PARTEVALUADOID   AS "destinatarioParticipacionId",
+              r.PARTEVALUADORID  AS "autorParticipacionId",
               r.PROMEDIO         AS "promedio",
               r.FECHAENVIO       AS "fecha",
               a.MOTIVOREGLA      AS "motivo",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "destinatario"
+              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "autor"
          FROM RETRORESPUESTA r
          JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
-         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADOID
+         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADORID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
-        WHERE r.PARTEVALUADORID = :1
+        WHERE r.PARTEVALUADOID = :1
         ORDER BY r.FECHAENVIO DESC`,
       [participacionId],
     )
-    return filas.map(f => ({
-      respuestaId: Number(f.respuestaId),
-      destinatarioParticipacionId: Number(f.destinatarioParticipacionId),
-      promedio: f.promedio == null ? null : Number(f.promedio),
-      fecha: f.fecha ? new Date(f.fecha as string).toISOString() : null,
-      destinatario: String(f.destinatario ?? '').replace(/\s+/g, ' ').trim(),
-      historica: String(f.motivo ?? '').startsWith('HISTORICO'),
-    }))
+    if (filas.length === 0) return []
+
+    // las respuestas de todas, de una vez: la pantalla las necesita para editar
+    const ids = filas.map(f => Number(f.respuestaId))
+    const items: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT RETRORESPUESTAID AS "respuestaId", PREGUNTANUMERO AS "numero",
+              CALIFICACION AS "nota", COMENTARIO AS "texto"
+         FROM RETRORESPUESTAITEM
+        WHERE RETRORESPUESTAID IN (${ids.map((_, i) => `:${i + 1}`).join(', ')})`,
+      ids,
+    )
+
+    return filas.map(f => {
+      const id = Number(f.respuestaId)
+      const mios = items.filter(i => Number(i.respuestaId) === id)
+      const escalas: Record<string, number> = {}
+      const textos: Record<string, string> = {}
+      for (const i of mios) {
+        const numero = String(i.numero)
+        if (i.nota != null) escalas[numero] = Number(i.nota)
+        else if (i.texto != null) textos[numero] = String(i.texto)
+      }
+      return {
+        respuestaId: id,
+        autorParticipacionId: Number(f.autorParticipacionId),
+        promedio: f.promedio == null ? null : Number(f.promedio),
+        fecha: f.fecha ? new Date(f.fecha as string).toISOString() : null,
+        autor: String(f.autor ?? '').replace(/\s+/g, ' ').trim(),
+        historica: String(f.motivo ?? '').startsWith('HISTORICO'),
+        escalas,
+        textos,
+      }
+    })
   }
 
   async registrar(dto: RetroHistoricaDto, ctx: CtxUsuario) {
@@ -538,5 +563,150 @@ export class RetroHistoricoService {
     }
 
     return { respuestaId, promedio, anio: meta.anio, message: 'Retroalimentación registrada' }
+  }
+
+  // solo las cargadas a mano: las que la gente diligenció en el sistema no se tocan
+  private async cargaHistorica(respuestaId: number) {
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT r.RETRORESPUESTAID  AS "respuestaId",
+              r.RETROSESIONID     AS "sesionId",
+              r.RETROASIGNACIONID AS "asignacionId",
+              r.RETROFORMULARIOID AS "formularioId",
+              r.PARTEVALUADORID   AS "autor",
+              r.PARTEVALUADOID    AS "destinatario",
+              r.PROMEDIO          AS "promedio",
+              a.MOTIVOREGLA       AS "motivo",
+              pa.ANIO             AS "anio",
+              pa.EVALUADORID      AS "evaluadorId",
+              f.ESCALAMIN         AS "escalaMin",
+              f.ESCALAMAX         AS "escalaMax"
+         FROM RETRORESPUESTA r
+         JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
+         JOIN RETROFORMULARIO f ON f.RETROFORMULARIOID = r.RETROFORMULARIOID
+         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADOID
+        WHERE r.RETRORESPUESTAID = :1`,
+      [respuestaId],
+    )
+    const f = filas[0]
+    if (!f) throw new NotFoundException('Esa retroalimentación no existe')
+    if (!String(f.motivo ?? '').startsWith('HISTORICO')) {
+      throw new BadRequestException(
+        'Esa retroalimentación la diligenció la persona en el sistema, no se carga ni se corrige a mano.',
+      )
+    }
+    return {
+      respuestaId: Number(f.respuestaId),
+      sesionId: Number(f.sesionId),
+      asignacionId: Number(f.asignacionId),
+      formularioId: Number(f.formularioId),
+      autor: Number(f.autor),
+      destinatario: Number(f.destinatario),
+      promedio: f.promedio == null ? null : Number(f.promedio),
+      anio: Number(f.anio),
+      evaluadorId: Number(f.evaluadorId),
+      escalaMin: Number(f.escalaMin ?? 1),
+      escalaMax: Number(f.escalaMax ?? 5),
+    }
+  }
+
+  // corregir lo que se transcribió mal de la hoja
+  async editar(
+    respuestaId: number,
+    dto: { escalas: Record<string, number>; textos?: Record<string, string> },
+    ctx: CtxUsuario,
+  ) {
+    const carga = await this.cargaHistorica(respuestaId)
+    const preguntas = await this.preguntas(carga.formularioId)
+    const escalas = preguntas.filter(p => p.tipo === 'ESCALA')
+
+    for (const p of escalas) {
+      const val = Number(dto.escalas?.[String(p.numero)])
+      if (!Number.isInteger(val) || val < carga.escalaMin || val > carga.escalaMax) {
+        throw new BadRequestException(
+          `La pregunta ${p.numero} debe ser un número entero entre ${carga.escalaMin} y ${carga.escalaMax}.`,
+        )
+      }
+    }
+
+    const suma = escalas.reduce((t, p) => t + Number(dto.escalas[String(p.numero)]), 0)
+    const maximo = escalas.length * carga.escalaMax
+    const promedio = Math.round((suma / escalas.length) * 100) / 100
+
+    await this.dataSource.transaction(async m => {
+      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = :1`, [respuestaId])
+
+      for (const p of escalas) {
+        const seq: Array<{ NEXTVAL: number }> = await m.query(
+          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+        await m.query(
+          `INSERT INTO RETRORESPUESTAITEM
+             (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, CALIFICACION)
+           VALUES (:1, :2, :3, :4, :5)`,
+          [Number(seq[0].NEXTVAL), respuestaId, p.preguntaId, p.numero,
+           Number(dto.escalas[String(p.numero)])],
+        )
+      }
+
+      for (const p of preguntas.filter(x => x.tipo === 'TEXTO_POR_PERSONA')) {
+        const texto = (dto.textos?.[String(p.numero)] ?? '').trim()
+        if (!texto) continue
+        const seq: Array<{ NEXTVAL: number }> = await m.query(
+          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+        await m.query(
+          `INSERT INTO RETRORESPUESTAITEM
+             (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, COMENTARIO)
+           VALUES (:1, :2, :3, :4, :5)`,
+          [Number(seq[0].NEXTVAL), respuestaId, p.preguntaId, p.numero, texto.slice(0, 2000)],
+        )
+      }
+
+      await m.query(
+        `UPDATE RETRORESPUESTA SET PUNTAJEESCALA = :1, PUNTAJEMAXIMO = :2, PROMEDIO = :3
+          WHERE RETRORESPUESTAID = :4`,
+        [suma, maximo, promedio, respuestaId],
+      )
+    })
+
+    const nombres = await this.nombres([carga.autor, carga.destinatario])
+    const detalle = `${nombres.get(carga.autor) ?? carga.autor} a ${nombres.get(carga.destinatario) ?? carga.destinatario}`
+    await this.controlCambios.registrar({
+      tabla: 'RETRORESPUESTA', operacion: 'UPDATE', registroId: respuestaId,
+      participacionId: carga.destinatario, evaluadorId: carga.evaluadorId,
+      usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
+      comentario: `Corrigió la retroalimentación de ${carga.anio}: ${detalle}`,
+      valorAntes: { promedio: carga.promedio },
+      valorDespues: { escalas: dto.escalas, textos: dto.textos ?? {}, promedio },
+    })
+
+    return { respuestaId, promedio, message: 'Retroalimentación corregida' }
+  }
+
+  // quitar una que se cargó por equivocación, con su sesión y su asignación
+  async eliminar(respuestaId: number, ctx: CtxUsuario) {
+    const carga = await this.cargaHistorica(respuestaId)
+    const nombres = await this.nombres([carga.autor, carga.destinatario])
+    const detalle = `${nombres.get(carga.autor) ?? carga.autor} a ${nombres.get(carga.destinatario) ?? carga.destinatario}`
+
+    await this.dataSource.transaction(async m => {
+      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = :1`, [respuestaId])
+      // primero se suelta la referencia: la asignación apunta a la respuesta
+      await m.query(
+        `UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL WHERE RETROASIGNACIONID = :1`,
+        [carga.asignacionId],
+      )
+      await m.query(`DELETE FROM RETRORESPUESTA WHERE RETRORESPUESTAID = :1`, [respuestaId])
+      await m.query(`DELETE FROM RETROASIGNACION WHERE RETROASIGNACIONID = :1`, [carga.asignacionId])
+      await m.query(`DELETE FROM RETROSESION WHERE RETROSESIONID = :1`, [carga.sesionId])
+    })
+
+    await this.controlCambios.registrar({
+      tabla: 'RETRORESPUESTA', operacion: 'DELETE', registroId: respuestaId,
+      participacionId: carga.destinatario, evaluadorId: carga.evaluadorId,
+      usuarioEmail: ctx.usuarioEmail, usuarioPerfilId: ctx.usuarioPerfilId,
+      comentario: `Quitó la retroalimentación de ${carga.anio}: ${detalle}`,
+      valorAntes: { promedio: carga.promedio },
+    })
+
+    return { respuestaId, message: 'Retroalimentación quitada' }
   }
 }

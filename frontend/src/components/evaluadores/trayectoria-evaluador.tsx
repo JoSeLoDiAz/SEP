@@ -2167,7 +2167,7 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
   // el instrumento en línea existe desde 2026: lo anterior se transcribe abajo
   if (r.recibidas === 0 && detalle.anio < 2026) {
     return (
-      <Vacio texto={`Sin retroalimentación recibida en ${detalle.anio}. Abajo se carga la que esta persona le hizo a sus compañeros.`} />
+      <Vacio texto={`Sin retroalimentación registrada en ${detalle.anio}. Abajo se puede cargar la de la hoja de ese año.`} />
     )
   }
   if (r.recibidas === 0 && r.asignadas === 0) {

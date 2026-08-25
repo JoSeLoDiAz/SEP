@@ -345,7 +345,7 @@ export class TrayectoriaService {
       },
       {
         codigo: 'RETROALIMENTO',
-        nombre: 'Retroalimentación diligenciada',
+        nombre: 'Retroalimentación',
         // sin asignaciones no hay nada que diligenciar
         cumplido: n(c?.retroAsignadas) > 0 && n(c?.retroPendientes) === 0,
         detalle: n(c?.retroAsignadas) > 0

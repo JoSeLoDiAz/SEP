@@ -17,7 +17,7 @@ import {
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { fmtFecha, fmtMesAnio } from '@/lib/format-date'
+import { fmtFecha, fmtMesAnio, fmtSoloDia } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -2522,7 +2522,7 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
                       </span>
                     )}
                     <span className="text-[11px] text-neutral-500">
-                      {fmtFecha(d.fechaCargue)}
+                      {fmtSoloDia(d.fechaCargue)}
                     </span>
                   </div>
                   <p className="text-sm font-semibold text-neutral-800 mt-1 truncate">

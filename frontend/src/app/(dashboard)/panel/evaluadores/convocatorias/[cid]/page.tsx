@@ -13,7 +13,7 @@ import {
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { fmtFecha } from '@/lib/format-date'
+import { fmtFecha, fmtSoloDia } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -781,7 +781,7 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
                     </span>
                     <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
                       <CalendarDays size={11} />
-                      {fmtFecha(d.fechaCargue)}
+                      {fmtSoloDia(d.fechaCargue)}
                     </span>
                   </div>
                   <p className="text-sm font-semibold text-neutral-800 mt-1 truncate">

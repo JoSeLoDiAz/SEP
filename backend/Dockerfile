@@ -10,6 +10,8 @@ WORKDIR /app/backend
 RUN pnpm run build
 
 FROM node:22-alpine
+# sin tzdata, alpine ignora TZ y las fechas de Oracle se leen como UTC
+RUN apk add --no-cache tzdata
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./

@@ -3,6 +3,7 @@
 import { useFotoEvaluador } from '@/lib/use-foto-evaluador'
 import { CreditCard, FolderKanban, ImageOff, Layers, MapPin, ShieldX, Star } from 'lucide-react'
 import Link from 'next/link'
+import { aTitleCase } from '@/lib/title-case'
 
 const PRIMARY = '#00304D'
 
@@ -58,8 +59,9 @@ interface Alerta {
 }
 
 export function TarjetaEvaluador({ item }: { item: EvaluadorItem }) {
+  // por si un cargue masivo mete el nombre en mayúscula: la vista no depende del dato
   const nombreCompleto = [item.nombres, item.primerApellido, item.segundoApellido]
-    .filter(Boolean).join(' ').trim()
+    .map(aTitleCase).filter(Boolean).join(' ').trim()
   const inicial = (item.nombres?.[0] ?? '?').toUpperCase()
   const fotoSrc = useFotoEvaluador(item.evaluadorId, item.tieneFoto)
 

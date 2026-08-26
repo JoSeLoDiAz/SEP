@@ -53,3 +53,14 @@ export function fmtMesAnio(d: string | Date | null | undefined): string {
   if (Number.isNaN(f.getTime())) return '—'
   return f.toLocaleDateString('es-CO', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
+
+// Solo el día de un TIMESTAMP (cargues, registros): sí lleva hora, así que
+// se convierte a Bogotá. Distinto de fmtFecha, que es para fechas de calendario.
+export function fmtSoloDia(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const f = parseBackendDate(d)
+  if (Number.isNaN(f.getTime())) return '—'
+  return f.toLocaleDateString('es-CO', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: BOGOTA_TZ,
+  })
+}

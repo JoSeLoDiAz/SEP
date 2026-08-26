@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fmtFecha } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -1069,7 +1070,7 @@ function BloqueAutorizacion({
                 {[a.aprobadorCargo, a.aprobadorEmail].filter(Boolean).join(' · ')}
               </p>
               <p className="mt-0.5 text-[11px] text-neutral-500">
-                Autorizó el {new Date(a.fechaAprobacion).toLocaleDateString('es-CO')}
+                Autorizó el {fmtFecha(a.fechaAprobacion)}
               </p>
               {a.observaciones && (
                 <p className="mt-1 text-[11px] text-neutral-500">{a.observaciones}</p>

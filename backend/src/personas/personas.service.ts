@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { DataSource } from 'typeorm'
+import { fechaSolo } from '../common/fecha-solo'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const oracledb = require('oracledb') as { DB_TYPE_BLOB: number }
@@ -335,8 +336,8 @@ export class PersonasService {
       [
         Number(nid), personaId, Number(dto.tipoExperienciaId),
         dto.descripcion.trim(),
-        new Date(dto.fechaInicio),
-        new Date(dto.fechaFin),
+        fechaSolo(dto.fechaInicio),
+        fechaSolo(dto.fechaFin),
         dto.proyectoId ? Number(dto.proyectoId) : null,
       ],
     )
@@ -388,10 +389,10 @@ export class PersonasService {
       sets.push(`PERSONAEXPERIENCIADESCRIPCION = :${i++}`); params.push(dto.descripcion.trim())
     }
     if (dto.fechaInicio !== undefined) {
-      sets.push(`PERSONAEXPERIENCIAFECHAINICIO = :${i++}`); params.push(new Date(dto.fechaInicio))
+      sets.push(`PERSONAEXPERIENCIAFECHAINICIO = :${i++}`); params.push(fechaSolo(dto.fechaInicio))
     }
     if (dto.fechaFin !== undefined) {
-      sets.push(`PERSONAEXPERIENCIAFECHAFIN = :${i++}`); params.push(new Date(dto.fechaFin))
+      sets.push(`PERSONAEXPERIENCIAFECHAFIN = :${i++}`); params.push(fechaSolo(dto.fechaFin))
     }
     // al editar un ítem heredado, este proyecto lo toma y vuelve a pendiente de revisión
     if (heredada && dto.proyectoId) {
@@ -466,17 +467,18 @@ export class PersonasService {
     const hoy = new Date()
     hoy.setHours(0, 0, 0, 0)
     if (dto.fechaInicio !== undefined && dto.fechaInicio !== null) {
-      const fi = new Date(dto.fechaInicio)
-      if (Number.isNaN(fi.getTime())) throw new BadRequestException('Fecha de inicio inválida.')
+      const fi = fechaSolo(dto.fechaInicio)
+      if (!fi || Number.isNaN(fi.getTime())) throw new BadRequestException('Fecha de inicio inválida.')
       if (fi >= hoy) throw new BadRequestException('La fecha de inicio no puede ser hoy ni en el futuro.')
     }
     if (dto.fechaFin !== undefined && dto.fechaFin !== null) {
-      const ff = new Date(dto.fechaFin)
-      if (Number.isNaN(ff.getTime())) throw new BadRequestException('Fecha de finalización inválida.')
+      const ff = fechaSolo(dto.fechaFin)
+      if (!ff || Number.isNaN(ff.getTime())) throw new BadRequestException('Fecha de finalización inválida.')
       if (ff > hoy) throw new BadRequestException('La fecha de finalización no puede ser superior a hoy.')
     }
     if (dto.fechaInicio !== undefined && dto.fechaFin !== undefined && dto.fechaInicio && dto.fechaFin) {
-      if (new Date(dto.fechaFin) < new Date(dto.fechaInicio)) {
+      const desde = fechaSolo(dto.fechaInicio), hasta = fechaSolo(dto.fechaFin)
+      if (desde && hasta && hasta < desde) {
         throw new BadRequestException('La fecha de finalización no puede ser menor a la inicial.')
       }
     }
@@ -551,7 +553,7 @@ export class PersonasService {
       [
         Number(nid), personaId, Number(dto.tipoTituloId),
         dto.descripcion.trim(),
-        new Date(dto.fechaGraduacion),
+        fechaSolo(dto.fechaGraduacion),
         dto.proyectoId ? Number(dto.proyectoId) : null,
       ],
     )
@@ -602,7 +604,7 @@ export class PersonasService {
       sets.push(`PERSONATITULOSDESCRIPCION = :${i++}`); params.push(dto.descripcion.trim())
     }
     if (dto.fechaGraduacion !== undefined) {
-      sets.push(`PERSONATITULOFECHAGRADUACION = :${i++}`); params.push(new Date(dto.fechaGraduacion))
+      sets.push(`PERSONATITULOFECHAGRADUACION = :${i++}`); params.push(fechaSolo(dto.fechaGraduacion))
     }
     if (heredado && dto.proyectoId) {
       sets.push(`PERSONATITULOSPROYECTO = :${i++}`); params.push(Number(dto.proyectoId))
@@ -673,8 +675,8 @@ export class PersonasService {
       if (!dto.fechaGraduacion)                     throw new BadRequestException('Debe seleccionar la fecha de graduación.')
     }
     if (dto.fechaGraduacion !== undefined && dto.fechaGraduacion !== null) {
-      const fg = new Date(dto.fechaGraduacion)
-      if (Number.isNaN(fg.getTime())) throw new BadRequestException('Fecha de graduación inválida.')
+      const fg = fechaSolo(dto.fechaGraduacion)
+      if (!fg || Number.isNaN(fg.getTime())) throw new BadRequestException('Fecha de graduación inválida.')
       const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
       if (fg > hoy) throw new BadRequestException('La fecha de graduación no puede ser superior a hoy.')
     }

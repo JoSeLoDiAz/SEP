@@ -484,32 +484,46 @@ export class CicloService {
     }
 
     // sin convocatoria que acote, buscar en todo el histórico con dos letras no sirve
-    if (!convocatoriaSepId && texto.length < 3) {
-      return { convocatoria: null, motivo: 'Escriba al menos 3 caracteres.', items: [] }
+    if (!convocatoriaSepId && texto.length < 3 && !/^\d+$/.test(texto)) {
+      return { convocatoria: null, motivo: 'Escriba al menos 3 caracteres, o el número del proyecto.', items: [] }
     }
 
     const like = `%${texto.toUpperCase()}%`
 
+    // el equipo anota los proyectos por su número, así que buscar por id tiene que servir
+    const soloDigitos = /^\d+$/.test(texto)
+    const comoNumero = soloDigitos ? Number(texto) : null
+
     // cada rama arma sus binds: la convocatoria cambia el número de parámetros
-    const armar = (cols: { conv: string; nombre: string; social: string; nit: string }) => {
+    const armar = (cols: { conv: string; id: string; nombre: string; social: string; nit: string }) => {
       const params: unknown[] = []
       const bind = (v: unknown) => { params.push(v); return `:${params.length}` }
       const cond: string[] = []
       if (convocatoriaSepId != null) cond.push(`${cols.conv} = ${bind(convocatoriaSepId)}`)
       if (texto) {
-        cond.push(`(UPPER(${cols.nombre}) LIKE ${bind(like)}
-                OR UPPER(${cols.social}) LIKE ${bind(like)}
-                OR TRIM(${cols.nit}) LIKE ${bind(like)})`)
+        const partes = [
+          `UPPER(${cols.nombre}) LIKE ${bind(like)}`,
+          `UPPER(${cols.social}) LIKE ${bind(like)}`,
+          `TRIM(${cols.nit}) LIKE ${bind(like)}`,
+        ]
+        if (soloDigitos) {
+          // el = usa el índice; el LIKE deja buscar mientras se escribe, con el número a medias
+          if (comoNumero != null && Number.isSafeInteger(comoNumero)) {
+            partes.push(`${cols.id} = ${bind(comoNumero)}`)
+          }
+          partes.push(`TO_CHAR(${cols.id}) LIKE ${bind(`%${texto}%`)}`)
+        }
+        cond.push(`(${partes.join(' OR ')})`)
       }
       return { where: cond.length ? `WHERE ${cond.join(' AND ')}` : '', params }
     }
 
     const eje = armar({
-      conv: 'p.CONVOCATORIAID', nombre: 'p.PROYECTONOMBRE',
+      conv: 'p.CONVOCATORIAID', id: 'p.PROYECTOID', nombre: 'p.PROYECTONOMBRE',
       social: 'e.EMPRESARAZONSOCIAL', nit: 'e.EMPRESAIDENTIFICACION',
     })
     const form = armar({
-      conv: 'g.CONVOCATORIAID', nombre: 'g.NOMBREPROYECTO',
+      conv: 'g.CONVOCATORIAID', id: 'g.GUARDADOID', nombre: 'g.NOMBREPROYECTO',
       social: 'g.RAZONSOCIAL', nit: 'g.NIT',
     })
 
@@ -563,7 +577,8 @@ export class CicloService {
         : null,
       motivo: items.length === 0
         ? (convocatoriaSepId != null
-            ? `La convocatoria "${convocatoriaNombre}" no tiene proyectos que coincidan.`
+            ? `La convocatoria "${convocatoriaNombre}" no tiene proyectos que coincidan. ` +
+              'Puede buscar por número, por nombre del proyecto, por la empresa o por el NIT.'
             : 'Ningún proyecto coincide con la búsqueda.')
         : null,
       items,

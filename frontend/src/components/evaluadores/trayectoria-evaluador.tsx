@@ -2044,13 +2044,14 @@ function TabProyectos({
         <div className="border-b border-neutral-100 bg-neutral-50/60 px-5 py-4">
           {resp?.convocatoria && (
             <p className="mb-2 text-[11px] text-neutral-500">
-              Proyectos de <strong>{resp.convocatoria.nombre}</strong>
+              Proyectos de <strong>{resp.convocatoria.nombre}</strong>. Puede escribir el número,
+              por ejemplo <span className="font-mono font-semibold">1541</span>.
             </p>
           )}
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="Filtrar por proponente o NIT..."
+            placeholder="Número del proyecto, proponente, NIT o nombre..."
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
           />
 
@@ -2082,10 +2083,13 @@ function TabProyectos({
                   <li key={clave} className="flex items-center gap-3 px-4 py-2.5">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-neutral-800">
-                        {etiqueta(c)}
+                        <span className="font-mono font-bold" style={{ color: PRIMARY }}>
+                          {c.proyectoId ?? c.guardadoId}
+                        </span>
+                        {' · '}{etiqueta(c)}
                       </p>
                       <p className="truncate text-[11px] text-neutral-500">
-                        {[c.nit, c.anio].filter(Boolean).join(' · ') || '—'}
+                        {[c.nombreProyecto, c.nit, c.anio].filter(Boolean).join(' · ') || '—'}
                       </p>
                     </div>
                     <button

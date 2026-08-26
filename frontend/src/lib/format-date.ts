@@ -30,3 +30,26 @@ export function fmtDateTimeNumeric(d: string | Date | null | undefined): string 
     timeZone: BOGOTA_TZ,
   })
 }
+
+// Fechas SIN hora (fecha de grado, de inicio, de presentación…).
+//
+// El backend corre en UTC a propósito (main.ts), así que una fecha de
+// calendario llega como 2003-12-13T00:00:00.000Z. Formatearla en zona
+// Bogotá le resta cinco horas y la corre al día anterior. Aquí se leen
+// las partes en UTC, que son las que el usuario escribió.
+export function fmtFecha(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const f = parseBackendDate(d)
+  if (Number.isNaN(f.getTime())) return '—'
+  return f.toLocaleDateString('es-CO', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+  })
+}
+
+// la misma idea, en formato corto: "dic 2003"
+export function fmtMesAnio(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const f = parseBackendDate(d)
+  if (Number.isNaN(f.getTime())) return '—'
+  return f.toLocaleDateString('es-CO', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+}

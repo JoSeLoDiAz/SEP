@@ -13,6 +13,7 @@ import {
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { fmtFecha } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -363,8 +364,8 @@ function SeccionDatos({ conv, onChanged, setToast }: { conv: Convocatoria; onCha
           <Dato label="Año" valor={conv.anio} />
           <Dato label="Período" valor={conv.periodo} />
           <Dato label="Modalidad" valor={conv.modalidadPart} />
-          <Dato label="Fecha de inicio" valor={conv.fechaInicio ? new Date(conv.fechaInicio).toLocaleDateString('es-CO') : null} />
-          <Dato label="Fecha de fin" valor={conv.fechaFin ? new Date(conv.fechaFin).toLocaleDateString('es-CO') : null} />
+          <Dato label="Fecha de inicio" valor={conv.fechaInicio ? fmtFecha(conv.fechaInicio) : null} />
+          <Dato label="Fecha de fin" valor={conv.fechaFin ? fmtFecha(conv.fechaFin) : null} />
           <div />
           <div className="sm:col-span-2">
             <Dato label="Observaciones" valor={conv.observaciones} multiline />
@@ -780,7 +781,7 @@ function SeccionDocumentosConvocatoria({ convocatoriaId, setToast }: { convocato
                     </span>
                     <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
                       <CalendarDays size={11} />
-                      {new Date(d.fechaCargue).toLocaleDateString('es-CO')}
+                      {fmtFecha(d.fechaCargue)}
                     </span>
                   </div>
                   <p className="text-sm font-semibold text-neutral-800 mt-1 truncate">

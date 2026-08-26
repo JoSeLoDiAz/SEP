@@ -17,6 +17,7 @@ import {
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { fmtFecha, fmtMesAnio } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -1615,7 +1616,7 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
       filas={items.map(it => ({
         id: it.estudioId,
         titulo: it.titulo || '— Sin título —',
-        sub: [it.tipoEstudio, it.institucion, it.fechaGrado ? new Date(it.fechaGrado).toLocaleDateString('es-CO') : null].filter(Boolean).join(' · ') || '—',
+        sub: [it.tipoEstudio, it.institucion, it.fechaGrado ? fmtFecha(it.fechaGrado) : null].filter(Boolean).join(' · ') || '—',
         archivoUrl: it.tieneArchivo ? `/evaluadores/estudios/${it.estudioId}/archivo` : null,
         archivoNombre: it.archivoNombre ?? `estudio-${it.estudioId}.pdf`,
         eliminando: eliminando === it.estudioId,
@@ -1684,7 +1685,7 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
     }
   }
 
-  const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' }) : null
+  const fmt = (d: string | null) => d ? fmtMesAnio(d) : null
 
   return (
     <ListadoConArchivos
@@ -1795,7 +1796,7 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
       filas={items.map(it => ({
         id: it.ticId,
         titulo: it.nombre,
-        sub: [it.tipoEvento, it.horas ? `${it.horas}h` : null, it.fechaFin ? new Date(it.fechaFin).toLocaleDateString('es-CO') : null].filter(Boolean).join(' · ') || '—',
+        sub: [it.tipoEvento, it.horas ? `${it.horas}h` : null, it.fechaFin ? fmtFecha(it.fechaFin) : null].filter(Boolean).join(' · ') || '—',
         archivoUrl: it.tieneArchivo ? `/evaluadores/tic/${it.ticId}/archivo` : null,
         archivoNombre: it.archivoNombre ?? `tic-${it.ticId}.pdf`,
         eliminando: eliminando === it.ticId,
@@ -2108,7 +2109,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
                     </span>
                   )}
                   {p.fechaPresentacion && (
-                    <span className="text-[11px] text-neutral-500">{new Date(p.fechaPresentacion).toLocaleDateString('es-CO')}</span>
+                    <span className="text-[11px] text-neutral-500">{fmtFecha(p.fechaPresentacion)}</span>
                   )}
                 </div>
                 <p className="text-[11px] text-neutral-500 mt-0.5">
@@ -2521,7 +2522,7 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
                       </span>
                     )}
                     <span className="text-[11px] text-neutral-500">
-                      {new Date(d.fechaCargue).toLocaleDateString('es-CO')}
+                      {fmtFecha(d.fechaCargue)}
                     </span>
                   </div>
                   <p className="text-sm font-semibold text-neutral-800 mt-1 truncate">

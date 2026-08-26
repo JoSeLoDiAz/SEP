@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
+import { fmtFecha } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -317,7 +318,7 @@ export default function ConvocatoriasListadoPage() {
                           {c.fechaInicio ? (
                             <span className="inline-flex items-center gap-1 text-xs text-neutral-700">
                               <CalendarDays size={12} className="text-neutral-400" />
-                              {new Date(c.fechaInicio).toLocaleDateString('es-CO')}
+                              {fmtFecha(c.fechaInicio)}
                             </span>
                           ) : (
                             <span className="text-neutral-400 text-xs">—</span>

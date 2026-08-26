@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import type { MulterFile } from './evaluadores.service'
+import { fechaSolo } from '../common/fecha-solo'
 
 // Debe coincidir con el límite del interceptor multer.
 export const MAX_CONV_DOC_BYTES = 8 * 1024 * 1024
@@ -226,8 +227,8 @@ export class ConvocatoriasService {
           (dto.periodo ?? '').toString().trim() || null,
           dto.nombre.trim(),
           modalidadId,
-          dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-          dto.fechaFin ? new Date(dto.fechaFin) : null,
+          fechaSolo(dto.fechaInicio),
+          fechaSolo(dto.fechaFin),
           (dto.observaciones ?? '').toString().trim() || null,
           dto.convocatoriaSepId ?? null,
         ],
@@ -264,8 +265,8 @@ export class ConvocatoriasService {
       ['anio',          'ANIO',          v => Number(v)],
       ['periodo',       'PERIODO',       v => (v as string | null)?.toString().trim() || null],
       ['nombre',        'NOMBRE',        v => (v as string | null)?.toString().trim() || null],
-      ['fechaInicio',   'FECHAINICIO',   v => (v ? new Date(v as string) : null)],
-      ['fechaFin',      'FECHAFIN',      v => (v ? new Date(v as string) : null)],
+      ['fechaInicio',   'FECHAINICIO',   v => fechaSolo(v as string)],
+      ['fechaFin',      'FECHAFIN',      v => fechaSolo(v as string)],
       ['observaciones', 'OBSERVACIONES', v => (v as string | null)?.toString().trim() || null],
       ['activo',        'ACTIVO',        v => (v ? 1 : 0)],
       ['convocatoriaSepId',       'CONVOCATORIASEPID',       v => v ?? null],

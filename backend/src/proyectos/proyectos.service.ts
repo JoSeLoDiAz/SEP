@@ -4,6 +4,7 @@ import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
 import { NecesidadesService } from '../necesidades/necesidades.service'
 import { createHash, randomBytes } from 'crypto'
+import { fechaSolo } from '../common/fecha-solo'
 
 const PROYECTO_SIN_ASIGNAR = 1
 
@@ -1682,8 +1683,8 @@ export class ProyectosService {
        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE, 1, 0, 0, :11, 0)`,
       [
         Number(nid), nombre, Number(dto.anio),
-        dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-        dto.fechaCierre ? new Date(dto.fechaCierre) : null,
+        fechaSolo(dto.fechaInicio),
+        fechaSolo(dto.fechaCierre),
         Number(dto.presupuestoTotal), Number(dto.presupuestoMaximo),
         Number(dto.mesesProyecto), tipoNorm, 'ABIERTA',
         programaId,
@@ -1736,10 +1737,10 @@ export class ProyectosService {
       sets.push(`CONVOCATORIATIPOFINANCIACION = :${i++}`); params.push(norm)
     }
     if (dto.fechaInicio !== undefined) {
-      sets.push(`CONVOCATORIAFECHAINICIO = :${i++}`); params.push(dto.fechaInicio ? new Date(dto.fechaInicio) : null)
+      sets.push(`CONVOCATORIAFECHAINICIO = :${i++}`); params.push(fechaSolo(dto.fechaInicio))
     }
     if (dto.fechaCierre !== undefined) {
-      sets.push(`CONVOCATORIAFECHACIERRE = :${i++}`); params.push(dto.fechaCierre ? new Date(dto.fechaCierre) : null)
+      sets.push(`CONVOCATORIAFECHACIERRE = :${i++}`); params.push(fechaSolo(dto.fechaCierre))
     }
     if (sets.length === 0) {
       return { message: 'Sin cambios.' }

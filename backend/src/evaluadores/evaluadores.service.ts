@@ -13,6 +13,7 @@ import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
+import { fechaSolo } from '../common/fecha-solo'
 
 /** Nombre de pantalla de cada columna, para el error de "valor demasiado grande". */
 const CAMPOS_PARTICIPACION: Record<string, string> = {
@@ -1525,7 +1526,7 @@ export class EvaluadoresService {
         id, evaluadorId, dto.tipoEstudioId,
         dto.titulo?.trim() || null,
         dto.institucion?.trim() || null,
-        dto.fechaGrado ? new Date(dto.fechaGrado) : null,
+        fechaSolo(dto.fechaGrado),
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
@@ -1593,8 +1594,8 @@ export class EvaluadoresService {
       [
         id, evaluadorId,
         dto.cargo.trim(), dto.entidad.trim(),
-        dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-        dto.fechaFin ? new Date(dto.fechaFin) : null,
+        fechaSolo(dto.fechaInicio),
+        fechaSolo(dto.fechaFin),
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
@@ -1666,7 +1667,7 @@ export class EvaluadoresService {
         dto.tipoEventoId ?? null,
         dto.nombre.trim(),
         dto.horas ?? null,
-        dto.fechaFin ? new Date(dto.fechaFin) : null,
+        fechaSolo(dto.fechaFin),
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
@@ -1781,7 +1782,7 @@ export class EvaluadoresService {
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
-        dto.fechaPresentacion ? new Date(dto.fechaPresentacion) : null,
+        fechaSolo(dto.fechaPresentacion),
         dto.horario?.trim() || null,
         dto.intentos ?? null,
         dto.puntajeMayor ?? null,
@@ -1862,7 +1863,7 @@ export class EvaluadoresService {
     const map: Array<[keyof PruebaDto, string, (v: unknown) => unknown]> = [
       ['anio',              'ANIO',               v => v],
       ['periodo',           'PERIODO',            v => (v as string)?.trim() || null],
-      ['fechaPresentacion', 'FECHAPRESENTACION',  v => v ? new Date(v as string) : null],
+      ['fechaPresentacion', 'FECHAPRESENTACION',  v => fechaSolo(v as string)],
       ['horario',           'HORARIO',            v => (v as string)?.trim() || null],
       ['intentos',          'INTENTOS',           v => v ?? null],
       ['puntajeMayor',      'PUNTAJEMAYOR',       v => v ?? null],

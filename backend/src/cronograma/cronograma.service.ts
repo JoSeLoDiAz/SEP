@@ -6,6 +6,7 @@ import { AgregarSesionVirtualDto } from './dto/agregar-sesion-virtual.dto'
 import { PatchSesionPresencialDto } from './dto/patch-sesion-presencial.dto'
 import { PatchSesionVirtualDto } from './dto/patch-sesion-virtual.dto'
 import { UpsertCronogramaDto } from './dto/upsert-cronograma.dto'
+import { fechaSolo } from '../common/fecha-solo'
 
 // editable solo si esta sin radicar (PENDIENTE) o devuelta para corregir (MODIFICAR)
 function estadoBloqueaEdicion(estadoRadicado: string | null | undefined): boolean {
@@ -287,8 +288,8 @@ export class CronogramaService {
   // el ID sale de MAX+1 dentro de la transaccion: la tabla no tiene secuencia
   async upsertCronograma(proyectoId: number, dto: UpsertCronogramaDto) {
     await this.assertConvenioEnEjecucion(proyectoId)
-    const fi = new Date(dto.fechaInicio)
-    const ff = new Date(dto.fechaFin)
+    const fi = fechaSolo(dto.fechaInicio) as Date
+    const ff = fechaSolo(dto.fechaFin) as Date
     if (Number.isNaN(fi.getTime()) || Number.isNaN(ff.getTime())) {
       throw new BadRequestException('Fechas inválidas.')
     }

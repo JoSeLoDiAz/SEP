@@ -26,8 +26,6 @@ RUN pnpm run build
 # Stage 2: Runtime (standalone)
 # ─────────────────────────────────────────
 FROM node:22-alpine AS runner
-# sin tzdata, alpine ignora TZ y el render del servidor usa UTC
-RUN apk add --no-cache tzdata
 WORKDIR /app
 
 ENV NODE_ENV=production

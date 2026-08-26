@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fmtFecha, fmtMesAnio, fmtSoloDia } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
@@ -82,6 +82,9 @@ export default function FichaEvaluadorPage() {
   const [tab, setTab] = useState<TabId>('trayectoria')
   const [perfilTab, setPerfilTab] = useState<PerfilSubTab>('datos')
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
+  // sube cuando participaciones o pruebas cambian: la trayectoria de arriba se refresca sola
+  const [refresco, setRefresco] = useState(0)
+  const subirRefresco = useCallback(() => setRefresco(n => n + 1), [])
   const [confirmDesactivar, setConfirmDesactivar] = useState(false)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
   const [verFicha, setVerFicha] = useState(false)
@@ -224,9 +227,9 @@ export default function FichaEvaluadorPage() {
 
       {tab === 'trayectoria' && (
         <>
-          <TrayectoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} />
-          <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} />
-          <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} />
+          <TrayectoriaEvaluador evaluadorId={evaluadorId} setToast={setToast} refrescar={refresco} />
+          <SeccionParticipaciones evaluadorId={evaluadorId} setToast={setToast} onCambio={subirRefresco} />
+          <SeccionPruebas         evaluadorId={evaluadorId} setToast={setToast} onCambio={subirRefresco} />
         </>
       )}
 
@@ -1011,7 +1014,7 @@ interface Participacion {
   dinamizadorNombre: string | null
 }
 
-function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
+function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluadorId: number; setToast: SetToast; onCambio: () => void }) {
   const [items, setItems] = useState<Participacion[]>([])
   const [roles, setRoles] = useState<Cat[]>([])
   const [procesos, setProcesos] = useState<Cat[]>([])
@@ -1114,6 +1117,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
       setAgregar(false)
       limpiarForm()
       await cargar()
+      onCambio()
     } catch (err) {
       setToast({
         tipo: 'error',
@@ -1130,6 +1134,7 @@ function SeccionParticipaciones({ evaluadorId, setToast }: { evaluadorId: number
       await api.delete(`/evaluadores/participaciones/${pid}`)
       setToast({ tipo: 'success', msg: 'Eliminada' })
       await cargar()
+      onCambio()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
     } finally {
@@ -1908,7 +1913,7 @@ interface Prueba {
 // pasarse de aquí revienta la columna NUMBER(5,2) con un 500 sin detalle
 const MAX_PUNTAJE = 100
 
-function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
+function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: number; setToast: SetToast; onCambio: () => void }) {
   const [items, setItems] = useState<Prueba[]>([])
   // puede haber dos ciclos en el mismo año; el backend no adivina a cuál va la prueba
   const [ciclos, setCiclos] = useState<Participacion[]>([])
@@ -1971,6 +1976,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
       setAgregar(false)
       limpiar()
       await cargar()
+      onCambio()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
     } finally {
@@ -2002,6 +2008,7 @@ function SeccionPruebas({ evaluadorId, setToast }: { evaluadorId: number; setToa
       await api.delete(`/evaluadores/pruebas/${pid}`)
       setToast({ tipo: 'success', msg: 'Eliminada' })
       await cargar()
+      onCambio()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
     } finally {

@@ -140,10 +140,12 @@ const colorDe = (token?: string | null) => COLOR_ESTADO[token ?? 'neutral'] ?? C
 type SubTab = 'documentos' | 'formacion' | 'proyectos' | 'retroalimentacion' | 'certificado'
 
 export function TrayectoriaEvaluador({
-  evaluadorId, setToast,
+  evaluadorId, setToast, refrescar = 0,
 }: {
   evaluadorId: number
   setToast: (t: { tipo: 'success' | 'error'; msg: string } | null) => void
+  // sube de valor cuando algo cambia afuera (participaciones, pruebas)
+  refrescar?: number
 }) {
   const [rail, setRail] = useState<AnioRail[]>([])
   const [resumen, setResumen] = useState<Resumen | null>(null)
@@ -157,7 +159,8 @@ export function TrayectoriaEvaluador({
   useEffect(() => {
     let vivo = true
     ;(async () => {
-      setCargandoRail(true)
+      // al refrescar no se vacía la pantalla: el spinner es solo de la primera carga
+      setCargandoRail(v => (rail.length === 0 ? true : v))
       try {
         const [t, r] = await Promise.all([
           api.get<{ anios: AnioRail[] }>(`/evaluadores/${evaluadorId}/trayectoria`),
@@ -167,9 +170,13 @@ export function TrayectoriaEvaluador({
         const anios = t.data?.anios ?? []
         setRail(anios)
         setResumen(r.data)
-        // Abrir el ciclo más reciente sin obligar a un clic extra.
-        const primera = anios.find(a => a.participaciones?.length)?.participaciones?.[0]
-        if (primera) setSeleccion(primera.participacionId)
+        // se conserva el ciclo abierto; solo se escoge uno si no había o si ya no existe
+        setSeleccion(prev => {
+          const sigue = prev != null
+            && anios.some(a => a.participaciones?.some(p => p.participacionId === prev))
+          if (sigue) return prev
+          return anios.find(a => a.participaciones?.length)?.participaciones?.[0]?.participacionId ?? null
+        })
       } catch (err) {
         if (vivo) setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar la trayectoria') })
       } finally {
@@ -177,7 +184,9 @@ export function TrayectoriaEvaluador({
       }
     })()
     return () => { vivo = false }
-  }, [evaluadorId, setToast])
+    // rail se lee solo para saber si es la primera carga; no debe disparar el efecto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evaluadorId, setToast, recarga, refrescar])
 
   useEffect(() => {
     if (seleccion == null) { setDetalle(null); return }

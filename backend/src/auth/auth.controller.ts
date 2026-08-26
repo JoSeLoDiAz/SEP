@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Post, Put, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { AuthService } from './auth.service'
 import { LoginDto } from './dto/login.dto'
@@ -74,6 +74,17 @@ export class AuthController {
   @ApiOperation({ summary: 'Solicitar enlace de restablecimiento de contraseña por correo' })
   recuperarContrasena(@Body() dto: { email: string }) {
     return this.authService.solicitarRestablecimiento(dto.email)
+  }
+
+  @Put('mi-clave')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'El usuario cambia su propia contraseña' })
+  cambiarMiClave(
+    @CurrentUser() user: { email: string },
+    @Body() dto: { claveActual: string; nuevaClave: string },
+  ) {
+    return this.authService.cambiarMiClave(user.email, dto?.claveActual, dto?.nuevaClave)
   }
 
   @Post('restablecer-contrasena')

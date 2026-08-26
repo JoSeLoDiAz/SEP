@@ -47,6 +47,9 @@ function decrypt64(encryptedBase64: string, key: string): string {
   return Buffer.from(decArr).toString('utf8').trimEnd()
 }
 
+// twofish trabaja sobre un bloque de 16 bytes: la clave no puede pasar de ahí
+const MAX_CLAVE = 16
+
 // Perfiles GeneXus → roles legibles
 const PERFIL_ROLES: Record<number, string> = {
   1: 'administrador',
@@ -620,5 +623,48 @@ export class AuthService {
     this.resetTokens.delete(token)
 
     return { message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' }
+  }
+
+  // el usuario cambia su propia clave, verificando la actual
+  async cambiarMiClave(email: string, claveActual: string, nuevaClave: string) {
+    const actual = claveActual ?? ''
+    const nueva = nuevaClave ?? ''
+
+    if (!actual) throw new BadRequestException('Escribe tu contraseña actual')
+    if (nueva.length < 6) {
+      throw new BadRequestException('La nueva contraseña debe tener al menos 6 caracteres')
+    }
+    // twofish cifra un bloque de 16 bytes: más largo no se podría volver a validar
+    if (Buffer.byteLength(nueva, 'utf8') > MAX_CLAVE) {
+      throw new BadRequestException(`La contraseña no puede pasar de ${MAX_CLAVE} caracteres`)
+    }
+    if (nueva !== nueva.trim()) {
+      throw new BadRequestException('La contraseña no puede empezar ni terminar en espacio')
+    }
+    if (nueva === actual) {
+      throw new BadRequestException('La nueva contraseña tiene que ser distinta de la actual')
+    }
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioEmail: email } })
+    if (!usuario) throw new NotFoundException('Usuario no encontrado')
+
+    let guardada: string
+    try {
+      guardada = decrypt64(usuario.usuarioClave, usuario.usuarioLlaveEncriptacion)
+    } catch {
+      throw new BadRequestException(
+        'No se pudo leer tu contraseña actual. Usa "Olvidé mi contraseña" desde el inicio de sesión.',
+      )
+    }
+    if (guardada !== actual) {
+      throw new UnauthorizedException('La contraseña actual no es correcta')
+    }
+
+    await this.usuarioRepo.update(usuario.usuarioId, {
+      usuarioClave: encrypt64(nueva, usuario.usuarioLlaveEncriptacion),
+    })
+
+    this.log.log(`Cambió su contraseña: ${email}`)
+    return { message: 'Tu contraseña quedó actualizada' }
   }
 }

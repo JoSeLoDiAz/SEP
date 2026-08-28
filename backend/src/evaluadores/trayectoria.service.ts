@@ -45,6 +45,8 @@ interface ContadoresRow {
   retroAsignadas: number
   retroPendientes: number
   retroRecibidas: number
+  retroMinimo: number | null
+  retroMaximo: number | null
   retroPromedio: number | null
   tieneCertificado: number
   // cargado como documento, no emitido
@@ -285,6 +287,8 @@ export class TrayectoriaService {
         promedio: c?.retroPromedio != null ? Number(c.retroPromedio) : null,
         asignadas: Number(c?.retroAsignadas ?? 0),
         pendientes: Number(c?.retroPendientes ?? 0),
+        minimo: c?.retroMinimo != null ? Number(c.retroMinimo) : null,
+        maximo: c?.retroMaximo != null ? Number(c.retroMaximo) : null,
       },
     }
   }
@@ -598,6 +602,10 @@ export class TrayectoriaService {
            WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroRecibidas",
          (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr
            WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroPromedio",
+         (SELECT MIN(rr.PROMEDIO) FROM RETRORESPUESTA rr
+           WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroMinimo",
+         (SELECT MAX(rr.PROMEDIO) FROM RETRORESPUESTA rr
+           WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID)              AS "retroMaximo",
 
          (SELECT COUNT(*) FROM EVALUADORCERTIFICADO ce
            WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID

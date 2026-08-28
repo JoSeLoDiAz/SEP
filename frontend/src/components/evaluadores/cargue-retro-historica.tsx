@@ -2,7 +2,7 @@
 
 import api from '@/lib/api'
 import { getSepUsuario } from '@/lib/auth'
-import { AlertTriangle, Check, Copy, History, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, Copy, History, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 const PRIMARY = '#00304D'
@@ -389,6 +389,8 @@ function CargueDeNotas({
   const [textos, setTextos] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
   const [porQuitar, setPorQuitar] = useState<Recibida | null>(null)
+  // cuál está desplegada para ver sus respuestas una a una
+  const [verDetalle, setVerDetalle] = useState<number | null>(null)
 
   // quien ya se la hizo no vuelve a la lista, y nadie se retroalimenta a sí mismo
   const disponibles = useMemo(() => {
@@ -516,44 +518,99 @@ function CargueDeNotas({
             Ya cargadas ({recibidas.length})
           </p>
           <ul className="mt-1 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
-            {recibidas.map(r => (
-              <li key={r.respuestaId} className="flex items-center gap-2 px-3 py-2">
-                <Check size={14} className="shrink-0 text-emerald-600" />
-                <span className="min-w-0 flex-1 truncate text-[12px] text-neutral-700">
-                  {r.autor}
-                </span>
-                <span className="text-[12px] font-bold" style={{ color: PRIMARY }}>
-                  {r.promedio != null ? `${r.promedio} / ${instrumento.escalaMax}` : '—'}
-                </span>
-                {r.historica ? (
-                  <>
-                    <button
-                      onClick={() => abrirCorreccion(r)}
-                      className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
-                      aria-label={`Corregir la que le hizo ${r.autor}`}
-                      title="Corregir"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      onClick={() => setPorQuitar(r)}
-                      className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
-                      aria-label={`Quitar la que le hizo ${r.autor}`}
-                      title="Quitar"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </>
-                ) : (
-                  <span
-                    className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500"
-                    title="La diligenció la persona en el sistema, no se corrige a mano"
+            {recibidas.map(r => {
+              const desplegada = verDetalle === r.respuestaId
+              return (
+              <li key={r.respuestaId}>
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <button
+                    onClick={() => setVerDetalle(v => (v === r.respuestaId ? null : r.respuestaId))}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    aria-expanded={desplegada}
+                    title={desplegada ? 'Ocultar las respuestas' : 'Ver las respuestas una a una'}
                   >
-                    del sistema
+                    <ChevronRight
+                      size={13}
+                      className={`shrink-0 text-neutral-400 transition-transform ${desplegada ? 'rotate-90' : ''}`}
+                    />
+                    <Check size={14} className="shrink-0 text-emerald-600" />
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-neutral-700">{r.autor}</span>
+                  </button>
+                  <span className="text-[12px] font-bold" style={{ color: PRIMARY }}>
+                    {r.promedio != null ? `${r.promedio} / ${instrumento.escalaMax}` : '—'}
                   </span>
+                  {r.historica ? (
+                    <>
+                      <button
+                        onClick={() => abrirCorreccion(r)}
+                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                        aria-label={`Corregir la que le hizo ${r.autor}`}
+                        title="Corregir"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => setPorQuitar(r)}
+                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
+                        aria-label={`Quitar la que le hizo ${r.autor}`}
+                        title="Quitar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  ) : (
+                    <span
+                      className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500"
+                      title="La diligenció la persona en el sistema, no se corrige a mano"
+                    >
+                      del sistema
+                    </span>
+                  )}
+                </div>
+
+                {desplegada && (
+                  <div className="border-t border-neutral-100 bg-neutral-50/70 px-3 py-3">
+                    <ul className="space-y-2">
+                      {instrumento.preguntas.map(p => {
+                        const nota = r.escalas[String(p.numero)]
+                        const texto = r.textos[String(p.numero)]
+                        return (
+                          <li key={p.preguntaId} className="flex items-start gap-2">
+                            <span className="mt-0.5 w-4 shrink-0 text-[11px] font-bold text-neutral-400">
+                              {p.numero}
+                            </span>
+                            <span className="min-w-0 flex-1 text-[11px] leading-snug text-neutral-600">
+                              {p.texto}
+                            </span>
+                            {p.tipo === 'ESCALA' ? (
+                              <span
+                                className="shrink-0 rounded-md px-2 py-0.5 text-[12px] font-bold text-white"
+                                style={{ backgroundColor: nota == null ? '#a3a3a3' : PRIMARY }}
+                              >
+                                {nota ?? '—'}
+                              </span>
+                            ) : (
+                              <span className="max-w-[45%] shrink-0 text-right text-[11px] font-semibold text-neutral-800">
+                                {texto || '—'}
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                    {r.fecha && (
+                      <p className="mt-2.5 border-t border-neutral-200 pt-2 text-[10px] text-neutral-400">
+                        {r.historica ? 'Cargada a mano el ' : 'Diligenciada el '}
+                        {new Date(r.fecha).toLocaleDateString('es-CO', {
+                          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Bogota',
+                        })}
+                      </p>
+                    )}
+                  </div>
                 )}
               </li>
-            ))}
+              )
+            })}
           </ul>
         </>
       )}

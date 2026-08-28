@@ -121,7 +121,10 @@ interface Detalle extends Participacion {
   }>
   documentos: { propios: Documento[]; heredados: Documento[]; permanentes: Documento[] }
   certificado: { certificadoId: number; consecutivo: number; codigoVerificacion: string; anulado: boolean } | null
-  retroalimentacion: { recibidas: number; promedio: number | null; asignadas: number; pendientes: number }
+  retroalimentacion: {
+    recibidas: number; promedio: number | null; asignadas: number; pendientes: number
+    minimo: number | null; maximo: number | null
+  }
 }
 
 // Tailwind necesita las clases literales en el fuente, no armadas con template strings
@@ -2215,29 +2218,37 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
     )
   }
 
+  // el ciclo en línea reparte asignaciones; el histórico no, y ahí esas tarjetas sobran
+  const enLinea = r.asignadas > 0
+  const rango = r.minimo != null && r.maximo != null && r.minimo !== r.maximo
+    ? `de ${r.minimo} a ${r.maximo}`
+    : null
+
   return (
-    <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-3">
+    <div className={`grid grid-cols-1 gap-4 px-5 py-4 ${enLinea ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
       <Tarjeta
         icono={<BadgeCheck size={16} className="text-emerald-600" />}
         titulo="Promedio recibido"
         valor={r.promedio != null ? `${r.promedio} / 5` : '—'}
-        sub={`${r.recibidas} retroalimentaciones`}
+        sub={rango ?? 'de una sola persona'}
       />
       <Tarjeta
         icono={<Users size={16} className="text-cyan-600" />}
-        titulo="Le asignaron"
-        valor={String(r.asignadas)}
-        sub="personas por retroalimentar"
+        titulo="Quiénes lo retroalimentaron"
+        valor={String(r.recibidas)}
+        sub={r.recibidas === 1 ? 'persona del mismo ciclo' : 'personas del mismo ciclo'}
       />
-      <Tarjeta
-        icono={<ShieldCheck size={16} className={r.pendientes === 0 ? 'text-emerald-600' : 'text-amber-600'} />}
-        titulo="Pendientes de diligenciar"
-        valor={String(r.pendientes)}
-        sub={r.asignadas === 0 ? 'sin asignaciones' : r.pendientes === 0 ? 'completó todas' : 'aún sin enviar'}
-      />
-      <p className="text-[11px] text-neutral-400 sm:col-span-3">
-        El detalle por criterio y los comentarios llegan con el módulo de retroalimentación.
-        No se muestra quién escribió cada una: la hoja es anónima para quien la recibe.
+      {enLinea && (
+        <Tarjeta
+          icono={<ShieldCheck size={16} className={r.pendientes === 0 ? 'text-emerald-600' : 'text-amber-600'} />}
+          titulo="Le tocaba retroalimentar"
+          valor={`${r.asignadas - r.pendientes} / ${r.asignadas}`}
+          sub={r.pendientes === 0 ? 'las completó todas' : `le faltan ${r.pendientes}`}
+        />
+      )}
+      <p className={`text-[11px] text-neutral-400 ${enLinea ? 'sm:col-span-3' : 'sm:col-span-2'}`}>
+        Abajo está el detalle de quién se la hizo y con qué nota. Esos nombres solo los ve
+        gestión: al evaluador la hoja le llega anónima.
       </p>
     </div>
   )

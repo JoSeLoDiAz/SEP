@@ -13,7 +13,7 @@ import type {
   MulterFile, ParticipacionDto, PruebaDto, TicDto,
 } from './evaluadores.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
-import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
+import { MIMES_CORREO, esTipoDocDePerfil, seEjecutaEnElNavegador } from './formatos-correo'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { TrayectoriaService } from './trayectoria.service'
 import { ControlCambiosService } from './control-cambios.service'
@@ -995,7 +995,27 @@ export class EvaluadoresController {
   @ApiOperation({ summary: 'Shortcut — indica si el evaluador ya tiene cédula cargada' })
   getCedula(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     this.exigirGestion(user)
-    return this.service.getCedula(id)
+    return this.service.getDocumentoUnico(id, 'CEDULA')
+  }
+
+  @Get(':id/documento-unico/:codigo')
+  @ApiOperation({
+    summary: 'El documento de perfil de ese código (CEDULA, TARJETA_PROFESIONAL), o null',
+  })
+  getDocumentoUnico(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('codigo') codigo: string,
+  ) {
+    this.exigirGestion(user)
+    const cod = (codigo ?? '').trim().toUpperCase()
+    // solo los del perfil: los demás tipos admiten varios y se listan, no se piden de a uno
+    if (!esTipoDocDePerfil(cod)) {
+      throw new BadRequestException(
+        `"${cod}" no es un documento de perfil. Use /documentos?tipoCodigo=${cod}`,
+      )
+    }
+    return this.service.getDocumentoUnico(id, cod)
   }
 
   @Get(':id/documentos')

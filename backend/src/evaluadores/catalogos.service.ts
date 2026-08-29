@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { esTipoDocDelAnio, extensionesDeTipoDocEval } from './formatos-correo'
+import { esTipoDocDelAnio, esTipoDocDePerfil, extensionesDeTipoDocEval } from './formatos-correo'
 
 export interface CatalogoItem { id: number; nombre: string; activo: number }
 
@@ -351,6 +351,8 @@ export class CatalogosEvaluadorService {
       extensiones: extensionesDeTipoDocEval(r.codigo),
       // los del ciclo no van en la pantalla general: quedarían sin año
       esDelAnio: esTipoDocDelAnio(r.codigo),
+      // los del perfil tienen su propia tarjeta arriba y no se listan con los demás
+      esDePerfil: esTipoDocDePerfil(r.codigo),
       orden: Number(r.orden),
       activo: Number(r.activo) === 1,
     }))

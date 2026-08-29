@@ -1652,7 +1652,27 @@ function SeccionHV({ evaluadorId, setToast }: { evaluadorId: number; setToast: S
 
 // estudios, experiencia y tic comparten ListadoConArchivos
 interface Estudio { estudioId: number; tipoEstudioId: number | null; tipoEstudio: string | null; titulo: string | null; institucion: string | null; fechaGrado: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
-interface Experiencia { experienciaId: number; cargo: string | null; entidad: string | null; fechaInicio: string | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
+interface Experiencia {
+  /** 'MANUAL' se teclea; 'CICLO' sale sola de un ciclo con certificado. */
+  origen?: 'MANUAL' | 'CICLO'
+  clave?: string
+  experienciaId: number
+  cargo: string | null
+  entidad: string | null
+  fechaInicio: string | null
+  fechaFin: string | null
+  archivoNombre: string | null
+  tieneArchivo: boolean
+  usuarioCreacion?: string | null
+  /** La derivada del ciclo que esta fila parece repetir. */
+  posibleDuplicadoDe?: string
+  anioDuplicado?: number
+  // solo en las derivadas de un ciclo
+  participacionId?: number
+  anio?: number
+  periodo?: string | null
+  archivoUrl?: string | null
+}
 interface Tic { ticId: number; tipoEventoId?: number | null; tipoEvento: string | null; nombre: string; horas: number | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
 
 function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
@@ -1899,19 +1919,36 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
 
   return (
     <ListadoConArchivos
-      titulo={`Experiencia laboral y en proyectos (${items.length})`}
+      titulo={(() => {
+        const propias = items.filter(x => x.origen !== 'CICLO').length
+        const delBanco = items.length - propias
+        return `Experiencia laboral y en proyectos (${propias})` +
+          (delBanco ? ` · ${delBanco} del banco` : '')
+      })()}
       singular="esta experiencia"
       editando={editandoId != null}
       onCancelarEdicion={limpiar}
-      aviso={sueltos.length > 0 ? (
+      aviso={<>
+        {items.some(x => x.origen === 'CICLO') && (
+          <div className="border-b border-neutral-100 bg-[#00304D]/[0.03] px-5 py-2.5">
+            <p className="text-[11px] text-neutral-600">
+              Las filas marcadas <strong>Del ciclo</strong> salen solas de las convocatorias con
+              certificado: no se teclean ni se borran desde aquí, se gestionan en{' '}
+              <strong>Trayectoria</strong>. En la hoja de vida en PDF aparecen en su propia
+              sección, <strong>Trayectoria como evaluador</strong>, no en esta tabla.
+            </p>
+          </div>
+        )}
+        {sueltos.length > 0 ? (
         <div className="border-b border-amber-100 bg-amber-50/70 px-5 py-3">
           <p className="text-[12px] font-semibold text-amber-900">
             Hay {sueltos.length} soporte{sueltos.length === 1 ? '' : 's'} de experiencia cargado
             {sueltos.length === 1 ? '' : 's'} como documento suelto.
           </p>
           <p className="mt-1 text-[11px] text-amber-800">
-            Así no cuentan: la ficha y la hoja de vida en PDF leen esta lista, no los documentos.
-            Regístrelos aquí con su cargo, entidad y fechas, y bórrelos de la pestaña Documentos.
+            Así no cuentan: la hoja de vida en PDF lee las experiencias registradas, no los
+            documentos. Regístrelos aquí con su cargo, entidad y fechas, y bórrelos de la
+            pestaña Documentos.
           </p>
           <ul className="mt-2 ml-4 list-disc space-y-0.5 text-[11px] text-amber-800">
             {sueltos.map(d => (
@@ -1919,7 +1956,8 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
             ))}
           </ul>
         </div>
-      ) : undefined}
+        ) : null}
+      </>}
       onAgregarToggle={alternar}
       agregarAbierto={agregar}
       formulario={
@@ -1935,24 +1973,45 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
       creando={creando}
       loading={loading}
       vacio="Sin experiencia registrada"
-      filas={items.map(it => ({
-        id: it.experienciaId,
-        titulo: it.cargo || '— Sin cargo —',
-        // sin fecha de inicio no se puede afirmar que siga vigente: el soporte
-        // simplemente no trae el periodo
-        sub: [
-          it.entidad,
-          it.fechaInicio
-            ? [fmt(it.fechaInicio), it.fechaFin ? fmt(it.fechaFin) : 'Vigente'].filter(Boolean).join(' → ')
-            : (it.fechaFin ? `hasta ${fmt(it.fechaFin)}` : 'Sin fechas en el soporte'),
-        ].filter(Boolean).join(' · ') || '—',
-        archivoUrl: it.tieneArchivo ? `/evaluadores/experiencia/${it.experienciaId}/archivo` : null,
-        archivoNombre: it.archivoNombre ?? `experiencia-${it.experienciaId}.pdf`,
-        eliminando: eliminando === it.experienciaId,
-        onEliminar: () => eliminar(it.experienciaId),
-        onEditar: () => editar(it),
-        usuarioCreacion: it.usuarioCreacion ?? null,
-      }))}
+      filas={items.map(it => {
+        // la de un ciclo certificado sale sola y no se toca desde aquí
+        if (it.origen === 'CICLO') {
+          const cuando = `${it.anio}${it.periodo ? `-${it.periodo}` : ''}`
+          return {
+            id: it.clave ?? `ciclo-${it.participacionId}`,
+            titulo: it.cargo || 'Evaluador',
+            sub: [it.entidad, `Convocatoria de ${cuando}`].filter(Boolean).join(' · '),
+            archivoUrl: it.archivoUrl ?? null,
+            archivoNombre: `certificado-${cuando}.pdf`,
+            eliminando: false,
+            onEliminar: () => {},
+            automatica: true,
+            chip: `Del ciclo ${cuando}`,
+            motivoBloqueo: 'Sale del ciclo certificado. Se gestiona en Trayectoria, no aquí.',
+          }
+        }
+        return {
+          id: it.clave ?? it.experienciaId,
+          titulo: it.cargo || '— Sin cargo —',
+          // sin fecha de inicio no se puede afirmar que siga vigente: el soporte
+          // simplemente no trae el periodo
+          sub: [
+            it.entidad,
+            it.fechaInicio
+              ? [fmt(it.fechaInicio), it.fechaFin ? fmt(it.fechaFin) : 'Vigente'].filter(Boolean).join(' → ')
+              : (it.fechaFin ? `hasta ${fmt(it.fechaFin)}` : 'Sin fechas en el soporte'),
+            it.posibleDuplicadoDe
+              ? `⚠ El ciclo ${it.anioDuplicado} ya sale solo aquí abajo: ésta puede sobrar`
+              : null,
+          ].filter(Boolean).join(' · ') || '—',
+          archivoUrl: it.tieneArchivo ? `/evaluadores/experiencia/${it.experienciaId}/archivo` : null,
+          archivoNombre: it.archivoNombre ?? `experiencia-${it.experienciaId}.pdf`,
+          eliminando: eliminando === it.experienciaId,
+          onEliminar: () => eliminar(it.experienciaId),
+          onEditar: () => editar(it),
+          usuarioCreacion: it.usuarioCreacion ?? null,
+        }
+      })}
     />
   )
 }
@@ -2075,7 +2134,8 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
 }
 
 interface FilaListado {
-  id: number
+  /** Única dentro de la lista. Puede ser texto: las derivadas no tienen id propio. */
+  id: string | number
   titulo: string
   sub: string
   /** Path relativo al backend, ej: `/evaluadores/estudios/123/archivo` */
@@ -2087,6 +2147,12 @@ interface FilaListado {
   onEditar?: () => void
   /** Quién la cargó, si quedó registrado. */
   usuarioCreacion?: string | null
+  /** La fila no se teclea: sale sola de otro dato. Sin lápiz y sin papelera. */
+  automatica?: boolean
+  /** Etiqueta corta al lado del título, p. ej. "Del ciclo 2024". */
+  chip?: string
+  /** Por qué no se puede tocar, para el `title`. */
+  motivoBloqueo?: string
 }
 
 function ListadoConArchivos({
@@ -2154,7 +2220,14 @@ function ListadoConArchivos({
                 <FileText size={16} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-neutral-800 truncate">{f.titulo}</p>
+                <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-neutral-800">
+                  <span className="truncate">{f.titulo}</span>
+                  {f.chip && (
+                    <span className="shrink-0 rounded-full bg-[#00304D]/10 px-2 py-0.5 text-[10px] font-semibold text-[#00304D]">
+                      {f.chip}
+                    </span>
+                  )}
+                </p>
                 <p className="text-[11px] text-neutral-500 truncate">{f.sub}</p>
                 {f.usuarioCreacion && (
                   <p className="truncate text-[10px] text-neutral-400">Cargó {f.usuarioCreacion}</p>
@@ -2179,23 +2252,35 @@ function ListadoConArchivos({
                   </button>
                 </>
               )}
-              {f.onEditar && (
-                <button
-                  onClick={f.onEditar}
-                  title={`Corregir ${singular}`}
-                  className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+              {f.automatica ? (
+                <span
+                  title={f.motivoBloqueo ?? 'Sale sola; no se edita desde aquí'}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-neutral-100 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500"
                 >
-                  <Pencil size={14} />
-                </button>
+                  <ShieldCheck size={12} />
+                  Automática
+                </span>
+              ) : (
+                <>
+                  {f.onEditar && (
+                    <button
+                      onClick={f.onEditar}
+                      title={`Corregir ${singular}`}
+                      className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setPorBorrar(f)}
+                    disabled={f.eliminando}
+                    title={`Eliminar ${singular}`}
+                    className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                  >
+                    {f.eliminando ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  </button>
+                </>
               )}
-              <button
-                onClick={() => setPorBorrar(f)}
-                disabled={f.eliminando}
-                title={`Eliminar ${singular}`}
-                className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
-              >
-                {f.eliminando ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-              </button>
             </li>
           ))}
         </ul>

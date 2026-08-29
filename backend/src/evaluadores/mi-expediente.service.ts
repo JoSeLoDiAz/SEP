@@ -95,9 +95,12 @@ export class MiExpedienteService {
       aprobacionId, evaluadorId, 'la evidencia')
   }
 
+  // EVALUADORCERTIFICADO no tiene EVALUADORID: el dueño sale por la participación
   esMiCertificado(certificadoId: number, evaluadorId: number) {
     return this.exigirPropio(
-      `SELECT 1 FROM EVALUADORCERTIFICADO WHERE CERTIFICADOID = :1 AND EVALUADORID = :2`,
+      `SELECT 1 FROM EVALUADORCERTIFICADO ce
+         JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = ce.PARTICIPACIONID
+        WHERE ce.CERTIFICADOID = :1 AND pa.EVALUADORID = :2`,
       certificadoId, evaluadorId, 'el certificado')
   }
 

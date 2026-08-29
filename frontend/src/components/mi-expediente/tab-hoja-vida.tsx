@@ -20,11 +20,20 @@ const INPUT_ARCHIVO = 'block w-full text-xs text-neutral-600 file:mr-3 file:roun
 const SIN_EDITAR = 'Para corregir un registro, bórralo y vuelve a agregarlo.'
 
 interface Fila {
-  id: number
+  /** Puede ser texto: las filas que salen solas no tienen id propio. */
+  id: string | number
   principal: string
   meta: string
   archivoNombre: string | null
   tieneArchivo: boolean
+  /** Ruta completa del archivo. Sin esto se arma con `ruta/id/archivo`. */
+  urlArchivo?: string | null
+  /** Sale sola de otro dato: ni se corrige ni se borra desde aquí. */
+  automatica?: boolean
+  /** Etiqueta corta al lado del título. */
+  chip?: string
+  /** Nota bajo la fila, para explicar de dónde sale. */
+  pie?: string
 }
 
 function rangoFechas(inicio: string | null, fin: string | null): string {
@@ -119,19 +128,29 @@ function BloqueLista<T>({
             {filas.map(f => (
               <li key={f.id} className="flex items-center gap-3 rounded-xl border border-neutral-100 px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-neutral-800">{f.principal}</p>
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-neutral-800">
+                    <span className="truncate">{f.principal}</span>
+                    {f.chip && (
+                      <span className="shrink-0 rounded-full bg-[#00304D]/10 px-2 py-0.5 text-[10px] font-semibold text-[#00304D]">
+                        {f.chip}
+                      </span>
+                    )}
+                  </p>
                   <p className="truncate text-[11px] text-neutral-500">{f.meta}</p>
+                  {f.pie && <p className="truncate text-[10px] text-neutral-400">{f.pie}</p>}
                 </div>
                 {f.tieneArchivo && (
                   <BotonesArchivo
-                    url={`${ruta}/${f.id}/archivo`}
+                    url={f.urlArchivo ?? `${ruta}/${f.id}/archivo`}
                     nombre={f.archivoNombre}
                     setToast={setToast}
                   />
                 )}
-                <button onClick={() => setPorBorrar(f)} title="Eliminar" className={BTN_BORRAR}>
-                  <Trash2 size={14} />
-                </button>
+                {!f.automatica && (
+                  <button onClick={() => setPorBorrar(f)} title="Eliminar" className={BTN_BORRAR}>
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -420,7 +439,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
 
       <BloqueLista<MiExperiencia>
         titulo="Experiencia"
-        ayuda={`Dónde has trabajado y en qué cargo. ${SIN_EDITAR}`}
+        ayuda={`Dónde has trabajado y en qué cargo. ${SIN_EDITAR} Tus participaciones como evaluador salen solas y no se tocan desde aquí.`}
         icono={<Briefcase size={28} className="mx-auto text-neutral-300" />}
         ruta="/mi-expediente/experiencia"
         vacio="Sin experiencia registrada"
@@ -429,13 +448,30 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         recarga={recargaExp}
         formulario={formExperiencia}
         setToast={setToast}
-        filaDe={(x: MiExperiencia) => ({
-          id: x.experienciaId,
-          principal: x.cargo || '(sin cargo)',
-          meta: [x.entidad, rangoFechas(x.fechaInicio, x.fechaFin)].filter(Boolean).join(' · '),
-          archivoNombre: x.archivoNombre,
-          tieneArchivo: x.tieneArchivo,
-        })}
+        filaDe={(x: MiExperiencia) => {
+          // los ciclos certificados salen solos: aquí no se corrigen ni se borran
+          if (x.origen === 'CICLO') {
+            const cuando = `${x.anio}${x.periodo ? `-${x.periodo}` : ''}`
+            return {
+              id: x.clave ?? `ciclo-${x.participacionId}`,
+              principal: x.cargo || 'Participación en convocatoria',
+              meta: [x.entidad, `Convocatoria de ${cuando}`].filter(Boolean).join(' · '),
+              archivoNombre: x.archivoNombre,
+              tieneArchivo: x.tieneArchivo,
+              urlArchivo: x.archivoUrl ?? null,
+              automatica: true,
+              chip: `Del ciclo ${cuando}`,
+              pie: 'Sale de tu certificado del banco. Si algo está mal, escríbele a la gestora.',
+            }
+          }
+          return {
+            id: x.clave ?? x.experienciaId,
+            principal: x.cargo || '(sin cargo)',
+            meta: [x.entidad, rangoFechas(x.fechaInicio, x.fechaFin)].filter(Boolean).join(' · '),
+            archivoNombre: x.archivoNombre,
+            tieneArchivo: x.tieneArchivo,
+          }
+        }}
       />
 
       <BloqueLista<MiTic>

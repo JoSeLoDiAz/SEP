@@ -42,6 +42,13 @@ export interface MiExperiencia {
   fechaFin: string | null // null = sigue ahí
   archivoNombre: string | null
   tieneArchivo: boolean
+  /** 'MANUAL' la teclea el evaluador; 'CICLO' sale de un ciclo certificado. */
+  origen?: 'MANUAL' | 'CICLO'
+  clave?: string
+  participacionId?: number
+  anio?: number
+  periodo?: string | null
+  archivoUrl?: string | null
 }
 
 export interface MiTic {

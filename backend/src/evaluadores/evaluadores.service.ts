@@ -1231,10 +1231,17 @@ export class EvaluadoresService {
     return { message: 'Participación actualizada' }
   }
 
-  /** Si el ciclo tiene historia colgando responde 409; solo el admin puede forzar. */
+  /** Si el ciclo tiene historia colgando responde 409; solo el admin puede forzar,
+   *  y aun así tiene que pedirlo explícitamente con ?forzar=1. */
   async eliminarParticipacion(
     participacionId: number,
-    opciones: { forzar?: boolean; usuarioEmail?: string; usuarioPerfilId?: number } = {},
+    opciones: {
+      forzar?: boolean
+      /** false = el rol de esta persona no permite arrastrar la historia. */
+      puedeForzar?: boolean
+      usuarioEmail?: string
+      usuarioPerfilId?: number
+    } = {},
   ) {
     const cabecera = await this.dataSource.query(
       `SELECT EVALUADORID AS "evaluadorId", ANIO AS "anio"
@@ -1262,14 +1269,18 @@ export class EvaluadoresService {
     // y pedir la segunda confirmación. `forzar` solo llega si la persona ya la dio.
     if (conDatos.length > 0 && !opciones.forzar) {
       const detalle = conDatos.map(([k, v]) => `${v} ${k}`).join(', ')
+      const puede = opciones.puedeForzar !== false
       throw new ConflictException({
-        message:
-          `El ciclo ${cabecera[0].anio} ya tiene ${detalle}. ` +
-          'Si lo borra se pierde todo eso; si solo quiere marcarlo como no realizado, ' +
-          'cambie el estado a REVOCADO o DECLINO.',
+        message: puede
+          ? `El ciclo ${cabecera[0].anio} ya tiene ${detalle}. ` +
+            'Si lo borra se pierde todo eso; si solo quiere marcarlo como no realizado, ' +
+            'cambie el estado a REVOCADO o DECLINO.'
+          : `El ciclo ${cabecera[0].anio} ya tiene ${detalle}, así que no se puede borrar. ` +
+            'Cambie el estado a REVOCADO o DECLINO para dejar constancia de que no se ' +
+            'realizó, o pídale a un administrador que lo borre con todo lo que cuelga de él.',
         anio: Number(cabecera[0].anio),
         dependencias,
-        sePuedeForzar: true,
+        sePuedeForzar: puede,
       })
     }
 

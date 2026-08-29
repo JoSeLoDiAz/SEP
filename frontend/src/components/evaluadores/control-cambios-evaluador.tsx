@@ -42,6 +42,11 @@ const TABLA_LEGIBLE: Record<string, string> = {
   EVALUADORCERTIFICADO: 'Certificado',
   RETROASIGNACION: 'Matriz de retroalimentación',
   RETRORESPUESTA: 'Retroalimentación',
+  // las cuatro tablas del expediente: hasta ahora no dejaban rastro
+  EVALUADORESTUDIO: 'Estudio',
+  EVALUADOREXPERIENCIA: 'Experiencia laboral',
+  EVALUADORTIC: 'Certificación TIC',
+  EVALUADORDOCUMENTO: 'Documento',
 }
 
 export function ControlCambiosEvaluador({

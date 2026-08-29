@@ -1651,9 +1651,9 @@ function SeccionHV({ evaluadorId, setToast }: { evaluadorId: number; setToast: S
 }
 
 // estudios, experiencia y tic comparten ListadoConArchivos
-interface Estudio { estudioId: number; tipoEstudio: string | null; titulo: string | null; institucion: string | null; fechaGrado: string | null; archivoNombre: string | null; tieneArchivo: boolean }
-interface Experiencia { experienciaId: number; cargo: string | null; entidad: string | null; fechaInicio: string | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean }
-interface Tic { ticId: number; tipoEvento: string | null; nombre: string; horas: number | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean }
+interface Estudio { estudioId: number; tipoEstudioId: number | null; tipoEstudio: string | null; titulo: string | null; institucion: string | null; fechaGrado: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
+interface Experiencia { experienciaId: number; cargo: string | null; entidad: string | null; fechaInicio: string | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
+interface Tic { ticId: number; tipoEventoId?: number | null; tipoEvento: string | null; nombre: string; horas: number | null; fechaFin: string | null; archivoNombre: string | null; tieneArchivo: boolean; usuarioCreacion?: string | null }
 
 function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
   const [items, setItems] = useState<Estudio[]>([])
@@ -1668,6 +1668,8 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
   const [file, setFile] = useState<File | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  // corregir una errata no debería obligar a borrar y volver a subir el PDF
+  const [editandoId, setEditandoId] = useState<number | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1686,23 +1688,48 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
   }
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
+  function limpiar() {
+    setEditandoId(null)
+    setTipoId(''); setTitulo(''); setInstitucion(''); setFechaGrado(''); setFile(null)
+  }
+
+  function alternar() {
+    if (agregar) { setAgregar(false); limpiar() } else { limpiar(); setAgregar(true) }
+  }
+
+  function editar(it: Estudio) {
+    setEditandoId(it.estudioId)
+    setTipoId(String(it.tipoEstudioId ?? ''))
+    setTitulo(it.titulo ?? '')
+    setInstitucion(it.institucion ?? '')
+    // la fecha de grado es de calendario: se lee en UTC o sale un día antes
+    setFechaGrado(it.fechaGrado ? String(it.fechaGrado).slice(0, 10) : '')
+    setFile(null)
+    setAgregar(true)
+  }
+
   async function crear() {
     if (!tipoId) return setToast({ tipo: 'error', msg: 'Selecciona el tipo de estudio' })
     setCreando(true)
     try {
       const fd = new FormData()
       fd.append('tipoEstudioId', tipoId)
-      if (titulo) fd.append('titulo', titulo)
-      if (institucion) fd.append('institucion', institucion)
-      if (fechaGrado) fd.append('fechaGrado', fechaGrado)
+      fd.append('titulo', titulo)
+      fd.append('institucion', institucion)
+      fd.append('fechaGrado', fechaGrado)
+      // sin archivo el backend deja el que ya estaba: por eso se puede corregir sin resubir
       if (file) fd.append('archivo', file)
-      await api.post(`/evaluadores/${evaluadorId}/estudios`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      setToast({ tipo: 'success', msg: 'Estudio agregado' })
+      if (editandoId != null) {
+        await api.put(`/evaluadores/estudios/${editandoId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      } else {
+        await api.post(`/evaluadores/${evaluadorId}/estudios`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      }
+      setToast({ tipo: 'success', msg: editandoId != null ? 'Estudio corregido' : 'Estudio agregado' })
       setAgregar(false)
-      setTipoId(''); setTitulo(''); setInstitucion(''); setFechaGrado(''); setFile(null)
+      limpiar()
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo guardar') })
     } finally {
       setCreando(false)
     }
@@ -1712,7 +1739,8 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
     setEliminando(sid)
     try {
       await api.delete(`/evaluadores/estudios/${sid}`)
-      setToast({ tipo: 'success', msg: 'Eliminado' })
+      setToast({ tipo: 'success', msg: 'Estudio eliminado' })
+      if (editandoId === sid) { setAgregar(false); limpiar() }
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
@@ -1725,8 +1753,10 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
     <ListadoConArchivos
       titulo={`Estudios y certificados (${items.length})`}
       singular="este estudio"
-      onAgregarToggle={() => setAgregar(v => !v)}
+      onAgregarToggle={alternar}
       agregarAbierto={agregar}
+      editando={editandoId != null}
+      onCancelarEdicion={limpiar}
       formulario={
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -1766,6 +1796,8 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
         archivoNombre: it.archivoNombre ?? `estudio-${it.estudioId}.pdf`,
         eliminando: eliminando === it.estudioId,
         onEliminar: () => eliminar(it.estudioId),
+        onEditar: () => editar(it),
+        usuarioCreacion: it.usuarioCreacion ?? null,
       }))}
     />
   )
@@ -1782,6 +1814,7 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
   const [file, setFile] = useState<File | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  const [editandoId, setEditandoId] = useState<number | null>(null)
   // soportes que se cargaron como "documento de experiencia" en vez de como
   // experiencia: no salen en la ficha ni en el PDF, hay que pasarlos aquí
   const [sueltos, setSueltos] = useState<DocumentoItem[]>([])
@@ -1804,22 +1837,45 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
   }
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
+  function limpiar() {
+    setEditandoId(null)
+    setCargo(''); setEntidad(''); setFIni(''); setFFin(''); setFile(null)
+  }
+
+  function alternar() {
+    if (agregar) { setAgregar(false); limpiar() } else { limpiar(); setAgregar(true) }
+  }
+
+  function editar(it: Experiencia) {
+    setEditandoId(it.experienciaId)
+    setCargo(it.cargo ?? '')
+    setEntidad(it.entidad ?? '')
+    setFIni(it.fechaInicio ? String(it.fechaInicio).slice(0, 10) : '')
+    setFFin(it.fechaFin ? String(it.fechaFin).slice(0, 10) : '')
+    setFile(null)
+    setAgregar(true)
+  }
+
   async function crear() {
     if (!cargo.trim() || !entidad.trim()) return setToast({ tipo: 'error', msg: 'Cargo y entidad son obligatorios' })
     setCreando(true)
     try {
       const fd = new FormData()
       fd.append('cargo', cargo); fd.append('entidad', entidad)
-      if (fIni) fd.append('fechaInicio', fIni)
-      if (fFin) fd.append('fechaFin', fFin)
+      fd.append('fechaInicio', fIni)
+      fd.append('fechaFin', fFin)
       if (file) fd.append('archivo', file)
-      await api.post(`/evaluadores/${evaluadorId}/experiencia`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      setToast({ tipo: 'success', msg: 'Experiencia agregada' })
+      if (editandoId != null) {
+        await api.put(`/evaluadores/experiencia/${editandoId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      } else {
+        await api.post(`/evaluadores/${evaluadorId}/experiencia`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      }
+      setToast({ tipo: 'success', msg: editandoId != null ? 'Experiencia corregida' : 'Experiencia agregada' })
       setAgregar(false)
-      setCargo(''); setEntidad(''); setFIni(''); setFFin(''); setFile(null)
+      limpiar()
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo guardar') })
     } finally {
       setCreando(false)
     }
@@ -1829,7 +1885,8 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
     setEliminando(eid)
     try {
       await api.delete(`/evaluadores/experiencia/${eid}`)
-      setToast({ tipo: 'success', msg: 'Eliminada' })
+      setToast({ tipo: 'success', msg: 'Experiencia eliminada' })
+      if (editandoId === eid) { setAgregar(false); limpiar() }
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
@@ -1844,6 +1901,8 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
     <ListadoConArchivos
       titulo={`Experiencia laboral y en proyectos (${items.length})`}
       singular="esta experiencia"
+      editando={editandoId != null}
+      onCancelarEdicion={limpiar}
       aviso={sueltos.length > 0 ? (
         <div className="border-b border-amber-100 bg-amber-50/70 px-5 py-3">
           <p className="text-[12px] font-semibold text-amber-900">
@@ -1861,7 +1920,7 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
           </ul>
         </div>
       ) : undefined}
-      onAgregarToggle={() => setAgregar(v => !v)}
+      onAgregarToggle={alternar}
       agregarAbierto={agregar}
       formulario={
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1891,6 +1950,8 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
         archivoNombre: it.archivoNombre ?? `experiencia-${it.experienciaId}.pdf`,
         eliminando: eliminando === it.experienciaId,
         onEliminar: () => eliminar(it.experienciaId),
+        onEditar: () => editar(it),
+        usuarioCreacion: it.usuarioCreacion ?? null,
       }))}
     />
   )
@@ -1906,6 +1967,7 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
   const [file, setFile] = useState<File | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  const [editandoId, setEditandoId] = useState<number | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1920,22 +1982,44 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
   }
   useEffect(() => { cargar() /* eslint-disable-next-line */ }, [])
 
+  function limpiar() {
+    setEditandoId(null)
+    setNombre(''); setHoras(''); setFechaFin(''); setFile(null)
+  }
+
+  function alternar() {
+    if (agregar) { setAgregar(false); limpiar() } else { limpiar(); setAgregar(true) }
+  }
+
+  function editar(it: Tic) {
+    setEditandoId(it.ticId)
+    setNombre(it.nombre ?? '')
+    setHoras(it.horas != null ? String(it.horas) : '')
+    setFechaFin(it.fechaFin ? String(it.fechaFin).slice(0, 10) : '')
+    setFile(null)
+    setAgregar(true)
+  }
+
   async function crear() {
     if (!nombre.trim()) return setToast({ tipo: 'error', msg: 'Nombre obligatorio' })
     setCreando(true)
     try {
       const fd = new FormData()
       fd.append('nombre', nombre)
-      if (horas) fd.append('horas', horas)
-      if (fechaFin) fd.append('fechaFin', fechaFin)
+      fd.append('horas', horas)
+      fd.append('fechaFin', fechaFin)
       if (file) fd.append('archivo', file)
-      await api.post(`/evaluadores/${evaluadorId}/tic`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      setToast({ tipo: 'success', msg: 'TIC agregada' })
+      if (editandoId != null) {
+        await api.put(`/evaluadores/tic/${editandoId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      } else {
+        await api.post(`/evaluadores/${evaluadorId}/tic`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      }
+      setToast({ tipo: 'success', msg: editandoId != null ? 'Certificación corregida' : 'Certificación agregada' })
       setAgregar(false)
-      setNombre(''); setHoras(''); setFechaFin(''); setFile(null)
+      limpiar()
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo agregar') })
+      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo guardar') })
     } finally {
       setCreando(false)
     }
@@ -1945,7 +2029,8 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
     setEliminando(tid)
     try {
       await api.delete(`/evaluadores/tic/${tid}`)
-      setToast({ tipo: 'success', msg: 'Eliminada' })
+      setToast({ tipo: 'success', msg: 'Certificación eliminada' })
+      if (editandoId === tid) { setAgregar(false); limpiar() }
       await cargar()
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
@@ -1958,7 +2043,9 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
     <ListadoConArchivos
       titulo={`Formación TIC complementaria (${items.length})`}
       singular="esta formación TIC"
-      onAgregarToggle={() => setAgregar(v => !v)}
+      editando={editandoId != null}
+      onCancelarEdicion={limpiar}
+      onAgregarToggle={alternar}
       agregarAbierto={agregar}
       formulario={
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1980,6 +2067,8 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
         archivoNombre: it.archivoNombre ?? `tic-${it.ticId}.pdf`,
         eliminando: eliminando === it.ticId,
         onEliminar: () => eliminar(it.ticId),
+        onEditar: () => editar(it),
+        usuarioCreacion: it.usuarioCreacion ?? null,
       }))}
     />
   )
@@ -1994,11 +2083,15 @@ interface FilaListado {
   archivoNombre: string | null
   eliminando: boolean
   onEliminar: () => void
+  /** Si viene, la fila muestra el lápiz para corregirla sin borrarla. */
+  onEditar?: () => void
+  /** Quién la cargó, si quedó registrado. */
+  usuarioCreacion?: string | null
 }
 
 function ListadoConArchivos({
   titulo, singular, onAgregarToggle, agregarAbierto, formulario, onCrear, creando, loading, vacio, filas,
-  aviso,
+  aviso, editando, onCancelarEdicion,
 }: {
   titulo: string
   /** Cómo se llama una fila, para el texto de la confirmación. */
@@ -2008,6 +2101,9 @@ function ListadoConArchivos({
   loading: boolean; vacio: string; filas: FilaListado[]
   /** Franja opcional arriba de la lista. */
   aviso?: React.ReactNode
+  /** Texto del botón de guardar y aviso de que se está corrigiendo, no creando. */
+  editando?: boolean
+  onCancelarEdicion?: () => void
 }) {
   // borrar con un clic dejaba a la persona sin el soporte y sin manera de recuperarlo
   const [porBorrar, setPorBorrar] = useState<FilaListado | null>(null)
@@ -2020,11 +2116,27 @@ function ListadoConArchivos({
     }>
       {agregarAbierto && (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100">
+          {editando && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2">
+              <p className="text-[12px] font-semibold text-amber-800">
+                Está corrigiendo {singular}. Si no adjunta un archivo nuevo, el soporte que ya
+                está cargado se queda como está.
+              </p>
+              {onCancelarEdicion && (
+                <button
+                  onClick={onCancelarEdicion}
+                  className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+                >
+                  Mejor agregar una nueva
+                </button>
+              )}
+            </div>
+          )}
           {formulario}
           <div className="flex justify-end mt-3">
             <button onClick={onCrear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>
               {creando ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Guardar
+              {editando ? 'Guardar cambios' : 'Guardar'}
             </button>
           </div>
         </div>
@@ -2044,6 +2156,9 @@ function ListadoConArchivos({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-neutral-800 truncate">{f.titulo}</p>
                 <p className="text-[11px] text-neutral-500 truncate">{f.sub}</p>
+                {f.usuarioCreacion && (
+                  <p className="truncate text-[10px] text-neutral-400">Cargó {f.usuarioCreacion}</p>
+                )}
               </div>
               {f.archivoUrl && (
                 <>
@@ -2063,6 +2178,15 @@ function ListadoConArchivos({
                     <Download size={12} />
                   </button>
                 </>
+              )}
+              {f.onEditar && (
+                <button
+                  onClick={f.onEditar}
+                  title={`Corregir ${singular}`}
+                  className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                >
+                  <Pencil size={14} />
+                </button>
               )}
               <button
                 onClick={() => setPorBorrar(f)}

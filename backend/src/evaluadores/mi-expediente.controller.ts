@@ -21,6 +21,9 @@ import { responderArchivo } from './responder-archivo'
 
 const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // mismo tope que el resto del SEP
 
+// lo que deja JwtAuthGuard en la peticion, igual que en evaluadores.controller
+interface JwtUser { usuarioId: number; email: string; perfilId: number }
+
 // prefijo aparte: el evaluadorId lo pone el guard desde la sesión, nunca llega del cliente
 @ApiTags('mi-expediente')
 @Controller('mi-expediente')
@@ -34,6 +37,12 @@ export class MiExpedienteController {
     private readonly fichaPdf: FichaPdfService,
     private readonly catalogos: CatalogosEvaluadorService,
   ) {}
+
+  // Quién hizo el cambio. Aquí el valor está en distinguir lo que sube el propio
+  // evaluador de lo que sube el banco: los dos escriben en las mismas tablas.
+  private ctx(user: JwtUser) {
+    return { usuarioEmail: user.email, usuarioPerfilId: user.perfilId }
+  }
 
   // los catálogos de /evaluadores exigen perfil de gestión; el evaluador necesita estos dos
   @Get('catalogos/ciudades/buscar')
@@ -102,11 +111,28 @@ export class MiExpedienteController {
     limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
   }))
   crearEstudio(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Body() dto: EstudioDto,
     @UploadedFile() file?: MulterFile,
   ) {
-    return this.service.crearEstudio(yo.evaluadorId, dto, file)
+    return this.service.crearEstudio(yo.evaluadorId, dto, file, this.ctx(user))
+  }
+
+  @Put('estudios/:id')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
+  }))
+  @ApiOperation({ summary: 'Corregir un estudio propio. Sin archivo nuevo, el soporte se queda' })
+  async actualizarEstudio(
+    @CurrentUser() user: JwtUser,
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EstudioDto,
+    @UploadedFile() file?: MulterFile,
+  ) {
+    await this.mio.esMiEstudio(id, yo.evaluadorId)
+    return this.service.actualizarEstudio(id, dto, file, this.ctx(user))
   }
 
   @Get('estudios/:id/archivo')
@@ -122,11 +148,12 @@ export class MiExpedienteController {
 
   @Delete('estudios/:id')
   async borrarEstudio(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Param('id', ParseIntPipe) id: number,
   ) {
     await this.mio.esMiEstudio(id, yo.evaluadorId)
-    return this.service.eliminarEstudio(id)
+    return this.service.eliminarEstudio(id, this.ctx(user))
   }
 
   @Get('experiencia')
@@ -139,11 +166,28 @@ export class MiExpedienteController {
     limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
   }))
   crearExperiencia(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Body() dto: ExperienciaDto,
     @UploadedFile() file?: MulterFile,
   ) {
-    return this.service.crearExperiencia(yo.evaluadorId, dto, file)
+    return this.service.crearExperiencia(yo.evaluadorId, dto, file, this.ctx(user))
+  }
+
+  @Put('experiencia/:id')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
+  }))
+  @ApiOperation({ summary: 'Corregir una experiencia propia. Sin archivo nuevo, el soporte se queda' })
+  async actualizarExperiencia(
+    @CurrentUser() user: JwtUser,
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ExperienciaDto,
+    @UploadedFile() file?: MulterFile,
+  ) {
+    await this.mio.esMiExperiencia(id, yo.evaluadorId)
+    return this.service.actualizarExperiencia(id, dto, file, this.ctx(user))
   }
 
   @Get('experiencia/:id/archivo')
@@ -159,11 +203,12 @@ export class MiExpedienteController {
 
   @Delete('experiencia/:id')
   async borrarExperiencia(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Param('id', ParseIntPipe) id: number,
   ) {
     await this.mio.esMiExperiencia(id, yo.evaluadorId)
-    return this.service.eliminarExperiencia(id)
+    return this.service.eliminarExperiencia(id, this.ctx(user))
   }
 
   @Get('tic')
@@ -176,11 +221,28 @@ export class MiExpedienteController {
     limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
   }))
   crearTic(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Body() dto: TicDto,
     @UploadedFile() file?: MulterFile,
   ) {
-    return this.service.crearTic(yo.evaluadorId, dto, file)
+    return this.service.crearTic(yo.evaluadorId, dto, file, this.ctx(user))
+  }
+
+  @Put('tic/:id')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
+  }))
+  @ApiOperation({ summary: 'Corregir una certificación TIC propia. Sin archivo nuevo, el soporte se queda' })
+  async actualizarTic(
+    @CurrentUser() user: JwtUser,
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: TicDto,
+    @UploadedFile() file?: MulterFile,
+  ) {
+    await this.mio.esMiTic(id, yo.evaluadorId)
+    return this.service.actualizarTic(id, dto, file, this.ctx(user))
   }
 
   @Get('tic/:id/archivo')
@@ -196,11 +258,12 @@ export class MiExpedienteController {
 
   @Delete('tic/:id')
   async borrarTic(
+    @CurrentUser() user: JwtUser,
     @MiEvaluadorActual() yo: MiEvaluador,
     @Param('id', ParseIntPipe) id: number,
   ) {
     await this.mio.esMiTic(id, yo.evaluadorId)
-    return this.service.eliminarTic(id)
+    return this.service.eliminarTic(id, this.ctx(user))
   }
 
   @Get('documentos')

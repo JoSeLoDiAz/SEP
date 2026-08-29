@@ -2394,7 +2394,10 @@ export class EvaluadoresService {
          FROM EVALUADORDOCUMENTO d
          JOIN TIPODOCUMENTOEVAL  t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
         WHERE ${conds.join(' AND ')}
-        ORDER BY t.ORDEN ASC, d.FECHACARGUE DESC, d.DOCUMENTOID DESC`,
+        -- el año manda sobre la fecha de cargue: hay archivos con el mismo
+        -- nombre en años distintos y ordenarlos por cargue los mezcla
+        ORDER BY t.ORDEN ASC, d.ANIOREFERENCIA DESC NULLS LAST,
+                 d.FECHACARGUE DESC, d.DOCUMENTOID DESC`,
       params,
     )
     return rows.map(r => ({

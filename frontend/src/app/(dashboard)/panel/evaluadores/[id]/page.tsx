@@ -90,16 +90,26 @@ export default function FichaEvaluadorPage() {
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
   const [verFicha, setVerFicha] = useState(false)
 
+  // La pantalla en blanco solo tiene sentido la primera vez. Al guardar, cambiar
+  // la foto o desactivar, la ficha ya está pintada: se refresca por debajo y se
+  // avisa con un indicador discreto, sin perder el scroll ni la pestaña abierta.
+  const [refrescando, setRefrescando] = useState(false)
   const cargar = async () => {
-    setLoading(true)
+    const primeraVez = ficha == null
+    if (primeraVez) setLoading(true); else setRefrescando(true)
     setErrMsg('')
     try {
       const res = await api.get<Ficha>(`/evaluadores/${evaluadorId}`)
       setFicha(res.data)
     } catch (err: unknown) {
-      setErrMsg((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error cargando la ficha')
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Error cargando la ficha'
+      // si ya había ficha en pantalla no se borra por un refresco fallido
+      if (primeraVez) setErrMsg(msg)
+      else setToast({ tipo: 'error', msg })
     } finally {
       setLoading(false)
+      setRefrescando(false)
     }
   }
   useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
@@ -200,19 +210,33 @@ export default function FichaEvaluadorPage() {
         </div>
       </div>
 
-      <Link href="/panel/evaluadores" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
-        <ArrowLeft size={13} />
-        Volver al banco
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link href="/panel/evaluadores" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
+          <ArrowLeft size={13} />
+          Volver al banco
+        </Link>
+        {refrescando && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-neutral-400" role="status">
+            <Loader2 size={12} className="animate-spin" />
+            Actualizando…
+          </span>
+        )}
+      </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto bg-white border border-neutral-200 rounded-2xl p-1.5 shadow-sm">
+      <div
+        role="tablist"
+        aria-label="Secciones de la ficha"
+        className="flex gap-1 overflow-x-auto bg-white border border-neutral-200 rounded-2xl p-1.5 shadow-sm"
+      >
         {TABS.map(t => {
           const Icon = t.icon
           const activo = tab === t.id
           return (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={activo}
               onClick={() => setTab(t.id)}
               className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition ${
                 activo ? 'text-white shadow-sm' : 'text-neutral-600 hover:bg-neutral-50'
@@ -236,13 +260,19 @@ export default function FichaEvaluadorPage() {
 
       {tab === 'perfil' && (
         <>
-          <div className="flex gap-1 overflow-x-auto rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-sm">
+          <div
+            role="tablist"
+            aria-label="Secciones del perfil"
+            className="flex gap-1 overflow-x-auto rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-sm"
+          >
             {PERFIL_SUBTABS.map(t => {
               const Icon = t.icon
               const activo = perfilTab === t.id
               return (
                 <button
                   key={t.id}
+                  role="tab"
+                  aria-selected={activo}
                   onClick={() => setPerfilTab(t.id)}
                   className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition ${
                     activo ? 'text-white shadow-sm' : 'text-neutral-600 hover:bg-neutral-50'
@@ -324,7 +354,7 @@ function Section({ titulo, children, accion }: { titulo: string; children: React
   return (
     <section className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
       <header className="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3">
-        <p className="text-sm font-bold text-neutral-900">{titulo}</p>
+        <h2 className="text-sm font-bold text-neutral-900">{titulo}</h2>
         {accion}
       </header>
       <div>{children}</div>
@@ -402,8 +432,11 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
       setToast({ tipo: 'error', msg: 'Nombres y primer apellido son obligatorios' })
       return
     }
-    if (!email.trim() || !emailInst.trim()) {
-      setToast({ tipo: 'error', msg: 'Correo personal e institucional son obligatorios' })
+    // El institucional falta en 19 de las 69 fichas activas y el personal no falta
+    // en ninguna: exigir los dos dejaba esas 19 sin poder guardar nada, con un
+    // aviso que ademas señalaba al campo equivocado.
+    if (!email.trim()) {
+      setToast({ tipo: 'error', msg: 'El correo personal es obligatorio' })
       return
     }
     setGuardando(true)
@@ -504,7 +537,21 @@ function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged:
               <p className="text-[10px] text-neutral-400 mt-0.5">No editable — para cambiar, eliminar y volver a registrar.</p>
             </div>
             <div><label className={label}>Correo personal *</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className={input} /></div>
-            <div><label className={label}>Correo institucional *</label><input type="email" value={emailInst} onChange={e => setEmailInst(e.target.value)} className={input} /></div>
+            <div>
+              <label className={label}>Correo institucional</label>
+              <input
+                type="email"
+                value={emailInst}
+                onChange={e => setEmailInst(e.target.value)}
+                aria-describedby={!emailInst.trim() ? 'aviso-correo-inst' : undefined}
+                className={input}
+              />
+              {!emailInst.trim() && (
+                <p id="aviso-correo-inst" className="mt-1 text-[11px] text-amber-700">
+                  Falta para poder enviarle la invitación y el certificado. Se puede guardar sin él.
+                </p>
+              )}
+            </div>
             <div className="sm:col-span-2"><label className={label}>Celular</label><input value={celular} onChange={e => setCelular(e.target.value)} className={input} /></div>
           </div>
         </div>
@@ -602,7 +649,14 @@ function Dato({ label, valor, mono, multiline }: { label: string; valor: string 
   return (
     <div>
       <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">{label}</p>
-      <p className={`text-sm ${mono ? 'font-mono' : ''} text-neutral-800 ${multiline ? 'whitespace-pre-line' : 'truncate'}`}>{v}</p>
+      {/* title: los nombres largos (el del centro de formación, sobre todo) se
+          cortan y no había manera de ver el resto */}
+      <p
+        title={v}
+        className={`text-sm ${mono ? 'font-mono' : ''} text-neutral-800 ${multiline ? 'whitespace-pre-line' : 'truncate'}`}
+      >
+        {v}
+      </p>
     </div>
   )
 }
@@ -1331,7 +1385,16 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
               </p>
             )}
           </div>
-          <div className="col-span-2 sm:col-span-4 flex justify-end">
+          <div className="col-span-2 flex justify-end gap-2 sm:col-span-4">
+            {/* sin esto, corregir un ciclo dejaba la sección trabada: el formulario
+                solo se cerraba guardando, borrando o recargando la página */}
+            <button
+              onClick={() => { limpiarForm(); setAgregar(false) }}
+              disabled={creando}
+              className="rounded-lg border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-600 transition hover:bg-neutral-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
             <button onClick={crear} disabled={creando} className="inline-flex items-center gap-2 px-4 py-2 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90" style={{ backgroundColor: INSTITUTIONAL }}>
               {creando ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
               {editandoId ? 'Guardar cambios' : 'Guardar participación'}
@@ -1342,9 +1405,18 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
 
   return (
     <Section titulo={`Historial de participaciones (${items.length})`} accion={
-      <button onClick={() => setAgregar(v => !v)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
+      <button
+        onClick={() => {
+          // corrigiendo un ciclo, "Agregar" no hacía nada: el formulario de alta
+          // exige !editandoId. Ahora sale del modo edición y abre uno en blanco.
+          if (editandoId != null) { limpiarForm(); setAgregar(true) }
+          else setAgregar(v => !v)
+        }}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90"
+        style={{ backgroundColor: PRIMARY }}
+      >
         <Settings2 size={12} />
-        {agregar ? 'Cerrar' : 'Agregar'}
+        {editandoId != null ? 'Agregar otra' : agregar ? 'Cerrar' : 'Agregar'}
       </button>
     }>
       {agregar && !editandoId && formulario}
@@ -1411,6 +1483,7 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
                   <button
                     onClick={() => { setChoque(null); setPorBorrar(p.participacionId) }}
                     disabled={eliminando === p.participacionId}
+                    aria-label={`Eliminar el ciclo ${p.anio}${p.periodo ? `-${p.periodo}` : ''}`}
                     title="Eliminar la participación y todo lo del año"
                     className="shrink-0 rounded-lg p-2 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                   >
@@ -1438,6 +1511,7 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
                     <div className="mt-3 flex justify-end">
                       <button
                         onClick={() => editar(p)}
+                        title={`Corregir el ciclo ${p.anio}${p.periodo ? `-${p.periodo}` : ''}`}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-50"
                       >
                         <Pencil size={13} /> Editar
@@ -2274,6 +2348,7 @@ function ListadoConArchivos({
                   <button
                     onClick={() => setPorBorrar(f)}
                     disabled={f.eliminando}
+                    aria-label={`Eliminar ${f.titulo}`}
                     title={`Eliminar ${singular}`}
                     className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
                   >
@@ -2572,7 +2647,7 @@ function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: numb
               >
                 <Pencil size={14} />
               </button>
-              <button onClick={() => setPorBorrar(p)} disabled={eliminando === p.pruebaId} title="Eliminar la prueba" className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
+              <button onClick={() => setPorBorrar(p)} disabled={eliminando === p.pruebaId} aria-label={`Eliminar la prueba de ${p.anio}`} title="Eliminar la prueba" className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
                 {eliminando === p.pruebaId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               </button>
             </li>
@@ -2793,11 +2868,19 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
     ? items
     : items.filter(d => d.tipoCodigo === filtroCodigo)
 
+  // los del ciclo se cargan y se quitan en Trayectoria: borrarlos desde aquí
+  // apaga un hito sin que se vea dónde
+  const tiposDelAnio = new Set(tipos.filter(t => t.esDelAnio).map(t => t.codigo))
+
   const docAEliminar = confirmDelId != null ? items.find(d => d.documentoId === confirmDelId) : null
 
   return (
     <Section
-      titulo={`Documentos personales (${items.length})`}
+      titulo={(() => {
+        const delAnio = items.filter(d => tiposDelAnio.has(d.tipoCodigo)).length
+        return `Documentos (${items.length})` +
+          (delAnio ? ` · ${delAnio} de los ciclos` : '')
+      })()}
       accion={
         <button
           onClick={() => { if (formAbierto) cerrarForm(); else abrirForm() }}
@@ -3056,9 +3139,18 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
                     <Download size={13} />
                     Descargar
                   </button>
+                  {tiposDelAnio.has(d.tipoCodigo) && (
+                    <span
+                      title="Este soporte pertenece a un ciclo: se carga y se quita en Trayectoria"
+                      className="inline-flex items-center gap-1 rounded-lg bg-[#00304D]/[0.06] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#00304D]"
+                    >
+                      Del ciclo{d.anioReferencia ? ` ${d.anioReferencia}` : ''}
+                    </span>
+                  )}
                   <button
                     onClick={() => setConfirmDelId(d.documentoId)}
                     disabled={eliminandoId === d.documentoId}
+                    aria-label={`Eliminar ${d.archivoNombre ?? 'el documento'}`}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-700 text-xs font-semibold rounded-lg disabled:opacity-50 transition"
                   >
                     {eliminandoId === d.documentoId ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
@@ -3079,8 +3171,15 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
         titulo="Eliminar documento"
         mensaje={
           <>
-            ¿Seguro que deseas eliminar el documento{' '}
-            <strong>{docAEliminar?.archivoNombre ?? ''}</strong>? Esta acción no se puede deshacer.
+            Se borra <strong>{docAEliminar?.archivoNombre ?? 'el documento'}</strong>
+            {docAEliminar?.anioReferencia ? <>, del año <strong>{docAEliminar.anioReferencia}</strong></> : null}.
+            {docAEliminar && tiposDelAnio.has(docAEliminar.tipoCodigo) && (
+              <span className="mt-2 block text-[12px] font-semibold text-amber-700">
+                Es un soporte del ciclo{docAEliminar.anioReferencia ? ` ${docAEliminar.anioReferencia}` : ''}:
+                al borrarlo se apaga ese hito en Trayectoria.
+              </span>
+            )}
+            <span className="mt-2 block">No se puede deshacer.</span>
           </>
         }
         textoConfirmar="Eliminar"

@@ -51,6 +51,23 @@ export class CertificadoService {
   async emitir(participacionId: number, ctx: CtxUsuario, horasManuales?: number | null) {
     const datos = await this.reunirDatos(participacionId)
 
+    // El filtro de estado estaba solo en la lista de pendientes: un ciclo
+    // revocado no se proponía, pero sí se podía certificar entrando a él. Hay 18
+    // ciclos negativos, y varios conservan proyectos, prueba y certificados.
+    const estado: Array<{ negativo: number; nombre: string }> = await this.dataSource.query(
+      `SELECT NVL(es.ESNEGATIVO, 0) AS "negativo", TRIM(es.NOMBRE) AS "nombre"
+         FROM EVALUADORPARTICIPACION pa
+         LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+        WHERE pa.PARTICIPACIONID = :1`,
+      [participacionId],
+    )
+    if (Number(estado[0]?.negativo ?? 0) === 1) {
+      throw new BadRequestException(
+        `Este ciclo está en "${estado[0].nombre}": no se le puede emitir un certificado. ` +
+        'Cambie el estado del ciclo si la participación sí se realizó.',
+      )
+    }
+
     const vigente = await this.dataSource.query(
       `SELECT CERTIFICADOID AS "id" FROM EVALUADORCERTIFICADO
         WHERE PARTICIPACIONID = :1 AND ANULADO = 0`,

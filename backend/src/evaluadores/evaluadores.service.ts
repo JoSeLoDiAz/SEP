@@ -9,7 +9,7 @@ import {
   cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
 } from '../common/crypto/usuario-clave'
 import { ControlCambiosService } from './control-cambios.service'
-import { extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
+import { esTipoDocDelAnio, extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
@@ -1246,18 +1246,29 @@ export class EvaluadoresService {
 
     // No se puede forzar: SEP_APP no tiene DELETE sobre EVALUADORCERTIFICADO (v37).
     if ((dependencias['certificados'] ?? 0) > 0) {
-      throw new ConflictException(
-        `No se puede eliminar: el ciclo ${cabecera[0].anio} tiene certificados emitidos, ` +
-        'y esos no se borran ni forzando. Anule el certificado y cambie el estado del ciclo.',
-      )
+      throw new ConflictException({
+        message:
+          `No se puede eliminar: el ciclo ${cabecera[0].anio} tiene certificados emitidos, ` +
+          'y esos no se borran ni forzando. Anule el certificado y cambie el estado del ciclo.',
+        anio: Number(cabecera[0].anio),
+        dependencias,
+        sePuedeForzar: false,
+      })
     }
 
+    // El 409 es la primera puerta: la pantalla lo usa para mostrar qué se perdería
+    // y pedir la segunda confirmación. `forzar` solo llega si la persona ya la dio.
     if (conDatos.length > 0 && !opciones.forzar) {
       const detalle = conDatos.map(([k, v]) => `${v} ${k}`).join(', ')
-      throw new ConflictException(
-        `No se puede eliminar: el ciclo ${cabecera[0].anio} ya tiene ${detalle}. ` +
-        `Cambie el estado a REVOCADO o DECLINO en vez de borrarlo, para no perder la historia.`,
-      )
+      throw new ConflictException({
+        message:
+          `El ciclo ${cabecera[0].anio} ya tiene ${detalle}. ` +
+          'Si lo borra se pierde todo eso; si solo quiere marcarlo como no realizado, ' +
+          'cambie el estado a REVOCADO o DECLINO.',
+        anio: Number(cabecera[0].anio),
+        dependencias,
+        sePuedeForzar: true,
+      })
     }
 
     // Con forzar = true (admin) se limpian los hijos en orden de dependencia.
@@ -1995,6 +2006,14 @@ export class EvaluadoresService {
     if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
     const admiteMultiple = Number(tipo[0].admiteMultiple) === 1
 
+    // Un tipo de instancia única que no pertenece a un año es del perfil (cédula,
+    // tarjeta profesional): el insert de abajo borra el anterior, así que si además
+    // se le pega un año, subirlo desde un ciclo se lleva por delante el del perfil.
+    // Ya pasó dos veces. Se guarda sin año y sigue saliendo en su propio card.
+    const esDelPerfil = !admiteMultiple && !esTipoDocDelAnio(tipo[0].codigo)
+    const anioReferencia = esDelPerfil ? null : (opts.anioReferencia ?? null)
+    const participacionId = esDelPerfil ? null : (opts.participacionId ?? null)
+
     // Los formatos dependen del tipo: el correo de autorización recibe .msg, .eml o .html.
     const permitidas = extensionesDeTipoDocEval(tipo[0].codigo)
     const ext = extensionDe(file.originalname)
@@ -2036,8 +2055,8 @@ export class EvaluadoresService {
           evaluadorId,
           tipoId,
           opts.descripcion?.trim() || null,
-          opts.anioReferencia ?? null,
-          opts.participacionId ?? null,
+          anioReferencia,
+          participacionId,
           file.buffer,
           file.mimetype,
           nombre,

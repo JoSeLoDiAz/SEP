@@ -1156,7 +1156,10 @@ function SubirDocumentoDelAnio({
   onRecargar: () => void
 }) {
   const [abierto, setAbierto] = useState(false)
-  const [tipos, setTipos] = useState<Array<{ id: number; codigo: string; nombre: string; extensiones?: string[] }>>([])
+  const [tipos, setTipos] = useState<Array<{
+    id: number; codigo: string; nombre: string
+    extensiones?: string[]; esDelAnio?: boolean; admiteMultiple?: boolean
+  }>>([])
   const [tipoSel, setTipoSel] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [archivo, setArchivo] = useState<File | null>(null)
@@ -1169,14 +1172,20 @@ function SubirDocumentoDelAnio({
   useEffect(() => {
     if (!abierto || tipos.length) return
     let vivo = true
-    api.get<Array<{ id: number; codigo: string; nombre: string; extensiones?: string[] }>>(
-      '/evaluadores/catalogos/tipos-documento-evaluador')
+    api.get<Array<{
+      id: number; codigo: string; nombre: string
+      extensiones?: string[]; esDelAnio?: boolean; admiteMultiple?: boolean
+    }>>('/evaluadores/catalogos/tipos-documento-evaluador')
       .then(r => { if (vivo) setTipos(r.data ?? []) })
       .catch(() => { if (vivo) setToast({ tipo: 'error', msg: 'No se pudo cargar el catálogo de tipos' }) })
     return () => { vivo = false }
   }, [abierto, tipos.length, setToast])
 
-  const tipo = tipos.find(t => String(t.id) === tipoSel)
+  // La cédula y la tarjeta profesional son del perfil y de instancia única: cargarlas
+  // desde un año borraba la que ya estaba en el perfil. Aquí no se ofrecen.
+  const ofrecidos = tipos.filter(t => t.esDelAnio || t.admiteMultiple !== false)
+
+  const tipo = ofrecidos.find(t => String(t.id) === tipoSel)
   const exts = tipo?.extensiones?.length ? tipo.extensiones : ['pdf']
 
   async function subir() {
@@ -1248,8 +1257,11 @@ function SubirDocumentoDelAnio({
             <label className={label}>Tipo de documento *</label>
             <select value={tipoSel} onChange={e => setTipoSel(e.target.value)} className={input}>
               <option value="">— Escoja el tipo —</option>
-              {tipos.map(t => <option key={t.id} value={String(t.id)}>{t.nombre}</option>)}
+              {ofrecidos.map(t => <option key={t.id} value={String(t.id)}>{t.nombre}</option>)}
             </select>
+            <p className="mt-1 text-[10px] text-neutral-400">
+              La cédula y demás documentos del perfil se cargan en la pestaña Perfil, no aquí.
+            </p>
           </div>
           <div>
             <label className={label}>

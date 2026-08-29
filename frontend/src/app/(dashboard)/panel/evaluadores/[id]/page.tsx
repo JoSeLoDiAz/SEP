@@ -10,14 +10,15 @@ import { TrayectoriaEvaluador } from '@/components/evaluadores/trayectoria-evalu
 import { ControlCambiosEvaluador } from '@/components/evaluadores/control-cambios-evaluador'
 import { VisorFicha } from '@/components/evaluadores/visor-ficha'
 import {
-  ArrowLeft, Award, Briefcase, ChevronRight, Download, Eye, FileText,
+  ArrowLeft, Award, BadgeCheck, Briefcase, ChevronRight, Download, Eye, FileText,
   GraduationCap, History, IdCard, Loader2, Paperclip, Pencil, PowerOff, Save, Settings2,
   ShieldCheck, Trash2, Upload, UserCircle2,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fmtFecha, fmtMesAnio, fmtSoloDia } from '@/lib/format-date'
+import { fmtDateTime, fmtFecha, fmtMesAnio, fmtSoloDia } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -69,7 +70,7 @@ const PERFIL_SUBTABS: SubTab[] = [
   { id: 'datos',       label: 'Datos básicos',           icon: UserCircle2 },
   { id: 'estudios',    label: 'Hoja de vida y estudios', icon: GraduationCap },
   { id: 'tic',         label: 'Certificaciones TIC',     icon: Award },
-  { id: 'experiencia', label: 'Experiencia',             icon: Briefcase },
+  { id: 'experiencia', label: 'Experiencia laboral y en proyectos', icon: Briefcase },
 ]
 
 export default function FichaEvaluadorPage() {
@@ -258,9 +259,24 @@ export default function FichaEvaluadorPage() {
           {perfilTab === 'datos' && (
             <>
               <SeccionDatos ficha={ficha} onChanged={cargar} setToast={setToast} />
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <SeccionFoto   ficha={ficha} onChanged={cargar} setToast={setToast} />
-                <SeccionCedula evaluadorId={evaluadorId}       setToast={setToast} />
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+                <SeccionFoto ficha={ficha} onChanged={cargar} setToast={setToast} />
+                <TarjetaDocumentoUnico
+                  evaluadorId={evaluadorId}
+                  codigo="CEDULA"
+                  titulo="Cédula de ciudadanía"
+                  sustantivo="la cédula"
+                  Icono={IdCard}
+                  setToast={setToast}
+                />
+                <TarjetaDocumentoUnico
+                  evaluadorId={evaluadorId}
+                  codigo="TARJETA_PROFESIONAL"
+                  titulo="Tarjeta o matrícula profesional"
+                  sustantivo="la tarjeta profesional"
+                  Icono={BadgeCheck}
+                  setToast={setToast}
+                />
               </div>
             </>
           )}
@@ -826,52 +842,84 @@ interface TipoDocEval {
   id: number
   codigo: string
   nombre: string
+  admiteMultiple?: boolean
+  extensiones?: string[]
+  esDelAnio?: boolean
+  esDePerfil?: boolean
+  activo?: boolean
 }
 
-function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToast: SetToast }) {
+/** Un documento del que hay uno solo por evaluador y vive en su propia tarjeta:
+ *  la cédula y la tarjeta profesional. Antes esto era SeccionCedula con el código
+ *  CEDULA escrito por dentro; ahora el codigo entra por props. */
+function TarjetaDocumentoUnico({
+  evaluadorId, codigo, titulo, sustantivo, Icono, setToast,
+}: {
+  evaluadorId: number
+  /** Código en TIPODOCUMENTOEVAL, p. ej. CEDULA o TARJETA_PROFESIONAL. */
+  codigo: string
+  titulo: string
+  /** Cómo se nombra en los mensajes: "la cédula", "la tarjeta profesional". */
+  sustantivo: string
+  Icono: LucideIcon
+  setToast: SetToast
+}) {
   const [doc, setDoc] = useState<DocEvaluador | null>(null)
-  const [tipoCedulaId, setTipoCedulaId] = useState<number | null>(null)
+  const [tipo, setTipo] = useState<TipoDocEval | null>(null)
   const [loading, setLoading] = useState(true)
   const [subiendo, setSubiendo] = useState(false)
   const [eliminando, setEliminando] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  async function cargar() {
+  // los formatos salen del catálogo, que es la misma fuente que valida el backend
+  const exts = tipo?.extensiones?.length ? tipo.extensiones : ['pdf']
+  const porDefecto = `${codigo.toLowerCase()}.${exts[0]}`
+
+  const cargar = useCallback(async () => {
     setLoading(true)
     try {
       const [rDoc, rTipos] = await Promise.all([
-        api.get<DocEvaluador | null>(`/evaluadores/${evaluadorId}/cedula`),
+        api.get<DocEvaluador | null>(`/evaluadores/${evaluadorId}/documento-unico/${codigo}`),
         api.get<TipoDocEval[]>(`/evaluadores/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
       ])
       setDoc(rDoc.data ?? null)
-      const cedula = (rTipos.data ?? []).find(t => t.codigo === 'CEDULA')
-      setTipoCedulaId(cedula?.id ?? null)
+      setTipo((rTipos.data ?? []).find(t => t.codigo === codigo) ?? null)
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo cargar la cédula') })
+      setToast({ tipo: 'error', msg: manejarError(err, `No se pudo cargar ${sustantivo}`) })
     } finally {
       setLoading(false)
     }
-  }
-  useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
+  }, [evaluadorId, codigo, sustantivo, setToast])
+  useEffect(() => { cargar() }, [cargar])
 
   async function subir(file: File) {
-    if (!tipoCedulaId) {
-      setToast({ tipo: 'error', msg: 'No se encontró el tipo de documento "CEDULA" en el catálogo' })
+    if (!tipo) {
+      setToast({ tipo: 'error', msg: `No se encontró el tipo "${codigo}" en el catálogo` })
+      return
+    }
+    // se comprueba aquí para poder nombrar el formato; el servidor solo devuelve un 400
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+    if (!exts.includes(ext)) {
+      setToast({
+        tipo: 'error',
+        msg: `${titulo} admite ${exts.map(e => '.' + e).join(', ')}; el archivo es .${ext || 'sin extensión'}`,
+      })
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
     setSubiendo(true)
     try {
       const fd = new FormData()
       fd.append('archivo', file)
-      fd.append('tipoDocumentoEvalId', String(tipoCedulaId))
+      fd.append('tipoDocumentoEvalId', String(tipo.id))
       await api.post(`/evaluadores/${evaluadorId}/documentos`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      setToast({ tipo: 'success', msg: doc ? 'Cédula reemplazada' : 'Cédula cargada' })
+      setToast({ tipo: 'success', msg: doc ? `Se reemplazó ${sustantivo}` : `Se cargó ${sustantivo}` })
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo subir la cédula') })
+      setToast({ tipo: 'error', msg: manejarError(err, `No se pudo subir ${sustantivo}`) })
     } finally {
       setSubiendo(false)
       if (inputRef.current) inputRef.current.value = ''
@@ -883,21 +931,21 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
     setEliminando(true)
     try {
       await api.delete(`/evaluadores/documentos/${doc.documentoId}`)
-      setToast({ tipo: 'success', msg: 'Cédula eliminada' })
+      setToast({ tipo: 'success', msg: `Se eliminó ${sustantivo}` })
       setConfirmDel(false)
       await cargar()
     } catch (err) {
-      setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar la cédula') })
+      setToast({ tipo: 'error', msg: manejarError(err, `No se pudo eliminar ${sustantivo}`) })
     } finally {
       setEliminando(false)
     }
   }
 
   return (
-    <Section titulo="Cédula de ciudadanía">
+    <Section titulo={titulo}>
       <div className="px-5 py-5 flex flex-col sm:flex-row gap-5 items-start">
         <div className="w-44 h-44 rounded-2xl bg-[#00304D]/5 border border-[#00304D]/10 flex items-center justify-center shrink-0">
-          <IdCard size={64} className={doc ? 'text-[#00304D]' : 'text-neutral-300'} />
+          <Icono size={64} className={doc ? 'text-[#00304D]' : 'text-neutral-300'} />
         </div>
         <div className="flex-1 flex flex-col gap-3 min-w-0">
           {loading ? (
@@ -908,25 +956,25 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
           ) : doc ? (
             <>
               <p className="text-sm font-bold text-neutral-800 truncate">
-                {doc.archivoNombre ?? 'cedula.pdf'}
+                {doc.archivoNombre ?? porDefecto}
               </p>
               <p className="text-[11px] text-neutral-500">
-                Cargada el {new Date(doc.fechaCargue).toLocaleString('es-CO', {
-                  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-                })}
+                Cargada el {fmtDateTime(doc.fechaCargue)}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm font-bold text-neutral-700">No se ha subido la cédula</p>
-              <p className="text-[11px] text-neutral-500">Formato PDF. Máximo 8 MB.</p>
+              <p className="text-sm font-bold text-neutral-700">Sin cargar</p>
+              <p className="text-[11px] text-neutral-500">
+                {exts.map(e => e.toUpperCase()).join(', ')}. Máximo 8 MB.
+              </p>
             </>
           )}
 
           <input
             ref={inputRef}
             type="file"
-            accept="application/pdf"
+            accept={exts.map(e => '.' + e).join(',')}
             className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) subir(f) }}
           />
@@ -936,7 +984,7 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
               <>
                 <button
                   onClick={() => abrirArchivo(`/evaluadores/documentos/${doc.documentoId}/archivo`).catch(() => {
-                    setToast({ tipo: 'error', msg: 'No se pudo abrir la cédula' })
+                    setToast({ tipo: 'error', msg: `No se pudo abrir ${sustantivo}` })
                   })}
                   className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg transition hover:opacity-90"
                   style={{ backgroundColor: PRIMARY }}
@@ -947,9 +995,9 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
                 <button
                   onClick={() => descargarArchivoConNombreDelServidor(
                     `/evaluadores/documentos/${doc.documentoId}/descargar`,
-                    doc.archivoNombre ?? 'cedula.pdf',
+                    doc.archivoNombre ?? porDefecto,
                   ).catch(() => {
-                    setToast({ tipo: 'error', msg: 'No se pudo descargar la cédula' })
+                    setToast({ tipo: 'error', msg: `No se pudo descargar ${sustantivo}` })
                   })}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-sm font-semibold rounded-lg transition"
                 >
@@ -977,13 +1025,13 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
             ) : (
               <button
                 onClick={() => inputRef.current?.click()}
-                disabled={subiendo || !tipoCedulaId}
-                title={!tipoCedulaId ? 'Catálogo de tipos de documento no disponible' : undefined}
+                disabled={subiendo || !tipo}
+                title={!tipo ? 'Catálogo de tipos de documento no disponible' : undefined}
                 className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
                 style={{ backgroundColor: INSTITUTIONAL }}
               >
                 {subiendo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                Subir cédula
+                Subir
               </button>
             )}
           </div>
@@ -995,8 +1043,8 @@ function SeccionCedula({ evaluadorId, setToast }: { evaluadorId: number; setToas
         onClose={() => setConfirmDel(false)}
         onConfirm={eliminar}
         tipo="delete"
-        titulo="Eliminar cédula"
-        mensaje={<>¿Seguro que deseas eliminar la cédula de este evaluador? Esta acción no se puede deshacer.</>}
+        titulo={`Eliminar ${sustantivo}`}
+        mensaje={<>Se borra {sustantivo} de este evaluador junto con el archivo. No se puede deshacer.</>}
         textoConfirmar="Eliminar"
         cargando={eliminando}
       />
@@ -1725,12 +1773,20 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
   const [file, setFile] = useState<File | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  // soportes que se cargaron como "documento de experiencia" en vez de como
+  // experiencia: no salen en la ficha ni en el PDF, hay que pasarlos aquí
+  const [sueltos, setSueltos] = useState<DocumentoItem[]>([])
 
   async function cargar() {
     setLoading(true)
     try {
-      const r = await api.get<Experiencia[]>(`/evaluadores/${evaluadorId}/experiencia`)
+      const [r, rDocs] = await Promise.all([
+        api.get<Experiencia[]>(`/evaluadores/${evaluadorId}/experiencia`),
+        api.get<DocumentoItem[]>(`/evaluadores/${evaluadorId}/documentos`).catch(() => ({ data: [] })),
+      ])
       setItems(r.data ?? [])
+      setSueltos((rDocs.data ?? []).filter(d =>
+        d.tipoCodigo === 'EXPERIENCIA_PROYECTOS' || d.tipoCodigo === 'EXPERIENCIA_PROFESIONAL'))
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'Error cargando experiencia') })
     } finally {
@@ -1777,8 +1833,25 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
 
   return (
     <ListadoConArchivos
-      titulo={`Experiencia laboral (${items.length})`}
+      titulo={`Experiencia laboral y en proyectos (${items.length})`}
       singular="esta experiencia"
+      aviso={sueltos.length > 0 ? (
+        <div className="border-b border-amber-100 bg-amber-50/70 px-5 py-3">
+          <p className="text-[12px] font-semibold text-amber-900">
+            Hay {sueltos.length} soporte{sueltos.length === 1 ? '' : 's'} de experiencia cargado
+            {sueltos.length === 1 ? '' : 's'} como documento suelto.
+          </p>
+          <p className="mt-1 text-[11px] text-amber-800">
+            Así no cuentan: la ficha y la hoja de vida en PDF leen esta lista, no los documentos.
+            Regístrelos aquí con su cargo, entidad y fechas, y bórrelos de la pestaña Documentos.
+          </p>
+          <ul className="mt-2 ml-4 list-disc space-y-0.5 text-[11px] text-amber-800">
+            {sueltos.map(d => (
+              <li key={d.documentoId}>{d.descripcion || d.archivoNombre || `documento ${d.documentoId}`}</li>
+            ))}
+          </ul>
+        </div>
+      ) : undefined}
       onAgregarToggle={() => setAgregar(v => !v)}
       agregarAbierto={agregar}
       formulario={
@@ -1909,6 +1982,7 @@ interface FilaListado {
 
 function ListadoConArchivos({
   titulo, singular, onAgregarToggle, agregarAbierto, formulario, onCrear, creando, loading, vacio, filas,
+  aviso,
 }: {
   titulo: string
   /** Cómo se llama una fila, para el texto de la confirmación. */
@@ -1916,6 +1990,8 @@ function ListadoConArchivos({
   onAgregarToggle: () => void; agregarAbierto: boolean
   formulario: React.ReactNode; onCrear: () => void; creando: boolean
   loading: boolean; vacio: string; filas: FilaListado[]
+  /** Franja opcional arriba de la lista. */
+  aviso?: React.ReactNode
 }) {
   // borrar con un clic dejaba a la persona sin el soporte y sin manera de recuperarlo
   const [porBorrar, setPorBorrar] = useState<FilaListado | null>(null)
@@ -1937,6 +2013,7 @@ function ListadoConArchivos({
           </div>
         </div>
       )}
+      {aviso}
       {loading ? (
         <p className="px-5 py-6 text-sm text-neutral-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin" />Cargando...</p>
       ) : filas.length === 0 ? (
@@ -2320,6 +2397,8 @@ interface TipoDocEvalCat {
   extensiones?: string[]
   /** el documento es del ciclo, no del evaluador */
   esDelAnio?: boolean
+  /** el documento es de la persona y tiene su propia tarjeta en el perfil */
+  esDePerfil?: boolean
   orden?: number
   activo?: boolean
 }
@@ -2362,7 +2441,8 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
   // form state
   const [tipoSel, setTipoSel] = useState<string>('')
   const [descripcion, setDescripcion] = useState('')
-  const [anio, setAnio] = useState<string>(new Date().getFullYear().toString())
+  // sin valor por defecto: el año es el del documento, no el de hoy
+  const [anio, setAnio] = useState<string>('')
   const [archivo, setArchivo] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
@@ -2371,10 +2451,16 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
     try {
       const [rDocs, rTipos] = await Promise.all([
         api.get<DocumentoItem[]>(`/evaluadores/${evaluadorId}/documentos`),
-        api.get<TipoDocEvalCat[]>(`/evaluadores/catalogos/tipos-documento-evaluador`, { params: { soloActivos: true } }),
+        // con los inactivos: si un tipo se archiva, los documentos ya cargados
+        // siguen ahí y sin el catálogo completo saldrían sin nombre
+        api.get<TipoDocEvalCat[]>(`/evaluadores/catalogos/tipos-documento-evaluador`, { params: { soloActivos: '0' } }),
       ])
-      setItems((rDocs.data ?? []).filter(d => d.tipoCodigo !== 'CEDULA'))
-      setTipos((rTipos.data ?? []).filter(t => t.codigo !== 'CEDULA'))
+      // los del perfil (cédula, tarjeta profesional) tienen su propia tarjeta arriba;
+      // quién es de perfil lo dice el catálogo, no una lista repetida aquí
+      const cat = rTipos.data ?? []
+      const dePerfil = new Set(cat.filter(t => t.esDePerfil).map(t => t.codigo))
+      setItems((rDocs.data ?? []).filter(d => !dePerfil.has(d.tipoCodigo)))
+      setTipos(cat.filter(t => !t.esDePerfil))
     } catch (err) {
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudieron cargar los documentos') })
     } finally {
@@ -2384,14 +2470,16 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
   useEffect(() => { cargar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [evaluadorId])
 
   const tipoSeleccionado = tipos.find(t => String(t.id) === tipoSel)
+  // solo el certificado de participación pertenece a un año concreto
   const requiereAnio = tipoSeleccionado?.codigo === 'CERTIFICADO_PARTICIPACION'
-    || tipoSeleccionado?.codigo === 'EXPERIENCIA_PROYECTOS'
   const maxAnio = new Date().getFullYear() + 1
 
   function resetForm() {
     setTipoSel('')
     setDescripcion('')
-    setAnio(new Date().getFullYear().toString())
+    // en blanco a propósito: pre-llenarlo con el año actual dejó un
+    // certificado de 2018 marcado como 2026
+    setAnio('')
     setArchivo(null)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -2403,12 +2491,14 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
 
   // abre el formulario con el tipo del chip que esté puesto
   function abrirForm() {
-    const delChip = tipos.find(t => t.codigo === filtroCodigo && !t.esDelAnio)
+    const delChip = tipos.find(t => t.codigo === filtroCodigo && !t.esDelAnio && t.activo !== false)
     if (delChip) setTipoSel(String(delChip.id))
     setFormAbierto(true)
   }
 
   const chipEsDelAnio = tipos.some(t => t.codigo === filtroCodigo && t.esDelAnio)
+  // un tipo archivado ya no se ofrece para cargar, pero lo ya cargado sigue visible
+  const chipEstaArchivado = tipos.some(t => t.codigo === filtroCodigo && t.activo === false)
 
   async function subir() {
     if (!tipoSel) {
@@ -2470,6 +2560,10 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
   const conteoPorTipo: Record<string, number> = {}
   items.forEach(d => { conteoPorTipo[d.tipoCodigo] = (conteoPorTipo[d.tipoCodigo] ?? 0) + 1 })
 
+  // los vigentes siempre; los archivados solo si todavía cuelga algún documento de ellos,
+  // que si no la persona ve un documento cuyo chip no existe
+  const tiposConChip = tipos.filter(t => t.activo !== false || (conteoPorTipo[t.codigo] ?? 0) > 0)
+
   const itemsFiltrados = filtroCodigo === '__TODOS__'
     ? items
     : items.filter(d => d.tipoCodigo === filtroCodigo)
@@ -2506,8 +2600,9 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
             {items.length}
           </span>
         </button>
-        {tipos.map(t => {
+        {tiposConChip.map(t => {
           const activo = filtroCodigo === t.codigo
+          const archivado = t.activo === false
           const c = chipColor(t.codigo)
           return (
             <button
@@ -2527,6 +2622,11 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
                   del año
                 </span>
               )}
+              {archivado && (
+                <span className={`text-[9px] font-bold uppercase tracking-wide ${activo ? 'text-white/70' : 'text-amber-600'}`}>
+                  archivado
+                </span>
+              )}
               <span className={`px-1.5 py-px rounded-full text-[10px] ${activo ? 'bg-white/25' : 'bg-neutral-100'}`}>
                 {conteoPorTipo[t.codigo] ?? 0}
               </span>
@@ -2536,6 +2636,18 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
       </div>
 
       {/* Formulario colapsable */}
+      {chipEstaArchivado && (
+        <div className="border-b border-amber-100 bg-amber-50/70 px-5 py-3">
+          <p className="text-[12px] font-semibold text-amber-900">
+            Este tipo de documento ya no se usa.
+          </p>
+          <p className="mt-1 text-[11px] text-amber-800">
+            Lo que ya estaba cargado sigue aquí y se puede ver, descargar o eliminar, pero no
+            se pueden subir nuevos. Lo que corresponda va ahora en <strong>Perfil</strong>, en
+            estudios o en experiencia.
+          </p>
+        </div>
+      )}
       {formAbierto && chipEsDelAnio && (
         <div className="px-5 py-4 bg-amber-50/70 border-b border-amber-100">
           <p className="text-[12px] font-semibold text-amber-900">
@@ -2574,7 +2686,7 @@ function SeccionDocumentos({ evaluadorId, setToast }: { evaluadorId: number; set
               className={input}
             >
               <option value="">— Selecciona un tipo —</option>
-              {tipos.filter(t => !t.esDelAnio).map(t => (
+              {tipos.filter(t => !t.esDelAnio && t.activo !== false).map(t => (
                 <option key={t.id} value={String(t.id)}>{t.nombre}</option>
               ))}
             </select>

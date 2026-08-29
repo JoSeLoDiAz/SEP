@@ -9,7 +9,9 @@ import {
   cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
 } from '../common/crypto/usuario-clave'
 import { ControlCambiosService } from './control-cambios.service'
-import { esTipoDocDelAnio, extensionDe, extensionesDeTipoDocEval } from './formatos-correo'
+import {
+  TIPOS_DOC_DE_PERFIL, esTipoDocDelAnio, extensionDe, extensionesDeTipoDocEval,
+} from './formatos-correo'
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
@@ -1924,24 +1926,28 @@ export class EvaluadoresService {
 
   // Documentos genéricos (cédula, autorización, confidencialidad, …)
 
-  private tipoCedulaCache: number | null = null
+  private tipoPorCodigoCache = new Map<string, number>()
 
-  /** Cachea el id del tipo CEDULA para no golpear TIPODOCUMENTOEVAL en cada request. */
-  private async idTipoCedula(): Promise<number> {
-    if (this.tipoCedulaCache != null) return this.tipoCedulaCache
+  /** Cachea el id de un tipo por código para no golpear TIPODOCUMENTOEVAL en cada request. */
+  private async idTipoPorCodigo(codigo: string): Promise<number> {
+    const cod = (codigo ?? '').trim().toUpperCase()
+    const enCache = this.tipoPorCodigoCache.get(cod)
+    if (enCache != null) return enCache
     const rows: Array<{ id: number }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOEVALID AS "id"
          FROM TIPODOCUMENTOEVAL
-        WHERE UPPER(TRIM(CODIGO)) = 'CEDULA' AND ROWNUM = 1`,
+        WHERE UPPER(TRIM(CODIGO)) = :1 AND ROWNUM = 1`,
+      [cod],
     )
     if (!rows[0]) {
-      throw new BadRequestException('El tipo "CEDULA" no existe en TIPODOCUMENTOEVAL (ejecutar migración v22)')
+      throw new BadRequestException(`El tipo "${cod}" no existe en TIPODOCUMENTOEVAL`)
     }
-    this.tipoCedulaCache = Number(rows[0].id)
-    return this.tipoCedulaCache
+    this.tipoPorCodigoCache.set(cod, Number(rows[0].id))
+    return Number(rows[0].id)
   }
 
-  /** Sin `tipoCodigo` se excluye CEDULA, que el front muestra en su propio card. */
+  /** Sin `tipoCodigo` se excluyen los documentos de perfil (cédula, tarjeta
+   *  profesional): el front los muestra cada uno en su propia tarjeta. */
   async listarDocumentos(
     evaluadorId: number,
     opciones: { tipoCodigo?: string; incluirCedula?: boolean } = {},
@@ -1954,7 +1960,8 @@ export class EvaluadoresService {
       params.push(filtroTipo.toUpperCase())
       conds.push(`UPPER(TRIM(t.CODIGO)) = :${params.length}`)
     } else if (!incluirCedula) {
-      conds.push(`UPPER(TRIM(t.CODIGO)) <> 'CEDULA'`)
+      const marcadores = TIPOS_DOC_DE_PERFIL.map(c => { params.push(c); return `:${params.length}` })
+      conds.push(`UPPER(TRIM(t.CODIGO)) NOT IN (${marcadores.join(', ')})`)
     }
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT d.DOCUMENTOID           AS "documentoId",
@@ -2129,12 +2136,13 @@ export class EvaluadoresService {
     return { mensaje: 'Documento eliminado' }
   }
 
-  async getCedula(evaluadorId: number): Promise<{
+  /** El último documento de un tipo de instancia única (cédula, tarjeta profesional). */
+  async getDocumentoUnico(evaluadorId: number, codigo: string): Promise<{
     documentoId: number;
     archivoNombre: string | null;
     fechaCargue: Date;
   } | null> {
-    const tipoId = await this.idTipoCedula()
+    const tipoId = await this.idTipoPorCodigo(codigo)
     // ROWNUM se aplica antes del ORDER BY: hay que anidar la subquery.
     const rows: Array<{ id: number; nombre: string | null; fecha: Date }> = await this.dataSource.query(
       `SELECT * FROM (

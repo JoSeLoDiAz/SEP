@@ -93,9 +93,12 @@ export class EvaluadoresController {
   }
 
 
-  // Sin distinción de perfil: los límites del borrado son de integridad, no de permiso.
-  private puedeForzarBorrado(_user: JwtUser) {
-    return true
+  // Borrar un ciclo vacío lo puede hacer quien gestiona. Arrastrar con él la
+  // historia — retroalimentaciones, proyectos evaluados, capacitaciones — no:
+  // eso es admin. El 409 que recibe el gestor le dice qué cuelga del año y que
+  // la salida es cambiar el estado a REVOCADO o DECLINO, no borrarlo.
+  private puedeForzarBorrado(user: JwtUser) {
+    return user.perfilId === PERFIL_ADMIN
   }
 
   @Get('catalogos/roles')
@@ -589,10 +592,12 @@ export class EvaluadoresController {
     @Query('forzar') forzar?: string,
   ) {
     this.exigirGestion(user)
+    const puedeForzar = this.puedeForzarBorrado(user)
     return this.service.eliminarParticipacion(pid, {
       // el rol habilita forzar, pero arrastrar la historia exige además pedirlo:
       // sin `forzar=1` la primera llamada responde 409 y la pantalla confirma
-      forzar: forzar === '1' && this.puedeForzarBorrado(user),
+      forzar: forzar === '1' && puedeForzar,
+      puedeForzar,
       usuarioEmail: user.email,
       usuarioPerfilId: user.perfilId,
     })

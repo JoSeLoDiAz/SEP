@@ -18,6 +18,9 @@ for (const l of fs.readFileSync(path.join(RAIZ, 'backend/.env'), 'utf8').split(/
 const CORRECCIONES = {
   484: { titulo: 'ESTRUCTURACIÓN DE PROYECTOS FORMATIVOS' },
   411: { institucion: 'UNIVERSIDAD DEL ROSARIO' },
+  // mismo emisor y mismo encabezado que el 411: lo que sigue a la "y" son otras
+  // dos unidades de la universidad, no parte de su nombre
+  315: { institucion: 'UNIVERSIDAD DEL ROSARIO' },
 }
 
 const clas = JSON.parse(fs.readFileSync(path.join(__dirname, 'clasificacion.json'), 'utf8'))

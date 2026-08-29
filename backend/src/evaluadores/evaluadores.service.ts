@@ -1707,7 +1707,167 @@ export class EvaluadoresService {
 
   // Experiencia laboral
 
-  async listarExperiencias(evaluadorId: number) {
+  /** Los ciclos certificados, como experiencia. No se materializan en
+   *  EVALUADOREXPERIENCIA: si el ciclo cambia de a\xf1o o de convocatoria, una copia
+   *  quedar\xeda mintiendo. Se derivan al leer y son de solo lectura.
+   *
+   *  Un ciclo cuenta si tiene certificado propio \u2014emitido y no anulado, o
+   *  archivado como documento suyo\u2014. Los hist\xf3ricos se cargaron sin
+   *  participaci\xf3n, solo con a\xf1o: esos se aceptan \xdaNICAMENTE si ese a\xf1o el
+   *  evaluador tuvo un solo ciclo. Con dos o m\xe1s no hay forma de saber a cu\xe1l
+   *  pertenece el papel, y repartirlo entre todos certificaba ciclos que nadie
+   *  certific\xf3. */
+  async experienciaDeCiclos(
+    evaluadorId: number,
+    // el portal tiene sus propias rutas: con el prefijo del banco el evaluador
+    // recibiría un 403 al abrir su propio certificado
+    opciones: { prefijo?: '/evaluadores' | '/mi-expediente' } = {},
+  ) {
+    const prefijo = opciones.prefijo ?? '/evaluadores'
+    const ciclos: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT pa.PARTICIPACIONID         AS "participacionId",
+              pa.ANIO                    AS "anio",
+              TRIM(pa.PERIODO)           AS "periodo",
+              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
+              TRIM(cv.NOMBRE)            AS "convocatoria",
+              TRIM(pe.PROCESONOMBRE)     AS "procesoNombre",
+              -- emitido por el sistema y vigente
+              (SELECT MAX(ce.CERTIFICADOID) FROM EVALUADORCERTIFICADO ce
+                WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID
+                  AND ce.ANULADO = 0)                       AS "certificadoId",
+              -- emitido alguna vez, aunque este anulado: sirve para no rescatar
+              -- con el documento viejo un certificado que se anulo a proposito
+              (SELECT COUNT(*) FROM EVALUADORCERTIFICADO ce
+                WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID)  AS "emitidosTotal",
+              -- el documento de ESTE ciclo, no el de cualquiera del mismo a\xf1o
+              (SELECT dp.DOCUMENTOID FROM (
+                 SELECT dc.DOCUMENTOID
+                   FROM EVALUADORDOCUMENTO dc
+                   JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
+                  WHERE TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+                    AND dc.PARTICIPACIONID = pa.PARTICIPACIONID
+                  ORDER BY dc.FECHACARGUE DESC, dc.DOCUMENTOID DESC
+               ) dp WHERE ROWNUM = 1)                       AS "documentoId"
+         FROM EVALUADORPARTICIPACION pa
+         LEFT JOIN ROLEVALUADOR          r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
+         LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
+         LEFT JOIN PROCESOEVAL           pe ON pe.PROCESOID     = pa.PROCESOID
+         LEFT JOIN ESTADOPARTICIPACION   es ON es.ESTADOPARTID  = pa.ESTADOPARTID
+        WHERE pa.EVALUADORID = :1
+          -- un ciclo revocado o declinado no es experiencia, aunque tenga papel
+          AND NVL(es.ESNEGATIVO, 0) = 0
+        ORDER BY pa.ANIO DESC, TRIM(pa.PERIODO) DESC NULLS LAST`,
+      [evaluadorId],
+    )
+
+    // los hist\xf3ricos: certificados cargados sin decir a qu\xe9 ciclo pertenecen
+    const sueltos: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT dc.DOCUMENTOID AS "documentoId", dc.ANIOREFERENCIA AS "anio",
+              TRIM(dc.ARCHIVONOMBRE) AS "archivoNombre"
+         FROM EVALUADORDOCUMENTO dc
+         JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
+        WHERE dc.EVALUADORID = :1
+          AND TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+          AND dc.PARTICIPACIONID IS NULL
+          AND dc.ANIOREFERENCIA IS NOT NULL
+        ORDER BY dc.FECHACARGUE DESC, dc.DOCUMENTOID DESC`,
+      [evaluadorId],
+    )
+
+    // cu\xe1ntos ciclos tuvo cada a\xf1o: con m\xe1s de uno, el papel suelto no se asigna
+    const porAnio = new Map<number, number>()
+    for (const c of ciclos) {
+      const a = Number(c.anio)
+      porAnio.set(a, (porAnio.get(a) ?? 0) + 1)
+    }
+    const sueltoDe = new Map<number, Record<string, unknown>>()
+    for (const d of sueltos) {
+      const a = Number(d.anio)
+      if (porAnio.get(a) === 1 && !sueltoDe.has(a)) sueltoDe.set(a, d)
+    }
+
+    // los nombres reales de los documentos elegidos, para que la descarga no mienta
+    const idsDoc = ciclos.map(c => c.documentoId).filter(x => x != null).map(Number)
+    const nombres = new Map<number, string | null>()
+    if (idsDoc.length) {
+      const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+        `SELECT DOCUMENTOID AS "id", TRIM(ARCHIVONOMBRE) AS "nombre"
+           FROM EVALUADORDOCUMENTO
+          WHERE DOCUMENTOID IN (${idsDoc.map((_, i) => `:${i + 1}`).join(', ')})`,
+        idsDoc,
+      )
+      filas.forEach(f => nombres.set(Number(f.id), (f.nombre as string) ?? null))
+    }
+
+    const salida = []
+    for (const c of ciclos) {
+      const anio = Number(c.anio)
+      const certificadoId = c.certificadoId != null ? Number(c.certificadoId) : null
+      const emitidosTotal = Number(c.emitidosTotal ?? 0)
+      let documentoId = c.documentoId != null ? Number(c.documentoId) : null
+      let archivoNombre = documentoId != null ? nombres.get(documentoId) ?? null : null
+
+      // el papel suelto solo se usa si el ciclo no tiene el suyo
+      if (documentoId == null && certificadoId == null) {
+        const suelto = sueltoDe.get(anio)
+        if (suelto) {
+          documentoId = Number(suelto.documentoId)
+          archivoNombre = (suelto.archivoNombre as string) ?? null
+        }
+      }
+
+      // se emiti\xf3 y se anul\xf3 sin reemitir: el ciclo dej\xf3 de estar certificado,
+      // y el documento viejo no puede resucitarlo
+      const anuladoSinReemitir = emitidosTotal > 0 && certificadoId == null
+      if (anuladoSinReemitir) continue
+      if (documentoId == null && certificadoId == null) continue
+
+      const donde = [c.convocatoria, c.procesoNombre].filter(Boolean).join(' \xb7 ')
+      const cuando = `${anio}${c.periodo ? `-${c.periodo}` : ''}`
+      salida.push({
+        origen: 'CICLO' as const,
+        // clave propia: no puede chocar con los EXPERIENCIAID de las filas a mano
+        clave: `ciclo-${Number(c.participacionId)}`,
+        participacionId: Number(c.participacionId),
+        anio,
+        periodo: (c.periodo as string) || null,
+        // sin rol no se inventa uno: el resto del m\xf3dulo dice "Rol sin definir"
+        cargo: (c.rolNombre as string) || 'Rol sin definir',
+        entidad: donde ? `SENA \xb7 ${donde}` : 'SENA',
+        // el ciclo es de un a\xf1o, no de un rango: no se inventan d\xedas ni meses
+        fechaInicio: null as string | null,
+        fechaFin: null as string | null,
+        certificadoId,
+        documentoId,
+        archivoNombre: archivoNombre ?? `certificado-${cuando}.pdf`,
+        tieneArchivo: documentoId != null || certificadoId != null,
+        archivoUrl: documentoId != null
+          ? `${prefijo}/documentos/${documentoId}/archivo`
+          // la ruta del emitido es /pdf, no /archivo
+          : certificadoId != null ? `${prefijo}/certificados/${certificadoId}/pdf` : null,
+      })
+    }
+    // el mismo PDF subido dos veces deja dos filas con nombre idéntico: al bajarlas
+    // el gestor no sabe cuál es de cuál, así que se desambigua con el ciclo
+    const cuentaNombre = new Map<string, number>()
+    salida.forEach(x => cuentaNombre.set(x.archivoNombre, (cuentaNombre.get(x.archivoNombre) ?? 0) + 1))
+    for (const x of salida) {
+      if ((cuentaNombre.get(x.archivoNombre) ?? 0) < 2) continue
+      const punto = x.archivoNombre.lastIndexOf('.')
+      const base = punto > 0 ? x.archivoNombre.slice(0, punto) : x.archivoNombre
+      const ext = punto > 0 ? x.archivoNombre.slice(punto) : ''
+      x.archivoNombre = `${base} (${x.cargo} ${x.anio}${x.periodo ? `-${x.periodo}` : ''})${ext}`
+    }
+    return salida
+  }
+
+  /** `conCiclos` solo lo piden las pantallas. La ficha PDF y el Excel siguen
+   *  leyendo lo de siempre: la hoja de vida ya tiene su sección "Trayectoria
+   *  como evaluador" y ahí saldría dos veces. */
+  async listarExperiencias(
+    evaluadorId: number,
+    opciones: { conCiclos?: boolean; prefijo?: '/evaluadores' | '/mi-expediente' } = {},
+  ) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT EXPERIENCIAID         AS "experienciaId",
               TRIM(CARGOEXP)        AS "cargo",
@@ -1723,11 +1883,45 @@ export class EvaluadoresService {
         ORDER BY FECHAINICIO DESC NULLS LAST`,
       [evaluadorId],
     )
-    return rows.map(r => ({
+    const propias: Array<Record<string, unknown>> = rows.map(r => ({
       ...r,
+      origen: 'MANUAL' as const,
+      clave: `exp-${Number(r.experienciaId)}`,
       experienciaId: Number(r.experienciaId),
       tieneArchivo: Number(r.tieneArchivo) === 1,
+      archivoUrl: Number(r.tieneArchivo) === 1
+        ? `/evaluadores/experiencia/${Number(r.experienciaId)}/archivo` : null,
     }))
+    if (!opciones.conCiclos) return propias
+
+    const derivadas = await this.experienciaDeCiclos(evaluadorId, { prefijo: opciones.prefijo })
+
+    // Hay experiencias tecleadas a mano que dicen lo mismo que un ciclo derivado
+    // (\"EVALUADOR DE PROYECTOS CONVOCATORIA DG-0001-2019\" junto al ciclo 2019).
+    // No se fusionan solas \u2014las fechas de la tecleada son mejor dato que el a\xf1o
+    // suelto de la derivada\u2014 pero se se\xf1alan para que alguien decida.
+    const aniosDerivados = new Map(derivadas.map(d => [d.anio, d.clave]))
+    const marcadas = propias.map(p => {
+      const texto = `${p.cargo ?? ''} ${p.entidad ?? ''}`.toUpperCase()
+      const pareceCiclo = texto.includes('EVALUAD') || texto.includes('CONVOCATORIA')
+      if (!pareceCiclo) return p
+      const desde = p.fechaInicio ? new Date(String(p.fechaInicio)).getUTCFullYear() : null
+      const hasta = p.fechaFin ? new Date(String(p.fechaFin)).getUTCFullYear() : desde
+      for (const [anio, clave] of aniosDerivados) {
+        if (desde != null && hasta != null && anio >= desde && anio <= hasta) {
+          return { ...p, posibleDuplicadoDe: clave, anioDuplicado: anio }
+        }
+      }
+      return p
+    })
+    // se mezclan por fecha: las de año suelto entran por el 1 de enero de ese año,
+    // solo para ordenar — esa fecha no se guarda ni se muestra
+    const cuando = (x: Record<string, unknown>) => {
+      if (x.fechaInicio) return new Date(String(x.fechaInicio)).getTime()
+      if (x.anio) return new Date(Date.UTC(Number(x.anio), 0, 1)).getTime()
+      return -Infinity
+    }
+    return [...marcadas, ...derivadas].sort((a, b) => cuando(b) - cuando(a))
   }
 
   async crearExperiencia(

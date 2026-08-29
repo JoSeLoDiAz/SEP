@@ -715,7 +715,8 @@ export class EvaluadoresController {
   @Get(':id/experiencia')
   listarExperiencias(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
     this.exigirGestion(user)
-    return this.service.listarExperiencias(id)
+    // conCiclos: las pantallas sí muestran los ciclos certificados como experiencia
+    return this.service.listarExperiencias(id, { conCiclos: true })
   }
 
   @Post(':id/experiencia')

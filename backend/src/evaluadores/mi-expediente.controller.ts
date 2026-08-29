@@ -15,6 +15,7 @@ import type {
 import { TrayectoriaService } from './trayectoria.service'
 import { FichaPdfService } from './ficha-pdf.service'
 import { MiExpedienteService, type MiEvaluador } from './mi-expediente.service'
+import { CertificadoService } from './certificado.service'
 import { MiExpedienteGuard, MiEvaluadorActual } from './mi-expediente.guard'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { responderArchivo } from './responder-archivo'
@@ -36,6 +37,7 @@ export class MiExpedienteController {
     private readonly trayectoria: TrayectoriaService,
     private readonly fichaPdf: FichaPdfService,
     private readonly catalogos: CatalogosEvaluadorService,
+    private readonly certificados: CertificadoService,
   ) {}
 
   // Quién hizo el cambio. Aquí el valor está en distinguir lo que sube el propio
@@ -158,7 +160,9 @@ export class MiExpedienteController {
 
   @Get('experiencia')
   experiencia(@MiEvaluadorActual() yo: MiEvaluador) {
-    return this.service.listarExperiencias(yo.evaluadorId)
+    return this.service.listarExperiencias(yo.evaluadorId, {
+      conCiclos: true, prefijo: '/mi-expediente',
+    })
   }
 
   @Post('experiencia')
@@ -270,6 +274,18 @@ export class MiExpedienteController {
   @ApiOperation({ summary: 'Todos mis documentos: los permanentes y los de cada año' })
   documentos(@MiEvaluadorActual() yo: MiEvaluador) {
     return this.service.listarDocumentos(yo.evaluadorId)
+  }
+
+  @Get('certificados/:cid/pdf')
+  @ApiOperation({ summary: 'Mi certificado de participación emitido por el sistema' })
+  async miCertificado(
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Param('cid', ParseIntPipe) cid: number,
+    @Res() res: Response,
+  ) {
+    await this.mio.esMiCertificado(cid, yo.evaluadorId)
+    const { buffer, nombre } = await this.certificados.getPdf(cid)
+    responderArchivo(res, buffer, 'application/pdf', nombre, true)
   }
 
   @Get('documentos/:id/archivo')

@@ -580,11 +580,17 @@ export class EvaluadoresController {
   }
 
   @Delete('participaciones/:pid')
-  @ApiOperation({ summary: 'Eliminar un ciclo vacío. Si tiene historia, responde 409 y hay que anular' })
-  eliminarParticipacion(@CurrentUser() user: JwtUser, @Param('pid', ParseIntPipe) pid: number) {
+  @ApiOperation({ summary: 'Eliminar un ciclo vacío. Si tiene historia, responde 409 con el detalle' })
+  eliminarParticipacion(
+    @CurrentUser() user: JwtUser,
+    @Param('pid', ParseIntPipe) pid: number,
+    @Query('forzar') forzar?: string,
+  ) {
     this.exigirGestion(user)
     return this.service.eliminarParticipacion(pid, {
-      forzar: this.puedeForzarBorrado(user),
+      // el rol habilita forzar, pero arrastrar la historia exige además pedirlo:
+      // sin `forzar=1` la primera llamada responde 409 y la pantalla confirma
+      forzar: forzar === '1' && this.puedeForzarBorrado(user),
       usuarioEmail: user.email,
       usuarioPerfilId: user.perfilId,
     })

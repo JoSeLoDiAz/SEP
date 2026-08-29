@@ -320,6 +320,20 @@ function manejarError(err: unknown, fallback: string): string {
   return (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
 }
 
+/** Cuerpo del 409 al borrar un ciclo: qué cuelga de él y si se puede forzar. */
+interface Choque {
+  message: string
+  anio?: number
+  dependencias?: Record<string, number>
+  sePuedeForzar?: boolean
+}
+
+function leerChoque(err: unknown): Choque | null {
+  const r = (err as { response?: { status?: number; data?: Choque } })?.response
+  if (r?.status !== 409 || !r.data) return null
+  return r.data
+}
+
 function SeccionDatos({ ficha, onChanged, setToast }: { ficha: Ficha; onChanged: () => void; setToast: SetToast }) {
   const [editando, setEditando] = useState(false)
   const [guardando, setGuardando] = useState(false)
@@ -1040,6 +1054,10 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
   const [eliminando, setEliminando] = useState<number | null>(null)
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [expandido, setExpandido] = useState<number | null>(null)
+  // borrar un año es irreversible: primero se confirma y, si arrastra historia,
+  // el 409 abre una segunda pantalla con la lista exacta de lo que se pierde
+  const [porBorrar, setPorBorrar] = useState<number | null>(null)
+  const [choque, setChoque] = useState<Choque | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1128,15 +1146,21 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
     }
   }
 
-  async function eliminar(pid: number) {
+  /** Primer intento: sin forzar. Si el año tiene historia, el 409 trae el detalle
+   *  y se pide la segunda confirmación en vez de borrar a ciegas. */
+  async function eliminar(pid: number, forzar = false) {
     setEliminando(pid)
     try {
-      await api.delete(`/evaluadores/participaciones/${pid}`)
-      setToast({ tipo: 'success', msg: 'Eliminada' })
+      await api.delete(`/evaluadores/participaciones/${pid}${forzar ? '?forzar=1' : ''}`)
+      setToast({ tipo: 'success', msg: 'Ciclo eliminado' })
+      setPorBorrar(null); setChoque(null)
       await cargar()
       onCambio()
     } catch (err) {
+      const c = leerChoque(err)
+      if (c && !forzar) { setChoque(c); return }
       setToast({ tipo: 'error', msg: manejarError(err, 'No se pudo eliminar') })
+      setPorBorrar(null); setChoque(null)
     } finally {
       setEliminando(null)
     }
@@ -1144,6 +1168,8 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
 
   const label = 'block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1'
   const input = 'w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40'
+
+  const cicloPorBorrar = items.find(x => x.participacionId === porBorrar)
 
   // constante y no componente: uno anidado se remonta en cada tecla y pierde el foco
   const formulario = (
@@ -1326,7 +1352,7 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
                     </span>
                   </button>
                   <button
-                    onClick={() => eliminar(p.participacionId)}
+                    onClick={() => { setChoque(null); setPorBorrar(p.participacionId) }}
                     disabled={eliminando === p.participacionId}
                     title="Eliminar la participación y todo lo del año"
                     className="shrink-0 rounded-lg p-2 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
@@ -1373,6 +1399,62 @@ function SeccionParticipaciones({ evaluadorId, setToast, onCambio }: { evaluador
           })}
         </ul>
       )}
+
+      <ConfirmModal
+        open={porBorrar != null && choque == null}
+        onClose={() => setPorBorrar(null)}
+        onConfirm={() => porBorrar != null && eliminar(porBorrar)}
+        tipo="delete"
+        titulo={`Eliminar el ciclo ${cicloPorBorrar?.anio ?? ''}${cicloPorBorrar?.periodo ? `-${cicloPorBorrar.periodo}` : ''}`}
+        mensaje={
+          <>
+            Se borra la participación de{' '}
+            <strong>{cicloPorBorrar?.anio}{cicloPorBorrar?.periodo ? `-${cicloPorBorrar.periodo}` : ''}</strong>
+            {cicloPorBorrar?.rolNombre ? <> como <strong>{cicloPorBorrar.rolNombre}</strong></> : null}.
+            Si el año ya tiene historia cargada, se le mostrará qué se perdería antes de borrar nada.
+          </>
+        }
+        textoConfirmar="Continuar"
+        cargando={eliminando === porBorrar}
+      />
+
+      <ConfirmModal
+        open={choque != null}
+        onClose={() => { setChoque(null); setPorBorrar(null) }}
+        onConfirm={() => {
+          if (choque?.sePuedeForzar && porBorrar != null) eliminar(porBorrar, true)
+          else { setChoque(null); setPorBorrar(null) }
+        }}
+        tipo="delete"
+        titulo={`El ciclo ${choque?.anio ?? ''} no está vacío`}
+        mensaje={
+          <>
+            <p className="mb-2">{choque?.message}</p>
+            {choque?.dependencias && (
+              <ul className="mb-2 space-y-1 rounded-lg bg-red-50 px-3 py-2 text-[12px] text-red-800">
+                {Object.entries(choque.dependencias)
+                  .filter(([, n]) => n > 0)
+                  .map(([que, n]) => (
+                    <li key={que}>
+                      <strong>{n}</strong> {que}
+                      {que === 'pruebas' || que === 'documentos'
+                        ? ' — se conservan, quedan sueltos sin año'
+                        : ' — se borran'}
+                    </li>
+                  ))}
+              </ul>
+            )}
+            {choque?.sePuedeForzar && (
+              <p className="text-[12px] font-semibold text-red-700">
+                Esto no se puede deshacer. ¿Borrar el ciclo con todo lo que cuelga de él?
+              </p>
+            )}
+          </>
+        }
+        textoConfirmar={choque?.sePuedeForzar ? 'Sí, borrar todo' : 'Entendido'}
+        textoCancelar={choque?.sePuedeForzar ? 'No, dejarlo así' : 'Cerrar'}
+        cargando={eliminando != null}
+      />
     </Section>
   )
 }
@@ -1585,6 +1667,7 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
   return (
     <ListadoConArchivos
       titulo={`Estudios y certificados (${items.length})`}
+      singular="este estudio"
       onAgregarToggle={() => setAgregar(v => !v)}
       agregarAbierto={agregar}
       formulario={
@@ -1695,6 +1778,7 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
   return (
     <ListadoConArchivos
       titulo={`Experiencia laboral (${items.length})`}
+      singular="esta experiencia"
       onAgregarToggle={() => setAgregar(v => !v)}
       agregarAbierto={agregar}
       formulario={
@@ -1784,6 +1868,7 @@ function SeccionTic({ evaluadorId, setToast }: { evaluadorId: number; setToast: 
   return (
     <ListadoConArchivos
       titulo={`Formación TIC complementaria (${items.length})`}
+      singular="esta formación TIC"
       onAgregarToggle={() => setAgregar(v => !v)}
       agregarAbierto={agregar}
       formulario={
@@ -1823,12 +1908,17 @@ interface FilaListado {
 }
 
 function ListadoConArchivos({
-  titulo, onAgregarToggle, agregarAbierto, formulario, onCrear, creando, loading, vacio, filas,
+  titulo, singular, onAgregarToggle, agregarAbierto, formulario, onCrear, creando, loading, vacio, filas,
 }: {
-  titulo: string; onAgregarToggle: () => void; agregarAbierto: boolean
+  titulo: string
+  /** Cómo se llama una fila, para el texto de la confirmación. */
+  singular: string
+  onAgregarToggle: () => void; agregarAbierto: boolean
   formulario: React.ReactNode; onCrear: () => void; creando: boolean
   loading: boolean; vacio: string; filas: FilaListado[]
 }) {
+  // borrar con un clic dejaba a la persona sin el soporte y sin manera de recuperarlo
+  const [porBorrar, setPorBorrar] = useState<FilaListado | null>(null)
   return (
     <Section titulo={titulo} accion={
       <button onClick={onAgregarToggle} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
@@ -1881,13 +1971,35 @@ function ListadoConArchivos({
                   </button>
                 </>
               )}
-              <button onClick={f.onEliminar} disabled={f.eliminando} className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
+              <button
+                onClick={() => setPorBorrar(f)}
+                disabled={f.eliminando}
+                title={`Eliminar ${singular}`}
+                className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+              >
                 {f.eliminando ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               </button>
             </li>
           ))}
         </ul>
       )}
+
+      <ConfirmModal
+        open={porBorrar != null}
+        onClose={() => setPorBorrar(null)}
+        onConfirm={() => { porBorrar?.onEliminar(); setPorBorrar(null) }}
+        tipo="delete"
+        titulo={`Eliminar ${singular}`}
+        mensaje={
+          <>
+            Se borra <strong>{porBorrar?.titulo}</strong>
+            {porBorrar?.sub ? <> ({porBorrar.sub})</> : null}
+            {porBorrar?.archivoUrl ? ' junto con el archivo cargado' : ''}. No se puede deshacer.
+          </>
+        }
+        textoConfirmar="Eliminar"
+        cargando={porBorrar?.eliminando ?? false}
+      />
     </Section>
   )
 }
@@ -1930,6 +2042,7 @@ function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: numb
   const [editandoId, setEditandoId] = useState<number | null>(null)
   const [creando, setCreando] = useState(false)
   const [eliminando, setEliminando] = useState<number | null>(null)
+  const [porBorrar, setPorBorrar] = useState<Prueba | null>(null)
 
   async function cargar() {
     setLoading(true)
@@ -1999,14 +2112,25 @@ function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: numb
   function limpiar() {
     setEditandoId(null)
     setParticipacionId('')
+    setAnio(new Date().getFullYear().toString())
     setPeriodo(''); setFecha(''); setPuntaje(''); setIntentos(''); setPorcentaje('')
+  }
+
+  /** Cerrar y volver a abrir dejaba el formulario en modo edición: la prueba
+   *  nueva se guardaba encima de la que se estaba corrigiendo. Abre siempre limpio. */
+  function alternarFormulario() {
+    if (agregar) { setAgregar(false); limpiar() }
+    else { limpiar(); setAgregar(true) }
   }
 
   async function eliminar(pid: number) {
     setEliminando(pid)
     try {
       await api.delete(`/evaluadores/pruebas/${pid}`)
-      setToast({ tipo: 'success', msg: 'Eliminada' })
+      setToast({ tipo: 'success', msg: 'Prueba eliminada' })
+      // si se estaba corrigiendo justo esa, el formulario no puede seguir apuntándole
+      if (editandoId === pid) { setAgregar(false); limpiar() }
+      setPorBorrar(null)
       await cargar()
       onCambio()
     } catch (err) {
@@ -2025,13 +2149,29 @@ function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: numb
 
   return (
     <Section titulo={`Pruebas de conocimiento (${items.length})`} accion={
-      <button onClick={() => setAgregar(v => !v)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
+      <button onClick={alternarFormulario} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-semibold rounded-lg transition hover:opacity-90" style={{ backgroundColor: PRIMARY }}>
         <Settings2 size={12} />
         {agregar ? 'Cerrar' : 'Agregar'}
       </button>
     }>
       {agregar && (
         <div className="px-5 py-4 bg-neutral-50/60 border-b border-neutral-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {editandoId != null && (
+            <div className="col-span-2 flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 sm:col-span-4">
+              <p className="text-[12px] font-semibold text-amber-800">
+                Está corrigiendo la prueba de {items.find(x => x.pruebaId === editandoId)?.anio ?? ''}
+                {items.find(x => x.pruebaId === editandoId)?.periodo
+                  ? `-${items.find(x => x.pruebaId === editandoId)?.periodo}` : ''}
+                . Al guardar reemplaza esos datos.
+              </p>
+              <button
+                onClick={limpiar}
+                className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+              >
+                Mejor registrar una nueva
+              </button>
+            </div>
+          )}
           {ciclos.length > 0 && (
             <div className="col-span-2 sm:col-span-4">
               <label className={label}>Ciclo al que pertenece {ambiguo && '*'}</label>
@@ -2130,13 +2270,30 @@ function SeccionPruebas({ evaluadorId, setToast, onCambio }: { evaluadorId: numb
               >
                 <Pencil size={14} />
               </button>
-              <button onClick={() => eliminar(p.pruebaId)} disabled={eliminando === p.pruebaId} className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
+              <button onClick={() => setPorBorrar(p)} disabled={eliminando === p.pruebaId} title="Eliminar la prueba" className="p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50">
                 {eliminando === p.pruebaId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               </button>
             </li>
           ))}
         </ul>
       )}
+
+      <ConfirmModal
+        open={porBorrar != null}
+        onClose={() => setPorBorrar(null)}
+        onConfirm={() => porBorrar && eliminar(porBorrar.pruebaId)}
+        tipo="delete"
+        titulo="Eliminar la prueba"
+        mensaje={
+          <>
+            Se borra la prueba de <strong>{porBorrar?.anio}{porBorrar?.periodo ? `-${porBorrar.periodo}` : ''}</strong>
+            {porBorrar?.puntajeMayor != null ? <> con puntaje <strong>{porBorrar.puntajeMayor}</strong></> : null}.
+            El hito del ciclo vuelve a apagarse y no se puede deshacer.
+          </>
+        }
+        textoConfirmar="Eliminar"
+        cargando={eliminando != null}
+      />
     </Section>
   )
 }

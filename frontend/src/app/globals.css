@@ -134,6 +134,26 @@ html[data-high-contrast="true"] body [role="button"] {
   text-decoration: underline !important;
   outline: 2px solid #ffe600 !important;
 }
+/* La regla de arriba pinta de negro TODO, incluido el fondo que distingue lo
+   que está seleccionado: en alto contraste la pestaña activa, el chip elegido y
+   la opción del menú lateral se veían igual que las demás. Se devuelven con
+   fondo invertido y una barra inferior, que no dependen del color. */
+html[data-high-contrast="true"] body [aria-selected="true"],
+html[data-high-contrast="true"] body [aria-current]:not([aria-current="false"]),
+html[data-high-contrast="true"] body [aria-pressed="true"] {
+  background-color: #fff !important;
+  color: #000 !important;
+  border-bottom: 4px solid #ffe600 !important;
+  font-weight: 700 !important;
+}
+/* el texto y los iconos de dentro también, o quedan blancos sobre blanco */
+html[data-high-contrast="true"] body [aria-selected="true"] *,
+html[data-high-contrast="true"] body [aria-current]:not([aria-current="false"]) *,
+html[data-high-contrast="true"] body [aria-pressed="true"] * {
+  background-color: #fff !important;
+  color: #000 !important;
+}
+
 html[data-high-contrast="true"] body input,
 html[data-high-contrast="true"] body select,
 html[data-high-contrast="true"] body textarea {

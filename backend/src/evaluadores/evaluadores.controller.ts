@@ -13,7 +13,9 @@ import type {
   MulterFile, ParticipacionDto, PruebaDto, TicDto,
 } from './evaluadores.service'
 import { CatalogosEvaluadorService } from './catalogos.service'
-import { MIMES_CORREO, esTipoDocDePerfil, seEjecutaEnElNavegador } from './formatos-correo'
+import {
+  MIMES_CORREO, MIMES_IMAGEN, esTipoDocDePerfil, seEjecutaEnElNavegador,
+} from './formatos-correo'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { TrayectoriaService } from './trayectoria.service'
 import { ControlCambiosService } from './control-cambios.service'
@@ -1040,10 +1042,14 @@ export class EvaluadoresController {
   @Post(':id/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_ARCHIVO_BYTES },
-    // Puerta laxa: el tipo real lo valida el service contra el catálogo.
+    // Puerta laxa: el tipo real lo valida el service contra el catálogo. Sin las
+    // imágenes, la tarjeta profesional anunciaba JPG y el servidor la rechazaba aquí.
     fileFilter: filtroArchivo(
-      f => f.mimetype === 'application/pdf' || MIMES_CORREO.includes(f.mimetype),
-      'Tipo de archivo no soportado. Se acepta PDF, y correos en .msg, .eml, .html o .mht'),
+      f => f.mimetype === 'application/pdf'
+        || MIMES_IMAGEN.includes(f.mimetype)
+        || MIMES_CORREO.includes(f.mimetype),
+      'Tipo de archivo no soportado. Se acepta PDF, foto (JPG o PNG), ' +
+      'y correos en .msg, .eml, .html o .mht'),
   }))
   subirDocumento(
     @CurrentUser() user: JwtUser,

@@ -908,6 +908,15 @@ function TarjetaDocumentoUnico({
       if (inputRef.current) inputRef.current.value = ''
       return
     }
+    // una foto de celular pasa de 8 MB con facilidad: mejor decirlo antes de subirla
+    if (file.size > 8 * 1024 * 1024) {
+      setToast({
+        tipo: 'error',
+        msg: `El archivo pesa ${(file.size / (1024 * 1024)).toFixed(1)} MB y el máximo son 8 MB`,
+      })
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
     setSubiendo(true)
     try {
       const fd = new FormData()
@@ -1870,7 +1879,14 @@ function SeccionExperiencia({ evaluadorId, setToast }: { evaluadorId: number; se
       filas={items.map(it => ({
         id: it.experienciaId,
         titulo: it.cargo || '— Sin cargo —',
-        sub: [it.entidad, [fmt(it.fechaInicio), it.fechaFin ? fmt(it.fechaFin) : 'Vigente'].filter(Boolean).join(' → ')].filter(Boolean).join(' · ') || '—',
+        // sin fecha de inicio no se puede afirmar que siga vigente: el soporte
+        // simplemente no trae el periodo
+        sub: [
+          it.entidad,
+          it.fechaInicio
+            ? [fmt(it.fechaInicio), it.fechaFin ? fmt(it.fechaFin) : 'Vigente'].filter(Boolean).join(' → ')
+            : (it.fechaFin ? `hasta ${fmt(it.fechaFin)}` : 'Sin fechas en el soporte'),
+        ].filter(Boolean).join(' · ') || '—',
         archivoUrl: it.tieneArchivo ? `/evaluadores/experiencia/${it.experienciaId}/archivo` : null,
         archivoNombre: it.archivoNombre ?? `experiencia-${it.experienciaId}.pdf`,
         eliminando: eliminando === it.experienciaId,

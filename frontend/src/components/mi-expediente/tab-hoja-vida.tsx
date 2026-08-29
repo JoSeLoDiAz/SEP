@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Briefcase, GraduationCap, Loader2, MonitorSmartphone, Plus, Save, Trash2, X } from 'lucide-react'
 import api from '@/lib/api'
-import { fmtDateTime } from '@/lib/format-date'
+import { fmtFecha } from '@/lib/format-date'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   BotonesArchivo, Cargando, INSTITUTIONAL, Section, Vacio, input, label, mensajeError,
@@ -37,8 +37,10 @@ interface Fila {
 }
 
 function rangoFechas(inicio: string | null, fin: string | null): string {
-  const desde = inicio ? fmtDateTime(inicio) : null
-  const hasta = fin ? fmtDateTime(fin) : 'Actualidad'
+  // fechas de calendario: fmtFecha las lee en UTC. Con fmtDateTime el evaluador
+  // veía "12/09/1991, 7:00 p. m." donde su diploma dice 13/09/1991
+  const desde = inicio ? fmtFecha(inicio) : null
+  const hasta = fin ? fmtFecha(fin) : 'Actualidad'
   if (desde) return `${desde} — ${hasta}`
   return fin ? `hasta ${hasta}` : hasta
 }
@@ -430,7 +432,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         filaDe={(e: MiEstudio) => ({
           id: e.estudioId,
           principal: e.titulo || '(sin título)',
-          meta: [e.tipoEstudio, e.institucion, e.fechaGrado ? fmtDateTime(e.fechaGrado) : null]
+          meta: [e.tipoEstudio, e.institucion, e.fechaGrado ? fmtFecha(e.fechaGrado) : null]
             .filter(Boolean).join(' · ') || '—',
           archivoNombre: e.archivoNombre,
           tieneArchivo: e.tieneArchivo,
@@ -488,7 +490,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         filaDe={(t: MiTic) => ({
           id: t.ticId,
           principal: t.nombre || '(sin nombre)',
-          meta: [t.horas != null ? `${t.horas}h` : null, t.fechaFin ? fmtDateTime(t.fechaFin) : null]
+          meta: [t.horas != null ? `${t.horas}h` : null, t.fechaFin ? fmtFecha(t.fechaFin) : null]
             .filter(Boolean).join(' · ') || '—',
           archivoNombre: t.archivoNombre,
           tieneArchivo: t.tieneArchivo,

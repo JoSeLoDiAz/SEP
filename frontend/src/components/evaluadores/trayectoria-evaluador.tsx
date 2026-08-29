@@ -71,12 +71,17 @@ interface Resumen {
   totalCertificados: number
   promedioRetro: number | null
   totalRetroRecibidas: number
-  pruebaVigente: { anio: number; puntaje: number | null; aprobada: boolean; vigente: boolean } | null
+  pruebaVigente: {
+    anio: number; puntaje: number | null; porcentaje: number | null
+    minimo: number | null; aprobada: boolean; vigente: boolean
+  } | null
   /** Un renglón por año en que participó. `pruebaAprobada` en null = sin evaluar. */
   recorrido: Array<{
     anio: number
     porcentaje: number | null
     puntaje: number | null
+    /** Cuántas pruebas hubo ese año. Con más de una se muestra la mejor. */
+    pruebasDelAnio?: number
     pruebaAprobada: boolean | null
     curso: number | null
     cursoAprobado: boolean | null
@@ -109,7 +114,7 @@ interface Detalle extends Participacion {
     fechaInicio: string | null; fechaFin: string | null; observaciones: string | null
   }>
   pruebas: Array<{
-    pruebaId: number; anio: number; puntajeMayor: number | null
+    pruebaId: number; anio: number; puntajeMayor: number | null; efectividad: number | null
     puntajeMinimo: number | null; aprobada: boolean; fechaPresentacion: string | null
     intentos: number | null
   }>
@@ -155,6 +160,9 @@ export function TrayectoriaEvaluador({
   const [cargandoRail, setCargandoRail] = useState(true)
   const [seleccion, setSeleccion] = useState<number | null>(null)
   const [detalle, setDetalle] = useState<Detalle | null>(null)
+  // que ciclo tiene pintado: distingue abrir otro (con spinner) de refrescar el
+  // mismo porque se guardo algo abajo (sin parpadeo)
+  const detalleRef = useRef<number | null>(null)
   const [cargandoDetalle, setCargandoDetalle] = useState(false)
   const [subTab, setSubTab] = useState<SubTab>('documentos')
   const [recarga, setRecarga] = useState(0)
@@ -194,19 +202,26 @@ export function TrayectoriaEvaluador({
   useEffect(() => {
     if (seleccion == null) { setDetalle(null); return }
     let vivo = true
+    // solo la primera vez que se abre un ciclo se muestra "Cargando el ciclo...";
+    // los refrescos de abajo repintan por debajo, sin parpadeo
+    const esOtroCiclo = detalleRef.current !== seleccion
     ;(async () => {
-      setCargandoDetalle(true)
+      if (esOtroCiclo) setCargandoDetalle(true)
       try {
         const r = await api.get<Detalle>(`/evaluadores/participaciones/${seleccion}/detalle`)
+        detalleRef.current = seleccion
         if (vivo) setDetalle(r.data)
       } catch (err) {
         if (vivo) setToast({ tipo: 'error', msg: mensajeError(err, 'No se pudo cargar el ciclo') })
       } finally {
-        if (vivo) setCargandoDetalle(false)
+        if (vivo && esOtroCiclo) setCargandoDetalle(false)
       }
     })()
     return () => { vivo = false }
-  }, [seleccion, recarga, setToast])
+    // `refrescar` sube cuando se guarda algo en las secciones de abajo: sin él, el
+    // checklist, el anillo y la subpestaña Formación del ciclo abierto se quedaban
+    // con datos viejos y parecía que el registro no había funcionado.
+  }, [seleccion, recarga, refrescar, setToast])
 
   const hayCiclos = useMemo(() => rail.some(a => a.participaciones?.length), [rail])
 
@@ -301,6 +316,13 @@ function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
                 {estado(r.pruebaAprobada).txt}
               </span>
             )}
+            {/* con varias pruebas ese año se muestra la mejor: callarlo hacía
+                parecer que las otras no existen */}
+            {(r.pruebasDelAnio ?? 0) > 1 && (
+              <p className="text-[9px] text-neutral-400">
+                mejor de {r.pruebasDelAnio}
+              </p>
+            )}
 
             <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Curso</p>
             <p className="text-[13px] font-semibold text-neutral-800">
@@ -339,7 +361,10 @@ function FilaKpis({ resumen }: { resumen: Resumen }) {
     {
       label: 'Prueba',
       valor: prueba ? (prueba.aprobada ? 'Aprobada' : 'No aprobada') : '—',
-      sub: prueba ? `${prueba.anio}${prueba.puntaje != null ? ` · ${prueba.puntaje} pts` : ''}` : 'sin registro',
+      // el porcentaje es lo comparable con el mínimo; el puntaje son aciertos crudos
+      sub: prueba
+        ? `${prueba.anio}${prueba.porcentaje != null ? ` · ${prueba.porcentaje}%` : ''}`
+        : 'sin registro',
       // Una prueba aprobada pero de hace más de un año ya no habilita.
       alerta: !!prueba && prueba.aprobada && !prueba.vigente,
     },
@@ -679,7 +704,7 @@ function CabeceraCiclo({
     ['Mesa y equipo', [detalle.mesa, detalle.equipoEvaluador].filter(Boolean).join(' · ') || null],
     ['Dinamizó', detalle.dinamizadorNombre],
     ['Autorizó', detalle.aprobacion
-      ? `${detalle.aprobacion.aprobadorNombre} · ${fecha(detalle.aprobacion.fechaAprobacion)}`
+      ? `${detalle.aprobacion.aprobadorNombre} · ${fmtFecha(detalle.aprobacion.fechaAprobacion)}`
       : null],
     ['Convocatoria', detalle.convocatoriaNombre],
   ]
@@ -1822,13 +1847,18 @@ function TabFormacion({
                 <ClipboardList size={16} className={p.aprobada ? 'text-emerald-600' : 'text-neutral-300'} />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-medium text-neutral-800">
-                    Puntaje {p.puntajeMayor ?? '—'}
+                    {/* PUNTAJEMINIMO es un corte porcentual: lo que se compara con
+                        él es la efectividad, no los aciertos */}
+                    {p.efectividad != null ? `Efectividad ${p.efectividad}%` : `Puntaje ${p.puntajeMayor ?? '—'}`}
                     {p.puntajeMinimo != null && (
-                      <span className="text-[11px] font-normal text-neutral-500"> · mínimo {p.puntajeMinimo}</span>
+                      <span className="text-[11px] font-normal text-neutral-500"> · mínimo {p.puntajeMinimo}%</span>
+                    )}
+                    {p.efectividad != null && p.puntajeMayor != null && (
+                      <span className="text-[11px] font-normal text-neutral-400"> · {p.puntajeMayor} aciertos</span>
                     )}
                   </p>
                   <p className="text-[11px] text-neutral-500">
-                    {[fecha(p.fechaPresentacion), p.intentos != null ? `${p.intentos} intentos` : null]
+                    {[fmtFecha(p.fechaPresentacion), p.intentos != null ? `${p.intentos} intentos` : null]
                       .filter(v => v && v !== '—').join(' · ') || '—'}
                   </p>
                 </div>
@@ -2717,16 +2747,6 @@ function SoloHistorico() {
       </p>
     </div>
   )
-}
-
-function fecha(d: string | null | undefined): string {
-  if (!d) return '—'
-  const iso = /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00Z` : d
-  const parsed = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`)
-  if (Number.isNaN(parsed.getTime())) return '—'
-  return parsed.toLocaleDateString('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Bogota',
-  })
 }
 
 function mensajeError(err: unknown, porDefecto: string): string {

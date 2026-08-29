@@ -21,8 +21,12 @@
 --
 -- NO se ejecuta con SQL plano: hay que mover el BLOB de EVALUADORDOCUMENTO a la
 -- tabla destino fila por fila, con los valores que salieron de leer cada PDF.
--- El script que lo hace es scratchpad/v66.js; los datos exactos y el respaldo
--- previo estan en respaldo-v66.json (documentos + clasificacion con su fuente).
+-- El script que lo hace es v66_reclasificar_soportes_experiencia.js, aqui al lado.
+--
+-- El respaldo previo y la clasificacion con su fuente NO se versionan: traen
+-- nombres y numeros de cedula de evaluadores y este repositorio es publico.
+-- Viven fuera, en ../respaldos/v66-datos/ (respaldo-v66.json y
+-- v66-clasificacion.json), junto a los 20 PDF originales en ../respaldos/v66-soportes/.
 --
 --   node v66.js             -> ensayo, no escribe
 --   node v66.js --aplicar   -> escribe y hace commit

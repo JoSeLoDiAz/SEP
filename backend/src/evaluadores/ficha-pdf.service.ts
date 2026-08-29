@@ -1104,13 +1104,18 @@ export class FichaPdfService {
     return valor.trim() || vacio
   }
 
+  /** Fechas de calendario: grado, inicio y fin de experiencia, TIC, presentación
+   *  de la prueba. Oracle las guarda a medianoche y el proceso corre en UTC
+   *  (main.ts), así que formatearlas en Bogotá (-05:00) las retrasaba un día:
+   *  una fecha de grado del 13 salía impresa como 12. fechaLarga se queda en
+   *  Bogotá porque solo formatea el momento en que se genera el PDF. */
   private fechaCorta(valor: unknown): string {
     if (valor == null || valor === '') return '—'
     if (!(valor instanceof Date) && typeof valor !== 'string' && typeof valor !== 'number') return '—'
     const d = valor instanceof Date ? valor : new Date(valor)
     if (Number.isNaN(d.getTime())) return '—'
     return d.toLocaleDateString('es-CO', {
-      day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Bogota',
+      day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
     })
   }
 

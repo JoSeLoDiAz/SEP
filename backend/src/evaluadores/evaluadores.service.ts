@@ -2285,8 +2285,32 @@ export class EvaluadoresService {
 
   async actualizarPrueba(pruebaId: number, dto: Partial<PruebaDto>) {
     this.validarPuntajes(dto)
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
-    if (!ok[0]) throw new NotFoundException('Prueba no encontrada')
+    const cabecera: Array<{ evaluadorId: number; participacionId: number | null }> =
+      await this.dataSource.query(
+        `SELECT EVALUADORID AS "evaluadorId", PARTICIPACIONID AS "participacionId"
+           FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
+    if (!cabecera[0]) throw new NotFoundException('Prueba no encontrada')
+
+    // Mover la prueba de ciclo no hacía nada: PARTICIPACIONID no estaba en el
+    // mapa. Y como el año y el periodo sí están, la fila quedaba con el año del
+    // ciclo nuevo apuntando todavía al viejo.
+    let minimoDelCiclo: number | null | undefined
+    if (dto.participacionId !== undefined) {
+      if (dto.participacionId == null) {
+        minimoDelCiclo = null
+      } else {
+        // el mismo chequeo de pertenencia que ya hace el alta
+        const suyo: Array<{ minimo: number | null }> = await this.dataSource.query(
+          `SELECT cv.PUNTAJEMINIMOPRUEBA AS "minimo"
+             FROM EVALUADORPARTICIPACION pa
+             LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
+            WHERE pa.PARTICIPACIONID = :1 AND pa.EVALUADORID = :2`,
+          [dto.participacionId, Number(cabecera[0].evaluadorId)],
+        )
+        if (!suyo[0]) throw new BadRequestException('Esa participación no es de este evaluador')
+        minimoDelCiclo = suyo[0].minimo != null ? Number(suyo[0].minimo) : null
+      }
+    }
 
     const sets: string[] = []
     const params: unknown[] = []
@@ -2303,6 +2327,7 @@ export class EvaluadoresService {
       ['incorrectas',       'INCORRECTAS',        v => v ?? null],
       ['totalTiempo',       'TOTALTIEMPO',        v => (v as string)?.trim() || null],
       ['observacion',       'OBSERVACION',        v => (v as string)?.trim() || null],
+      ['participacionId',   'PARTICIPACIONID',    v => v ?? null],
     ]
     for (const [k, col, transform] of map) {
       if (dto[k] !== undefined) {
@@ -2318,7 +2343,14 @@ export class EvaluadoresService {
         `SELECT EFECTIVIDAD AS "efectividad", PUNTAJEMINIMO AS "minimo"
            FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
     const efectividad = dto.efectividad !== undefined ? dto.efectividad : actual[0]?.efectividad
-    const minimo = dto.puntajeMinimo !== undefined ? dto.puntajeMinimo : actual[0]?.minimo
+    // al cambiar de ciclo manda el corte de SU convocatoria, salvo que lo pidan a mano
+    const minimo = dto.puntajeMinimo !== undefined
+      ? dto.puntajeMinimo
+      : minimoDelCiclo !== undefined ? minimoDelCiclo : actual[0]?.minimo
+    if (dto.puntajeMinimo === undefined && minimoDelCiclo !== undefined) {
+      params.push(minimoDelCiclo)
+      sets.push(`PUNTAJEMINIMO = :${params.length}`)
+    }
     const aprobada = this.derivarAprobada(efectividad, minimo)
     params.push(aprobada == null ? null : (aprobada ? 1 : 0))
     sets.push(`APROBADA = :${params.length}`)

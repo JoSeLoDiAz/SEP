@@ -37,6 +37,7 @@ interface ContadoresRow {
   cursoAprobado: number
   cursoCalificacion: number | null
   pruebaAprobada: number
+  pruebaEfectividad: number | null
   pruebaPuntaje: number | null
   pruebaMinimo: number | null
   tieneAsignacion: number
@@ -110,13 +111,16 @@ export class TrayectoriaService {
 
     // vigente = aprobada del año en curso o el anterior
     const pruebaRows: Array<Record<string, unknown>> = await this.dataSource.query(
+      // del año más reciente, la mejor: por id se tomaba la última cargada, que
+      // en 22 pares evaluador-año no es la mejor (hasta 17 puntos de diferencia)
       `SELECT pr.ANIO           AS "anio",
               pr.PUNTAJEMAYOR   AS "puntaje",
+              pr.EFECTIVIDAD    AS "porcentaje",
               pr.PUNTAJEMINIMO  AS "minimo",
               pr.APROBADA       AS "aprobada"
          FROM EVALUADORPRUEBA pr
         WHERE pr.EVALUADORID = :1
-        ORDER BY pr.ANIO DESC, pr.PRUEBAID DESC
+        ORDER BY pr.ANIO DESC, pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
         FETCH FIRST 1 ROWS ONLY`,
       [evaluadorId],
     )
@@ -140,6 +144,8 @@ export class TrayectoriaService {
         ? {
             anio: Number(ultimaPrueba.anio),
             puntaje: ultimaPrueba.puntaje != null ? Number(ultimaPrueba.puntaje) : null,
+            porcentaje: ultimaPrueba.porcentaje != null ? Number(ultimaPrueba.porcentaje) : null,
+            minimo: ultimaPrueba.minimo != null ? Number(ultimaPrueba.minimo) : null,
             aprobada,
             vigente: aprobada && Number(ultimaPrueba.anio) >= anioActual - 1,
           }
@@ -301,6 +307,8 @@ export class TrayectoriaService {
     const n = (v: unknown) => Number(v ?? 0)
 
     const puntaje = c?.pruebaPuntaje != null ? Number(c.pruebaPuntaje) : null
+
+    const efectividad = c?.pruebaEfectividad != null ? Number(c.pruebaEfectividad) : null
     const minimo = c?.pruebaMinimo != null ? Number(c.pruebaMinimo) : null
 
     const hitos: Hito[] = [
@@ -330,9 +338,12 @@ export class TrayectoriaService {
         codigo: 'PRUEBA',
         nombre: 'Prueba de conocimiento aprobada',
         cumplido: n(c?.pruebaAprobada) > 0,
-        detalle: puntaje != null
-          ? `Puntaje ${puntaje}${minimo != null ? ` / mínimo ${minimo}` : ''}`
-          : null,
+        // se rotula con el porcentaje, que es lo que se compara contra el mínimo
+        detalle: efectividad != null
+          ? `Efectividad ${efectividad}%${minimo != null ? ` / mínimo ${minimo}%` : ''}`
+          : puntaje != null
+            ? `${puntaje} aciertos${minimo != null ? ` · mínimo ${minimo}%` : ''}`
+            : null,
       },
       {
         codigo: 'ASIGNACION',
@@ -393,19 +404,28 @@ export class TrayectoriaService {
       `SELECT a.ANIO AS "anio",
               (SELECT pr.EFECTIVIDAD FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
-                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "porcentaje",
+                ORDER BY pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
+                FETCH FIRST 1 ROWS ONLY)   AS "porcentaje",
               (SELECT pr.PUNTAJEMAYOR FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
-                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "puntaje",
+                ORDER BY pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
+                FETCH FIRST 1 ROWS ONLY)   AS "puntaje",
               (SELECT pr.PUNTAJEMINIMO FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
-                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "minimo",
+                ORDER BY pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
+                FETCH FIRST 1 ROWS ONLY)   AS "minimo",
               (SELECT pr.APROBADA FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
-                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "aprobada",
+                ORDER BY pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
+                FETCH FIRST 1 ROWS ONLY)   AS "aprobada",
               (SELECT pr.INTENTOS FROM EVALUADORPRUEBA pr
                 WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO
-                ORDER BY pr.PRUEBAID DESC FETCH FIRST 1 ROWS ONLY)   AS "intentos",
+                ORDER BY pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
+                FETCH FIRST 1 ROWS ONLY)   AS "intentos",
+              -- cuántas pruebas hubo ese año: si son varias, la franja muestra la
+              -- mejor y la tarjeta lo dice, en vez de callar las otras
+              (SELECT COUNT(*) FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = :ev AND pr.ANIO = a.ANIO)      AS "pruebasDelAnio",
               (SELECT ROUND(AVG(rr.PROMEDIO), 2)
                  FROM RETRORESPUESTA rr
                  JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = rr.PARTEVALUADOID
@@ -437,6 +457,7 @@ export class TrayectoriaService {
       anio: Number(f.anio),
       porcentaje: f.porcentaje != null ? Number(f.porcentaje) : null,
       puntaje: f.puntaje != null ? Number(f.puntaje) : null,
+      pruebasDelAnio: f.pruebasDelAnio != null ? Number(f.pruebasDelAnio) : 0,
       intentos: f.intentos != null ? Number(f.intentos) : null,
       curso: f.curso != null ? Number(f.curso) : null,
       cursoAprobado: f.cursoAprobado != null ? Number(f.cursoAprobado) === 1 : null,
@@ -453,9 +474,12 @@ export class TrayectoriaService {
 
   private esPruebaAprobada(p: Record<string, unknown>): boolean {
     if (Number(p.aprobada ?? 0) === 1) return true
-    // el histórico anterior a v34 no tiene APROBADA: se infiere del corte
-    if (p.puntaje == null || p.minimo == null) return false
-    return Number(p.puntaje) >= Number(p.minimo)
+    // El histórico anterior a v34 no tiene APROBADA: se infiere del corte, y el
+    // corte es porcentual, así que se compara contra EFECTIVIDAD. En las 173
+    // pruebas que sí traen APROBADA, esta regla coincide con ella sin excepción.
+    if (p.minimo == null) return false
+    if (p.porcentaje != null) return Number(p.porcentaje) >= Number(p.minimo)
+    return false
   }
 
   private async exigirEvaluador(evaluadorId: number) {
@@ -570,11 +594,16 @@ export class TrayectoriaService {
          (SELECT MAX(ca.CALIFICACION) FROM EVALUADORCAPACITACION ca
            WHERE ca.PARTICIPACIONID = pa.PARTICIPACIONID)             AS "cursoCalificacion",
 
+         -- PUNTAJEMINIMO es un corte PORCENTUAL: lo comparable es EFECTIVIDAD,
+         -- no PUNTAJEMAYOR, que son aciertos crudos (41 sobre 50). Compararlos
+         -- daba "41 >= 80" falso en 156 de las 180 pruebas del banco.
          (SELECT COUNT(*) FROM EVALUADORPRUEBA pr
            WHERE pr.PARTICIPACIONID = pa.PARTICIPACIONID
              AND (pr.APROBADA = 1
                   OR (pr.PUNTAJEMINIMO IS NOT NULL
-                      AND pr.PUNTAJEMAYOR >= pr.PUNTAJEMINIMO)))      AS "pruebaAprobada",
+                      AND pr.EFECTIVIDAD >= pr.PUNTAJEMINIMO)))       AS "pruebaAprobada",
+         (SELECT MAX(pr.EFECTIVIDAD) FROM EVALUADORPRUEBA pr
+           WHERE pr.PARTICIPACIONID = pa.PARTICIPACIONID)             AS "pruebaEfectividad",
          (SELECT MAX(pr.PUNTAJEMAYOR) FROM EVALUADORPRUEBA pr
            WHERE pr.PARTICIPACIONID = pa.PARTICIPACIONID)             AS "pruebaPuntaje",
          (SELECT MAX(pr.PUNTAJEMINIMO) FROM EVALUADORPRUEBA pr
@@ -703,8 +732,9 @@ export class TrayectoriaService {
       ...r,
       pruebaId: Number(r.pruebaId),
       anio: Number(r.anio),
+      // el corte es porcentual: se compara con EFECTIVIDAD, no con los aciertos
       aprobada: this.esPruebaAprobada({
-        aprobada: r.aprobada, puntaje: r.puntajeMayor, minimo: r.puntajeMinimo,
+        aprobada: r.aprobada, porcentaje: r.efectividad, minimo: r.puntajeMinimo,
       }),
     }))
   }

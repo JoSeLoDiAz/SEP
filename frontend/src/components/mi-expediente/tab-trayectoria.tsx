@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, BellRing, CalendarDays, CheckCircle2, Mail } from 'lucide-react'
 import api from '@/lib/api'
-import { fmtDateTime } from '@/lib/format-date'
+import { fmtDateTime, fmtFecha } from '@/lib/format-date'
 import {
   PRIMARY, Section, Vacio, Cargando, BotonesArchivo, mensajeError, type SetToast,
 } from '@/components/mi-expediente/comunes'
@@ -254,7 +254,8 @@ export default function TabTrayectoria({ setToast }: { setToast: SetToast }) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-neutral-800">{e.nombre || 'Evidencia'}</p>
                     <p className="truncate text-[11px] text-neutral-500">
-                      {meta([e.anio, e.convocatoria, fmtDateTime(e.fecha), peso(e.bytes)]) || '—'}
+                      {/* FECHAAPROBACION se guarda con TO_DATE('YYYY-MM-DD'): es de calendario */}
+                      {meta([e.anio, e.convocatoria, fmtFecha(e.fecha), peso(e.bytes)]) || '—'}
                     </p>
                   </div>
                   <BotonesArchivo

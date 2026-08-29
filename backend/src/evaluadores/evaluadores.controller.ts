@@ -668,7 +668,7 @@ export class EvaluadoresController {
       institucion: body.institucion,
       fechaGrado: body.fechaGrado,
     }
-    return this.service.crearEstudio(id, dto, file)
+    return this.service.crearEstudio(id, dto, file, this.ctx(user))
   }
 
   @Get('estudios/:sid/archivo')
@@ -685,10 +685,31 @@ export class EvaluadoresController {
     res.end(buffer)
   }
 
+  @Put('estudios/:sid')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
+  }))
+  @ApiOperation({ summary: 'Corregir un estudio. Sin archivo nuevo, el soporte no se toca' })
+  actualizarEstudio(
+    @CurrentUser() user: JwtUser,
+    @Param('sid', ParseIntPipe) sid: number,
+    @UploadedFile() file: MulterFile | undefined,
+    @Body() body: { tipoEstudioId?: string; titulo?: string; institucion?: string; fechaGrado?: string },
+  ) {
+    this.exigirGestion(user)
+    return this.service.actualizarEstudio(sid, {
+      tipoEstudioId: body.tipoEstudioId ? Number(body.tipoEstudioId) : undefined,
+      titulo: body.titulo,
+      institucion: body.institucion,
+      fechaGrado: body.fechaGrado,
+    }, file, this.ctx(user))
+  }
+
   @Delete('estudios/:sid')
   eliminarEstudio(@CurrentUser() user: JwtUser, @Param('sid', ParseIntPipe) sid: number) {
     this.exigirGestion(user)
-    return this.service.eliminarEstudio(sid)
+    return this.service.eliminarEstudio(sid, this.ctx(user))
   }
 
   @Get(':id/experiencia')
@@ -715,7 +736,7 @@ export class EvaluadoresController {
       fechaInicio: body.fechaInicio,
       fechaFin: body.fechaFin || null,
     }
-    return this.service.crearExperiencia(id, dto, file)
+    return this.service.crearExperiencia(id, dto, file, this.ctx(user))
   }
 
   @Get('experiencia/:eid/archivo')
@@ -732,10 +753,31 @@ export class EvaluadoresController {
     res.end(buffer)
   }
 
+  @Put('experiencia/:eid')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
+  }))
+  @ApiOperation({ summary: 'Corregir una experiencia. Sin archivo nuevo, el soporte no se toca' })
+  actualizarExperiencia(
+    @CurrentUser() user: JwtUser,
+    @Param('eid', ParseIntPipe) eid: number,
+    @UploadedFile() file: MulterFile | undefined,
+    @Body() body: { cargo?: string; entidad?: string; fechaInicio?: string; fechaFin?: string },
+  ) {
+    this.exigirGestion(user)
+    return this.service.actualizarExperiencia(eid, {
+      cargo: body.cargo,
+      entidad: body.entidad,
+      fechaInicio: body.fechaInicio,
+      fechaFin: body.fechaFin,
+    }, file, this.ctx(user))
+  }
+
   @Delete('experiencia/:eid')
   eliminarExperiencia(@CurrentUser() user: JwtUser, @Param('eid', ParseIntPipe) eid: number) {
     this.exigirGestion(user)
-    return this.service.eliminarExperiencia(eid)
+    return this.service.eliminarExperiencia(eid, this.ctx(user))
   }
 
   @Get(':id/tic')
@@ -762,7 +804,7 @@ export class EvaluadoresController {
       horas: body.horas ? Number(body.horas) : undefined,
       fechaFin: body.fechaFin || null,
     }
-    return this.service.crearTic(id, dto, file)
+    return this.service.crearTic(id, dto, file, this.ctx(user))
   }
 
   @Get('tic/:tid/archivo')
@@ -779,10 +821,32 @@ export class EvaluadoresController {
     res.end(buffer)
   }
 
+  @Put('tic/:tid')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES },
+    fileFilter: filtroArchivo(f => f.mimetype === 'application/pdf', 'Solo PDF'),
+  }))
+  @ApiOperation({ summary: 'Corregir una certificación TIC. Sin archivo nuevo, el soporte no se toca' })
+  actualizarTic(
+    @CurrentUser() user: JwtUser,
+    @Param('tid', ParseIntPipe) tid: number,
+    @UploadedFile() file: MulterFile | undefined,
+    @Body() body: { tipoEventoId?: string; nombre?: string; horas?: string; fechaFin?: string },
+  ) {
+    this.exigirGestion(user)
+    const horas = body.horas ? Number(body.horas) : undefined
+    return this.service.actualizarTic(tid, {
+      tipoEventoId: body.tipoEventoId ? Number(body.tipoEventoId) : undefined,
+      nombre: body.nombre,
+      horas: Number.isFinite(horas) ? horas : undefined,
+      fechaFin: body.fechaFin,
+    }, file, this.ctx(user))
+  }
+
   @Delete('tic/:tid')
   eliminarTic(@CurrentUser() user: JwtUser, @Param('tid', ParseIntPipe) tid: number) {
     this.exigirGestion(user)
-    return this.service.eliminarTic(tid)
+    return this.service.eliminarTic(tid, this.ctx(user))
   }
 
   @Get(':id/pruebas')
@@ -1077,7 +1141,7 @@ export class EvaluadoresController {
       descripcion: body.descripcion,
       anioReferencia: Number.isFinite(anio) ? anio : undefined,
       participacionId: Number.isFinite(participacionId) ? participacionId : undefined,
-    })
+    }, this.ctx(user))
   }
 
   @Get('documentos/:docId/archivo')
@@ -1116,6 +1180,6 @@ export class EvaluadoresController {
     @Param('docId', ParseIntPipe) docId: number,
   ) {
     this.exigirGestion(user)
-    return this.service.eliminarDocumento(docId)
+    return this.service.eliminarDocumento(docId, this.ctx(user))
   }
 }

@@ -101,6 +101,12 @@ export interface ParticipacionDto {
   usuarioEmail?: string
 }
 
+/** Quién hace el cambio. Va a USUARIOCREACION y al control de cambios. */
+export interface CtxUsuario {
+  usuarioEmail: string
+  usuarioPerfilId?: number
+}
+
 export interface EstudioDto {
   tipoEstudioId: number
   titulo?: string
@@ -1498,6 +1504,83 @@ export class EvaluadoresService {
     return { message: 'Hoja de vida eliminada' }
   }
 
+  // --- expediente: estudios, experiencia y TIC ---
+  //
+  // Las tres tablas se comportan igual: una fila con un PDF opcional, que hasta
+  // ahora solo se podía crear y borrar. Corregir una errata obligaba a borrar y
+  // volver a subir el soporte, y no quedaba rastro de quién hizo qué.
+
+  /** Una sola puerta al control de cambios para las cuatro tablas del expediente.
+   *  Sin `ctx` no se registra: es una llamada interna, no una acción de alguien. */
+  private async registrarExpediente(
+    tabla: string,
+    operacion: 'INSERT' | 'UPDATE' | 'DELETE',
+    registroId: number,
+    evaluadorId: number,
+    ctx: CtxUsuario | undefined,
+    valores: { antes?: unknown; despues?: unknown },
+  ): Promise<void> {
+    if (!ctx?.usuarioEmail) return
+    await this.controlCambios.registrar({
+      tabla,
+      operacion,
+      registroId,
+      evaluadorId,
+      usuarioEmail: ctx.usuarioEmail,
+      usuarioPerfilId: ctx.usuarioPerfilId,
+      valorAntes: valores.antes ?? null,
+      valorDespues: valores.despues ?? null,
+    })
+  }
+
+  /** Foto de la fila antes de tocarla, sin el BLOB, para el control de cambios. */
+  private async antesDe(tabla: string, pk: string, id: number): Promise<Record<string, unknown> | null> {
+    const columnas: Record<string, string> = {
+      EVALUADORESTUDIO:
+        `EVALUADORID AS "evaluadorId", TIPOESTUDIOID AS "tipoEstudioId",
+         TRIM(ESTUDIOTITULO) AS "titulo", TRIM(INSTITUCION) AS "institucion",
+         FECHAGRADO AS "fechaGrado", TRIM(ARCHIVONOMBRE) AS "archivoNombre"`,
+      EVALUADOREXPERIENCIA:
+        `EVALUADORID AS "evaluadorId", TRIM(CARGOEXP) AS "cargo",
+         TRIM(ENTIDADEXP) AS "entidad", FECHAINICIO AS "fechaInicio",
+         FECHAFIN AS "fechaFin", TRIM(ARCHIVONOMBRE) AS "archivoNombre"`,
+      EVALUADORTIC:
+        `EVALUADORID AS "evaluadorId", TIPOEVENTOID AS "tipoEventoId",
+         TRIM(TICNOMBRE) AS "nombre", TICHORAS AS "horas",
+         FECHAFIN AS "fechaFin", TRIM(ARCHIVONOMBRE) AS "archivoNombre"`,
+      EVALUADORDOCUMENTO:
+        `EVALUADORID AS "evaluadorId", TIPODOCUMENTOEVALID AS "tipoDocumentoEvalId",
+         TRIM(DOCUMENTODESCRIPCION) AS "descripcion", ANIOREFERENCIA AS "anioReferencia",
+         PARTICIPACIONID AS "participacionId", TRIM(ARCHIVONOMBRE) AS "archivoNombre"`,
+    }
+    const cols = columnas[tabla]
+    if (!cols) return null
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT ${cols} FROM ${tabla} WHERE ${pk} = :1`, [id],
+    )
+    return rows[0] ?? null
+  }
+
+  /** Une los SET de un UPDATE con archivo opcional: sin archivo nuevo, el que
+   *  hay se queda donde está (si no, corregir una tilde borraría el soporte). */
+  private setsConArchivo(
+    base: Array<[string, unknown]>, file: MulterFile | undefined,
+  ): { sets: string[]; params: unknown[] } {
+    const pares = [...base]
+    if (file?.buffer) {
+      pares.push(['ARCHIVOPDF', file.buffer])
+      pares.push(['ARCHIVOMIME', file.mimetype])
+      pares.push(['ARCHIVONOMBRE', file.originalname])
+    }
+    const sets: string[] = []
+    const params: unknown[] = []
+    for (const [col, valor] of pares) {
+      params.push(valor)
+      sets.push(`${col} = :${params.length}`)
+    }
+    return { sets, params }
+  }
+
   // Estudios (diplomas, certificados — excluye HV)
 
   async listarEstudios(evaluadorId: number) {
@@ -1510,6 +1593,7 @@ export class EvaluadoresService {
               s.FECHAGRADO               AS "fechaGrado",
               TRIM(s.ARCHIVONOMBRE)      AS "archivoNombre",
               CASE WHEN s.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
+              TRIM(s.USUARIOCREACION)    AS "usuarioCreacion",
               s.FECHACARGUE              AS "fechaCargue"
          FROM EVALUADORESTUDIO s
          LEFT JOIN TIPOESTUDIO t ON t.TIPOESTUDIOID = s.TIPOESTUDIOID
@@ -1526,7 +1610,9 @@ export class EvaluadoresService {
     }))
   }
 
-  async crearEstudio(evaluadorId: number, dto: EstudioDto, file?: MulterFile) {
+  async crearEstudio(
+    evaluadorId: number, dto: EstudioDto, file?: MulterFile, ctx?: CtxUsuario,
+  ) {
     if (!dto.tipoEstudioId) throw new BadRequestException('Tipo de estudio requerido')
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
@@ -1544,8 +1630,8 @@ export class EvaluadoresService {
     await this.dataSource.query(
       `INSERT INTO EVALUADORESTUDIO
          (ESTUDIOID, EVALUADORID, TIPOESTUDIOID, ESTUDIOTITULO, INSTITUCION, FECHAGRADO,
-          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
+          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
       [
         id, evaluadorId, dto.tipoEstudioId,
         dto.titulo?.trim() || null,
@@ -1554,9 +1640,48 @@ export class EvaluadoresService {
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
+        ctx?.usuarioEmail ?? null,
       ],
     )
+    await this.registrarExpediente('EVALUADORESTUDIO', 'INSERT', id, evaluadorId, ctx, {
+      despues: {
+        tipoEstudioId: dto.tipoEstudioId, titulo: dto.titulo?.trim() || null,
+        institucion: dto.institucion?.trim() || null, fechaGrado: dto.fechaGrado ?? null,
+        archivoNombre: file?.originalname ?? null,
+      },
+    })
     return { estudioId: id, message: 'Estudio agregado' }
+  }
+
+  /** Sin `file` el soporte no se toca: para eso existe este endpoint. */
+  async actualizarEstudio(
+    estudioId: number, dto: Partial<EstudioDto>, file?: MulterFile, ctx?: CtxUsuario,
+  ) {
+    const antes = await this.antesDe('EVALUADORESTUDIO', 'ESTUDIOID', estudioId)
+    if (!antes) throw new NotFoundException('Estudio no encontrado')
+
+    if (dto.tipoEstudioId != null) {
+      const tipoHV = await this.getTipoEstudioHV().catch(() => 0)
+      if (tipoHV && Number(dto.tipoEstudioId) === tipoHV) {
+        throw new BadRequestException('La hoja de vida se carga desde la sección "Hoja de vida"')
+      }
+    }
+
+    const { sets, params } = this.setsConArchivo([
+      ['TIPOESTUDIOID', dto.tipoEstudioId ?? antes.tipoEstudioId],
+      ['ESTUDIOTITULO', dto.titulo?.trim() || null],
+      ['INSTITUCION', dto.institucion?.trim() || null],
+      ['FECHAGRADO', fechaSolo(dto.fechaGrado)],
+    ], file)
+    params.push(estudioId)
+    await this.dataSource.query(
+      `UPDATE EVALUADORESTUDIO SET ${sets.join(', ')} WHERE ESTUDIOID = :${params.length}`, params,
+    )
+
+    const despues = await this.antesDe('EVALUADORESTUDIO', 'ESTUDIOID', estudioId)
+    await this.registrarExpediente(
+      'EVALUADORESTUDIO', 'UPDATE', estudioId, Number(antes.evaluadorId), ctx, { antes, despues })
+    return { estudioId, message: 'Estudio actualizado' }
   }
 
   async getEstudioArchivo(estudioId: number) {
@@ -1571,8 +1696,12 @@ export class EvaluadoresService {
     return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `estudio-${estudioId}.pdf` }
   }
 
-  async eliminarEstudio(estudioId: number) {
+  async eliminarEstudio(estudioId: number, ctx?: CtxUsuario) {
+    const antes = await this.antesDe('EVALUADORESTUDIO', 'ESTUDIOID', estudioId)
+    if (!antes) throw new NotFoundException('Estudio no encontrado')
     await this.dataSource.query(`DELETE FROM EVALUADORESTUDIO WHERE ESTUDIOID = :1`, [estudioId])
+    await this.registrarExpediente(
+      'EVALUADORESTUDIO', 'DELETE', estudioId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'Estudio eliminado' }
   }
 
@@ -1586,7 +1715,9 @@ export class EvaluadoresService {
               FECHAINICIO           AS "fechaInicio",
               FECHAFIN              AS "fechaFin",
               TRIM(ARCHIVONOMBRE)   AS "archivoNombre",
-              CASE WHEN ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo"
+              CASE WHEN ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
+              TRIM(USUARIOCREACION) AS "usuarioCreacion",
+              FECHACARGUE           AS "fechaCargue"
          FROM EVALUADOREXPERIENCIA
         WHERE EVALUADORID = :1
         ORDER BY FECHAINICIO DESC NULLS LAST`,
@@ -1599,7 +1730,9 @@ export class EvaluadoresService {
     }))
   }
 
-  async crearExperiencia(evaluadorId: number, dto: ExperienciaDto, file?: MulterFile) {
+  async crearExperiencia(
+    evaluadorId: number, dto: ExperienciaDto, file?: MulterFile, ctx?: CtxUsuario,
+  ) {
     if (!dto.cargo?.trim() || !dto.entidad?.trim()) {
       throw new BadRequestException('Cargo y entidad son obligatorios')
     }
@@ -1613,8 +1746,8 @@ export class EvaluadoresService {
     await this.dataSource.query(
       `INSERT INTO EVALUADOREXPERIENCIA
          (EXPERIENCIAID, EVALUADORID, CARGOEXP, ENTIDADEXP, FECHAINICIO, FECHAFIN,
-          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)`,
+          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
       [
         id, evaluadorId,
         dto.cargo.trim(), dto.entidad.trim(),
@@ -1623,9 +1756,44 @@ export class EvaluadoresService {
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
+        ctx?.usuarioEmail ?? null,
       ],
     )
+    await this.registrarExpediente('EVALUADOREXPERIENCIA', 'INSERT', id, evaluadorId, ctx, {
+      despues: {
+        cargo: dto.cargo.trim(), entidad: dto.entidad.trim(),
+        fechaInicio: dto.fechaInicio ?? null, fechaFin: dto.fechaFin ?? null,
+        archivoNombre: file?.originalname ?? null,
+      },
+    })
     return { experienciaId: id, message: 'Experiencia agregada' }
+  }
+
+  async actualizarExperiencia(
+    experienciaId: number, dto: Partial<ExperienciaDto>, file?: MulterFile, ctx?: CtxUsuario,
+  ) {
+    const antes = await this.antesDe('EVALUADOREXPERIENCIA', 'EXPERIENCIAID', experienciaId)
+    if (!antes) throw new NotFoundException('Experiencia no encontrada')
+
+    const cargo = dto.cargo?.trim() ?? String(antes.cargo ?? '')
+    const entidad = dto.entidad?.trim() ?? String(antes.entidad ?? '')
+    if (!cargo || !entidad) throw new BadRequestException('Cargo y entidad son obligatorios')
+
+    const { sets, params } = this.setsConArchivo([
+      ['CARGOEXP', cargo],
+      ['ENTIDADEXP', entidad],
+      ['FECHAINICIO', fechaSolo(dto.fechaInicio)],
+      ['FECHAFIN', fechaSolo(dto.fechaFin)],
+    ], file)
+    params.push(experienciaId)
+    await this.dataSource.query(
+      `UPDATE EVALUADOREXPERIENCIA SET ${sets.join(', ')} WHERE EXPERIENCIAID = :${params.length}`, params,
+    )
+
+    const despues = await this.antesDe('EVALUADOREXPERIENCIA', 'EXPERIENCIAID', experienciaId)
+    await this.registrarExpediente(
+      'EVALUADOREXPERIENCIA', 'UPDATE', experienciaId, Number(antes.evaluadorId), ctx, { antes, despues })
+    return { experienciaId, message: 'Experiencia actualizada' }
   }
 
   async getExperienciaArchivo(experienciaId: number) {
@@ -1640,8 +1808,12 @@ export class EvaluadoresService {
     return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `experiencia-${experienciaId}.pdf` }
   }
 
-  async eliminarExperiencia(experienciaId: number) {
+  async eliminarExperiencia(experienciaId: number, ctx?: CtxUsuario) {
+    const antes = await this.antesDe('EVALUADOREXPERIENCIA', 'EXPERIENCIAID', experienciaId)
+    if (!antes) throw new NotFoundException('Experiencia no encontrada')
     await this.dataSource.query(`DELETE FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = :1`, [experienciaId])
+    await this.registrarExpediente(
+      'EVALUADOREXPERIENCIA', 'DELETE', experienciaId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'Experiencia eliminada' }
   }
 
@@ -1656,7 +1828,9 @@ export class EvaluadoresService {
               t.TICHORAS                 AS "horas",
               t.FECHAFIN                 AS "fechaFin",
               TRIM(t.ARCHIVONOMBRE)      AS "archivoNombre",
-              CASE WHEN t.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo"
+              CASE WHEN t.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
+              TRIM(t.USUARIOCREACION)    AS "usuarioCreacion",
+              t.FECHACARGUE              AS "fechaCargue"
          FROM EVALUADORTIC t
          LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = t.TIPOEVENTOID
         WHERE t.EVALUADORID = :1
@@ -1672,7 +1846,7 @@ export class EvaluadoresService {
     }))
   }
 
-  async crearTic(evaluadorId: number, dto: TicDto, file?: MulterFile) {
+  async crearTic(evaluadorId: number, dto: TicDto, file?: MulterFile, ctx?: CtxUsuario) {
     if (!dto.nombre?.trim()) throw new BadRequestException('Nombre requerido')
     const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
@@ -1684,8 +1858,8 @@ export class EvaluadoresService {
     await this.dataSource.query(
       `INSERT INTO EVALUADORTIC
          (TICID, EVALUADORID, TIPOEVENTOID, TICNOMBRE, TICHORAS, FECHAFIN,
-          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)`,
+          ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
       [
         id, evaluadorId,
         dto.tipoEventoId ?? null,
@@ -1695,9 +1869,43 @@ export class EvaluadoresService {
         file?.buffer ?? null,
         file?.mimetype ?? null,
         file?.originalname ?? null,
+        ctx?.usuarioEmail ?? null,
       ],
     )
+    await this.registrarExpediente('EVALUADORTIC', 'INSERT', id, evaluadorId, ctx, {
+      despues: {
+        tipoEventoId: dto.tipoEventoId ?? null, nombre: dto.nombre.trim(),
+        horas: dto.horas ?? null, fechaFin: dto.fechaFin ?? null,
+        archivoNombre: file?.originalname ?? null,
+      },
+    })
     return { ticId: id, message: 'TIC agregado' }
+  }
+
+  async actualizarTic(
+    ticId: number, dto: Partial<TicDto>, file?: MulterFile, ctx?: CtxUsuario,
+  ) {
+    const antes = await this.antesDe('EVALUADORTIC', 'TICID', ticId)
+    if (!antes) throw new NotFoundException('Certificación TIC no encontrada')
+
+    const nombre = dto.nombre?.trim() ?? String(antes.nombre ?? '')
+    if (!nombre) throw new BadRequestException('Nombre requerido')
+
+    const { sets, params } = this.setsConArchivo([
+      ['TIPOEVENTOID', dto.tipoEventoId ?? null],
+      ['TICNOMBRE', nombre],
+      ['TICHORAS', dto.horas ?? null],
+      ['FECHAFIN', fechaSolo(dto.fechaFin)],
+    ], file)
+    params.push(ticId)
+    await this.dataSource.query(
+      `UPDATE EVALUADORTIC SET ${sets.join(', ')} WHERE TICID = :${params.length}`, params,
+    )
+
+    const despues = await this.antesDe('EVALUADORTIC', 'TICID', ticId)
+    await this.registrarExpediente(
+      'EVALUADORTIC', 'UPDATE', ticId, Number(antes.evaluadorId), ctx, { antes, despues })
+    return { ticId, message: 'Certificación TIC actualizada' }
   }
 
   async getTicArchivo(ticId: number) {
@@ -1712,8 +1920,12 @@ export class EvaluadoresService {
     return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `tic-${ticId}.pdf` }
   }
 
-  async eliminarTic(ticId: number) {
+  async eliminarTic(ticId: number, ctx?: CtxUsuario) {
+    const antes = await this.antesDe('EVALUADORTIC', 'TICID', ticId)
+    if (!antes) throw new NotFoundException('Certificación TIC no encontrada')
     await this.dataSource.query(`DELETE FROM EVALUADORTIC WHERE TICID = :1`, [ticId])
+    await this.registrarExpediente(
+      'EVALUADORTIC', 'DELETE', ticId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'TIC eliminado' }
   }
 
@@ -2005,6 +2217,7 @@ export class EvaluadoresService {
     tipoId: number,
     file: MulterFile,
     opts: { descripcion?: string; anioReferencia?: number; participacionId?: number } = {},
+    ctx?: CtxUsuario,
   ): Promise<{ mensaje: string; documentoId: number }> {
     if (!file?.buffer) throw new BadRequestException('Adjunta el archivo en el campo "archivo"')
     if (!tipoId) throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
@@ -2046,8 +2259,17 @@ export class EvaluadoresService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      // Si el tipo es de instancia única, borrar previos antes de insertar.
+      // Si el tipo es de instancia única, borrar previos antes de insertar. Se
+      // apuntan primero: si no, el reemplazo de una cédula no dejaba ni rastro.
+      let reemplazados: Array<Record<string, unknown>> = []
       if (!admiteMultiple) {
+        reemplazados = await qr.query(
+          `SELECT DOCUMENTOID AS "documentoId", TRIM(ARCHIVONOMBRE) AS "archivoNombre",
+                  TRIM(DOCUMENTODESCRIPCION) AS "descripcion", FECHACARGUE AS "fechaCargue"
+             FROM EVALUADORDOCUMENTO
+            WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2`,
+          [evaluadorId, tipoId],
+        )
         await qr.query(
           `DELETE FROM EVALUADORDOCUMENTO
             WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2`,
@@ -2082,6 +2304,21 @@ export class EvaluadoresService {
       )
 
       await qr.commitTransaction()
+
+      // fuera de la transacción: el log nunca debe poder tumbar la subida
+      for (const viejo of reemplazados) {
+        await this.registrarExpediente(
+          'EVALUADORDOCUMENTO', 'DELETE', Number(viejo.documentoId), evaluadorId, ctx,
+          { antes: { ...viejo, tipoCodigo: tipo[0].codigo, motivo: 'reemplazado al subir uno nuevo' } })
+      }
+      await this.registrarExpediente('EVALUADORDOCUMENTO', 'INSERT', documentoId, evaluadorId, ctx, {
+        despues: {
+          tipoCodigo: tipo[0].codigo, archivoNombre: nombre,
+          descripcion: opts.descripcion?.trim() || null,
+          anioReferencia, participacionId,
+        },
+      })
+
       return { mensaje: admiteMultiple ? 'Documento agregado' : 'Documento actualizado', documentoId }
     } catch (err) {
       await qr.rollbackTransaction()
@@ -2138,12 +2375,12 @@ export class EvaluadoresService {
     }
   }
 
-  async eliminarDocumento(docId: number): Promise<{ mensaje: string }> {
-    const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`, [docId],
-    )
-    if (!ok[0]) throw new NotFoundException('Documento no encontrado')
+  async eliminarDocumento(docId: number, ctx?: CtxUsuario): Promise<{ mensaje: string }> {
+    const antes = await this.antesDe('EVALUADORDOCUMENTO', 'DOCUMENTOID', docId)
+    if (!antes) throw new NotFoundException('Documento no encontrado')
     await this.dataSource.query(`DELETE FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`, [docId])
+    await this.registrarExpediente(
+      'EVALUADORDOCUMENTO', 'DELETE', docId, Number(antes.evaluadorId), ctx, { antes })
     return { mensaje: 'Documento eliminado' }
   }
 

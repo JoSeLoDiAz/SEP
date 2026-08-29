@@ -7,7 +7,7 @@ import { CargueRetroHistorica } from './cargue-retro-historica'
 import {
   AlertTriangle, Award, BadgeCheck, Briefcase, CalendarDays, Check, CheckCircle2,
   ChevronRight, Circle, ClipboardList, Copy, Download, Eye, FileText, FolderOpen,
-  Loader2, MessageSquareQuote, Paperclip, Pencil, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
+  Loader2, MessageSquareQuote, MinusCircle, Paperclip, Pencil, Plus, ShieldCheck, Stamp, Trash2, Upload, Users, XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -16,7 +16,16 @@ import { fmtFecha } from '@/lib/format-date'
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
 
-interface Hito { codigo: string; nombre: string; cumplido: boolean; detalle?: string | null }
+interface Hito {
+  codigo: string
+  nombre: string
+  cumplido: boolean
+  detalle?: string | null
+  /** false = este ciclo no puede cumplirlo; no cuenta para el anillo. */
+  aplica?: boolean
+  /** Cumplido, pero con un matiz (el certificado no lo emitio el SEP). */
+  advertencia?: boolean
+}
 interface Progreso { cumplidos: number; total: number; hitos: Hito[] }
 
 interface Participacion {
@@ -327,7 +336,9 @@ function FranjaRecorrido({ recorrido }: { recorrido: Resumen['recorrido'] }) {
             <p className="mt-2 text-[9px] font-semibold uppercase tracking-wide text-neutral-400">Curso</p>
             <p className="text-[13px] font-semibold text-neutral-800">
               {r.curso != null ? String(r.curso) : '—'}
-              {r.cursoAprobado === false && (
+              {/* sin nota no hay nada que reprobar: APROBADO llega en 0 porque la
+                  convocatoria no tiene corte, no porque la persona fallara */}
+              {r.cursoAprobado === false && r.curso != null && (
                 <span className="ml-1 text-[9px] font-bold uppercase text-red-600">No aprobado</span>
               )}
             </p>
@@ -568,7 +579,9 @@ function CambiarEstado({
       </div>
       <p className="text-[11px] text-neutral-400 sm:col-span-2">
         El cambio queda en el control de cambios con su usuario y la fecha.
-        {detalle.estadoSugerido && detalle.estadoSugerido !== codigo && (
+        {/* en un ciclo revocado o declinado el sugerido siempre diverge: proponer
+            "FINALIZADO" sobre una participación revocada confunde en vez de ayudar */}
+        {detalle.estadoSugerido && detalle.estadoSugerido !== codigo && !detalle.estadoNegativo && (
           <> Por lo que hay cargado correspondería <strong>{detalle.estadoSugerido}</strong>.</>
         )}
       </p>
@@ -823,17 +836,29 @@ function Checklist({ progreso }: { progreso: Progreso }) {
             key={h.codigo}
             title={h.detalle ?? undefined}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium ${
-              h.cumplido
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                : 'border-neutral-200 bg-neutral-50 text-neutral-400'
+              h.aplica === false
+                ? 'border-dashed border-neutral-200 bg-white text-neutral-400'
+                : h.cumplido
+                  ? h.advertencia
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-neutral-200 bg-neutral-50 text-neutral-400'
             }`}
           >
-            {h.cumplido
-              ? <CheckCircle2 size={13} className="shrink-0 text-emerald-600" />
-              : <Circle size={13} className="shrink-0 text-neutral-300" />}
+            {h.aplica === false
+              ? <MinusCircle size={13} className="shrink-0 text-neutral-300" />
+              : h.cumplido
+                ? <CheckCircle2 size={13} className={`shrink-0 ${h.advertencia ? 'text-amber-600' : 'text-emerald-600'}`} />
+                : <Circle size={13} className="shrink-0 text-neutral-300" />}
             {h.nombre}
-            {h.detalle && h.cumplido && (
-              <span className="font-semibold text-emerald-700">· {h.detalle}</span>
+            {/* el detalle también cuando está apagado: "Efectividad 60% / mínimo 70%"
+                dice algo que el círculo gris se callaba */}
+            {h.detalle && (
+              <span className={`font-semibold ${
+                h.aplica === false ? 'text-neutral-400'
+                  : h.cumplido ? (h.advertencia ? 'text-amber-700' : 'text-emerald-700')
+                  : 'text-neutral-500'
+              }`}>· {h.detalle}</span>
             )}
           </span>
         ))}
@@ -2511,7 +2536,10 @@ function TabCertificado({
   }
 
   if (!cert) {
-    const hitosPendientes = detalle.progreso.hitos.filter(h => !h.cumplido && h.codigo !== 'CERTIFICADO')
+    // los que este ciclo no puede cumplir no son pendientes: contarlos inflaba el
+    // aviso con hitos que nadie podia encender
+    const hitosPendientes = detalle.progreso.hitos.filter(
+      h => !h.cumplido && h.aplica !== false && h.codigo !== 'CERTIFICADO')
     return (
       <div className="px-5 py-8 text-center">
         {cargados.length > 0 ? (
@@ -2525,8 +2553,9 @@ function TabCertificado({
         <p className="mx-auto mt-1 max-w-md text-[12px] text-neutral-500">
           El certificado se genera desde el sistema con número consecutivo y código de verificación.
           {hitosPendientes.length > 0 && (
-            <> Quedan <strong>{hitosPendientes.length} hito(s)</strong> del ciclo sin cumplir; se puede
-            emitir igual, pero conviene revisarlos.</>
+            <> Falta{hitosPendientes.length === 1 ? '' : 'n'}{' '}
+            <strong>{hitosPendientes.map(h => h.nombre.toLowerCase()).join(', ')}</strong>; se puede
+            emitir igual, pero conviene revisarlo{hitosPendientes.length === 1 ? '' : 's'}.</>
           )}
         </p>
         <button

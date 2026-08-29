@@ -9,6 +9,10 @@ export interface Hito {
   nombre: string
   cumplido: boolean
   detalle?: string | null
+  /** false = este ciclo no puede cumplirlo, así que no cuenta para el anillo. */
+  aplica?: boolean
+  /** Se cumple, pero con un matiz que conviene ver (p. ej. certificado no emitido). */
+  advertencia?: boolean
 }
 
 export interface ProgresoCiclo {
@@ -311,13 +315,11 @@ export class TrayectoriaService {
     const efectividad = c?.pruebaEfectividad != null ? Number(c.pruebaEfectividad) : null
     const minimo = c?.pruebaMinimo != null ? Number(c.pruebaMinimo) : null
 
+    // "Invitación recibida" miraba un archivo de la CONVOCATORIA, no algo de esta
+    // persona: estaba verde en las 224 participaciones y regalaba 1/9 del anillo a
+    // todo el mundo. La convocatoria ya se ve en la cabecera del ciclo, y el correo
+    // de invitación en la subpestaña Documentos, que es su sitio.
     const hitos: Hito[] = [
-      {
-        codigo: 'INVITACION',
-        nombre: 'Invitación recibida',
-        cumplido: n(c?.tieneInvitacion) > 0,
-        detalle: cabecera.convocatoriaNombre as string | null,
-      },
       {
         codigo: 'AUTORIZACION',
         nombre: 'Autorización del jefe',
@@ -332,7 +334,13 @@ export class TrayectoriaService {
         codigo: 'CURSO',
         nombre: 'Curso de formación aprobado',
         cumplido: n(c?.cursoAprobado) > 0,
-        detalle: c?.cursoCalificacion != null ? `Nota ${Number(c.cursoCalificacion)}` : null,
+        // 10 de las 11 convocatorias no tienen nota mínima de curso, así que
+        // calcularAprobado fuerza APROBADO = 0 y nadie puede encender este hito:
+        // sin corte no cuenta para el anillo en vez de dejarlo tope en 8/9
+        aplica: cabecera.corteCurso != null,
+        detalle: c?.cursoCalificacion != null
+          ? `Nota ${Number(c.cursoCalificacion)}${cabecera.corteCurso != null ? ` / mínimo ${Number(cabecera.corteCurso)}` : ''}`
+          : cabecera.corteCurso == null ? 'La convocatoria no exige curso' : null,
       },
       {
         codigo: 'PRUEBA',
@@ -360,26 +368,43 @@ export class TrayectoriaService {
       },
       {
         codigo: 'RETROALIMENTO',
-        nombre: 'Retroalimentación',
-        // sin asignaciones no hay nada que diligenciar
+        nombre: 'Retroalimentación emitida',
         cumplido: n(c?.retroAsignadas) > 0 && n(c?.retroPendientes) === 0,
+        // 204 de las 224 participaciones no tienen ninguna asignación: sin nada
+        // que diligenciar, este hito tapaba el denominador de por vida
+        aplica: n(c?.retroAsignadas) > 0,
         detalle: n(c?.retroAsignadas) > 0
           ? `${n(c?.retroAsignadas) - n(c?.retroPendientes)} de ${n(c?.retroAsignadas)}`
-          : 'Sin asignaciones',
+          : 'No le asignaron a nadie',
+      },
+      {
+        codigo: 'RETRORECIBIDA',
+        nombre: 'Retroalimentación recibida',
+        cumplido: n(c?.retroRecibidas) > 0,
+        detalle: n(c?.retroRecibidas) > 0
+          ? `${n(c?.retroRecibidas)} de sus compañeros` +
+            (c?.retroPromedio != null ? ` · promedio ${Number(c.retroPromedio)}` : '')
+          : 'Nadie lo ha retroalimentado aún',
       },
       {
         codigo: 'CERTIFICADO',
-        nombre: 'Certificado emitido',
+        nombre: 'Certificado',
         cumplido: n(c?.tieneCertificado) > 0 || n(c?.certificadoCargado) > 0,
+        // Hoy hay 0 filas en EVALUADORCERTIFICADO y 194 PDF archivados: decir
+        // "emitido" de todos era atribuirle al SEP un papel que no emitió.
         detalle: n(c?.tieneCertificado) > 0
-          ? undefined
-          : n(c?.certificadoCargado) > 0 ? 'Cargado de un año anterior' : undefined,
+          ? 'Emitido por el SEP'
+          : n(c?.certificadoCargado) > 0 ? 'Cargado, no emitido por el SEP' : undefined,
+        advertencia: n(c?.tieneCertificado) === 0 && n(c?.certificadoCargado) > 0,
       },
     ]
 
+    // Un hito que nadie puede cumplir no debe restar: los que no aplican salen
+    // del denominador para que un ciclo completo llegue de verdad al 100%.
+    const cuentan = hitos.filter(h => h.aplica !== false)
     return {
-      cumplidos: hitos.filter(h => h.cumplido).length,
-      total: hitos.length,
+      cumplidos: cuentan.filter(h => h.cumplido).length,
+      total: cuentan.length,
       hitos,
     }
   }

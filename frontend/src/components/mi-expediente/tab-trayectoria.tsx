@@ -183,7 +183,8 @@ export default function TabTrayectoria({ setToast }: { setToast: SetToast }) {
                     </td>
                     <td className="px-4 py-2 text-right text-[13px] tabular-nums text-neutral-800">
                       {r.curso != null ? r.curso : '—'}
-                      {r.cursoAprobado === false && (
+                      {/* sin nota no hay nada que reprobar */}
+                      {r.cursoAprobado === false && r.curso != null && (
                         <span className="ml-1 text-[10px] font-bold uppercase text-red-600">No aprobado</span>
                       )}
                     </td>

@@ -6,8 +6,11 @@ export const EXTENSIONES_CORREO = ['msg', 'eml', 'html', 'htm', 'mht', 'mhtml'] 
 // un correo impreso a PDF también vale como evidencia
 export const EXTENSIONES_ADJUNTO_CORREO = ['pdf', ...EXTENSIONES_CORREO]
 
-// la tarjeta profesional casi siempre llega fotografiada con el celular
+// la tarjeta profesional casi siempre llega fotografiada con el celular.
+// SVG queda fuera a propósito: se ejecuta en el navegador y el token vive en localStorage
 export const EXTENSIONES_IMAGEN = ['jpg', 'jpeg', 'png']
+
+export const MIMES_IMAGEN = ['image/jpeg', 'image/png']
 
 // en código y no en columna del catálogo: esa columna es DDL y el contenedor puede subir antes del SQL
 const EXTENSIONES_POR_TIPO_DOC_EVAL: Record<string, string[]> = {

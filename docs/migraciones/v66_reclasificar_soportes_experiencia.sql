@@ -1,0 +1,38 @@
+-- v66 — los 20 soportes de "experiencia en proyectos" van a donde pertenecen.
+--
+-- Los tipos de documento EXPERIENCIA_PROFESIONAL (4) y EXPERIENCIA_PROYECTOS (5)
+-- se usaban como cajon de sastre: ahi habia certificaciones laborales, diplomas
+-- de cursos y certificados de haber participado como evaluador, todo mezclado.
+-- Nada de eso salia en la ficha ni en la hoja de vida en PDF, que leen
+-- EVALUADOREXPERIENCIA y EVALUADORESTUDIO.
+--
+-- Se leyeron los 20 PDF uno por uno (varios son escaneos, hubo que rasterizarlos)
+-- y cada clasificacion fue auditada por segunda vez contra el mismo PDF. El
+-- reparto quedo asi:
+--     8 -> EVALUADOREXPERIENCIA   (certificaciones laborales)
+--     9 -> EVALUADORESTUDIO       (cursos del SENA y de la U. del Rosario)
+--     3 -> CERTIFICADO_PARTICIPACION (participacion como evaluador; solo cambian
+--          de tipo, siguen siendo documentos)
+--
+-- Las fechas salen del CONTENIDO del documento, no del ANIOREFERENCIA que traia
+-- el registro: ese campo se pre-llenaba con el anio actual y estaba mal (el doc
+-- 315, un certificado de 2018, figuraba como 2026). Donde el documento no dice
+-- el periodo (docs 78 y 79) las fechas quedan en NULL en vez de inventarse.
+--
+-- NO se ejecuta con SQL plano: hay que mover el BLOB de EVALUADORDOCUMENTO a la
+-- tabla destino fila por fila, con los valores que salieron de leer cada PDF.
+-- El script que lo hace es scratchpad/v66.js; los datos exactos y el respaldo
+-- previo estan en respaldo-v66.json (documentos + clasificacion con su fuente).
+--
+--   node v66.js             -> ensayo, no escribe
+--   node v66.js --aplicar   -> escribe y hace commit
+--
+-- Al terminar archiva el tipo 5, igual que la v48 hizo con el 4:
+--
+--   UPDATE TIPODOCUMENTOEVAL SET ACTIVO = 0 WHERE CODIGO = 'EXPERIENCIA_PROYECTOS';
+--
+-- Comprobaciones que corre el script al final:
+--   - no queda ningun documento en los tipos 4 y 5
+--   - la suma de bytes de los archivos movidos coincide con la de origen
+--   - el evaluador 110 (Ana Fatiniza Guerra), que tenia CERO experiencia
+--     registrada pese a sus tres certificaciones laborales, queda con 3

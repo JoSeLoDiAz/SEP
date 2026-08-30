@@ -170,7 +170,13 @@ export interface CicloResumido {
   participacionId: number
   anio: number
   estadoCodigo: string | null
+  /** Legible: el chip mostraba el código crudo (NO_APROBO, EN_FORMACION). */
+  estadoNombre: string | null
   estadoColor: string | null
+  /** Desempata el par verde FINALIZADO / CERTIFICADO. */
+  estadoFinal: boolean
+  rolNombre: string | null
+  areaNombre: string | null
 }
 
 /** Una tarjeta del listado del banco. */
@@ -192,6 +198,8 @@ export interface EvaluadorListaItem {
   totalCiclos: number
   totalProyectos: number
   ultimoAnio: number | null
+  /** Año de la última prueba: distingue "nunca presentó" de "la tiene vencida". */
+  ultimoAnioPrueba: number | null
   promedioRetro: number | null
   ciclos: CicloResumido[]
 }
@@ -273,22 +281,27 @@ export class EvaluadoresService {
       throw new BadRequestException('Tipo de documento e identificación son requeridos')
     }
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT p.PERSONAID                    AS "personaId",
-              p.TIPODOCUMENTOIDENTIDADID     AS "tipoDocumentoIdentidadId",
-              TRIM(p.PERSONANOMBRES)         AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)  AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO) AS "segundoApellido",
-              TRIM(p.PERSONAIDENTIFICACION)  AS "identificacion",
-              TRIM(p.PERSONAEMAIL)           AS "email",
-              TRIM(p.PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
-              TRIM(p.PERSONACELULAR)         AS "celular",
-              p.CIUDADID                     AS "ciudadId",
-              e.EVALUADORID                  AS "evaluadorId"
-         FROM PERSONA p
-         LEFT JOIN EVALUADOR e ON e.PERSONAID = p.PERSONAID
-        WHERE TRIM(p.PERSONAIDENTIFICACION) = :1
-          AND p.TIPODOCUMENTOIDENTIDADID = :2
-          AND ROWNUM = 1`,
+      // ROWNUM se aplica ANTES del ORDER BY: hay que anidar, o se toma una fila
+      // cualquiera y luego se "ordena" esa sola. Con dos personas de la misma
+      // cédula, esta consulta y la del alta podían devolver personas distintas.
+      `SELECT * FROM (
+         SELECT p.PERSONAID                    AS "personaId",
+                p.TIPODOCUMENTOIDENTIDADID     AS "tipoDocumentoIdentidadId",
+                TRIM(p.PERSONANOMBRES)         AS "nombres",
+                TRIM(p.PERSONAPRIMERAPELLIDO)  AS "primerApellido",
+                TRIM(p.PERSONASEGUNDOAPELLIDO) AS "segundoApellido",
+                TRIM(p.PERSONAIDENTIFICACION)  AS "identificacion",
+                TRIM(p.PERSONAEMAIL)           AS "email",
+                TRIM(p.PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
+                TRIM(p.PERSONACELULAR)         AS "celular",
+                p.CIUDADID                     AS "ciudadId",
+                e.EVALUADORID                  AS "evaluadorId"
+           FROM PERSONA p
+           LEFT JOIN EVALUADOR e ON e.PERSONAID = p.PERSONAID
+          WHERE TRIM(p.PERSONAIDENTIFICACION) = :1
+            AND p.TIPODOCUMENTOIDENTIDADID = :2
+          ORDER BY p.PERSONAID
+       ) WHERE ROWNUM = 1`,
       [id, tipoDocumentoIdentidadId],
     )
     if (!rows[0]) return { encontrado: false }
@@ -343,7 +356,18 @@ export class EvaluadoresService {
       // Los nombres son NCHAR: vienen rellenos de espacios, sin TRIM la concatenación no matchea.
       const nombreCompleto = `TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO)`
         + ` || ' ' || TRIM(NVL(p.PERSONASEGUNDOAPELLIDO, ' '))`
-      cond.push(`(UPPER(${nombreCompleto}) LIKE ${bind(like)} ESCAPE '\\'
+
+      // Hay 16 evaluadores con tilde o eñe (García, López, Barón, LONDOÑO...). Sin
+      // esto el banco contesta que no existen cuando sí existen, y el Excel sale
+      // incompleto sin avisar. Se normalizan LOS DOS lados: normalizar solo la
+      // columna mueve el fallo a quien sí teclea la tilde. Primero se quitan los
+      // diacríticos y después se escapan los comodines, en ese orden.
+      const sinTildes = q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+      const likeSinTildes = `%${sinTildes.replace(/([%_\\])/g, '\\$1')}%`
+      const sinTildesEnSql = (col: string) =>
+        `TRANSLATE(UPPER(${col}), 'ÁÉÍÓÚÜÑáéíóúüñ', 'AEIOUUNAEIOUUN')`
+
+      cond.push(`(${sinTildesEnSql(nombreCompleto)} LIKE ${bind(likeSinTildes)} ESCAPE '\\'
               OR UPPER(TRIM(p.PERSONAEMAIL)) LIKE ${bind(like)} ESCAPE '\\'
               OR TRIM(p.PERSONAIDENTIFICACION) LIKE ${bind(like)} ESCAPE '\\')`)
     }
@@ -425,12 +449,22 @@ export class EvaluadoresService {
                                  WHERE d.EVALUADORID = e.EVALUADORID AND UPPER(t.CODIGO) = 'CEDULA')
                    THEN 1 ELSE 0 END                             AS "tieneCedula",
               CASE WHEN ${PRUEBA_VIGENTE}
-                   THEN 1 ELSE 0 END                             AS "pruebaVigente"
+                   THEN 1 ELSE 0 END                             AS "pruebaVigente",
+              -- "Sin prueba vigente" metía en el mismo saco a los 17 que nunca la
+              -- presentaron y a los 19 que la tienen vencida. Son cosas distintas
+              -- a la hora de armar una convocatoria.
+              (SELECT MAX(pr.ANIO) FROM EVALUADORPRUEBA pr
+                WHERE pr.EVALUADORID = e.EVALUADORID)             AS "ultimoAnioPrueba"
          FROM EVALUADOR e
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN REGIONAL r ON r.REGIONALID = e.REGIONALID
          ${where}
-         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES, e.EVALUADORID
+         -- El orden binario pone las MAYÚSCULAS antes: "CORREDOR" salía entre
+         -- Barón y Caballero. WEST_EUROPEAN_AI ignora mayúsculas y tildes.
+         -- No SPANISH_M_AI: mete la regla del dígrafo Ch y manda Chaux tras Cortes.
+         ORDER BY NLSSORT(TRIM(p.PERSONAPRIMERAPELLIDO), 'NLS_SORT=WEST_EUROPEAN_AI'),
+                  NLSSORT(TRIM(p.PERSONANOMBRES), 'NLS_SORT=WEST_EUROPEAN_AI'),
+                  e.EVALUADORID
          OFFSET ${offset} ROWS FETCH NEXT ${tamPag} ROWS ONLY`,
       params,
     )
@@ -452,6 +486,7 @@ export class EvaluadoresService {
       tieneFoto: Number(r.tieneFoto) === 1,
       tieneCedula: Number(r.tieneCedula) === 1,
       pruebaVigente: Number(r.pruebaVigente) === 1,
+      ultimoAnioPrueba: r.ultimoAnioPrueba != null ? Number(r.ultimoAnioPrueba) : null,
       totalCiclos: Number(r.totalCiclos ?? 0),
       totalProyectos: Number(r.totalProyectos ?? 0),
       ultimoAnio: r.ultimoAnio != null ? Number(r.ultimoAnio) : null,
@@ -470,10 +505,20 @@ export class EvaluadoresService {
              SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
                     pa.PARTICIPACIONID AS "participacionId",
                     TRIM(es.CODIGO) AS "estadoCodigo", TRIM(es.COLOR) AS "estadoColor",
+                    -- el chip mostraba el código crudo de la base (NO_APROBO,
+                    -- EN_FORMACION) en la interfaz
+                    TRIM(es.NOMBRE) AS "estadoNombre",
+                    NVL(es.ESFINAL, 0) AS "estadoFinal",
+                    -- filtrar por rol ANALISTA devolvía tarjetas donde no aparecía
+                    -- por ningún lado que lo fueran
+                    TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
+                    TRIM(ar.NOMBRE) AS "areaNombre",
                     ROW_NUMBER() OVER (PARTITION BY pa.EVALUADORID
                                        ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC) AS rn
                FROM EVALUADORPARTICIPACION pa
                LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
+               LEFT JOIN ROLEVALUADOR        r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
+               LEFT JOIN AREAEVALUACION      ar ON ar.AREAID = pa.AREAID
               WHERE pa.EVALUADORID IN (${marcadores})
            ) WHERE rn <= 3
            ORDER BY "evaluadorId", rn`,
@@ -486,7 +531,11 @@ export class EvaluadoresService {
             participacionId: Number(c.participacionId),
             anio: Number(c.anio),
             estadoCodigo: (c.estadoCodigo as string | null) ?? null,
+            estadoNombre: (c.estadoNombre as string | null) ?? null,
             estadoColor: (c.estadoColor as string | null) ?? null,
+            estadoFinal: Number(c.estadoFinal ?? 0) === 1,
+            rolNombre: (c.rolNombre as string | null) ?? null,
+            areaNombre: (c.areaNombre as string | null) ?? null,
           })
         }
       }
@@ -562,9 +611,26 @@ export class EvaluadoresService {
     await qr.startTransaction()
     try {
       // TRIM porque PERSONAIDENTIFICACION es NCHAR(20) y rellena con espacios.
+      // ORDER BY PERSONAID: sin desempate, dos consultas sobre la misma cédula
+      // podían devolver personas distintas. Hoy no hay cédulas repetidas, pero el
+      // día que las haya el alta colgaría al evaluador de la persona equivocada.
       let personaId: number
-      const existente: Array<{ id: number }> = await qr.query(
-        `SELECT PERSONAID AS "id" FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1`,
+      /** Lo que se tecleó y no se usó, porque la persona ya existía en el SEP. */
+      const datosIgnorados: Array<{ campo: string; tecleado: string; seUso: string }> = []
+      let correoDeLaFicha = (dto.email ?? '').trim().toLowerCase()
+
+      const existente: Array<Record<string, unknown>> = await qr.query(
+        `SELECT * FROM (
+           SELECT PERSONAID                      AS "id",
+                  TRIM(PERSONANOMBRES)           AS "nombres",
+                  TRIM(PERSONAPRIMERAPELLIDO)    AS "primerApellido",
+                  TRIM(PERSONASEGUNDOAPELLIDO)   AS "segundoApellido",
+                  TRIM(PERSONAEMAIL)             AS "email",
+                  TRIM(PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
+                  TRIM(PERSONACELULAR)           AS "celular"
+             FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1
+            ORDER BY PERSONAID
+         ) WHERE ROWNUM = 1`,
         [ident],
       )
       if (existente[0]) {
@@ -576,6 +642,27 @@ export class EvaluadoresService {
         if (yaEval[0]) {
           throw new ConflictException('Esta persona ya está registrada como evaluador')
         }
+
+        // PERSONA la comparten los 292.176 registros de todo el SEP: sobrescribirla
+        // pisaría a esa persona en los demás módulos. Así que no se toca —pero
+        // tampoco se calla: se devuelve qué se descartó para que la pantalla lo diga.
+        const yaEsta = existente[0] as Record<string, string | null>
+        const comparar = (campo: string, tecleado: string | null | undefined, guardado: string | null) => {
+          const t = (tecleado ?? '').trim()
+          if (!t) return
+          if ((guardado ?? '').trim().toLowerCase() === t.toLowerCase()) return
+          datosIgnorados.push({ campo, tecleado: t, seUso: (guardado ?? '').trim() || '(vacío)' })
+        }
+        comparar('Nombres', dto.nombres, yaEsta.nombres)
+        comparar('Primer apellido', dto.primerApellido, yaEsta.primerApellido)
+        comparar('Segundo apellido', dto.segundoApellido, yaEsta.segundoApellido)
+        comparar('Correo personal', dto.email, yaEsta.email)
+        comparar('Correo institucional', dto.emailInstitucional, yaEsta.emailInstitucional)
+        comparar('Celular', dto.celular, yaEsta.celular)
+
+        // la cuenta se crea con el correo que de verdad queda en la ficha, no con
+        // el tecleado: si no, el login y lo que se ve en pantalla no coinciden
+        correoDeLaFicha = (yaEsta.email ?? '').trim().toLowerCase() || correoDeLaFicha
       } else {
         const seq: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
         personaId = Number(seq[0].NEXTVAL)
@@ -588,7 +675,11 @@ export class EvaluadoresService {
              (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
               PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION, PERSONAEMAIL, PERSONAEMAILINSTITUCIONAL,
               PERSONACELULAR, PERSONAFECHAREGISTRO, GENEROID, CIUDADID, PERSONAHABEASDATA, PERSONAHABEASDATAE)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE, 3, :10, 'SI', 'NA')`,
+           -- GENEROID iba quemado en 3, que en el catálogo es NO BINARIO, no
+           -- "sin dato": el alta le atribuía ese género a todo el que registrara,
+           -- y 14 evaluadores quedaron así. La columna admite NULL; no afirmar
+           -- nada es lo honesto, y la ficha ya deja elegirlo después.
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE, NULL, :10, 'SI', 'NA')`,
           [
             personaId,
             dto.tipoDocumentoIdentidadId,
@@ -599,7 +690,9 @@ export class EvaluadoresService {
             dto.email.trim().toLowerCase(),
             (dto.emailInstitucional ?? '').trim() || null,
             (dto.celular ?? '').trim() || null,
-            dto.ciudadId ?? 1,
+            // CIUDADID = 1 es "Ninguna" en el catalogo: un centinela que 20
+            // evaluadores tienen puesto. NULL dice lo mismo sin fingir un dato.
+            dto.ciudadId ?? null,
           ],
         )
       }
@@ -629,8 +722,8 @@ export class EvaluadoresService {
 
       // Misma transacción que el evaluador, y con el correo institucional si lo hay.
       const acceso = await this.provisionarCuenta(qr, {
-        email: ((dto.emailInstitucional ?? '').trim() || (dto.email ?? '').trim()).toLowerCase(),
-        emailAlterno: (dto.email ?? '').trim().toLowerCase(),
+        email: ((dto.emailInstitucional ?? '').trim() || correoDeLaFicha).toLowerCase(),
+        emailAlterno: correoDeLaFicha,
         claveInicial: dto.claveInicial,
       })
 
@@ -638,6 +731,8 @@ export class EvaluadoresService {
       return {
         evaluadorId, personaId,
         acceso,
+        // qué se tecleó y no se usó porque la persona ya estaba en el SEP
+        datosIgnorados,
         message: acceso.claveInicial
           ? 'Evaluador creado con cuenta de acceso'
           : 'Evaluador creado',

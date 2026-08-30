@@ -169,7 +169,9 @@ export class CertificadoService {
           AND NVL(es.ESNEGATIVO, 0) = 0
           AND NOT EXISTS (SELECT 1 FROM EVALUADORCERTIFICADO c
                            WHERE c.PARTICIPACIONID = pa.PARTICIPACIONID AND c.ANULADO = 0)
-        ORDER BY p.PERSONAPRIMERAPELLIDO`,
+        -- mismo criterio que el banco: el orden binario pone las MAYÚSCULAS antes
+        ORDER BY NLSSORT(TRIM(p.PERSONAPRIMERAPELLIDO), 'NLS_SORT=WEST_EUROPEAN_AI'),
+                 NLSSORT(TRIM(p.PERSONANOMBRES), 'NLS_SORT=WEST_EUROPEAN_AI')`,
       [convocatoriaId],
     )
     return filas.map(f => ({

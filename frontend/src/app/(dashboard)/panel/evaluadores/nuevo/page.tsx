@@ -22,7 +22,14 @@ interface Acceso {
   email: string | null
   detalle: string
 }
-interface RespCrear { evaluadorId: number; personaId: number; acceso?: Acceso }
+/** Lo que se tecleo y no se uso porque la persona ya existia en el SEP. */
+interface DatoIgnorado { campo: string; tecleado: string; seUso: string }
+interface RespCrear {
+  evaluadorId: number
+  personaId: number
+  acceso?: Acceso
+  datosIgnorados?: DatoIgnorado[]
+}
 interface RegionalCat { id: number; nombre: string }
 interface CentroCat { id: number; nombre: string }
 interface CiudadCat { id: number; ciudad: string; depto: string }
@@ -85,6 +92,12 @@ export default function NuevoEvaluadorPage() {
     evaluadorId: number; email: string; clave: string; detalle: string
   } | null>(null)
   const [copiado, setCopiado] = useState(false)
+  // Cuando la cedula ya existe en el SEP se reutiliza esa PERSONA y lo tecleado
+  // se descarta. PERSONA la comparten los 292.176 registros del sistema, asi que
+  // sobrescribirla pisaria a esa persona en todos los modulos: no se toca, pero
+  // tampoco se calla.
+  const [datosIgnorados, setDatosIgnorados] = useState<DatoIgnorado[]>([])
+  const [creadoId, setCreadoId] = useState<number | null>(null)
 
   useEffect(() => {
     api.get<TipoDoc[]>('/auth/tipos-documento', { params: { para: 'persona' } })
@@ -187,6 +200,8 @@ export default function NuevoEvaluadorPage() {
         jefeCargo: jefeCargo.trim() || undefined,
       })
       const acceso = res.data.acceso
+      const ignorados = res.data.datosIgnorados ?? []
+      if (ignorados.length) setDatosIgnorados(ignorados)
       if (acceso?.claveInicial) {
         // La clave solo existe en esta respuesta: si redirigimos, se pierde.
         setCredenciales({
@@ -202,7 +217,12 @@ export default function NuevoEvaluadorPage() {
         tipo: 'success',
         msg: acceso?.detalle ?? 'Evaluador creado',
       })
-      setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 3500)
+      // con datos descartados no se redirige solo: hay que poder leer el aviso
+      if (!ignorados.length) {
+        setTimeout(() => router.push(`/panel/evaluadores/${res.data.evaluadorId}`), 3500)
+      } else {
+        setCreadoId(res.data.evaluadorId)
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
       setToast({ tipo: 'error', msg: msg ?? 'No se pudo crear el evaluador' })
@@ -286,6 +306,45 @@ export default function NuevoEvaluadorPage() {
             </div>
           </div>
         </section>
+      </div>
+    )
+  }
+
+  if (datosIgnorados.length > 0 && creadoId != null) {
+    return (
+      <div className="flex max-w-3xl flex-col gap-5 p-5 sm:p-7 xl:p-10">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-5">
+          <h1 className="text-base font-bold text-amber-900">
+            El evaluador quedó creado, pero con los datos que ya tenía en el SEP
+          </h1>
+          <p className="mt-2 text-[13px] text-amber-900">
+            Esa cédula ya estaba registrada, así que la ficha usa esos datos. No se
+            sobrescriben porque esa misma persona aparece en el resto del SEP y
+            cambiarlos aquí la cambiaría en todas partes.
+          </p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {datosIgnorados.map(d => (
+              <li key={d.campo} className="rounded-lg bg-white px-3 py-2 text-[12px]">
+                <span className="font-semibold text-neutral-800">{d.campo}</span>
+                <span className="block text-neutral-500">
+                  usted escribió <strong className="text-neutral-700">{d.tecleado}</strong>
+                  {' · '}quedó <strong className="text-neutral-700">{d.seUso}</strong>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[12px] text-amber-900">
+            Si los datos guardados están desactualizados, corríjalos desde la ficha de
+            la persona, no desde aquí.
+          </p>
+        </div>
+        <Link
+          href={`/panel/evaluadores/${creadoId}`}
+          className="inline-flex w-fit items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          style={{ backgroundColor: PRIMARY }}
+        >
+          Abrir la ficha
+        </Link>
       </div>
     )
   }

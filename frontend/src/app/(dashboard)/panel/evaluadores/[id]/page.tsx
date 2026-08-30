@@ -21,6 +21,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { fmtDateTime, fmtFecha, fmtMesAnio, fmtSoloDia } from '@/lib/format-date'
 
 const PRIMARY = '#00304D'
+
+/** Los enlaces de vuelta iban a /panel/evaluadores pelado y remontaban la lista
+ *  sin filtros ni pagina. El listado deja su query aqui al cargarse. */
+function urlDelBanco(): string {
+  if (typeof window === 'undefined') return '/panel/evaluadores'
+  try {
+    const q = sessionStorage.getItem('sep_banco_query')
+    return q ? `/panel/evaluadores?${q}` : '/panel/evaluadores'
+  } catch {
+    return '/panel/evaluadores'
+  }
+}
 const INSTITUTIONAL = '#39a900'
 
 interface Ficha {
@@ -165,7 +177,7 @@ export default function FichaEvaluadorPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-white/70 text-xs flex-wrap">
-              <Link href="/panel/evaluadores" className="hover:text-white">Banco de Evaluadores</Link>
+              <Link href={urlDelBanco()} className="hover:text-white">Banco de Evaluadores</Link>
               <ChevronRight size={12} />
               <span>Ficha</span>
             </div>
@@ -211,7 +223,7 @@ export default function FichaEvaluadorPage() {
       </div>
 
       <div className="flex items-center gap-3">
-        <Link href="/panel/evaluadores" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
+        <Link href={urlDelBanco()} className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
           <ArrowLeft size={13} />
           Volver al banco
         </Link>

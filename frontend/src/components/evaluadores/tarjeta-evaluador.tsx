@@ -13,7 +13,13 @@ export interface CicloResumido {
   participacionId: number
   anio: number
   estadoCodigo: string | null
+  /** Legible: el chip mostraba el código crudo (NO_APROBO, EN_FORMACION). */
+  estadoNombre: string | null
   estadoColor: string | null
+  /** Desempata el par verde FINALIZADO / CERTIFICADO. */
+  estadoFinal: boolean
+  rolNombre: string | null
+  areaNombre: string | null
 }
 
 export interface EvaluadorItem {
@@ -31,6 +37,8 @@ export interface EvaluadorItem {
   tieneFoto: boolean
   tieneCedula: boolean
   pruebaVigente: boolean
+  /** Año de la última prueba. null = nunca la presentó. */
+  ultimoAnioPrueba: number | null
   totalCiclos: number
   totalProyectos: number
   ultimoAnio: number | null
@@ -71,7 +79,13 @@ export function TarjetaEvaluador({ item }: { item: EvaluadorItem }) {
   const alertas: Alerta[] = []
   if (!item.tieneCedula) alertas.push({ clave: 'cedula', texto: 'Sin cédula', clase: 'bg-red-100 text-red-700', icono: CreditCard })
   if (!item.tieneFoto) alertas.push({ clave: 'foto', texto: 'Sin foto', clase: 'bg-amber-100 text-amber-700', icono: ImageOff })
-  if (!item.pruebaVigente) alertas.push({ clave: 'prueba', texto: 'Prueba no vigente', clase: 'bg-orange-100 text-orange-700', icono: ShieldX })
+  // "Prueba no vigente" metía en el mismo saco a los 17 que nunca la presentaron
+  // y a los 19 que la tienen vencida; para armar una convocatoria no es lo mismo.
+  if (!item.pruebaVigente) {
+    alertas.push(item.ultimoAnioPrueba == null
+      ? { clave: 'prueba', texto: 'Nunca presentó la prueba', clase: 'bg-red-100 text-red-700', icono: ShieldX }
+      : { clave: 'prueba', texto: `Prueba ${item.ultimoAnioPrueba} vencida`, clase: 'bg-orange-100 text-orange-700', icono: ShieldX })
+  }
 
   return (
     <Link
@@ -131,17 +145,29 @@ export function TarjetaEvaluador({ item }: { item: EvaluadorItem }) {
           </p>
         )}
 
+        {ciclos[0]?.rolNombre && (
+          <p className="mt-2 truncate text-[11px] text-neutral-500">
+            {aTitleCase(ciclos[0].rolNombre)}
+            {ciclos[0].areaNombre ? ` · ${aTitleCase(ciclos[0].areaNombre)}` : ''}
+            <span className="text-neutral-400"> · {ciclos[0].anio}</span>
+          </p>
+        )}
+
         {ciclos.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {ciclos.map(c => {
               const color = colorDe(c.estadoColor)
+              // el punto relleno distingue el ciclo cerrado del que sigue abierto:
+              // FINALIZADO y CERTIFICADO comparten el mismo verde
+              const cerrado = c.estadoFinal
               return (
                 <span
                   key={c.participacionId}
-                  title={c.estadoCodigo ?? 'Sin estado'}
+                  title={[c.estadoNombre ?? c.estadoCodigo ?? 'Sin estado', c.rolNombre, c.areaNombre]
+                    .filter(Boolean).join(' · ')}
                   className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold tabular-nums ${color.chip}`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${color.punto}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${cerrado ? color.punto : `border ${color.punto.replace('bg-', 'border-')} bg-transparent`}`} />
                   {c.anio}
                 </span>
               )

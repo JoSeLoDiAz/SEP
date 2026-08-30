@@ -59,6 +59,33 @@ export function paramsDeFiltros(filtros: FiltrosBanco, busqueda: string): Record
   return p
 }
 
+/** Espejo de paramsDeFiltros: reconstruye el estado desde la barra de direcciones. */
+export function filtrosDeParams(sp: URLSearchParams): { filtros: FiltrosBanco; busqueda: string; page: number } {
+  const num = (k: string): number | '' => {
+    const v = sp.get(k)
+    const n = v == null ? NaN : Number(v)
+    return Number.isFinite(n) && n > 0 ? n : ''
+  }
+  return {
+    busqueda: sp.get('busqueda') ?? '',
+    page: Math.max(1, Number(sp.get('page')) || 1),
+    filtros: {
+      anio: num('anio'),
+      procesoId: num('procesoId'),
+      rolEvaluadorId: num('rolEvaluadorId'),
+      areaId: num('areaId'),
+      estadoCodigo: sp.get('estadoCodigo') ?? '',
+      regionalId: num('regionalId'),
+      centroId: num('centroId'),
+      sinCedula: sp.get('sinCedula') === 'true',
+      sinFoto: sp.get('sinFoto') === 'true',
+      // el backend no tiene flag sinPrueba: viaja como pruebaVigente=false
+      sinPrueba: sp.get('pruebaVigente') === 'false',
+      incluirInactivos: sp.get('incluirInactivos') === 'true',
+    },
+  }
+}
+
 export function contarFiltros(filtros: FiltrosBanco): number {
   return Object.values(filtros).filter(v => v !== '' && v !== false).length
 }

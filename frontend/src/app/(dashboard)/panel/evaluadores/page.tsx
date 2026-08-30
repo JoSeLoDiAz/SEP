@@ -1,7 +1,8 @@
 'use client'
 
 import {
-  BarraFiltrosBanco, contarFiltros, FILTROS_VACIOS, paramsDeFiltros, type FiltrosBanco,
+  BarraFiltrosBanco, contarFiltros, FILTROS_VACIOS, filtrosDeParams, paramsDeFiltros,
+  type FiltrosBanco,
 } from '@/components/evaluadores/filtros-banco'
 import { TarjetaEvaluador, type EvaluadorItem } from '@/components/evaluadores/tarjeta-evaluador'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
@@ -13,7 +14,8 @@ import {
   ShieldX, UserPlus, Users,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useRef, useState } from 'react'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
@@ -32,12 +34,28 @@ interface Contadores {
   sinPrueba: number
 }
 
+// useSearchParams exige Suspense en el App Router
 export default function EvaluadoresDashboardPage() {
-  const [busqueda, setBusqueda] = useState('')
+  return (
+    <Suspense fallback={null}>
+      <BancoDeEvaluadores />
+    </Suspense>
+  )
+}
+
+function BancoDeEvaluadores() {
+  // Los filtros viven en la URL: así volver de una ficha no los borra. El culpable
+  // no era el botón atrás sino los enlaces de la ficha, que son Link sin query.
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const inicial = filtrosDeParams(new URLSearchParams(searchParams.toString()))
+
+  const [busqueda, setBusqueda] = useState(inicial.busqueda)
   // el Excel sale con el texto ya aplicado, no con lo que se esté tecleando
-  const [busquedaAplicada, setBusquedaAplicada] = useState('')
-  const [filtros, setFiltros] = useState<FiltrosBanco>(FILTROS_VACIOS)
-  const [page, setPage] = useState(1)
+  const [busquedaAplicada, setBusquedaAplicada] = useState(inicial.busqueda)
+  const [filtros, setFiltros] = useState<FiltrosBanco>(inicial.filtros)
+  const [page, setPage] = useState(inicial.page)
   const [data, setData] = useState<RespListado | null>(null)
   const [contadores, setContadores] = useState<Contadores | null>(null)
   const [cargandoContadores, setCargandoContadores] = useState(false)
@@ -69,6 +87,15 @@ export default function EvaluadoresDashboardPage() {
 
     const base = paramsDeFiltros(f, q)
     void cargarContadores(base)
+
+    // el estado queda en la barra de direcciones: al volver de una ficha, o al
+    // compartir el enlace, la lista sale con los mismos filtros y en la misma pagina
+    const qs = new URLSearchParams(base)
+    if (p > 1) qs.set('page', String(p))
+    const texto = qs.toString()
+    router.replace(texto ? `${pathname}?${texto}` : pathname, { scroll: false })
+    // la ficha lo lee para que "Volver al banco" no devuelva la lista en blanco
+    try { sessionStorage.setItem('sep_banco_query', texto) } catch { /* modo privado */ }
 
     try {
       const res = await api.get<RespListado>('/evaluadores', {

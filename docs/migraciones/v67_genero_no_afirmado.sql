@@ -12,9 +12,13 @@
 -- El código ya no lo hace (bindea NULL, que la columna admite). Falta decidir
 -- qué hacer con las 14 filas que quedaron.
 --
--- ESTE SCRIPT NO SE HA EJECUTADO. Pone GENEROID en NULL para esas 14, es decir
--- deja de afirmar algo que nadie dijo, sin afirmar otra cosa en su lugar. La
--- ficha del evaluador permite elegirlo después, cuando la persona lo indique.
+-- EJECUTADA el 2026-08-31: 14 filas. Pone GENEROID en NULL para esas 14, es
+-- decir deja de afirmar algo que nadie dijo, sin afirmar otra cosa en su lugar.
+-- La ficha del evaluador permite elegirlo después, cuando la persona lo indique.
+--
+-- Después: 29 masculino, 31 femenino, 14 sin dato. Ninguna otra columna de esas
+-- personas se tocó, y PERSONA sigue con sus 292.176 filas.
+-- Respaldo (fuera del repo): ../respaldos/respaldo-v67-genero.json
 --
 -- Ojo: PERSONA la comparten los 292.176 registros de todo el SEP. Este UPDATE
 -- toca solo a las que son evaluador Y tienen GENEROID = 3 Y fueron registradas
@@ -38,9 +42,6 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE('Personas a las que se les quito el genero atribuido: ' || v_tocadas);
   DBMS_OUTPUT.PUT_LINE('(se esperaban 14)');
 
-  -- descomentar para aplicar
-  -- COMMIT;
-  ROLLBACK;
-  DBMS_OUTPUT.PUT_LINE('ROLLBACK: ensayo. Cambie ROLLBACK por COMMIT para aplicar.');
+  COMMIT;
 END;
 /

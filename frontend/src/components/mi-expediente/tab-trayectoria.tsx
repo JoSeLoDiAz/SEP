@@ -104,7 +104,7 @@ export default function TabTrayectoria({ setToast }: { setToast: SetToast }) {
               <p className="mt-0.5 text-[12px] font-semibold text-amber-800">
                 {nueva.convocatoria || 'Sin convocatoria'} · {nueva.anio}
               </p>
-              <p className="mt-1 text-[11px] text-amber-700">Todavía no has confirmado si participas.</p>
+              <p className="mt-1 text-[11px] text-amber-700">El equipo del banco confirmará tu participación.</p>
             </div>
           </div>
         </div>

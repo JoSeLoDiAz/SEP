@@ -47,6 +47,7 @@ function rangoFechas(inicio: string | null, fin: string | null): string {
 
 function BloqueLista<T>({
   titulo, ayuda, icono, ruta, filaDe, vacio, abierto, onAbierto, recarga, formulario, setToast,
+  inactivo = false,
 }: {
   titulo: string
   ayuda: string
@@ -59,6 +60,8 @@ function BloqueLista<T>({
   recarga: number
   formulario: ReactNode
   setToast: SetToast
+  /** Ficha inactiva: se puede consultar, no modificar. */
+  inactivo?: boolean
 }) {
   const [items, setItems] = useState<T[]>([])
   const [cargando, setCargando] = useState(true)
@@ -104,7 +107,7 @@ function BloqueLista<T>({
       <Section
         titulo={`${titulo}${filas.length ? ` (${filas.length})` : ''}`}
         ayuda={ayuda}
-        accion={
+        accion={inactivo ? null : (
           <button
             onClick={() => onAbierto(!abierto)}
             className={BTN_PRIMARIO}
@@ -113,9 +116,9 @@ function BloqueLista<T>({
             {abierto ? <X size={14} /> : <Plus size={14} />}
             {abierto ? 'Cerrar' : 'Agregar'}
           </button>
-        }
+        )}
       >
-        {abierto && (
+        {abierto && !inactivo && (
           <div className="border-b border-neutral-100 bg-neutral-50/60 px-5 py-4">{formulario}</div>
         )}
 
@@ -148,7 +151,7 @@ function BloqueLista<T>({
                     setToast={setToast}
                   />
                 )}
-                {!f.automatica && (
+                {!f.automatica && !inactivo && (
                   <button onClick={() => setPorBorrar(f)} title="Eliminar" className={BTN_BORRAR}>
                     <Trash2 size={14} />
                   </button>
@@ -173,7 +176,11 @@ function BloqueLista<T>({
   )
 }
 
-export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
+export default function TabHojaVida({ setToast, inactivo = false }: {
+  setToast: SetToast
+  /** Ficha inactiva: el guard del backend rechaza toda escritura. */
+  inactivo?: boolean
+}) {
   const [tipos, setTipos] = useState<TipoEstudioOpcion[]>([])
 
   const [abiertoEst, setAbiertoEst] = useState(false)
@@ -429,6 +436,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         recarga={recargaEst}
         formulario={formEstudio}
         setToast={setToast}
+        inactivo={inactivo}
         filaDe={(e: MiEstudio) => ({
           id: e.estudioId,
           principal: e.titulo || '(sin título)',
@@ -450,6 +458,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         recarga={recargaExp}
         formulario={formExperiencia}
         setToast={setToast}
+        inactivo={inactivo}
         filaDe={(x: MiExperiencia) => {
           // los ciclos certificados salen solos: aquí no se corrigen ni se borran
           if (x.origen === 'CICLO') {
@@ -487,6 +496,7 @@ export default function TabHojaVida({ setToast }: { setToast: SetToast }) {
         recarga={recargaTic}
         formulario={formTic}
         setToast={setToast}
+        inactivo={inactivo}
         filaDe={(t: MiTic) => ({
           id: t.ticId,
           principal: t.nombre || '(sin nombre)',

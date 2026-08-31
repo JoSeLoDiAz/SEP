@@ -142,9 +142,13 @@ export default function MiExpedientePage() {
       </div>
 
       {tab === 'trayectoria' && <TabTrayectoria setToast={setToast} />}
-      {tab === 'perfil' && <TabPerfil ficha={ficha} setToast={setToast} onRecargar={recargar} />}
-      {tab === 'hoja-vida' && <TabHojaVida setToast={setToast} />}
-      {tab === 'documentos' && <TabDocumentos setToast={setToast} />}
+      {/* El guard del backend bloquea el 100% de las escrituras del inactivo, asi
+          que no es un agujero: es una pantalla que miente. Decia "solo consulta"
+          y ofrecia seis botones que terminaban en un toast rojo despues de subir
+          el archivo. Trayectoria y Documentos ya eran coherentes. */}
+      {tab === 'perfil' && <TabPerfil ficha={ficha} setToast={setToast} onRecargar={recargar} inactivo={inactivo} />}
+      {tab === 'hoja-vida' && <TabHojaVida setToast={setToast} inactivo={inactivo} />}
+      {tab === 'documentos' && <TabDocumentos setToast={setToast} inactivo={inactivo} />}
     </div>
   )
 }

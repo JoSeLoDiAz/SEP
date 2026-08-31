@@ -5,7 +5,7 @@ import { Camera, Check, Loader2, MapPin, X } from 'lucide-react'
 import api from '@/lib/api'
 import type { MiFicha, MunicipioOpcion } from '@/lib/types/mi-expediente'
 import {
-  INSTITUTIONAL, PRIMARY, Section, input, label, mensajeError, type SetToast,
+  INSTITUTIONAL, PRIMARY, Section, input, inputBloqueado, label, mensajeError, type SetToast,
 } from '@/components/mi-expediente/comunes'
 
 const MAX_FOTO_MB = 8
@@ -33,10 +33,12 @@ function Dato({ titulo, valor, mono }: { titulo: string; valor: string | null; m
   )
 }
 
-export default function TabPerfil({ ficha, setToast, onRecargar }: {
+export default function TabPerfil({ ficha, setToast, onRecargar, inactivo = false }: {
   ficha: MiFicha
   setToast: SetToast
   onRecargar: () => void
+  /** Ficha inactiva: el guard del backend rechaza toda escritura. */
+  inactivo?: boolean
 }) {
   const [fotoUrl, setFotoUrl] = useState<string | null>(null)
   const [cargandoFoto, setCargandoFoto] = useState(true)
@@ -160,14 +162,16 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
             <div className="min-w-0">
               <p className="text-base font-bold text-neutral-900">{nombreCompleto || '—'}</p>
               <p className="text-[12px] text-neutral-500">{ficha.cargo || 'Sin cargo registrado'}</p>
-              <button
-                onClick={() => fotoRef.current?.click()}
-                disabled={subiendoFoto}
-                className="mt-2 inline-flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
-              >
-                {subiendoFoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                Cambiar foto
-              </button>
+              {!inactivo && (
+                <button
+                  onClick={() => fotoRef.current?.click()}
+                  disabled={subiendoFoto}
+                  className="mt-2 inline-flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  {subiendoFoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                  Cambiar foto
+                </button>
+              )}
               <input
                 ref={fotoRef}
                 type="file"
@@ -205,7 +209,14 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
         </div>
       </Section>
 
-      <Section titulo="Lo que puedes actualizar" ayuda="Se guarda en tu expediente al instante">
+      <Section
+        titulo={inactivo ? 'Tus datos de contacto' : 'Lo que puedes actualizar'}
+        ayuda={inactivo
+          // el mismo texto del guard, para que la pantalla y el backend digan lo mismo
+          ? 'Tu ficha de evaluador está inactiva: puedes consultarla, pero no modificarla. '
+            + 'Escríbele a la gestora del banco si necesitas actualizarla.'
+          : 'Se guarda en tu expediente al instante'}
+      >
         <div className="flex flex-col gap-4 px-5 py-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -213,9 +224,10 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
               <input
                 value={celular}
                 onChange={e => setCelular(e.target.value)}
+                readOnly={inactivo}
                 maxLength={30}
                 placeholder="300 000 0000"
-                className={input}
+                className={inactivo ? inputBloqueado : input}
               />
             </div>
             <div>
@@ -224,7 +236,7 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
                 value={profesion}
                 onChange={e => setProfesion(e.target.value)}
                 maxLength={200}
-                className={input}
+                className={inactivo ? inputBloqueado : input}
               />
             </div>
             <div>
@@ -233,7 +245,7 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
                 value={posgrado}
                 onChange={e => setPosgrado(e.target.value)}
                 maxLength={200}
-                className={input}
+                className={inactivo ? inputBloqueado : input}
               />
             </div>
             <div>
@@ -246,17 +258,19 @@ export default function TabPerfil({ ficha, setToast, onRecargar }: {
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <button
-              onClick={guardar}
-              disabled={guardando}
-              className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
-              style={{ backgroundColor: INSTITUTIONAL }}
-            >
-              {guardando ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-              Guardar cambios
-            </button>
-          </div>
+          {!inactivo && (
+            <div className="flex justify-end">
+              <button
+                onClick={guardar}
+                disabled={guardando}
+                className="inline-flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition hover:opacity-90"
+                style={{ backgroundColor: INSTITUTIONAL }}
+              >
+                {guardando ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Guardar cambios
+              </button>
+            </div>
+          )}
         </div>
       </Section>
     </div>

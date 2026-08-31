@@ -84,7 +84,9 @@ export class FichaPdfService {
   // revelarNombres solo lo pide la gestora: en la ficha que baja el evaluador va en false
   async generar(
     evaluadorId: number,
-    opciones: { revelarNombres?: boolean } = {},
+    /** `paraEvaluador`: lo descarga la propia persona desde su portal, así que
+     *  las alertas se le dicen a ella y no sobre ella. */
+    opciones: { revelarNombres?: boolean; paraEvaluador?: boolean } = {},
   ): Promise<{ buffer: Buffer; nombre: string }> {
     // si el evaluador no existe, getFicha lanza el 404 y no se genera nada
     const ficha = await this.evaluadores.getFicha(evaluadorId) as Record<string, unknown>
@@ -108,6 +110,7 @@ export class FichaPdfService {
     const buffer = await this.construirPdf({
       ficha, resumen, trayectoria, estudios, experiencias, tics,
       foto, tieneCedula, proyectos, nombreCompleto, retro,
+      paraEvaluador: opciones.paraEvaluador === true,
     })
 
     const identificacion = this.txt(ficha.identificacion, String(evaluadorId))
@@ -143,14 +146,19 @@ export class FichaPdfService {
 
     return filas.map((f, i) => {
       const anonimo = Number(f.anonimo) === 1
-      const nombre = (!anonimo || revelarNombres) && f.nombre
+      const oculto = anonimo && !revelarNombres
+      const nombre = !oculto && f.nombre
         ? String(f.nombre).trim()
         : `Calificador ${i + 1}`
+      // El anonimato se caía por el costado: se ocultaba el nombre pero se
+      // imprimía el rol y el área, y 7 de las 13 combinaciones rol+área del banco
+      // corresponden a UNA sola persona. "Calificador 2 · LÍDER · Financiera" es
+      // un nombre propio para cualquiera que conozca el equipo.
       return {
         anio: Number(f.anio),
         nombre,
-        rol: this.txt(f.rol, ''),
-        area: this.txt(f.area, ''),
+        rol: oculto ? '' : this.txt(f.rol, ''),
+        area: oculto ? '' : this.txt(f.area, ''),
         promedio: f.promedio != null ? Number(f.promedio) : null,
         comentario: this.txt(f.comentario, ''),
       }
@@ -220,6 +228,8 @@ export class FichaPdfService {
     proyectos: Map<number, ProyectoCiclo[]>
     nombreCompleto: string
     retro: Awaited<ReturnType<FichaPdfService['retroRecibida']>>
+    /** true = lo baja la propia persona: las alertas se le dicen a ella. */
+    paraEvaluador: boolean
   }): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       // bufferPages: el total de paginas no se sabe hasta cerrar el contenido
@@ -242,7 +252,7 @@ export class FichaPdfService {
       this.kpis(l, d.resumen)
       this.recorrido(l, d.resumen.recorrido)
       this.veredicto(l, d.resumen)
-      this.alertas(l, d.ficha, d.resumen, d.tieneCedula)
+      this.alertas(l, d.ficha, d.resumen, d.tieneCedula, d.paraEvaluador)
       this.retroalimentacion(l, d.retro)
 
       this.titulo(l, 'Formación académica')
@@ -607,11 +617,23 @@ export class FichaPdfService {
     ficha: Record<string, unknown>,
     resumen: Awaited<ReturnType<TrayectoriaService['getResumen']>>,
     tieneCedula: boolean,
+    // el mismo PDF lo baja el banco y lo baja la persona: no puede hablar igual
+    paraEvaluador = false,
   ) {
     const avisos: string[] = []
-    if (Number(ficha.activo) !== 1) avisos.push('El evaluador está inactivo en el banco.')
-    if (!tieneCedula) avisos.push('No tiene cargado el documento de identidad (cédula).')
-    if (ficha.tieneFoto !== true) avisos.push('No tiene foto cargada.')
+    if (Number(ficha.activo) !== 1) {
+      avisos.push(paraEvaluador
+        ? 'Tu ficha está inactiva en el banco.'
+        : 'El evaluador está inactivo en el banco.')
+    }
+    if (!tieneCedula) {
+      avisos.push(paraEvaluador
+        ? 'Te falta cargar la cédula.'
+        : 'No tiene cargado el documento de identidad (cédula).')
+    }
+    if (ficha.tieneFoto !== true) {
+      avisos.push(paraEvaluador ? 'Te falta cargar la foto.' : 'No tiene foto cargada.')
+    }
 
     const p = resumen.pruebaVigente
     // sin porcentaje ni nota de corte no se puede afirmar que no aprobo
@@ -619,38 +641,53 @@ export class FichaPdfService {
       && resumen.recorrido?.find(x => x.anio === p.anio)?.pruebaAprobada == null
 
     if (!p) {
-      avisos.push('No registra prueba de conocimiento.')
+      avisos.push(paraEvaluador
+        ? 'No tienes registrada la prueba de conocimiento.'
+        : 'No registra prueba de conocimiento.')
     } else if (sinEvaluar) {
       avisos.push(
         `La prueba de ${p.anio} está sin evaluar: falta el porcentaje o el ` +
         'porcentaje mínimo del ciclo, así que no se puede decir si aprobó.',
       )
     } else if (!p.aprobada) {
-      avisos.push(
-        `La última prueba (${p.anio}) no fue aprobada` +
-        `${p.puntaje != null ? ` — puntaje ${p.puntaje}` : ''}.`,
-      )
+      // el porcentaje es lo comparable con el corte; el puntaje son aciertos crudos
+      const nota = p.porcentaje != null ? ` — efectividad ${p.porcentaje}%` : ''
+      avisos.push(paraEvaluador
+        ? `Tu última prueba (${p.anio}) no quedó aprobada${nota}.`
+        : `La última prueba (${p.anio}) no fue aprobada${nota}.`)
     } else if (!p.vigente) {
-      avisos.push(`La prueba aprobada más reciente es de ${p.anio}: está vencida para la vigencia actual.`)
+      avisos.push(paraEvaluador
+        ? `Tu prueba aprobada más reciente es de ${p.anio}: está vencida para la vigencia actual.`
+        : `La prueba aprobada más reciente es de ${p.anio}: está vencida para la vigencia actual.`)
     }
 
     // desempeño: lo que no se ve mirando solo la última prueba
     const s = this.senales(resumen)
     if (s.maxIntentos >= INTENTOS_ALARMA) {
-      avisos.push(
-        `Necesitó ${s.maxIntentos} intentos para la prueba de ${s.anioMaxIntentos}: ` +
-        'conviene revisarlo antes de convocarlo.',
-      )
+      // "conviene revisarlo antes de convocarlo" es una nota para quien decide,
+      // no algo que se le diga a la persona sobre sí misma
+      avisos.push(paraEvaluador
+        ? `Necesitaste ${s.maxIntentos} intentos en la prueba de ${s.anioMaxIntentos}.`
+        : `Necesitó ${s.maxIntentos} intentos para la prueba de ${s.anioMaxIntentos}: ` +
+          'conviene revisarlo antes de convocarlo.')
     }
     if (s.reprobados.length) {
-      avisos.push(`No aprobó la prueba de ${s.reprobados.join(', ')}.`)
+      avisos.push(paraEvaluador
+        ? `No aprobaste la prueba de ${s.reprobados.join(', ')}.`
+        : `No aprobó la prueba de ${s.reprobados.join(', ')}.`)
     }
     if (s.promRetro != null && s.promRetro < 3.5) {
-      avisos.push(`La retroalimentación promedio es ${s.promRetro.toFixed(1)}/5.`)
+      avisos.push(paraEvaluador
+        ? `Tu retroalimentación promedio es ${s.promRetro.toFixed(1)}/5.`
+        : `La retroalimentación promedio es ${s.promRetro.toFixed(1)}/5.`)
     }
 
     const { doc } = l
-    const lineas = avisos.length ? avisos : ['Sin alertas: la ficha tiene lo mínimo para operar.']
+    const lineas = avisos.length
+      ? avisos
+      : [paraEvaluador
+          ? 'Tu ficha está completa: no te falta nada por cargar.'
+          : 'Sin alertas: la ficha tiene lo mínimo para operar.']
     const acento = avisos.length ? AMBAR : VERDE
     const fondo = avisos.length ? AMBAR_FONDO : VERDE_FONDO
     const anchoTexto = l.ancho - 26

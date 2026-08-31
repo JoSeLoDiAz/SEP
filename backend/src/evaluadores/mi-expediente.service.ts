@@ -138,7 +138,11 @@ export class MiExpedienteService {
     return filas.map(f => ({
       ...f,
       estadoNegativo: Number(f.estadoNegativo) === 1,
-      esNueva: Number(f.anio) >= anioActual && !f.estadoCodigo,
+      // La condicion era "sin estado", que no se cumple nunca: los 224 ciclos del
+      // banco tienen uno. Lo nuevo es estar POSTULADO este anio; sin el filtro de
+      // anio se encenderia con los 131 POSTULADO viejos.
+      esNueva: Number(f.anio) === anioActual
+        && String(f.estadoCodigo ?? '').trim().toUpperCase() === 'POSTULADO',
     }))
   }
 

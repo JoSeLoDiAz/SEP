@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res,
+  BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
@@ -19,6 +19,7 @@ import { CertificadoService } from './certificado.service'
 import { MiExpedienteGuard, MiEvaluadorActual } from './mi-expediente.guard'
 import { filtroArchivo, filtroSoloNombre } from './subida-archivo'
 import { responderArchivo } from './responder-archivo'
+import { esTipoDocDelAnio } from './formatos-correo'
 
 const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024 // mismo tope que el resto del SEP
 
@@ -58,6 +59,15 @@ export class MiExpedienteController {
     return this.catalogos.listarTiposEstudio(true, true)
   }
 
+  @Get('catalogos/tipos-documento')
+  @ApiOperation({ summary: 'Tipos de documento que el evaluador puede subir por su cuenta' })
+  async tiposDocumento() {
+    // los del ciclo los carga el banco dentro de su anio: aqui no hay anio al
+    // que colgarlos, asi que no se ofrecen
+    const tipos = await this.catalogos.listarTiposDocumentoEvaluador(true)
+    return tipos.filter(t => !t.esDelAnio)
+  }
+
   @Get()
   @ApiOperation({ summary: 'Mis datos de evaluador' })
   ficha(@MiEvaluadorActual() yo: MiEvaluador) {
@@ -74,7 +84,8 @@ export class MiExpedienteController {
   @Get('ficha.pdf')
   @ApiOperation({ summary: 'Mi ficha completa en PDF' })
   async fichaPdfPropia(@MiEvaluadorActual() yo: MiEvaluador, @Res() res: Response) {
-    const { buffer, nombre } = await this.fichaPdf.generar(yo.evaluadorId)
+    // paraEvaluador: es su propia ficha, no un informe sobre él
+    const { buffer, nombre } = await this.fichaPdf.generar(yo.evaluadorId, { paraEvaluador: true })
     responderArchivo(res, buffer, 'application/pdf', nombre, false)
   }
 
@@ -273,7 +284,63 @@ export class MiExpedienteController {
   @Get('documentos')
   @ApiOperation({ summary: 'Todos mis documentos: los permanentes y los de cada año' })
   documentos(@MiEvaluadorActual() yo: MiEvaluador) {
-    return this.service.listarDocumentos(yo.evaluadorId)
+    // incluirCedula: el filtro que esconde los documentos de perfil existe para
+    // la pantalla del banco, que los muestra en su propia tarjeta. Aquí dejaba a
+    // 33 personas sin ver su cédula, y a una le decía "no tienes documentos"
+    // siendo falso.
+    return this.service.listarDocumentos(yo.evaluadorId, { incluirCedula: true })
+  }
+
+  @Post('documentos')
+  @UseInterceptors(FileInterceptor('archivo', {
+    limits: { fileSize: MAX_ARCHIVO_BYTES }, fileFilter: filtroSoloNombre,
+  }))
+  @ApiOperation({ summary: 'Subir un documento mío: cédula, tarjeta profesional y demás' })
+  async subirMiDocumento(
+    @CurrentUser() user: JwtUser,
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Body() body: { tipoDocumentoEvalId?: string; descripcion?: string },
+    @UploadedFile() file?: MulterFile,
+  ) {
+    const tipoId = Number(body.tipoDocumentoEvalId)
+    if (!Number.isFinite(tipoId) || tipoId <= 0) {
+      throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
+    }
+    // Los del ciclo (autorización, confidencialidad, certificado) los carga el
+    // banco dentro de su año: aquí no hay año al que colgarlos. La lista es la
+    // misma que usa el resto del módulo, no una copia.
+    const tipos = await this.catalogos.listarTiposDocumentoEvaluador(true)
+    const tipo = tipos.find(t => t.id === tipoId)
+    if (!tipo) throw new BadRequestException('Tipo de documento no existe o está inactivo')
+    if (tipo.esDelAnio) {
+      throw new BadRequestException(
+        `"${tipo.nombre}" pertenece a un ciclo concreto y lo carga el banco. ` +
+        'Desde aquí puedes subir tus documentos personales.',
+      )
+    }
+    // sin participacionId ni año: es del evaluador, no de un ciclo
+    return this.service.subirDocumento(yo.evaluadorId, tipoId, file as MulterFile, {
+      descripcion: body.descripcion,
+    }, this.ctx(user))
+  }
+
+  @Delete('documentos/:id')
+  @ApiOperation({ summary: 'Borrar un documento mío que no pertenezca a un ciclo' })
+  async borrarMiDocumento(
+    @CurrentUser() user: JwtUser,
+    @MiEvaluadorActual() yo: MiEvaluador,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    await this.mio.esMiDocumento(id, yo.evaluadorId)
+    // los del ciclo no se borran desde el portal: apagaría un hito del año
+    const meta = await this.service.getDocumentoMeta(id)
+    if (esTipoDocDelAnio(meta.tipoCodigo)) {
+      throw new BadRequestException(
+        'Ese soporte pertenece a un ciclo y lo administra el banco. ' +
+        'Escríbele a la gestora si hay que cambiarlo.',
+      )
+    }
+    return this.service.eliminarDocumento(id, this.ctx(user))
   }
 
   @Get('certificados/:cid/pdf')

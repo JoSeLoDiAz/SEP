@@ -381,8 +381,11 @@ export class TrayectoriaService {
         codigo: 'RETRORECIBIDA',
         nombre: 'Retroalimentación recibida',
         cumplido: n(c?.retroRecibidas) > 0,
+        // "de sus compañeros" dejó de ser cierto: el dinamizador GGPC también
+        // retroalimenta y no es compañero de ciclo (v68). Se dice el número, que
+        // sí es exacto, y quién fue se ve en el detalle.
         detalle: n(c?.retroRecibidas) > 0
-          ? `${n(c?.retroRecibidas)} de sus compañeros` +
+          ? `${n(c?.retroRecibidas)} recibida${n(c?.retroRecibidas) === 1 ? '' : 's'}` +
             (c?.retroPromedio != null ? ` · promedio ${Number(c.retroPromedio)}` : '')
           : 'Nadie lo ha retroalimentado aún',
       },

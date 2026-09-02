@@ -46,6 +46,10 @@ interface Companero {
   identificacion: string | null
   rol: string | null
   area: string | null
+  /** El dinamizador del GGPC: no es del ciclo y va en su propio grupo. */
+  esDinamizador?: boolean
+  /** Quién dinamizó esta mesa, si quedó registrado. Solo para reconocerlo. */
+  quienDinamizo?: string | null
 }
 interface Recibida {
   respuestaId: number
@@ -400,6 +404,10 @@ function CargueDeNotas({
       c.participacionId !== participacionId && c.evaluadorId !== yo && !usados.has(c.participacionId))
   }, [companeros, recibidas, participacionId])
 
+  // el dinamizador del GGPC no es compañero de ciclo: va en su propio grupo
+  const delCiclo = disponibles.filter(c => !c.esDinamizador)
+  const dinamizador = disponibles.find(c => c.esDinamizador) ?? null
+
   const escalaPreguntas = instrumento.preguntas.filter(p => p.tipo === 'ESCALA')
   const textoPreguntas = instrumento.preguntas.filter(p => p.tipo !== 'ESCALA')
 
@@ -686,12 +694,34 @@ function CargueDeNotas({
                   className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40"
                 >
                   <option value="">Seleccione a la persona…</option>
-                  {disponibles.map(c => (
-                    <option key={c.participacionId} value={c.participacionId}>
-                      {c.nombre}{c.rol ? ` · ${c.rol}` : ''}
-                    </option>
-                  ))}
+                  {delCiclo.length > 0 && (
+                    <optgroup label="Del ciclo">
+                      {delCiclo.map(c => (
+                        <option key={c.participacionId} value={c.participacionId}>
+                          {c.nombre}{c.rol ? ` · ${c.rol}` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {dinamizador && (
+                    <optgroup label="Fuera del ciclo">
+                      <option value={dinamizador.participacionId}>
+                        {dinamizador.nombre}
+                        {dinamizador.quienDinamizo ? ` · ${dinamizador.quienDinamizo}` : ''}
+                      </option>
+                    </optgroup>
+                  )}
                 </select>
+              )}
+              {!corrigiendo && dinamizador
+                && String(dinamizador.participacionId) === autor && (
+                <p className="mt-1.5 text-[11px] text-neutral-500">
+                  {dinamizador.quienDinamizo
+                    ? `Quien dinamizó esta mesa fue ${dinamizador.quienDinamizo}. `
+                    : ''}
+                  Se guarda como &quot;Dinamizador GGPC&quot;, con la misma hoja del año,
+                  y entra al promedio junto con las del ciclo.
+                </p>
               )}
             </div>
             <button

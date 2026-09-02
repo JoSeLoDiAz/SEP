@@ -63,8 +63,10 @@ export class CatalogosEvaluadorService {
   // años que existen en el banco, no una ventana fija de fechas
   async listarAniosParticipacion(): Promise<number[]> {
     const rows: Array<{ anio: number }> = await this.dataSource.query(
+      // ANIO > 0: la participación centinela del dinamizador GGPC (v68) no es de
+      // ningún año y lleva 0, que no es un año y no debe salir en la lista.
       `SELECT DISTINCT ANIO AS "anio" FROM EVALUADORPARTICIPACION
-        WHERE ANIO IS NOT NULL
+        WHERE ANIO IS NOT NULL AND ANIO > 0
         ORDER BY 1 DESC`,
     )
     const anios = rows.map(r => Number(r.anio))

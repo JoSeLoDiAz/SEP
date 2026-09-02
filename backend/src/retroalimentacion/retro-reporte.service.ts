@@ -397,7 +397,9 @@ export class RetroReporteService {
          LEFT JOIN ROLEVALUADOR   rev  ON rev.ROLEVALUADORID = pav.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION arev ON arev.AREAID = pav.AREAID
          LEFT JOIN ROLEVALUADOR   rdo  ON rdo.ROLEVALUADORID = pad.ROLEVALUADORID
-        WHERE pav.CONVOCATORIAID = :1
+        -- el ciclo lo marca QUIEN RECIBE, no quien escribe: el dinamizador GGPC
+        -- está fuera de toda convocatoria y anclarlo a él lo dejaría fuera del Excel
+        WHERE pad.CONVOCATORIAID = :1
         ORDER BY pev.PERSONAPRIMERAPELLIDO, pdo.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
@@ -432,7 +434,8 @@ export class RetroReporteService {
          JOIN EVALUADOR edo ON edo.EVALUADORID = pad.EVALUADORID
          JOIN PERSONA   pdo ON pdo.PERSONAID  = edo.PERSONAID
          LEFT JOIN ROLEVALUADOR rdo ON rdo.ROLEVALUADORID = pad.ROLEVALUADORID
-        WHERE pav.CONVOCATORIAID = :1
+        -- anclado a quien recibe, igual que las asignaciones
+        WHERE pad.CONVOCATORIAID = :1
         ORDER BY pev.PERSONAPRIMERAPELLIDO, pdo.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
@@ -457,8 +460,9 @@ export class RetroReporteService {
               rr.PARTEVALUADOID AS "evaluadoId"
          FROM RETRORESPUESTAITEM i
          JOIN RETRORESPUESTA rr ON rr.RETRORESPUESTAID = i.RETRORESPUESTAID
-         JOIN EVALUADORPARTICIPACION pav ON pav.PARTICIPACIONID = rr.PARTEVALUADORID
-        WHERE pav.CONVOCATORIAID = :1`,
+         JOIN EVALUADORPARTICIPACION pad ON pad.PARTICIPACIONID = rr.PARTEVALUADOID
+        -- anclado a quien recibe, igual que las asignaciones
+        WHERE pad.CONVOCATORIAID = :1`,
       [convocatoriaId],
     )
     return rows.map(r => ({

@@ -2303,7 +2303,8 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
         icono={<Users size={16} className="text-cyan-600" />}
         titulo="Quiénes lo retroalimentaron"
         valor={String(r.recibidas)}
-        sub={r.recibidas === 1 ? 'persona del mismo ciclo' : 'personas del mismo ciclo'}
+        // ya no son solo los del ciclo: el dinamizador GGPC también cuenta aquí
+        sub={r.recibidas === 1 ? 'retroalimentación' : 'retroalimentaciones'}
       />
       {enLinea && (
         <Tarjeta

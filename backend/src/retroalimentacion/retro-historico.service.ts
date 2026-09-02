@@ -2,6 +2,9 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { ControlCambiosService } from '../evaluadores/control-cambios.service'
+import {
+  IDENTIFICACION_DINAMIZADOR, MOTIVO_DINAMIZADOR, NOMBRE_DINAMIZADOR,
+} from './dinamizador'
 
 export interface CtxUsuario {
   usuarioEmail: string
@@ -17,6 +20,20 @@ export interface RetroHistoricaDto {
   escalas: Record<string, number>
   // { '6': 'SÍ', '7': 'Presencial' } las de texto, tal como vienen de la hoja
   textos?: Record<string, string>
+}
+
+/** Una opción del desplegable "¿quién le hizo esta retroalimentación?". */
+export interface CompaneroRetro {
+  participacionId: number
+  evaluadorId: number
+  nombre: string
+  identificacion: string | null
+  rol: string | null
+  area: string | null
+  /** true solo en el dinamizador GGPC, que la pantalla muestra aparte del ciclo. */
+  esDinamizador?: boolean
+  /** Quién dinamizó esa mesa, si quedó registrado. Es una ayuda, no se guarda. */
+  quienDinamizo?: string | null
 }
 
 const ANIO_EN_LINEA = 2026
@@ -67,6 +84,51 @@ export class RetroHistoricoService {
       anio: Number(f.anio),
       convocatoriaId: Number(f.convocatoriaId),
       evaluadorId: Number(f.evaluadorId),
+    }
+  }
+
+  /** Se resuelve una vez y se guarda; el "no existe" no se cachea a propósito. */
+  private centinela: { participacionId: number; evaluadorId: number } | null = null
+
+  // La participación centinela del dinamizador GGPC: una sola para todos los
+  // años y sin convocatoria, así que queda fuera de la matriz, del tablero de
+  // avance y de los conteos del ciclo, que filtran todos por convocatoria.
+  // Devuelve null mientras no se haya corrido la v68, y entonces el dinamizador
+  // simplemente no aparece: nada más cambia.
+  private async dinamizador(): Promise<{ participacionId: number; evaluadorId: number } | null> {
+    if (this.centinela) return this.centinela
+    const filas: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT pa.PARTICIPACIONID AS "participacionId", pa.EVALUADORID AS "evaluadorId"
+         FROM EVALUADORPARTICIPACION pa
+         JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
+         JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
+        WHERE pa.CONVOCATORIAID IS NULL
+          AND TRIM(p.PERSONAIDENTIFICACION) = :1`,
+      [IDENTIFICACION_DINAMIZADOR],
+    )
+    if (!filas[0]) return null
+    this.centinela = {
+      participacionId: Number(filas[0].participacionId),
+      evaluadorId: Number(filas[0].evaluadorId),
+    }
+    return this.centinela
+  }
+
+  // Quién dinamizó la mesa de esta persona. Es texto libre de la v51 y hay uno
+  // por mesa, no uno por ciclo, así que se lee de la participación del evaluado.
+  private async quienDinamizo(participacionId: number): Promise<string | null> {
+    try {
+      const filas: Array<{ nombre: string | null }> = await this.dataSource.query(
+        `SELECT TRIM(DINAMIZADOR) AS "nombre" FROM EVALUADORPARTICIPACION
+          WHERE PARTICIPACIONID = :1`,
+        [participacionId],
+      )
+      const nombre = filas[0]?.nombre
+      return nombre ? String(nombre).replace(/\s+/g, ' ').trim() || null : null
+    } catch {
+      // ORA-00904 = falta la columna DINAMIZADOR (v51 sin correr). No es grave:
+      // es solo la ayuda del desplegable.
+      return null
     }
   }
 
@@ -353,7 +415,7 @@ export class RetroHistoricoService {
         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES`,
       [ctx.convocatoriaId],
     )
-    return filas.map(f => ({
+    const delCiclo: CompaneroRetro[] = filas.map(f => ({
       participacionId: Number(f.participacionId),
       evaluadorId: Number(f.evaluadorId),
       nombre: String(f.nombre ?? '').replace(/\s+/g, ' ').trim(),
@@ -361,6 +423,22 @@ export class RetroHistoricoService {
       rol: f.rol ? String(f.rol) : null,
       area: f.area ? String(f.area) : null,
     }))
+
+    // El dinamizador no sale de la consulta de arriba y no puede salir: no está
+    // en la convocatoria. Va al final, marcado, para que la pantalla lo separe
+    // de los del ciclo en vez de revolverlo con ellos.
+    const centinela = await this.dinamizador()
+    if (!centinela || centinela.participacionId === participacionId) return delCiclo
+    return [...delCiclo, {
+      participacionId: centinela.participacionId,
+      evaluadorId: centinela.evaluadorId,
+      nombre: NOMBRE_DINAMIZADOR,
+      identificacion: null,
+      rol: null,
+      area: null,
+      esDinamizador: true,
+      quienDinamizo: await this.quienDinamizo(participacionId),
+    }]
   }
 
   // las que esta persona RECIBIO, con quien se la hizo y las respuestas, para poder corregirlas
@@ -433,18 +511,25 @@ export class RetroHistoricoService {
       )
     }
 
-    // ambos tienen que ser del mismo ciclo: si no, la retroalimentación no significa nada
-    const otro: Array<{ anio: number; convocatoriaId: number }> = await this.dataSource.query(
-      `SELECT ANIO AS "anio", CONVOCATORIAID AS "convocatoriaId"
-         FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
-      [autor],
-    )
-    if (!otro[0]) throw new NotFoundException('La participación de quien la hizo no existe')
-    if (Number(otro[0].convocatoriaId) !== meta.convocatoriaId) {
-      throw new BadRequestException(
-        `No son de la misma convocatoria (${otro[0].anio} contra ${meta.anio}): ` +
-        'la retroalimentación se hace entre quienes estuvieron en el mismo ciclo.',
+    // El dinamizador GGPC es la única excepción: está fuera de todo ciclo a
+    // propósito, así que exigirle la convocatoria del evaluado no tiene sentido.
+    const centinela = await this.dinamizador()
+    const esDelDinamizador = centinela != null && autor === centinela.participacionId
+
+    if (!esDelDinamizador) {
+      // los demás sí: si no son del mismo ciclo, la retroalimentación no significa nada
+      const otro: Array<{ anio: number; convocatoriaId: number }> = await this.dataSource.query(
+        `SELECT ANIO AS "anio", CONVOCATORIAID AS "convocatoriaId"
+           FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
+        [autor],
       )
+      if (!otro[0]) throw new NotFoundException('La participación de quien la hizo no existe')
+      if (Number(otro[0].convocatoriaId) !== meta.convocatoriaId) {
+        throw new BadRequestException(
+          `No son de la misma convocatoria (${otro[0].anio} contra ${meta.anio}): ` +
+          'la retroalimentación se hace entre quienes estuvieron en el mismo ciclo.',
+        )
+      }
     }
 
     const repetida: Array<{ n: number }> = await this.dataSource.query(
@@ -502,7 +587,8 @@ export class RetroHistoricoService {
            (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
             ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION)
          VALUES (:1, :2, :3, :4, N'ENVIADA', N'MANUAL', :5, :6)`,
-        [asignacionId, meta.formularioId, autor, destinatario, MOTIVO_HISTORICO, ctx.usuarioEmail],
+        [asignacionId, meta.formularioId, autor, destinatario,
+          esDelDinamizador ? MOTIVO_DINAMIZADOR : MOTIVO_HISTORICO, ctx.usuarioEmail],
       )
 
       const id = await siguiente('RETRORESPUESTA_SEQ')
@@ -545,14 +631,18 @@ export class RetroHistoricoService {
     })
 
     // queda en las dos fichas: en la de quien la hizo, que es desde donde se carga,
-    // y en la de quien la recibió, que es a quien describe
-    const quien = await this.contexto(autor)
+    // y en la de quien la recibió, que es a quien describe.
+    // El centinela no tiene ficha que mirar, y además contexto() le exigiría una
+    // convocatoria con instrumento activo que no tiene: aquí ya se hizo commit,
+    // así que reventaría con la retroalimentación guardada.
+    const fichas: Array<[number, number]> = [[destinatario, meta.evaluadorId]]
+    if (!esDelDinamizador) {
+      const quien = await this.contexto(autor)
+      fichas.unshift([autor, quien.evaluadorId])
+    }
     const nombres = await this.nombres([autor, destinatario])
     const detalle = `${nombres.get(autor) ?? autor} retroalimentó a ${nombres.get(destinatario) ?? destinatario}`
-    for (const [participacion, evaluador] of [
-      [autor, quien.evaluadorId],
-      [destinatario, meta.evaluadorId],
-    ] as const) {
+    for (const [participacion, evaluador] of fichas) {
       await this.controlCambios.registrar({
         tabla: 'RETRORESPUESTA', operacion: 'INSERT', registroId: respuestaId,
         participacionId: participacion, evaluadorId: evaluador,

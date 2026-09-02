@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm'
 import { EvaluadoresService } from './evaluadores.service'
 import { TrayectoriaService } from './trayectoria.service'
 import type { ProgresoCiclo } from './trayectoria.service'
+import { ES_DINAMIZADOR_SQL, NOMBRE_DINAMIZADOR } from '../retroalimentacion/dinamizador'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: Record<string, unknown>) => any = require('pdfkit')
@@ -123,6 +124,7 @@ export class FichaPdfService {
       `SELECT pe.ANIO              AS "anio",
               r.PROMEDIO           AS "promedio",
               NVL(fo.RESULTADOANONIMO, 1) AS "anonimo",
+              ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
               TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
               TRIM(rol.ROLEVALUADORNOMBRE) AS "rol",
               TRIM(ar.NOMBRE)      AS "area",
@@ -146,10 +148,16 @@ export class FichaPdfService {
 
     return filas.map((f, i) => {
       const anonimo = Number(f.anonimo) === 1
-      const oculto = anonimo && !revelarNombres
-      const nombre = !oculto && f.nombre
-        ? String(f.nombre).trim()
-        : `Calificador ${i + 1}`
+      // El dinamizador del GGPC no es un par anónimo del ciclo: es un cargo, y
+      // el evaluado ya lo tiene a la vista en la fila "Dinamizó" de su ficha.
+      // Sin esta rama caería en "Calificador 3", que no le dice nada a nadie.
+      const esDinamizador = Number(f.esDinamizador) === 1
+      const oculto = anonimo && !revelarNombres && !esDinamizador
+      const nombre = esDinamizador
+        ? NOMBRE_DINAMIZADOR
+        : !oculto && f.nombre
+          ? String(f.nombre).trim()
+          : `Calificador ${i + 1}`
       // El anonimato se caía por el costado: se ocultaba el nombre pero se
       // imprimía el rol y el área, y 7 de las 13 combinaciones rol+área del banco
       // corresponden a UNA sola persona. "Calificador 2 · LÍDER · Financiera" es

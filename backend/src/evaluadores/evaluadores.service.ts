@@ -16,6 +16,7 @@ import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
 import { fechaSolo } from '../common/fecha-solo'
+import { IDENTIFICACION_DINAMIZADOR } from '../retroalimentacion/dinamizador'
 
 /** Nombre de pantalla de cada columna, para el error de "valor demasiado grande". */
 const CAMPOS_PARTICIPACION: Record<string, string> = {
@@ -1332,6 +1333,20 @@ export class EvaluadoresService {
     return { message: 'Participación actualizada' }
   }
 
+  /** El centinela del dinamizador GGPC: no es el ciclo de nadie y no se borra. */
+  private async esParticipacionDelDinamizador(participacionId: number): Promise<boolean> {
+    const filas: Array<{ n: number }> = await this.dataSource.query(
+      `SELECT COUNT(*) AS "n"
+         FROM EVALUADORPARTICIPACION pa
+         JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
+         JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
+        WHERE pa.PARTICIPACIONID = :1
+          AND TRIM(p.PERSONAIDENTIFICACION) = :2`,
+      [participacionId, IDENTIFICACION_DINAMIZADOR],
+    )
+    return Number(filas[0]?.n ?? 0) > 0
+  }
+
   /** Si el ciclo tiene historia colgando responde 409; solo el admin puede forzar,
    *  y aun así tiene que pedirlo explícitamente con ?forzar=1. */
   async eliminarParticipacion(
@@ -1350,6 +1365,23 @@ export class EvaluadoresService {
       [participacionId],
     )
     if (!cabecera[0]) throw new NotFoundException('Participación no encontrada')
+
+    // La participación centinela del dinamizador GGPC (v68) es el autor de TODAS
+    // sus retroalimentaciones, de todos los años. Como el borrado forzado de más
+    // abajo hace `WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, borrarla se
+    // llevaría de una todas esas retros sin que nadie lo pidiera.
+    if (await this.esParticipacionDelDinamizador(participacionId)) {
+      throw new ConflictException({
+        message:
+          'Esa no es la participación de un evaluador: es la del Dinamizador GGPC, y de ' +
+          'ella cuelgan todas las retroalimentaciones que él ha hecho, de todos los años. ' +
+          'No se borra desde aquí. Si sobra una retroalimentación suya, bórrela una a una ' +
+          'desde la ficha de la persona que la recibió.',
+        anio: Number(cabecera[0].anio),
+        dependencias: {},
+        sePuedeForzar: false,
+      })
+    }
 
     const dependencias = await this.contarDependenciasParticipacion(participacionId)
     const conDatos = Object.entries(dependencias).filter(([, v]) => v > 0)

@@ -4,6 +4,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { ControlCambiosService } from '../evaluadores/control-cambios.service'
+import { ES_DINAMIZADOR_SQL, NOMBRE_DINAMIZADOR } from './dinamizador'
 import { bindRepetido } from '../common/db/binds'
 import { RetroMatrizService } from './retro-matriz.service'
 
@@ -726,6 +727,7 @@ export class RetroalimentacionService {
               TRIM(rol.ROLEVALUADORNOMBRE) AS "rolCalificador",
               TRIM(ar.NOMBRE)    AS "areaCalificador",
               TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombreCalificador",
+              ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
               (SELECT i2.COMENTARIO FROM RETRORESPUESTAITEM i2
                 WHERE i2.RETRORESPUESTAID = r.RETRORESPUESTAID
                   AND i2.COMENTARIO IS NOT NULL AND ROWNUM = 1) AS "comentario"
@@ -753,8 +755,15 @@ export class RetroalimentacionService {
       respuestaId: Number(c.respuestaId),
       promedio: c.promedio != null ? Number(c.promedio) : null,
       fecha: c.fecha,
-      origen: [c.rolCalificador, c.areaCalificador].filter(Boolean).join(' · ') || 'Par evaluador',
-      nombre: revelar ? (c.nombreCalificador as string ?? '').trim() : null,
+      // el dinamizador GGPC no es un par ni tiene rol ni área: sin esta rama
+      // aparecería como "Par evaluador", que es justo lo que no es
+      origen: Number(c.esDinamizador) === 1
+        ? NOMBRE_DINAMIZADOR
+        : [c.rolCalificador, c.areaCalificador].filter(Boolean).join(' · ') || 'Par evaluador',
+      // se nombra por el cargo, nunca por la persona: eso no rompe el anonimato
+      nombre: Number(c.esDinamizador) === 1
+        ? NOMBRE_DINAMIZADOR
+        : revelar ? (c.nombreCalificador as string ?? '').trim() : null,
       comentario: c.comentario as string | null,
     }))
 

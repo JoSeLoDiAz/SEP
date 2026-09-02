@@ -218,9 +218,17 @@ export class RetroalimentacionService {
   async previewMatriz(convocatoriaId: number) {
     const form = await this.getFormulario(convocatoriaId)
     const resultado = await this.matriz.calcular(convocatoriaId, form.reglasMatriz)
+    // Solo las de la matriz: las del dinamizador GGPC comparten formulario con el
+    // ciclo pero su autor está fuera de la convocatoria, y avance() no las cuenta
+    // (filtra los participantes por convocatoria). Sin este AND, la misma pantalla
+    // decía "Ya hay 21 asignaciones guardadas" al lado del KPI "Asignaciones 12".
     const yaExisten: Array<{ T: number }> = await this.dataSource.query(
-      `SELECT COUNT(*) AS "T" FROM RETROASIGNACION WHERE RETROFORMULARIOID = :1`,
-      [form.retroFormularioId],
+      `SELECT COUNT(*) AS "T" FROM RETROASIGNACION a
+        WHERE a.RETROFORMULARIOID = :1
+          AND EXISTS (SELECT 1 FROM EVALUADORPARTICIPACION pav
+                       WHERE pav.PARTICIPACIONID = a.PARTEVALUADORID
+                         AND pav.CONVOCATORIAID = :2)`,
+      [form.retroFormularioId, convocatoriaId],
     )
 
     // el alcance de los transversales puede venir forzado por las reglas del ciclo
@@ -803,10 +811,19 @@ export class RetroalimentacionService {
                 WHERE a.PARTEVALUADORID = pa.PARTICIPACIONID AND a.ESTADO <> N'ANULADA') AS "asignadas",
               (SELECT COUNT(*) FROM RETROASIGNACION a
                 WHERE a.PARTEVALUADORID = pa.PARTICIPACIONID AND a.ESTADO = N'ENVIADA') AS "enviadas",
+              -- Solo lo del ciclo: este tablero sigue la matriz, y "Enviadas"
+              -- (que cuenta por autor dentro de la convocatoria) tiene que poder
+              -- compararse con "Recibidas" en la misma fila. Con el dinamizador
+              -- dentro, una columna decía 12 y la de al lado 21. Su nota sí entra
+              -- al promedio de la persona, pero eso se ve en su ficha, no aquí.
               (SELECT COUNT(*) FROM RETRORESPUESTA rr
-                WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID) AS "recibidas",
+                 JOIN EVALUADORPARTICIPACION pav ON pav.PARTICIPACIONID = rr.PARTEVALUADORID
+                WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID
+                  AND pav.CONVOCATORIAID = pa.CONVOCATORIAID) AS "recibidas",
               (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr
-                WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID) AS "promedioRecibido",
+                 JOIN EVALUADORPARTICIPACION pav ON pav.PARTICIPACIONID = rr.PARTEVALUADORID
+                WHERE rr.PARTEVALUADOID = pa.PARTICIPACIONID
+                  AND pav.CONVOCATORIAID = pa.CONVOCATORIAID) AS "promedioRecibido",
               (SELECT MAX(s.MINUTOSTRANSCURRIDOS) FROM RETROSESION s
                 WHERE s.PARTICIPACIONID = pa.PARTICIPACIONID) AS "minutos",
               (SELECT MAX(CASE WHEN s.SEEXCEDIO = 1 THEN 1 ELSE 0 END) FROM RETROSESION s

@@ -37,8 +37,11 @@
 -- 303 filas), que es donde corresponde, porque hay un dinamizador por mesa y no
 -- uno por ciclo (23 distintos en 2024, 10 en 2026).
 --
--- EVALUADORACTIVO = 0 a propósito: no es un evaluador del banco y no debe salir
--- en el listado ni en los conteos. evaluadores.service.ts filtra por activo = 1.
+-- EVALUADORACTIVO = 0 a propósito: no es un evaluador del banco. Pero eso NO
+-- basta para dejarlo fuera del listado, porque el botón "Con inactivos" cambia
+-- ese filtro por 1 = 1; por eso evaluadores.service.ts lo excluye además por
+-- identificación, sin condición. Lo mismo pasaba con el tablero del ciclo: no
+-- queda fuera "por construcción" de todo, solo de lo que filtra por el autor.
 --
 -- Idempotente: correrlo dos veces no duplica nada.
 

@@ -2287,9 +2287,14 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
 
   // el ciclo en línea reparte asignaciones; el histórico no, y ahí esas tarjetas sobran
   const enLinea = r.asignadas > 0
+  // "de una sola persona" solo si de verdad hay una. Con dos notas iguales el
+  // rango es null, y antes eso caía en ese literal: con el dinamizador, dos notas
+  // idénticas dejaron de ser raras (11 de las 12 respuestas de 2025 son un 5).
   const rango = r.minimo != null && r.maximo != null && r.minimo !== r.maximo
     ? `de ${r.minimo} a ${r.maximo}`
-    : null
+    : r.recibidas === 1
+      ? 'de una sola persona'
+      : `${r.recibidas} calificaciones`
 
   return (
     <div className={`grid grid-cols-1 gap-4 px-5 py-4 ${enLinea ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
@@ -2297,7 +2302,7 @@ function ResumenRetroalimentacion({ detalle }: { detalle: Detalle }) {
         icono={<BadgeCheck size={16} className="text-emerald-600" />}
         titulo="Promedio recibido"
         valor={r.promedio != null ? `${r.promedio} / 5` : '—'}
-        sub={rango ?? 'de una sola persona'}
+        sub={rango}
       />
       <Tarjeta
         icono={<Users size={16} className="text-cyan-600" />}

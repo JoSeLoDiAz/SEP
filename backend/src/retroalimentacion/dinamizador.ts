@@ -6,9 +6,14 @@
 // ningún ciclo, así que entra por una participación centinela SIN convocatoria,
 // creada una sola vez por docs/migraciones/v68_dinamizador_ggpc.sql.
 //
-// Al no tener convocatoria queda fuera, por construcción, de todo lo que filtra
-// por ella: la matriz, el tablero de avance, la lista de compañeros y los
-// participantes del Excel. No hay que acordarse de excluirlo en ningún lado.
+// Al no tener convocatoria queda fuera, por construcción, de lo que filtra por
+// el AUTOR: la matriz, la lista de compañeros y los participantes del Excel.
+//
+// Ojo: eso no cubre todo, y creer que sí fue el error de la primera versión. Lo
+// que cuenta por el EVALUADO —"recibidas" del tablero de avance— sí lo veía, y
+// dejaba la misma pantalla diciendo 12 en una columna y 21 en la de al lado. Y
+// el banco de evaluadores lo sacaba en cuanto se prendía "Con inactivos". Los
+// sitios que hay que excluir a mano están marcados con este archivo importado.
 //
 // Vive en su propio archivo para que lo puedan leer tanto retroalimentacion como
 // evaluadores sin que los dos módulos se importen entre sí.

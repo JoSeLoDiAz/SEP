@@ -146,7 +146,12 @@ export class FichaPdfService {
       [evaluadorId],
     )
 
-    return filas.map((f, i) => {
+    // El contador va aparte del índice de la fila y solo avanza con los que de
+    // verdad se ocultan. Con el índice, la fila del dinamizador gastaba un número
+    // sin usarlo: al evaluado le salía "Calificador 1", "Dinamizador GGPC",
+    // "Calificador 3", y ese salto delata que hubo un tercero.
+    let anonimos = 0
+    return filas.map(f => {
       const anonimo = Number(f.anonimo) === 1
       // El dinamizador del GGPC no es un par anónimo del ciclo: es un cargo, y
       // el evaluado ya lo tiene a la vista en la fila "Dinamizó" de su ficha.
@@ -157,7 +162,7 @@ export class FichaPdfService {
         ? NOMBRE_DINAMIZADOR
         : !oculto && f.nombre
           ? String(f.nombre).trim()
-          : `Calificador ${i + 1}`
+          : `Calificador ${++anonimos}`
       // El anonimato se caía por el costado: se ocultaba el nombre pero se
       // imprimía el rol y el área, y 7 de las 13 combinaciones rol+área del banco
       // corresponden a UNA sola persona. "Calificador 2 · LÍDER · Financiera" es

@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { ControlCambiosService } from '../evaluadores/control-cambios.service'
 import {
-  IDENTIFICACION_DINAMIZADOR, MOTIVO_DINAMIZADOR, NOMBRE_DINAMIZADOR,
+  ES_DINAMIZADOR_SQL, IDENTIFICACION_DINAMIZADOR, MOTIVO_DINAMIZADOR, NOMBRE_DINAMIZADOR,
 } from './dinamizador'
 
 export interface CtxUsuario {
@@ -449,6 +449,7 @@ export class RetroHistoricoService {
               r.PROMEDIO         AS "promedio",
               r.FECHAENVIO       AS "fecha",
               a.MOTIVOREGLA      AS "motivo",
+              ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
               TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "autor"
          FROM RETRORESPUESTA r
          JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
@@ -486,7 +487,13 @@ export class RetroHistoricoService {
         autorParticipacionId: Number(f.autorParticipacionId),
         promedio: f.promedio == null ? null : Number(f.promedio),
         fecha: f.fecha ? new Date(f.fecha as string).toISOString() : null,
-        autor: String(f.autor ?? '').replace(/\s+/g, ' ').trim(),
+        // por la etiqueta, no por el nombre de la fila: hoy coinciden porque la
+        // v68 grabó ese mismo texto en PERSONA, pero eso es una casualidad y no
+        // algo en lo que se pueda confiar
+        autor: Number(f.esDinamizador) === 1
+          ? NOMBRE_DINAMIZADOR
+          : String(f.autor ?? '').replace(/\s+/g, ' ').trim(),
+        esDinamizador: Number(f.esDinamizador) === 1,
         historica: String(f.motivo ?? '').startsWith('HISTORICO'),
         escalas,
         textos,

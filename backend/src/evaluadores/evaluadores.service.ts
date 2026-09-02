@@ -351,6 +351,15 @@ export class EvaluadoresService {
 
     cond.push(filtros.incluirInactivos ? '1 = 1' : 'e.EVALUADORACTIVO = 1')
 
+    // El centinela del dinamizador GGPC no es un evaluador: es el autor técnico
+    // de sus retroalimentaciones. Marcarlo EVALUADORACTIVO = 0 no bastaba, porque
+    // el botón "Con inactivos" cambia la condición de arriba por 1 = 1 y entonces
+    // salía en el listado con su identificación y su correo. De esta misma
+    // consulta cuelgan los tres KPI de alerta del banco —donde figuraba como una
+    // ficha sin cédula, sin foto y sin prueba— y la sábana de Excel, que le sacaba
+    // una fila de "Año 0". Se excluye sin condición, que es la única que aguanta.
+    cond.push(`TRIM(p.PERSONAIDENTIFICACION) <> ${bind(IDENTIFICACION_DINAMIZADOR)}`)
+
     if (q) {
       // Se escapan los comodines: un "%" tecleado no debe traer todo.
       const like = `%${q.toUpperCase().replace(/([%_\\])/g, '\\$1')}%`
@@ -1280,6 +1289,18 @@ export class EvaluadoresService {
       `SELECT 1 FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId],
     )
     if (!ok[0]) throw new NotFoundException('Participación no encontrada')
+
+    // El centinela se localiza por no tener convocatoria. Este PUT mapea `anio` y
+    // `convocatoriaId`, así que ponerle cualquiera de los dos lo volvería
+    // irreconocible: el dinamizador dejaría de aparecer en el desplegable y sus
+    // retroalimentaciones quedarían colgando de un autor que ya nadie identifica.
+    // Se cierra igual que el borrado, que ya estaba protegido.
+    if (await this.esParticipacionDelDinamizador(participacionId)) {
+      throw new ConflictException(
+        'Esa es la participación del Dinamizador GGPC, no la de un evaluador. No se ' +
+        'edita: de ella cuelgan todas las retroalimentaciones que él ha hecho.',
+      )
+    }
 
     const sets: string[] = []
     const params: unknown[] = []

@@ -21,6 +21,14 @@ services:
       - "relay.sena.edu.co:172.30.163.235"
     networks:
       - sep-internal
+      # Oracle vive en esta red. Antes se le hablaba por host.docker.internal,
+      # que resuelve a la IP de docker0 (172.17.0.1): eso obliga a salir al host
+      # y volver a entrar. El 2026-09-03 la VM se reinició, docker0 quedó
+      # NO-CARRIER —ningún contenedor usa la bridge por defecto— y el host dejó
+      # de aceptar ese tráfico, así que el backend se reinició 43 veces y la
+      # aplicación quedó en 502 con la base intacta. De contenedor a contenedor
+      # no hace falta ni docker0 ni el cortafuegos del host.
+      - sep-shared-network
 
   nginx:
     image: nginx:stable-alpine
@@ -41,3 +49,6 @@ services:
 networks:
   sep-internal:
     driver: bridge
+  # La crea el compose de Oracle, no este: aquí solo se usa.
+  sep-shared-network:
+    external: true

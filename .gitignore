@@ -1,0 +1,57 @@
+# ── Dependencias ──
+node_modules/
+.pnpm-store/
+
+# ── Build outputs ──
+dist/
+build/
+.next/
+out/
+.output/
+*.tsbuildinfo
+
+# ── Variables de entorno ──
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ── Logs ──
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Coverage / tests ──
+coverage/
+.nyc_output/
+
+# ── Docker ──
+docker/nginx/logs/
+
+# ── Editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Herramientas locales (Claude Code, etc.) ──
+.claude/
+
+# ── Datos reales de personas ──
+# Hojas de vida, fotos, cédulas y bases con identificaciones y correos de
+# personas reales. Se trabajan en local pero NO entran al repositorio: un
+# repositorio no es el sitio para datos personales, y una vez subidos quedan
+# en el historial aunque después se borren.
+docs/evaluador/*.xlsx
+docs/evaluador/*/
+!docs/evaluador/plantillas/
+docs/reports/
+
+# ── Temporales de Office ──
+# Word deja un archivo de bloqueo mientras el documento está abierto.
+~$*
+
+# ── OS ──
+.DS_Store
+Thumbs.db

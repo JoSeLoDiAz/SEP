@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# Build SEP (Next standalone + Nest dist) en runner GitLab (vmpmgit) — SOLO offline.
+# Artefactos: .ci-artifacts/{frontend-standalone.tgz,backend-app.tgz,build-meta.txt}
+# Los tarballs se publican por LAN a PRE (GitLab no admite artefactos de cientos de MB).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ci-lib-ssh.sh
+source "${SCRIPT_DIR}/ci-lib-ssh.sh"
+REPO_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+OFFLINE_ROOT="${SEP_OFFLINE_ROOT:-/home/opc/sep-ci/offline}"
+OUT_DIR="${REPO_ROOT}/.ci-artifacts"
+NODE_IMAGE="${SEP_NODE_IMAGE:-docker.io/library/node:22-bookworm-slim}"
+PNPM_STORE="${OFFLINE_ROOT}/pnpm-store"
+NODE_TAR="${OFFLINE_ROOT}/imagenes/node-22-bookworm-slim.tar"
+NODE_MODULES_TGZ="${OFFLINE_ROOT}/node_modules.tgz"
+PNPM_BIN="${OFFLINE_ROOT}/pnpm"
+REMOTE_APP="${DEPLOY_REMOTE_APP_DIR:-/data/SEP}"
+
+[[ -f "${REPO_ROOT}/pnpm-lock.yaml" ]] || { echo "ERROR: falta pnpm-lock.yaml" >&2; exit 1; }
+command -v podman >/dev/null || { echo "ERROR: podman requerido en runner build" >&2; exit 1; }
+
+mkdir -p "${OUT_DIR}" "${OFFLINE_ROOT}/imagenes" "${PNPM_STORE}"
+
+seed_offline_from_pre_if_needed() {
+  local need=0
+  local lock_hash=""
+  local lock_hash_file="${OFFLINE_ROOT}/.pnpm-lock.sha256"
+  lock_hash="$(sha256sum "${REPO_ROOT}/pnpm-lock.yaml" | awk '{print $1}')"
+  podman image exists "${NODE_IMAGE}" 2>/dev/null || [[ -f "${NODE_TAR}" ]] || need=1
+  local need_npm=0
+  if [[ -z "$(ls -A "${PNPM_STORE}" 2>/dev/null || true)" ]] && [[ ! -f "${NODE_MODULES_TGZ}" ]]; then
+    need_npm=1
+  elif [[ -n "${lock_hash}" ]] && [[ -f "${lock_hash_file}" ]]; then
+    local stored=""
+    stored="$(tr -d '[:space:]' < "${lock_hash_file}")"
+    [[ "${stored}" == "${lock_hash}" ]] || need_npm=1
+  fi
+  [[ "${need_npm}" -eq 1 ]] && need=1
+  [[ -x "${PNPM_BIN}" ]] || need=1
+  [[ "${need}" -eq 1 ]] || {
+    echo "=== Offline local OK (sin resembra) ==="
+    return 0
+  }
+
+  local key host user
+  key="$(resolve_deploy_ssh_key)" || {
+    echo "ERROR: faltan caches offline en ${OFFLINE_ROOT} y no hay llave SSH a PRE" >&2
+    return 1
+  }
+  host="${DEPLOY_SSH_HOST:-172.24.129.65}"
+  user="${DEPLOY_SSH_USER:-opc}"
+  chmod 600 "${key}" 2>/dev/null || true
+  local ssh=(ssh -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+  local scp=(scp -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+  local rsh="ssh -i ${key} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes"
+  echo "=== Sembrando offline SEP desde ${user}@${host} (LAN, no Internet) ==="
+
+  if [[ ! -f "${NODE_TAR}" ]]; then
+    if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar'"; then
+      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
+    elif "${ssh[@]}" "${user}@${host}" "test -f /data/MASAMADRE/imagenes/node-22-bookworm-slim.tar"; then
+      echo "AVISO: usando node-22 de MASAMADRE como puente; preferible sembrar en SEP/imagenes" >&2
+      "${scp[@]}" "${user}@${host}:/data/MASAMADRE/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
+    fi
+  fi
+  if [[ ! -x "${PNPM_BIN}" ]]; then
+    if "${ssh[@]}" "${user}@${host}" "test -x '${REMOTE_APP}/offline/pnpm'"; then
+      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/pnpm" "${PNPM_BIN}"
+      chmod +x "${PNPM_BIN}"
+    fi
+  fi
+  if [[ "${need_npm}" -eq 1 ]]; then
+    if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/offline/node_modules.tgz'"; then
+      echo "=== Copiando node_modules.tgz desde PRE ==="
+      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/node_modules.tgz" "${NODE_MODULES_TGZ}"
+    fi
+    if "${ssh[@]}" "${user}@${host}" "test -d '${REMOTE_APP}/offline/pnpm-store' && ls '${REMOTE_APP}/offline/pnpm-store' | grep -q ."; then
+      echo "=== Rsync pnpm-store desde PRE ==="
+      mkdir -p "${PNPM_STORE}"
+      rsync -az -e "${rsh}" \
+        "${user}@${host}:${REMOTE_APP}/offline/pnpm-store/" \
+        "${PNPM_STORE}/" || echo "AVISO: rsync pnpm-store incompleto" >&2
+      echo "${lock_hash}" > "${lock_hash_file}"
+    fi
+  fi
+}
+
+ensure_image_from_tar() {
+  local image="$1" tarpath="$2"
+  if podman image exists "${image}" 2>/dev/null; then
+    return 0
+  fi
+  [[ -f "${tarpath}" ]] || {
+    echo "ERROR: falta imagen ${image} y no existe ${tarpath}" >&2
+    return 1
+  }
+  echo "=== podman load ${tarpath} ==="
+  podman load -i "${tarpath}"
+  podman image exists "${image}" 2>/dev/null || {
+    echo "ERROR: tras load no existe ${image}" >&2
+    return 1
+  }
+}
+
+seed_offline_from_pre_if_needed
+ensure_image_from_tar "${NODE_IMAGE}" "${NODE_TAR}"
+
+if [[ -f "${NODE_MODULES_TGZ}" ]] && [[ ! -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
+  echo "=== Restaurando node_modules desde seed ==="
+  tar -C "${REPO_ROOT}" -xzf "${NODE_MODULES_TGZ}"
+fi
+
+if [[ -z "$(ls -A "${PNPM_STORE}" 2>/dev/null || true)" ]] && [[ ! -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
+  echo "ERROR: sin pnpm-store ni node_modules; no se permite install con red" >&2
+  exit 1
+fi
+
+TURNSTILE_KEY="${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-0x4AAAAAADD6VVCyoP6eM5Ao}"
+PUBLIC_API="${NEXT_PUBLIC_API_URL:-/api}"
+
+echo "=== CI build Next standalone + Nest dist offline ==="
+PODMAN_VOLS=(-v "${REPO_ROOT}:/app:Z" -v "${PNPM_STORE}:/store:Z")
+if [[ -x "${PNPM_BIN}" && -f "${PNPM_BIN}" ]]; then
+  PODMAN_VOLS+=(-v "${PNPM_BIN}:/opt/pnpm:Z")
+fi
+podman run --rm \
+  "${PODMAN_VOLS[@]}" \
+  -e NEXT_TELEMETRY_DISABLED=1 \
+  -e NEXT_PUBLIC_API_URL="${PUBLIC_API}" \
+  -e NEXT_PUBLIC_TURNSTILE_SITE_KEY="${TURNSTILE_KEY}" \
+  -e PNPM_STORE_DIR=/store \
+  "${NODE_IMAGE}" \
+  bash -c '
+    set -euo pipefail
+    cd /app
+    if [[ -x /opt/pnpm ]]; then
+      PNPM=/opt/pnpm
+    elif [[ -x node_modules/.bin/pnpm ]]; then
+      PNPM=node_modules/.bin/pnpm
+    else
+      echo "ERROR: no hay binario pnpm offline" >&2
+      exit 1
+    fi
+    if [[ ! -d node_modules/.pnpm ]]; then
+      if "${PNPM}" install --frozen-lockfile --offline --store-dir /store --ignore-scripts; then
+        echo "pnpm install offline OK"
+      else
+        echo "ERROR: pnpm install fallo (offline)" >&2
+        exit 1
+      fi
+    else
+      echo "Usando node_modules existente (sin pnpm install)"
+    fi
+    "${PNPM}" --filter frontend run build
+    "${PNPM}" --filter backend run build
+    test -f frontend/.next/standalone/frontend/server.js
+    test -f backend/dist/main.js
+    mkdir -p frontend/.next/standalone/frontend/.next
+    mkdir -p frontend/.next/standalone/frontend/public
+    cp -a frontend/.next/static frontend/.next/standalone/frontend/.next/static
+    if [[ -d frontend/public ]]; then
+      cp -a frontend/public/. frontend/.next/standalone/frontend/public/
+    fi
+  '
+
+tar -C "${REPO_ROOT}/frontend/.next/standalone" -czf "${OUT_DIR}/frontend-standalone.tgz" .
+test -f "${OUT_DIR}/frontend-standalone.tgz"
+
+STAGE_BE="$(mktemp -d /tmp/sep-be-XXXXXX)"
+trap 'rm -rf "${STAGE_BE}"' EXIT
+mkdir -p "${STAGE_BE}/backend"
+cp -a "${REPO_ROOT}/package.json" "${REPO_ROOT}/pnpm-workspace.yaml" "${REPO_ROOT}/pnpm-lock.yaml" "${STAGE_BE}/"
+mkdir -p "${STAGE_BE}/frontend"
+cp -a "${REPO_ROOT}/frontend/package.json" "${STAGE_BE}/frontend/"
+cp -a "${REPO_ROOT}/backend/package.json" "${STAGE_BE}/backend/"
+cp -a "${REPO_ROOT}/backend/dist" "${STAGE_BE}/backend/dist"
+if [[ -d "${REPO_ROOT}/node_modules" ]]; then
+  cp -a "${REPO_ROOT}/node_modules" "${STAGE_BE}/node_modules"
+fi
+if [[ -d "${REPO_ROOT}/backend/node_modules" ]]; then
+  cp -a "${REPO_ROOT}/backend/node_modules" "${STAGE_BE}/backend/node_modules"
+fi
+tar -C "${STAGE_BE}" -czf "${OUT_DIR}/backend-app.tgz" .
+test -f "${OUT_DIR}/backend-app.tgz"
+
+cat > "${OUT_DIR}/build-meta.txt" <<EOF
+sha=${CI_COMMIT_SHA:-unknown}
+short=${CI_COMMIT_SHORT_SHA:-unknown}
+ref=${CI_COMMIT_REF_NAME:-unknown}
+built_at=$(date -Is)
+node_image=${NODE_IMAGE}
+offline_pnpm=1
+offline_mode=strict
+next_public_api_url=${PUBLIC_API}
+frontend_sha256=$(sha256sum "${OUT_DIR}/frontend-standalone.tgz" | awk '{print $1}')
+backend_sha256=$(sha256sum "${OUT_DIR}/backend-app.tgz" | awk '{print $1}')
+EOF
+
+ls -lh "${OUT_DIR}"
+
+publish_artifacts_to_pre() {
+  local key host user
+  key="$(resolve_deploy_ssh_key)" || {
+    echo "ERROR: no hay llave SSH para publicar artefactos en PRE" >&2
+    return 1
+  }
+  host="${DEPLOY_SSH_HOST:-172.24.129.65}"
+  user="${DEPLOY_SSH_USER:-opc}"
+  chmod 600 "${key}" 2>/dev/null || true
+  local ssh=(ssh -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+  local scp=(scp -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+  echo "=== Publicando artefactos por LAN a ${user}@${host}:${REMOTE_APP}/.ci-in ==="
+  "${ssh[@]}" "${user}@${host}" "mkdir -p '${REMOTE_APP}/.ci-in'"
+  "${scp[@]}" \
+    "${OUT_DIR}/frontend-standalone.tgz" \
+    "${OUT_DIR}/backend-app.tgz" \
+    "${OUT_DIR}/build-meta.txt" \
+    "${user}@${host}:${REMOTE_APP}/.ci-in/"
+  "${ssh[@]}" "${user}@${host}" \
+    "test -f '${REMOTE_APP}/.ci-in/frontend-standalone.tgz' && test -f '${REMOTE_APP}/.ci-in/backend-app.tgz' && grep -q 'short=${CI_COMMIT_SHORT_SHA:-unknown}' '${REMOTE_APP}/.ci-in/build-meta.txt'"
+  mkdir -p /home/opc/sep-ci/artifacts
+  cp -f "${OUT_DIR}/frontend-standalone.tgz" "${OUT_DIR}/backend-app.tgz" "${OUT_DIR}/build-meta.txt" \
+    /home/opc/sep-ci/artifacts/ 2>/dev/null || true
+  echo "=== Artefactos en PRE (.ci-in) OK ==="
+}
+
+publish_artifacts_to_pre
+echo "=== CI build OK (offline estricto) ==="

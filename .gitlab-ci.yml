@@ -1,0 +1,89 @@
+stages:
+  - build
+  - deploy
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "PRE"
+    - when: never
+
+variables:
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: 20
+  SEP_OFFLINE_ROOT: "/home/opc/sep-ci/offline"
+  FF_NETWORK_PER_BUILD: "false"
+
+# Build FE standalone + BE dist en vmpmgit (tag build). Solo offline.
+build:pre:
+  stage: build
+  tags:
+    - build
+  timeout: 60 minutes
+  environment:
+    name: pre
+    action: prepare
+  artifacts:
+    name: "sep-pre-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - .ci-artifacts/build-meta.txt
+    expire_in: 7 days
+  variables:
+    DEPLOY_SSH_HOST: "172.24.129.65"
+    DEPLOY_SSH_USER: "opc"
+    DEPLOY_REMOTE_APP_DIR: "/data/SEP"
+  before_script:
+    - |
+      set -euo pipefail
+      sed -i 's/\r$//' scripts/ci-build-offline.sh scripts/ci-deploy-pre-artifacts.sh scripts/ci-render-env.sh scripts/ci-lib-ssh.sh 2>/dev/null || true
+      chmod +x scripts/ci-build-offline.sh scripts/ci-deploy-pre-artifacts.sh scripts/ci-render-env.sh scripts/ci-lib-ssh.sh
+      source scripts/ci-lib-ssh.sh
+      if resolve_deploy_ssh_key >/dev/null 2>&1; then
+        echo "SSH PRE OK (siembra offline disponible)"
+      else
+        echo "Aviso: sin DEPLOY_SSH_*; siembra offline puede fallar"
+      fi
+  script:
+    - bash scripts/ci-build-offline.sh
+  rules:
+    - if: $CI_COMMIT_BRANCH == "PRE"
+  after_script:
+    - |
+      rm -f "${CI_PROJECT_DIR:-.}/.ci-ssh-sep-pre.key" 2>/dev/null || true
+      echo "Build PRE commit=${CI_COMMIT_SHORT_SHA} status=${CI_JOB_STATUS}"
+
+# Publica standalone + backend + .env y recrea sep-frontend / sep-backend. Manual.
+deploy:pre:
+  stage: deploy
+  tags:
+    - pre
+  timeout: 30 minutes
+  needs:
+    - job: build:pre
+      artifacts: true
+  environment:
+    name: pre
+    url: https://pre-sep.sena.edu.co
+  variables:
+    DEPLOY_SSH_HOST: "172.24.129.65"
+    DEPLOY_SSH_USER: "opc"
+    DEPLOY_REMOTE_APP_DIR: "/data/SEP"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "PRE"
+      when: manual
+      allow_failure: false
+  before_script:
+    - |
+      set -euo pipefail
+      test -f .ci-artifacts/build-meta.txt
+      sed -i 's/\r$//' scripts/ci-deploy-pre-artifacts.sh scripts/ci-lib-ssh.sh scripts/ci-render-env.sh 2>/dev/null || true
+      chmod +x scripts/ci-deploy-pre-artifacts.sh scripts/ci-lib-ssh.sh scripts/ci-render-env.sh
+      source scripts/ci-lib-ssh.sh
+      resolve_deploy_ssh_key >/dev/null
+      echo "SSH PRE OK"
+      bash scripts/ci-render-env.sh .ci-artifacts/pre.env
+  script:
+    - bash scripts/ci-deploy-pre-artifacts.sh
+  after_script:
+    - |
+      rm -f "${CI_PROJECT_DIR:-.}/.ci-ssh-sep-pre.key" .ci-artifacts/pre.env 2>/dev/null || true
+      echo "Deploy PRE commit=${CI_COMMIT_SHORT_SHA} status=${CI_JOB_STATUS}"

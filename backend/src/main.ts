@@ -37,12 +37,19 @@ async function bootstrap() {
   // Nest recorre los filtros al revés: el de Oracle va primero para aplicarse de último
   app.useGlobalFilters(new OracleErrorFilter(), new UploadErrorFilter())
 
+  const extraOrigins = [
+    process.env.APP_URL,
+    'https://pre-sep.sena.edu.co',
+    'https://sep.sena.edu.co',
+  ].filter((v): v is string => !!v && v.trim() !== '')
+
   app.enableCors({
     origin: [
       'http://localhost:3000',
       'http://localhost:8081',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:8081',
+      ...extraOrigins,
     ],
     credentials: true,
     // sin exponer Content-Disposition el navegador lo oculta cross-origin y la descarga pierde el nombre

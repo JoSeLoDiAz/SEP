@@ -142,13 +142,36 @@ fi
 TURNSTILE_KEY="${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-0x4AAAAAADD6VVCyoP6eM5Ao}"
 PUBLIC_API="${NEXT_PUBLIC_API_URL:-/api}"
 
+pick_stage_root() {
+  local d avail
+  for d in /FS/maintenance/sep-tmp /home/opc/sep-ci/tmp /var/tmp; do
+    mkdir -p "${d}" 2>/dev/null || continue
+    [[ -w "${d}" ]] || continue
+    avail="$(df -Pm "${d}" 2>/dev/null | awk 'NR==2 { print $4 }')"
+    [[ -n "${avail}" && "${avail}" -gt 2048 ]] || continue
+    echo "${d}"
+    return 0
+  done
+  echo ""
+}
+
+STAGE_ROOT="$(pick_stage_root)"
+if [[ -n "${STAGE_ROOT}" ]]; then
+  echo "=== Stage backend en ${STAGE_ROOT} (fuera del disco raiz) ==="
+  rm -rf "${STAGE_ROOT}/be-root"
+fi
+
 echo "=== CI build Next standalone + Nest dist offline ==="
 PODMAN_VOLS=(-v "${REPO_ROOT}:/app:Z" -v "${PNPM_STORE}:/store:Z")
 if [[ -x "${PNPM_BIN}" && -f "${PNPM_BIN}" ]]; then
   PODMAN_VOLS+=(-v "${PNPM_BIN}:/opt/pnpm:Z")
 fi
+if [[ -n "${STAGE_ROOT}" ]]; then
+  PODMAN_VOLS+=(-v "${STAGE_ROOT}:/stage:Z")
+fi
 podman run --rm \
   "${PODMAN_VOLS[@]}" \
+  -e CI=1 \
   -e NEXT_TELEMETRY_DISABLED=1 \
   -e NEXT_PUBLIC_API_URL="${PUBLIC_API}" \
   -e NEXT_PUBLIC_TURNSTILE_SITE_KEY="${TURNSTILE_KEY}" \
@@ -185,26 +208,66 @@ podman run --rm \
     if [[ -d frontend/public ]]; then
       cp -a frontend/public/. frontend/.next/standalone/frontend/public/
     fi
+    if [[ -d /stage && -w /stage ]]; then
+      echo "=== pnpm deploy backend --prod (sin Next/SWC) ==="
+      rm -rf /stage/be-root
+      mkdir -p /stage/be-root
+      if "${PNPM}" --filter backend deploy --prod /stage/be-root/backend \
+        && test -f /stage/be-root/backend/dist/main.js; then
+        echo "pnpm deploy backend OK"
+      else
+        echo "Aviso: pnpm deploy fallo; se usara fallback en el host"
+        rm -rf /stage/be-root
+      fi
+    fi
   '
 
 tar -C "${REPO_ROOT}/frontend/.next/standalone" -czf "${OUT_DIR}/frontend-standalone.tgz" .
 test -f "${OUT_DIR}/frontend-standalone.tgz"
+echo "=== Liberando frontend/.next del disco raiz ==="
+rm -rf "${REPO_ROOT}/frontend/.next"
 
-STAGE_BE="$(mktemp -d /tmp/sep-be-XXXXXX)"
-trap 'rm -rf "${STAGE_BE}"' EXIT
-mkdir -p "${STAGE_BE}/backend"
-cp -a "${REPO_ROOT}/package.json" "${REPO_ROOT}/pnpm-workspace.yaml" "${REPO_ROOT}/pnpm-lock.yaml" "${STAGE_BE}/"
-mkdir -p "${STAGE_BE}/frontend"
-cp -a "${REPO_ROOT}/frontend/package.json" "${STAGE_BE}/frontend/"
-cp -a "${REPO_ROOT}/backend/package.json" "${STAGE_BE}/backend/"
-cp -a "${REPO_ROOT}/backend/dist" "${STAGE_BE}/backend/dist"
-if [[ -d "${REPO_ROOT}/node_modules" ]]; then
-  cp -a "${REPO_ROOT}/node_modules" "${STAGE_BE}/node_modules"
-fi
-if [[ -d "${REPO_ROOT}/backend/node_modules" ]]; then
-  cp -a "${REPO_ROOT}/backend/node_modules" "${STAGE_BE}/backend/node_modules"
-fi
-tar -C "${STAGE_BE}" -czf "${OUT_DIR}/backend-app.tgz" .
+pack_backend_tarball() {
+  if [[ -f "${STAGE_ROOT:-}/be-root/backend/dist/main.js" ]]; then
+    echo "=== Empaquetando backend desde pnpm deploy ==="
+    tar -C "${STAGE_ROOT}/be-root" -czf "${OUT_DIR}/backend-app.tgz" .
+    rm -rf "${STAGE_ROOT}/be-root"
+    return 0
+  fi
+
+  echo "=== Empaquetando backend (rsync sin Next/SWC; fallback) ==="
+  local stage
+  if [[ -n "${STAGE_ROOT}" ]]; then
+    stage="${STAGE_ROOT}/be-root"
+    rm -rf "${stage}"
+    mkdir -p "${stage}"
+  else
+    stage="$(mktemp -d /var/tmp/sep-be-XXXXXX)"
+  fi
+  mkdir -p "${stage}/backend" "${stage}/frontend"
+  cp -a "${REPO_ROOT}/package.json" "${REPO_ROOT}/pnpm-workspace.yaml" "${REPO_ROOT}/pnpm-lock.yaml" "${stage}/"
+  cp -a "${REPO_ROOT}/frontend/package.json" "${stage}/frontend/"
+  cp -a "${REPO_ROOT}/backend/package.json" "${REPO_ROOT}/backend/dist" "${stage}/backend/"
+  if [[ -d "${REPO_ROOT}/node_modules" ]]; then
+    rsync -a \
+      --exclude='.pnpm/@next*' \
+      --exclude='.pnpm/next@*' \
+      --exclude='.pnpm/@swc*' \
+      --exclude='.pnpm/react@*' \
+      --exclude='.pnpm/react-dom@*' \
+      --exclude='.pnpm/sharp@*' \
+      --exclude='.pnpm/@esbuild*' \
+      --exclude='.cache' \
+      "${REPO_ROOT}/node_modules/" "${stage}/node_modules/"
+  fi
+  if [[ -d "${REPO_ROOT}/backend/node_modules" ]]; then
+    rsync -a "${REPO_ROOT}/backend/node_modules/" "${stage}/backend/node_modules/"
+  fi
+  tar -C "${stage}" -czf "${OUT_DIR}/backend-app.tgz" .
+  rm -rf "${stage}"
+}
+
+pack_backend_tarball
 test -f "${OUT_DIR}/backend-app.tgz"
 
 cat > "${OUT_DIR}/build-meta.txt" <<EOF
@@ -243,9 +306,6 @@ publish_artifacts_to_pre() {
     "${user}@${host}:${REMOTE_APP}/.ci-in/"
   "${ssh[@]}" "${user}@${host}" \
     "test -f '${REMOTE_APP}/.ci-in/frontend-standalone.tgz' && test -f '${REMOTE_APP}/.ci-in/backend-app.tgz' && grep -q 'short=${CI_COMMIT_SHORT_SHA:-unknown}' '${REMOTE_APP}/.ci-in/build-meta.txt'"
-  mkdir -p /home/opc/sep-ci/artifacts
-  cp -f "${OUT_DIR}/frontend-standalone.tgz" "${OUT_DIR}/backend-app.tgz" "${OUT_DIR}/build-meta.txt" \
-    /home/opc/sep-ci/artifacts/ 2>/dev/null || true
   echo "=== Artefactos en PRE (.ci-in) OK ==="
 }
 

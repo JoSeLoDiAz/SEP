@@ -71,15 +71,14 @@ seed_offline_from_pre_if_needed() {
   host="${DEPLOY_SSH_HOST:-172.24.129.65}"
   user="${DEPLOY_SSH_USER:-opc}"
   chmod 600 "${key}" 2>/dev/null || true
-  pre_ssh_opts
+  pre_scp_opts
   local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
-  # -O: SCP legado. Sin eso, OpenSSH 9+ (SFTP) se cuelga con el gate command=.
-  local scp=(scp -O -i "${key}" "${PRE_SSH_OPTS[@]}")
+  local scp=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Sembrando offline SEP desde ${user}@${host} (LAN, no Internet) ==="
   echo "faltantes: image=${need_image} pnpm=${need_pnpm} deps=${need_deps}"
 
   if [[ "${need_image}" -eq 1 ]]; then
-    echo "=== scp imagen Node desde PRE (scp -O) ==="
+    echo "=== scp imagen Node desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar'"; then
       "${scp[@]}" "${user}@${host}:${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
       echo "=== imagen Node OK ==="
@@ -294,9 +293,9 @@ publish_artifacts_to_pre() {
   host="${DEPLOY_SSH_HOST:-172.24.129.65}"
   user="${DEPLOY_SSH_USER:-opc}"
   chmod 600 "${key}" 2>/dev/null || true
-  pre_ssh_opts
+  pre_scp_opts
   local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
-  local scp=(scp -O -i "${key}" "${PRE_SSH_OPTS[@]}")
+  local scp=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Publicando artefactos por LAN a ${user}@${host}:${REMOTE_APP}/.ci-in ==="
   "${ssh[@]}" "${user}@${host}" "mkdir -p '${REMOTE_APP}/.ci-in'"
   "${scp[@]}" \

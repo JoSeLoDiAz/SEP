@@ -2,7 +2,8 @@
 # Resuelve llave SSH PRE (SEP). Preferir GitLab File DEPLOY_SSH_PRIVATE_KEY (env=pre).
 #
 # OpenSSH 9+ usa SFTP en scp. El gate de authorized_keys (command=) no habla SFTP
-# y el cliente se queda colgado. Forzar protocolo legado: scp -O.
+# y el cliente se queda colgado. Forzar protocolo legado: scp -O (si el binario lo tiene).
+# El scp de OL8/vmpmgit no entiende -O; ahi el protocolo ya es el legado.
 pre_ssh_opts() {
   PRE_SSH_OPTS=(
     -o BatchMode=yes
@@ -12,6 +13,14 @@ pre_ssh_opts() {
     -o ServerAliveCountMax=4
     -o IdentitiesOnly=yes
   )
+}
+
+pre_scp_opts() {
+  pre_ssh_opts
+  PRE_SCP_OPTS=()
+  if ! scp -O 2>&1 | grep -q 'unknown option'; then
+    PRE_SCP_OPTS+=(-O)
+  fi
 }
 
 resolve_deploy_ssh_key() {

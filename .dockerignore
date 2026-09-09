@@ -1,0 +1,4 @@
+backend/dist
+backend/tsconfig.build.tsbuildinfo
+frontend/.next
+**/node_modules

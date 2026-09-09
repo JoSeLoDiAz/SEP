@@ -48,6 +48,15 @@ docs/evaluador/*/
 !docs/evaluador/plantillas/
 docs/reports/
 
+# ── Respaldos de migraciones con datos de personas ──
+# El repositorio es público. Los respaldos que traen nombres, cédulas o nombres de
+# archivo de evaluadores van fuera: ../respaldos/. Solo se versionan los que
+# contienen únicamente identificadores internos (respaldo-v64.json, por ejemplo).
+docs/migraciones/respaldo-v6[6-9]*.json
+docs/migraciones/respaldo-v[7-9]*.json
+docs/migraciones/*-clasificacion.json
+docs/migraciones/*-datos.json
+
 # ── Temporales de Office ──
 # Word deja un archivo de bloqueo mientras el documento está abierto.
 ~$*

@@ -1,0 +1,12 @@
+packages:
+  - 'frontend'
+  - 'backend'
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - sharp
+allowBuilds:
+  '@nestjs/core': false
+  '@scarf/scarf': false
+  oracledb: false
+  unrs-resolver: false
+  vue-demi: false

@@ -1,93 +1,384 @@
-# SI177-SEP_Reestructurado
+# SEP — Sistema Especializado de Proyectos
 
+Plataforma empresarial de gestión de proyectos para el **GGPC — SENA / DSNFT**, construida sobre un stack moderno y desplegada en producción en `https://sep.ggpcsena.com`.
 
+> **Última actualización:** 19 mayo 2026
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Índice
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- [Stack tecnológico](#stack-tecnológico)
+- [Arquitectura](#arquitectura)
+- [URLs públicas](#urls-públicas)
+- [Estructura del monorepo](#estructura-del-monorepo)
+- [Setup para desarrolladores](#setup-para-desarrolladores)
+- [Estrategia de ramas](#estrategia-de-ramas)
+- [Roles de base de datos](#roles-de-base-de-datos)
+- [Despliegue a producción](#despliegue-a-producción)
+- [Documentación detallada](#documentación-detallada)
+- [Equipo](#equipo)
 
-## Add your files
+---
 
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Stack tecnológico
+
+| Capa | Tecnología | Versión |
+|---|---|---|
+| Frontend | Next.js (App Router) + TypeScript | 15.x |
+| Estilos / UI | Tailwind CSS + lucide-react | 3.4 / 0.x |
+| Estado | TanStack Query / hooks nativos | 5.x |
+| Backend | NestJS + TypeORM (queries crudos vía DataSource) | 11.x |
+| Base de datos | Oracle Database 21c XE (`gvenzl/oracle-xe:21-slim`) | 21c |
+| Proxy | Nginx | stable-alpine |
+| Runtime | Node.js | 22 LTS |
+| Contenedores | Docker + Compose | — |
+| Gestor pkgs | pnpm (workspaces) | latest |
+| Túnel público | Cloudflare Tunnel (HTTP + SSH + TCP) | — |
+| Email | Nodemailer + SMTP Gmail | — |
+| PDFs | PDFKit | — |
+| Auth | JWT (Passport) | — |
+
+---
+
+## Arquitectura
 
 ```
-cd existing_repo
-git remote add origin https://projecthub.sena.edu.co/aplicaciones/amazonas/si177-sep/si177-sep_reestructurado.git
-git branch -M main
-git push -uf origin main
+┌─────────────────────────────────────────────────────────────┐
+│  SERVIDOR (Hyper-V VM Ubuntu — i7-14700, 32 GB)              │
+│  ───────────────────────────────────────────────             │
+│  • Oracle XE        :1521  (DB centralizada)                  │
+│  • Docker stack PROD                                         │
+│      ├── nginx     :8080 → 80                                 │
+│      ├── frontend  :3000  (Next.js standalone)                │
+│      └── backend   :4000  (NestJS)                            │
+│  • cloudflared     (expone HTTP + SSH + TCP)                  │
+└─────────────────────────────────────────────────────────────┘
+       ▲                ▲                       ▲
+       │                │                       │
+sep.ggpcsena.com   ssh.ggpcsena.com    sepdb.ggpcsena.com
+(usuarios finales) (admin)             (devs vía cloudflared
+                                        access tcp en local)
+       │                │                       │
+       │                │                       ├─ Josse (admin)
+       │                │                       ├─ Rosa
+       │                │                       ├─ Jhonatan
+       │                │                       ├─ Javier
+       │                │                       ├─ Julio
+       │                │                       └─ Juliana
 ```
 
-## Integrate with your tools
+Cada desarrollador trabaja en **modo dev** (`pnpm dev`) en su PC local con hot-reload. Solo el líder técnico hace `docker compose up --build` en el servidor para desplegar a producción.
 
-* [Set up project integrations](https://projecthub.sena.edu.co/aplicaciones/amazonas/si177-sep/si177-sep_reestructurado/-/settings/integrations)
+---
 
-## Collaborate with your team
+## URLs públicas
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+| Hostname | Servicio | Quién lo usa |
+|---|---|---|
+| `https://sep.ggpcsena.com` | App web SEP en producción | usuarios finales (empresas, SENA) |
+| `ssh.ggpcsena.com:22` | SSH al servidor | admin |
+| `sepdb.ggpcsena.com:1521` | Oracle DB (TCP vía Cloudflare Tunnel) | desarrolladores en local |
 
-## Test and Deploy
+---
 
-Use the built-in continuous integration in GitLab.
+## Estructura del monorepo
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+```
+SEPLocal/
+├── backend/                          # NestJS API REST
+│   ├── src/
+│   │   ├── auth/                     # login, JWT, recuperación de contraseña
+│   │   ├── empresa/                  # gestión de empresas proponentes
+│   │   ├── contactos/                # contactos de empresa
+│   │   ├── necesidades/              # necesidades de formación
+│   │   ├── proyectos/                # módulo central — proyectos, AFs, rubros, UTs
+│   │   ├── importar-proyecto/        # importación desde Excel del formulador
+│   │   ├── convenios/                # listado, beneficiarios, director del convenio
+│   │   ├── personas/                 # registro/actualización de personas (HV)
+│   │   ├── capacitadores/            # capacitadores naturales y jurídicos
+│   │   ├── cronograma/               # cronograma presencial/virtual + radicado
+│   │   ├── grupos/                   # AF·grupos, cobertura, asociar beneficiarios
+│   │   ├── certificacion/            # UTHoras, certificación, reporte asistencia
+│   │   ├── modificaciones/           # otrosíes/ajustes/prórrogas (lado conveniente)
+│   │   ├── plataformas-virtuales/    # accesos a plataformas del convenio
+│   │   ├── certificados/             # generación de PDFs (PDFKit)
+│   │   ├── usuarios-admin/           # gestión de usuarios y multirol
+│   │   ├── evaluadores/              # banco de evaluadores (en construcción)
+│   │   └── main.ts
+│   ├── package.json
+│   └── .env                          # NO commitear — cada dev lo crea
+├── frontend/                         # Next.js App Router
+│   └── src/
+│       ├── app/
+│       │   ├── (public)/             # rutas sin login
+│       │   ├── (dashboard)/          # rutas con login + sidebar
+│       │   │   └── panel/
+│       │   │       ├── proyectos/[id]/
+│       │   │       │   ├── acciones/[afId]/{beneficiarios,unidades,rubros}/
+│       │   │       │   └── ...
+│       │   │       ├── convenios/[id]/                # ← módulo de ejecución
+│       │   │       │   ├── directores/
+│       │   │       │   ├── capacitadores/
+│       │   │       │   ├── cronograma/
+│       │   │       │   ├── beneficiarios/
+│       │   │       │   ├── grupos/[afGrupoId]/{certificar,asistencia}/
+│       │   │       │   ├── modificaciones/
+│       │   │       │   └── plataformas/
+│       │   │       ├── necesidades/
+│       │   │       ├── datos/
+│       │   │       └── ...
+│       │   ├── login/
+│       │   └── layout.tsx
+│       ├── components/
+│       │   ├── layout/               # AppSidebar, PanelTopbar, ConvenioNav
+│       │   ├── convenios/            # modales: asociar, grupos, modificación, plataforma…
+│       │   ├── cronograma/           # calendario de sesiones
+│       │   ├── public/               # registro empresa, eventos, login
+│       │   └── ui/                   # NumberInput, NoScrollNumbers, ToastBetowa, ConfirmModal…
+│       └── lib/                      # api.ts (axios), auth.ts, descargar-archivo.ts
+├── docker/
+│   └── nginx/default.conf            # reverse proxy
+├── docs/
+│   ├── informes/                     # documentación funcional por módulo
+│   │   ├── 00-A-contexto-proyecto.md
+│   │   ├── 00-B-servidor-ubuntu.md
+│   │   ├── 01-login.md … 09-…
+│   │   ├── 10-setup-desarrolladores.md   # ← guía dev local
+│   │   └── 11-setup-server-multi-dev.md  # ← guía admin del server
+│   └── migraciones/                  # scripts SQL versionados
+│       ├── v1_… v8_convocatoria10_rubros.sql
+│       └── v9_usuario_lector_devs.sql    # ← SEP_LECTOR
+├── docker-compose.yml
+├── reload-nginx.sh
+├── pnpm-workspace.yaml
+└── .env.example
+```
 
-***
+---
 
-# Editing this README
+## Setup para desarrolladores
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+> **Lectura completa:** [`docs/informes/10-setup-desarrolladores.md`](docs/informes/10-setup-desarrolladores.md)
 
-## Suggestions for a good README
+Resumen ultra-corto para devs ya configurados:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+# 1. Asegúrate de que el túnel a la DB esté arriba
+schtasks /Run /TN "SEP DB Tunnel"
+Test-NetConnection -ComputerName 127.0.0.1 -Port 1521
 
-## Name
-Choose a self-explaining name for your project.
+# 2. Clona / actualiza el repo
+git clone https://github.com/JoSeLoDiAz/SEP.git
+cd SEP
+git checkout dev
+git pull
+pnpm install
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+# 3. Crea backend/.env (pídele las claves al líder)
+cp .env.example backend/.env
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+# 4. Levanta dev (2 terminales)
+pnpm --filter backend run start:dev      # → http://localhost:4000
+pnpm --filter frontend dev               # → http://localhost:3000
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Cualquier cambio en código se ve en el navegador en ~200 ms. **No requiere Docker en local.**
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+---
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Estrategia de ramas
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```
+produccion ◀── (merge solo por Josse, despliega a sep.ggpcsena.com)
+    ↑
+   dev      ◀── (rama integradora del equipo, recibe los PRs de features)
+    ↑
+feature/<nombre-dev>-<descripción>  ◀── (cada dev en su rama personal)
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+**Reglas:**
+- ❌ Nadie hace push directo a `produccion` ni `dev` (branch protection).
+- ✅ Cada dev abre PR de su rama → `dev`. Josse revisa y mergea.
+- ✅ Cuando `dev` está estable, Josse mergea `dev` → `produccion`.
+- ✅ Solo Josse tiene rol `Admin` en GitHub; los demás son `Write`.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+**Convenciones de mensaje:**
+- `feat:` nueva funcionalidad
+- `fix:` corrección de bug
+- `refactor:` reestructurar sin cambiar comportamiento
+- `docs:` documentación
+- `style:` formato / CSS
+- `chore:` configs, deps, mantenimiento
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+---
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Roles de base de datos
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+| Usuario | Permisos | Quién lo usa |
+|---|---|---|
+| `SEPLOCAL` | Owner del schema — todo (DDL incluido) | Solo Josse, para migraciones |
+| `SEP_APP` | INSERT/UPDATE/DELETE/SELECT (sin DDL) — bloqueado fuera de Node por logon trigger | Backend de cada dev en `.env` |
+| `SEP_LECTOR` | Solo `SELECT` (180 tablas + sinónimos) | SQL Developer de cada dev (consulta segura) |
+| `SYSTEM` | DBA del PDB | Solo Josse para mantenimiento |
 
-## License
-For open source projects, say how it is licensed.
+> **Contraseñas:** no se comparten en el repo. Pídeselas a Josse por canal seguro (Bitwarden / pendrive — nunca por Slack ni email).
+>
+> **Por qué dos usuarios para los devs:** `SEP_APP` es el que va en `.env` del backend. Aunque un dev tenga la contraseña, un logon trigger lo bloquea si intenta abrirla en SQL Developer (solo acepta clientes Node/Nest). Para consultar datos a mano se usa `SEP_LECTOR` (solo SELECT). Así, ni la contraseña de `SEP_APP` filtrada permite `DROP TABLE`.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Scripts de creación:
+- [`docs/migraciones/v9_usuario_lector_devs.sql`](docs/migraciones/v9_usuario_lector_devs.sql) — `SEP_LECTOR`
+- [`docs/migraciones/v10_usuario_sep_app.sql`](docs/migraciones/v10_usuario_sep_app.sql) — `SEP_APP` + logon trigger + auditoría
+
+---
+
+## Despliegue a producción
+
+> **Solo Josse.** Lectura completa: [`docs/informes/11-setup-server-multi-dev.md`](docs/informes/11-setup-server-multi-dev.md)
+
+```bash
+# 1. Mergea dev → produccion en local
+git checkout produccion
+git pull
+git merge dev
+git push origin produccion
+
+# 2. Conéctate al server (VM Hyper-V Ubuntu)
+ssh sepadmin@ssh.ggpcsena.com
+cd /opt/sep/SEPLocal
+
+# 3. Pull y deploy
+git pull
+docker compose up -d --build && bash reload-nginx.sh
+```
+
+⏱️ **Tiempo de build cached + deploy:** ~12 segundos en el servidor (Hyper-V + VT-x nativo).
+
+---
+
+## Variables de entorno requeridas (`backend/.env`)
+
+```env
+BACKEND_PORT=4000
+NODE_ENV=development
+
+ORACLE_USER=SEP_APP
+ORACLE_PASSWORD=<pedir al líder>
+ORACLE_CONNECT_STRING=localhost:1521/XEPDB1   # vía cloudflared en local
+
+JWT_SECRET=<64 caracteres random>
+JWT_EXPIRES_IN=30m   # sliding-session: backend regenera token en cada request
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=<correo>
+SMTP_PASS=<app password>
+
+APP_URL=http://localhost:3000   # en producción: https://sep.ggpcsena.com
+
+# Captcha del login. Vacío en dev = sin verificación. En prod siempre va.
+TURNSTILE_SECRET=<pedir al líder>
+```
+
+Y en `frontend/.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:4000/api
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAADD6VVCyoP6eM5Ao   # site key pública
+```
+
+Plantilla completa: [`.env.example`](.env.example)
+
+---
+
+## Documentación detallada
+
+Toda la documentación funcional está en [`docs/informes/`](docs/informes/):
+
+| Documento | Contenido |
+|---|---|
+| [`00-A-contexto-proyecto.md`](docs/informes/00-A-contexto-proyecto.md) | Contexto general del SEP y GGPC |
+| [`00-B-servidor-ubuntu.md`](docs/informes/00-B-servidor-ubuntu.md) | Setup base del servidor Ubuntu |
+| [`01-login.md`](docs/informes/01-login.md) | Módulo de autenticación |
+| [`02-inicio-publico.md`](docs/informes/02-inicio-publico.md) | Landing pública |
+| [`03-certificados.md`](docs/informes/03-certificados.md) | Generación de certificados PDF |
+| [`04-eventos.md`](docs/informes/04-eventos.md) | Inscripción a eventos |
+| [`05-inicio-empresa-panel.md`](docs/informes/05-inicio-empresa-panel.md) | Dashboard empresa |
+| [`06-datos-basicos-empresa.md`](docs/informes/06-datos-basicos-empresa.md) | Datos básicos / contactos |
+| [`07-control-versiones-git.md`](docs/informes/07-control-versiones-git.md) | Convenciones Git |
+| [`08-registro-proponente.md`](docs/informes/08-registro-proponente.md) | Registro de proponente |
+| [`09-registro-usuario-persona.md`](docs/informes/09-registro-usuario-persona.md) | Registro de persona |
+| [`10-setup-desarrolladores.md`](docs/informes/10-setup-desarrolladores.md) | **Guía completa para devs nuevos** |
+| [`11-setup-server-multi-dev.md`](docs/informes/11-setup-server-multi-dev.md) | **Guía del lado server (admin)** |
+| [`12-contactos.md`](docs/informes/12-contactos.md) | Contactos de empresa |
+| [`13-analisis-empresarial.md`](docs/informes/13-analisis-empresarial.md) | Análisis empresarial |
+| [`14-diagnostico-necesidades.md`](docs/informes/14-diagnostico-necesidades.md) | Diagnóstico de necesidades |
+| [`15-listado-proyectos.md`](docs/informes/15-listado-proyectos.md) | Listado de proyectos |
+| [`16-crear-proyecto.md`](docs/informes/16-crear-proyecto.md) | Creación de proyecto |
+| [`17-gestionar-proyecto.md`](docs/informes/17-gestionar-proyecto.md) | Gestión del proyecto |
+| [`18-acciones-formacion.md`](docs/informes/18-acciones-formacion.md) | Acciones de formación |
+| [`19-formular-accion-formacion.md`](docs/informes/19-formular-accion-formacion.md) | Formular acción de formación |
+| [`20-rubros-accion-formacion.md`](docs/informes/20-rubros-accion-formacion.md) | Rubros por AF |
+| [`21-versiones-proyecto.md`](docs/informes/21-versiones-proyecto.md) | Versiones del proyecto |
+| [`22-descargar-proyecto.md`](docs/informes/22-descargar-proyecto.md) | Descargar proyecto |
+| [`23-aprobacion-proyectos.md`](docs/informes/23-aprobacion-proyectos.md) | Aprobación y publicación de resultados |
+| [`24-convenios-vista-general.md`](docs/informes/24-convenios-vista-general.md) | **Convenios — vista general y panel del convenio** |
+| [`25-directores-capacitadores-convenio.md`](docs/informes/25-directores-capacitadores-convenio.md) | **Directores y capacitadores del convenio** |
+| [`26-cronograma-convenio.md`](docs/informes/26-cronograma-convenio.md) | **Cronograma del convenio** |
+| [`27-beneficiarios-convenio.md`](docs/informes/27-beneficiarios-convenio.md) | **Beneficiarios del convenio** |
+| [`28-grupos-certificacion-asistencia.md`](docs/informes/28-grupos-certificacion-asistencia.md) | **AF·Grupos, certificación y reporte de asistencia** |
+| [`29-modificaciones-plataformas-virtuales.md`](docs/informes/29-modificaciones-plataformas-virtuales.md) | **Modificaciones y plataformas virtuales del convenio** |
+
+---
+
+## Equipo
+
+| Rol | Nombre | Responsabilidad |
+|---|---|---|
+| **Líder técnico / Admin** | Josse Díaz (`josediazd40z@gmail.com`) | Arquitectura, infra, deploys, code review, BD |
+| Desarrolladora | Rosa | Features asignadas |
+| Desarrollador | Jhonatan | Features asignadas |
+| Desarrollador | Javier | Features asignadas |
+| Desarrollador | Julio | Features asignadas |
+| Desarrolladora | Juliana | Features asignadas |
+
+---
+
+## Funcionalidades implementadas (highlights recientes)
+
+### Formulación (etapa propuesta)
+- ✅ Multi-tenant: empresas, contactos, datos básicos
+- ✅ Inscripción pública a eventos + certificados PDF
+- ✅ Necesidades de formación
+- ✅ Proyectos: generalidades, articulación, alineación
+- ✅ Acciones de Formación: detalle completo con grupos, beneficiarios, sectores, niveles ocupacionales, CUOC, áreas funcionales
+- ✅ Unidades Temáticas con perfiles de capacitador
+- ✅ **Rubros AF** con prereqs (grupos, UTs, horas), GO, Transferencia
+- ✅ Validaciones por campo (presencial / híbrida / virtual)
+- ✅ Eliminación en cascada de AF (sectores, UTs, grupos, coberturas)
+- ✅ Importación masiva de proyectos desde el Excel del formulador (carga completa a BD)
+
+### Convenios — ejecución (nuevo)
+- ✅ Listado de convenios con estados y panel principal por convenio
+- ✅ **Directores** del proyecto: registro, validación interventoría, historial
+- ✅ **Capacitadores** naturales y jurídicos con sus HVs y empresas capacitadoras
+- ✅ **Cronograma** presencial/virtual con calendario visual, modalidades 1/2/3 (presencial) y 4 (virtual), radicación por cortes
+- ✅ **Beneficiarios**: registro (HabeasData), empresa beneficiaria inline, asociación rápida a grupos, control activos/inactivos, validación 5% repetidos por AF
+- ✅ **AF·Grupos**: cupos vs registrados vs certificados, cobertura geográfica, reglas de 1-grupo-por-AF
+- ✅ **Certificación** por UT: tabla beneficiario × sesión, certificación masiva, regla CERTIFICA = SI si ≥ 80% horas
+- ✅ **Reporte de Asistencia** Excel con formato legacy F2.x/F3.1 (fill azul corporativo `#00304D`)
+- ✅ **Modificaciones** del convenio (otrosíes, ajustes, prórrogas) — lado conveniente con bloqueo cuando interventoría/SENA ya respondieron
+- ✅ **Plataformas Virtuales**: accesos a plataformas con clave oculta + copiar al portapapeles
+- ✅ Validación transversal "convenio en ejecución" (CONVENIOSESTADO = 1) aplicada a todas las acciones de escritura
+- ✅ Exportes Excel con compresión (ExcelJS / SheetJS) y respaldo NCHAR para Oracle
+
+### Plataforma y arquitectura
+- ✅ NumberInput con separadores de miles y bloqueo de scroll
+- ✅ Recarga parcial de secciones (no resetea formulario)
+- ✅ Setup multi-dev con DB centralizada y permisos diferenciados
+- ✅ Toast `ToastBetowa` y `ConfirmModal` reutilizables para feedback consistente
+
+---
+
+## Licencia
+
+Software propietario — GGPC SENA / DSNFT. Uso interno autorizado.

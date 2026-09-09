@@ -41,8 +41,9 @@ p="$(grep -E '^BACKEND_PORT=' "${ENV_FILE}" | head -1 | cut -d= -f2- | tr -d '\r
 [[ -n "${p}" ]] && BE_PORT="${p}"
 
 chmod 600 "${SSH_KEY}" "${ENV_FILE}" 2>/dev/null || true
-SSH=(ssh -i "${SSH_KEY}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
-SCP=(scp -i "${SSH_KEY}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+pre_ssh_opts
+SSH=(ssh -i "${SSH_KEY}" "${PRE_SSH_OPTS[@]}")
+SCP=(scp -O -i "${SSH_KEY}" "${PRE_SSH_OPTS[@]}")
 TARGET="${SSH_USER}@${SSH_HOST}"
 
 ENV_BEFORE="$("${SSH[@]}" "${TARGET}" "sha256sum '${REMOTE_APP}/.env' 2>/dev/null | awk '{print \$1}' || true")"

@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
 # Resuelve llave SSH PRE (SEP). Preferir GitLab File DEPLOY_SSH_PRIVATE_KEY (env=pre).
+#
+# OpenSSH 9+ usa SFTP en scp. El gate de authorized_keys (command=) no habla SFTP
+# y el cliente se queda colgado. Forzar protocolo legado: scp -O.
+pre_ssh_opts() {
+  PRE_SSH_OPTS=(
+    -o BatchMode=yes
+    -o StrictHostKeyChecking=accept-new
+    -o ConnectTimeout=30
+    -o ServerAliveInterval=15
+    -o ServerAliveCountMax=4
+    -o IdentitiesOnly=yes
+  )
+}
+
 resolve_deploy_ssh_key() {
   local candidate keyfile
   if [[ -n "${DEPLOY_SSH_KEY_FILE:-}" && -f "${DEPLOY_SSH_KEY_FILE}" ]]; then

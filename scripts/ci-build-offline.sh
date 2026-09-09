@@ -22,26 +22,46 @@ command -v podman >/dev/null || { echo "ERROR: podman requerido en runner build"
 
 mkdir -p "${OUT_DIR}" "${OFFLINE_ROOT}/imagenes" "${PNPM_STORE}"
 
+reuse_local_node_tar() {
+  if podman image exists "${NODE_IMAGE}" 2>/dev/null; then
+    echo "=== Imagen ${NODE_IMAGE} ya cargada en el runner ==="
+    return 0
+  fi
+  [[ -f "${NODE_TAR}" ]] && return 0
+  local src
+  for src in \
+    /home/opc/masamadre-ci/offline/imagenes/node-22-bookworm-slim.tar \
+    /home/opc/sips-ci/offline/imagenes/node-22-bookworm-slim.tar
+  do
+    if [[ -f "${src}" ]]; then
+      echo "=== Reusando tar Node local ${src} ==="
+      cp -f "${src}" "${NODE_TAR}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 seed_offline_from_pre_if_needed() {
-  local need=0
   local lock_hash=""
   local lock_hash_file="${OFFLINE_ROOT}/.pnpm-lock.sha256"
   lock_hash="$(sha256sum "${REPO_ROOT}/pnpm-lock.yaml" | awk '{print $1}')"
-  podman image exists "${NODE_IMAGE}" 2>/dev/null || [[ -f "${NODE_TAR}" ]] || need=1
-  local need_npm=0
-  if [[ -z "$(ls -A "${PNPM_STORE}" 2>/dev/null || true)" ]] && [[ ! -f "${NODE_MODULES_TGZ}" ]]; then
-    need_npm=1
-  elif [[ -n "${lock_hash}" ]] && [[ -f "${lock_hash_file}" ]]; then
+  reuse_local_node_tar || true
+
+  local need_image=0 need_pnpm=0 need_deps=0
+  podman image exists "${NODE_IMAGE}" 2>/dev/null || [[ -f "${NODE_TAR}" ]] || need_image=1
+  [[ -x "${PNPM_BIN}" && -f "${PNPM_BIN}" ]] || need_pnpm=1
+  if [[ ! -f "${NODE_MODULES_TGZ}" ]]; then
+    need_deps=1
+  elif [[ -f "${lock_hash_file}" ]]; then
     local stored=""
     stored="$(tr -d '[:space:]' < "${lock_hash_file}")"
-    [[ "${stored}" == "${lock_hash}" ]] || need_npm=1
+    [[ "${stored}" == "${lock_hash}" ]] || need_deps=1
   fi
-  [[ "${need_npm}" -eq 1 ]] && need=1
-  [[ -x "${PNPM_BIN}" ]] || need=1
-  [[ "${need}" -eq 1 ]] || {
+  if [[ "${need_image}" -eq 0 && "${need_pnpm}" -eq 0 && "${need_deps}" -eq 0 ]]; then
     echo "=== Offline local OK (sin resembra) ==="
     return 0
-  }
+  fi
 
   local key host user
   key="$(resolve_deploy_ssh_key)" || {
@@ -51,37 +71,40 @@ seed_offline_from_pre_if_needed() {
   host="${DEPLOY_SSH_HOST:-172.24.129.65}"
   user="${DEPLOY_SSH_USER:-opc}"
   chmod 600 "${key}" 2>/dev/null || true
-  local ssh=(ssh -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
-  local scp=(scp -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
-  local rsh="ssh -i ${key} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes"
+  pre_ssh_opts
+  local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
+  # -O: SCP legado. Sin eso, OpenSSH 9+ (SFTP) se cuelga con el gate command=.
+  local scp=(scp -O -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Sembrando offline SEP desde ${user}@${host} (LAN, no Internet) ==="
+  echo "faltantes: image=${need_image} pnpm=${need_pnpm} deps=${need_deps}"
 
-  if [[ ! -f "${NODE_TAR}" ]]; then
+  if [[ "${need_image}" -eq 1 ]]; then
+    echo "=== scp imagen Node desde PRE (scp -O) ==="
     if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar'"; then
       "${scp[@]}" "${user}@${host}:${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
-    elif "${ssh[@]}" "${user}@${host}" "test -f /data/MASAMADRE/imagenes/node-22-bookworm-slim.tar"; then
-      echo "AVISO: usando node-22 de MASAMADRE como puente; preferible sembrar en SEP/imagenes" >&2
-      "${scp[@]}" "${user}@${host}:/data/MASAMADRE/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
+      echo "=== imagen Node OK ==="
+    else
+      echo "ERROR: no hay node-22-bookworm-slim.tar en PRE" >&2
+      return 1
     fi
   fi
-  if [[ ! -x "${PNPM_BIN}" ]]; then
+  if [[ "${need_pnpm}" -eq 1 ]]; then
+    echo "=== scp binario pnpm desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -x '${REMOTE_APP}/offline/pnpm'"; then
       "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/pnpm" "${PNPM_BIN}"
       chmod +x "${PNPM_BIN}"
+      echo "=== pnpm OK ==="
     fi
   fi
-  if [[ "${need_npm}" -eq 1 ]]; then
+  if [[ "${need_deps}" -eq 1 ]]; then
+    echo "=== scp node_modules.tgz desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/offline/node_modules.tgz'"; then
-      echo "=== Copiando node_modules.tgz desde PRE ==="
       "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/node_modules.tgz" "${NODE_MODULES_TGZ}"
-    fi
-    if "${ssh[@]}" "${user}@${host}" "test -d '${REMOTE_APP}/offline/pnpm-store' && ls '${REMOTE_APP}/offline/pnpm-store' | grep -q ."; then
-      echo "=== Rsync pnpm-store desde PRE ==="
-      mkdir -p "${PNPM_STORE}"
-      rsync -az -e "${rsh}" \
-        "${user}@${host}:${REMOTE_APP}/offline/pnpm-store/" \
-        "${PNPM_STORE}/" || echo "AVISO: rsync pnpm-store incompleto" >&2
       echo "${lock_hash}" > "${lock_hash_file}"
+      echo "=== node_modules.tgz OK (sin rsync del store) ==="
+    else
+      echo "ERROR: falta ${REMOTE_APP}/offline/node_modules.tgz" >&2
+      return 1
     fi
   fi
 }
@@ -208,8 +231,9 @@ publish_artifacts_to_pre() {
   host="${DEPLOY_SSH_HOST:-172.24.129.65}"
   user="${DEPLOY_SSH_USER:-opc}"
   chmod 600 "${key}" 2>/dev/null || true
-  local ssh=(ssh -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
-  local scp=(scp -i "${key}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o IdentitiesOnly=yes)
+  pre_ssh_opts
+  local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
+  local scp=(scp -O -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Publicando artefactos por LAN a ${user}@${host}:${REMOTE_APP}/.ci-in ==="
   "${ssh[@]}" "${user}@${host}" "mkdir -p '${REMOTE_APP}/.ci-in'"
   "${scp[@]}" \

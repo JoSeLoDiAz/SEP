@@ -73,14 +73,14 @@ seed_offline_from_pre_if_needed() {
   chmod 600 "${key}" 2>/dev/null || true
   pre_scp_opts
   local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
-  local scp=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
+  local scp_cmd=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Sembrando offline SEP desde ${user}@${host} (LAN, no Internet) ==="
   echo "faltantes: image=${need_image} pnpm=${need_pnpm} deps=${need_deps}"
 
   if [[ "${need_image}" -eq 1 ]]; then
     echo "=== scp imagen Node desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar'"; then
-      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
+      "${scp_cmd[@]}" "${user}@${host}:${REMOTE_APP}/imagenes/node-22-bookworm-slim.tar" "${NODE_TAR}"
       echo "=== imagen Node OK ==="
     else
       echo "ERROR: no hay node-22-bookworm-slim.tar en PRE" >&2
@@ -90,7 +90,7 @@ seed_offline_from_pre_if_needed() {
   if [[ "${need_pnpm}" -eq 1 ]]; then
     echo "=== scp binario pnpm desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -x '${REMOTE_APP}/offline/pnpm'"; then
-      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/pnpm" "${PNPM_BIN}"
+      "${scp_cmd[@]}" "${user}@${host}:${REMOTE_APP}/offline/pnpm" "${PNPM_BIN}"
       chmod +x "${PNPM_BIN}"
       echo "=== pnpm OK ==="
     fi
@@ -98,7 +98,7 @@ seed_offline_from_pre_if_needed() {
   if [[ "${need_deps}" -eq 1 ]]; then
     echo "=== scp node_modules.tgz desde PRE ==="
     if "${ssh[@]}" "${user}@${host}" "test -f '${REMOTE_APP}/offline/node_modules.tgz'"; then
-      "${scp[@]}" "${user}@${host}:${REMOTE_APP}/offline/node_modules.tgz" "${NODE_MODULES_TGZ}"
+      "${scp_cmd[@]}" "${user}@${host}:${REMOTE_APP}/offline/node_modules.tgz" "${NODE_MODULES_TGZ}"
       echo "${lock_hash}" > "${lock_hash_file}"
       echo "=== node_modules.tgz OK (sin rsync del store) ==="
     else
@@ -211,7 +211,7 @@ podman run --rm \
       echo "=== pnpm deploy backend --prod (sin Next/SWC) ==="
       rm -rf /stage/be-root
       mkdir -p /stage/be-root
-      if "${PNPM}" --filter backend deploy --prod /stage/be-root/backend \
+      if "${PNPM}" --filter backend deploy --legacy --prod /stage/be-root/backend \
         && test -f /stage/be-root/backend/dist/main.js; then
         echo "pnpm deploy backend OK"
       else
@@ -295,10 +295,10 @@ publish_artifacts_to_pre() {
   chmod 600 "${key}" 2>/dev/null || true
   pre_scp_opts
   local ssh=(ssh -i "${key}" "${PRE_SSH_OPTS[@]}")
-  local scp=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
+  local scp_cmd=(scp "${PRE_SCP_OPTS[@]}" -i "${key}" "${PRE_SSH_OPTS[@]}")
   echo "=== Publicando artefactos por LAN a ${user}@${host}:${REMOTE_APP}/.ci-in ==="
   "${ssh[@]}" "${user}@${host}" "mkdir -p '${REMOTE_APP}/.ci-in'"
-  "${scp[@]}" \
+  "${scp_cmd[@]}" \
     "${OUT_DIR}/frontend-standalone.tgz" \
     "${OUT_DIR}/backend-app.tgz" \
     "${OUT_DIR}/build-meta.txt" \

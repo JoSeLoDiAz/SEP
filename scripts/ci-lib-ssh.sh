@@ -18,9 +18,14 @@ pre_ssh_opts() {
 pre_scp_opts() {
   pre_ssh_opts
   PRE_SCP_OPTS=()
-  if ! scp -O 2>&1 | grep -q 'unknown option'; then
+  # OpenSSH 9+ lista -O en el usage ([-346ABCOpqRrsTv]). OL8 no.
+  # No sondear con `scp -O | grep`: pipefail + SIGPIPE da falso positivo.
+  local usage
+  usage="$(scp 2>&1 || true)"
+  if [[ "${usage}" == *'[-'*O*']'* ]]; then
     PRE_SCP_OPTS+=(-O)
   fi
+  echo "scp extra: ${PRE_SCP_OPTS[*]:-(ninguno)}"
 }
 
 resolve_deploy_ssh_key() {

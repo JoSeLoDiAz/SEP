@@ -206,7 +206,7 @@ Si en el futuro quieres añadir una capa extra (ej. requerir login con email del
 
 ### 4.1 Push de las ramas
 
-Ya estás listo (Claude lo hace en el siguiente paso del chat). El push incluye:
+Ya estás listo para hacer el push. Incluye:
 - `produccion` (renombrada desde `main`)
 - `dev` (rama integradora nueva)
 

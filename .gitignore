@@ -35,7 +35,7 @@ docker/nginx/logs/
 *.swp
 *.swo
 
-# ── Herramientas locales (Claude Code, etc.) ──
+# ── Configuración local de herramientas ──
 .claude/
 
 # ── Datos reales de personas ──

@@ -1,4 +1,4 @@
-import { FacebookIcon, InstagramIcon, LinkedinIcon, MapPin, MessageCircle, Phone, PhoneCall, Radio, Users, X, YoutubeIcon } from 'lucide-react'
+import { FacebookIcon, InstagramIcon, LinkedinIcon, MessageCircle, Radio, X, YoutubeIcon } from 'lucide-react'
 import Image from 'next/image'
 import { MinisteriosMarquee } from './ministerios-marquee'
 
@@ -40,65 +40,71 @@ const ministerios = [
   { label: 'MinTic',           src: '/images/ministerios/mintic.svg',           href: 'http://www.mintic.gov.co/' },
 ]
 
+// El nombre de la red va en el aria-label: sin el, Instagram y X quedan como
+// dos enlaces «@SENACOMUNICA» identicos para un lector de pantalla.
 const socialLinks = [
-  { icon: FacebookIcon,   label: '@SENA',          href: 'https://www.facebook.com/SENA/' },
-  { icon: X,              label: '@SENACOMUNICA',  href: 'https://x.com/SENAComunica' },
-  { icon: InstagramIcon,  label: '@SENACOMUNICA',  href: 'https://www.instagram.com/senacomunica/' },
-  { icon: YoutubeIcon,    label: '@SENATV',        href: 'https://www.youtube.com/user/SENATV' },
-  { icon: Radio,          label: 'SENA-Ra',        href: 'https://sonic.paulatina.co/8176/stream' },
-  { icon: LinkedinIcon,   label: 'SENA',           href: 'https://www.linkedin.com/school/servicio-nacional-de-aprendizaje-sena-/' },
-  { icon: TikTokIcon,     label: '@senacomunica_', href: 'https://www.tiktok.com/@senacomunica_' },
+  { icon: FacebookIcon,   red: 'Facebook',          label: '@SENA',          href: 'https://www.facebook.com/SENA/' },
+  { icon: InstagramIcon,  red: 'Instagram',         label: '@SENACOMUNICA',  href: 'https://www.instagram.com/senacomunica/' },
+  { icon: YoutubeIcon,    red: 'YouTube',           label: '@SENATV',        href: 'https://www.youtube.com/user/SENATV' },
+  { icon: X,              red: 'X (antes Twitter)', label: '@SENACOMUNICA',  href: 'https://x.com/SENAComunica' },
+  { icon: MessageCircle,  red: 'WhatsApp',          label: '305 809 24 44',  href: 'https://wa.me/573058092444' },
+  { icon: Radio,          red: 'Emisora SENA-Ra',   label: 'SENA-Ra',        href: 'https://sonic.paulatina.co/8176/stream' },
+  { icon: LinkedinIcon,   red: 'LinkedIn',          label: 'SENA',           href: 'https://www.linkedin.com/school/servicio-nacional-de-aprendizaje-sena-/' },
+  { icon: TikTokIcon,     red: 'TikTok',            label: '@senacomunica_', href: 'https://www.tiktok.com/@senacomunica_' },
 ]
 
-const directorioHref = '/es-co/sena/Paginas/directorio.aspx'
+// Las .aspx del portal viejo siguen vivas, pero mudadas a historico.sena.edu.co:
+// en relativo apuntaban a este mismo host y morian en 404.
+const PORTAL = 'https://www.sena.edu.co'
+const HISTORICO = 'https://historico.sena.edu.co'
 
-const legalLinks = [
-  { label: 'Directorio SENA',                                    href: directorioHref },
-  { label: 'PQRS',                                               href: 'http://sciudadanos.sena.edu.co/SolicitudIndex.aspx' },
-  { label: 'Chat en línea',                                      href: '/es-co/ciudadano/Paginas/chat.aspx' },
-  { label: 'Denuncias por actos de corrupción',                  href: '/es-co/ciudadano/Paginas/Denuncias_Corrupcion.aspx' },
-  { label: 'Notificaciones judiciales',                          href: '/es-co/transparencia/Paginas/mecanismosContacto.aspx#notificacionesJudiciales' },
-  { label: 'Mapa del sitio',                                     href: '/es-co/Paginas/mapaSitio.aspx' },
+const directorioHref = `${PORTAL}/la-entidad/directorio-regionales?vista=lista&regional=bogota`
+
+// El pie de la referencia agrupa los enlaces en filas: la primera va sola y las
+// demas se reparten en dos bloques que envuelven.
+const enlacesAtencion = [
+  { label: 'PQRS',                              href: 'https://sciudadanos.sena.edu.co/SolicitudIndex.aspx' },
+  { label: 'Chat en línea',                     href: `${HISTORICO}/es-co/ciudadano/Paginas/chat.aspx` },
+  { label: 'Denuncias por actos de corrupción', href: `${HISTORICO}/es-co/ciudadano/Paginas/Denuncias_Corrupcion.aspx` },
+  { label: 'Mapa del sitio',                    href: `${PORTAL}/mapa-del-sitio` },
+  { label: 'Notificaciones judiciales',         href: `${PORTAL}/transparencia#transparency-10` },
 ]
 
-const legalLinks2 = [
-  { label: 'Derechos de autor y/o autorización de uso sobre contenidos', href: '/es-co/Paginas/politicasCondicionesUso.aspx#derechoAutor' },
-  { label: 'Política de Tratamiento para Protección de Datos Personales', href: '/es-co/transparencia/Paginas/habeas_data.aspx' },
-  { label: 'Política de seguridad y privacidad de la información',        href: 'http://compromiso.sena.edu.co/index.php?text=inicio&id=27' },
+const enlacesPoliticas = [
+  { label: 'Derechos de autor y/o autorización de uso sobre contenidos', href: `${HISTORICO}/es-co/Paginas/politicasCondicionesUso.aspx#derechoAutor` },
+  { label: 'Política de Tratamiento para Protección de Datos Personales', href: `${HISTORICO}/es-co/transparencia/Paginas/habeas_data.aspx` },
+  // compromiso.sena.edu.co ya no responde: la politica vive en el portal nuevo.
+  { label: 'Política de seguridad y privacidad de la información',        href: `${PORTAL}/transparencia/politicas-y-lineamientos` },
+]
+
+const datosSede: { etiqueta: string; valor: string; tel?: string }[] = [
+  { etiqueta: 'Dirección',            valor: 'Calle 57 No. 8 - 69 Bogotá D.C. (Cundinamarca), Colombia' },
+  { etiqueta: 'Código postal',        valor: '110231' },
+  { etiqueta: 'Horario de atención',  valor: '8:00 a.m. a 12:30 p.m. y 2:00 p.m. a 5:30 p.m.' },
+  { etiqueta: 'Atención presencial',  valor: '33 Regionales y 118 Centros de Formación' },
+  { etiqueta: 'Teléfono conmutador',  valor: '+57 601 736 6060', tel: '+576017366060' },
+  { etiqueta: 'Línea gratuita',       valor: '018000 910270',    tel: '018000910270' },
+  { etiqueta: 'Línea anticorrupción', valor: '157',              tel: '157' },
 ]
 
 const enlaceClaro =
-  'text-white/80 transition hover:text-white hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500'
+  'text-white underline-offset-2 transition hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500'
 
-function TituloColumna({ children }: { children: React.ReactNode }) {
+function Enlaces({ items }: { items: { label: string; href: string }[] }) {
   return (
-    <h3 className="text-sm font-bold text-white">
-      {children}
-      <span aria-hidden="true" className="mx-auto mt-2 block h-0.5 w-10 rounded-full bg-lime-500 lg:mx-0" />
-    </h3>
-  )
-}
-
-function EnlacesLegales({ items, label }: { items: { label: string; href: string }[]; label: string }) {
-  return (
-    <nav aria-label={label}>
-      <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        {items.map(({ label: texto, href }, i) => (
-          <li key={href} className="flex items-center gap-2">
-            <a href={href} target="_blank" rel="noreferrer" className={enlaceClaro}>
-              {texto}
-            </a>
-            {i < items.length - 1 && <span aria-hidden="true" className="text-white/30">|</span>}
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <div className="flex flex-wrap gap-x-6 gap-y-2 lg:gap-x-4 lg:gap-y-1">
+      {items.map(({ label, href }) => (
+        <a key={href} href={href} target="_blank" rel="noreferrer" className={enlaceClaro}>
+          {label}
+        </a>
+      ))}
+    </div>
   )
 }
 
 export function PublicFooter() {
   return (
-    <footer>
+    <footer aria-label="Pie de página SENA">
       {/* Sector Trabajo — tarjeta blanca sobre gris para que flote */}
       <section aria-labelledby="pie-sector-trabajo" className="border-t border-neutral-200 bg-neutral-50 px-4 py-10 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
@@ -136,138 +142,159 @@ export function PublicFooter() {
         </div>
       </div>
 
-      {/* Bloque institucional azul */}
-      {/* esquinas redondeadas arriba, como en betowa y ape */}
-      <div className="overflow-hidden rounded-t-[2rem] bg-cerulean-500 sm:rounded-t-[3rem] lg:rounded-t-[4rem]">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-3 lg:gap-12 lg:px-8">
+      {/* Bloque institucional — tarjeta azul flotando sobre la franja verde,
+          igual que el pie nuevo de sena.edu.co */}
+      <div className="bg-[linear-gradient(to_bottom,#ffffff_0%,#ffffff_30%,#39a900_30%,#39a900_100%)] px-4 py-10">
+        <div className="relative mx-auto max-w-[96rem] overflow-hidden rounded-lg px-[1.7rem] py-14 shadow-lg">
+          {/* textura geometrica sobre el degradado azul */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-cover bg-center bg-no-repeat"
+            style={{
+              backgroundImage:
+                'url("/images/fondo-geometrico-sena.webp"), linear-gradient(to right, #010f1f 0%, #003366 100%)',
+            }}
+          />
 
-          {/* Identidad + sellos */}
-          <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
-            <Image
-              src="/images/sena-logo.svg"
-              alt="SENA"
-              width={120}
-              height={120}
-              className="h-20 w-20 object-contain brightness-0 invert"
-            />
-            <p className="mt-4 text-sm font-bold uppercase leading-snug text-white">
-              Servicio Nacional de Aprendizaje SENA
-            </p>
-            <p className="text-sm font-semibold uppercase text-white/70">Dirección General</p>
-            {/* el png de los sellos es oscuro: sobre azul necesita fondo blanco */}
-            <div className="mt-6 rounded-xl bg-white px-4 py-3">
+          {/* Identidad + sede principal */}
+          <div className="relative flex flex-col items-stretch gap-8 px-4 text-sm text-white md:text-base lg:flex-row lg:justify-between lg:gap-10 lg:px-8">
+            <div className="flex w-full flex-1 flex-col gap-4 text-left lg:max-w-[70%]">
+              <p className="text-left text-[clamp(0.95rem,4.2vw,1.35rem)] font-semibold uppercase leading-snug text-white lg:hidden">
+                Servicio Nacional de Aprendizaje <b className="font-bold">SENA</b>
+              </p>
+
+              <div className="flex w-full flex-row items-center justify-between gap-4 lg:mb-2 lg:w-auto lg:justify-start lg:gap-4">
+                <Image
+                  src="/images/sena-logo.svg"
+                  alt="SENA"
+                  width={120}
+                  height={114}
+                  className="h-10 w-auto shrink-0 drop-shadow-[0_1px_3px_rgb(0_0_0/0.45)] md:h-12"
+                />
+                <Image
+                  src="/images/sector-trabajo-logo.webp"
+                  alt="Sector Trabajo — Gobierno de Colombia"
+                  width={676}
+                  height={472}
+                  className="h-14 w-auto shrink-0 object-contain mix-blend-screen lg:hidden"
+                />
+                <p className="hidden text-[25px] font-semibold uppercase leading-snug text-white lg:block lg:max-w-[min(100%,28rem)]">
+                  Servicio Nacional de Aprendizaje <b className="font-bold">SENA</b>
+                </p>
+              </div>
+
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/70 md:text-sm">Dirección General</p>
+
+              <div>
+                <p className="text-base font-bold leading-snug md:text-lg">Sede principal</p>
+              </div>
+
+              <div className="[overflow-wrap:anywhere]">
+                {datosSede.map(({ etiqueta, valor, tel }) => (
+                  <p key={etiqueta} className="leading-relaxed">
+                    {etiqueta}:{' '}
+                    {tel ? (
+                      <a href={`tel:${tel}`} className={`font-medium ${enlaceClaro}`}>
+                        {valor}
+                      </a>
+                    ) : (
+                      <span className="font-medium">{valor}</span>
+                    )}
+                  </p>
+                ))}
+                <p className="leading-relaxed">
+                  Correo institucional:{' '}
+                  <a
+                    href="mailto:servicioalciudadano@sena.edu.co"
+                    className="font-medium text-[#A4D78A] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+                  >
+                    servicioalciudadano@sena.edu.co
+                  </a>
+                </p>
+                <p className="leading-relaxed">
+                  Horarios por sede en el{' '}
+                  <a href={directorioHref} target="_blank" rel="noreferrer" className={enlaceClaro}>
+                    Directorio SENA
+                  </a>
+                </p>
+              </div>
+            </div>
+
+            {/* Logo Trabajo grande — solo en escritorio, el movil lo lleva arriba */}
+            <div className="pointer-events-none absolute right-3 top-6 hidden lg:block xl:right-0 xl:top-8">
               <Image
-                src="/images/normas-iso-logos.png"
-                alt="Normas ISO"
-                width={220}
-                height={110}
-                className="h-14 w-auto object-contain sm:h-16"
+                src="/images/sector-trabajo-logo.webp"
+                alt=""
+                aria-hidden="true"
+                width={676}
+                height={472}
+                className="h-24 w-auto object-contain mix-blend-screen md:h-[11rem]"
               />
             </div>
           </div>
 
-          {/* Atención presencial */}
-          <div className="text-center lg:text-left">
-            <TituloColumna>Atención presencial</TituloColumna>
-            <ul className="mt-4 space-y-3 text-xs leading-relaxed text-white/80">
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <MapPin size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>Calle 57 No. 8 – 69 Bogotá D.C. (Cundinamarca), Colombia</span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Users size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>El SENA brinda atención presencial en las 33 Regionales y 118 Centros de Formación</span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Phone size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Horarios de atención por sede en el{' '}
-                  <a href={directorioHref} target="_blank" rel="noreferrer" className={enlaceClaro}>
-                    Directorio SENA
-                  </a>
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Líneas y redes */}
-          <div className="text-center lg:text-left">
-            <TituloColumna>Líneas de atención</TituloColumna>
-            <ul className="mt-4 space-y-3 text-xs text-white/80">
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <PhoneCall size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Bogotá{' '}
-                  <a href="tel:+576017366060" className={enlaceClaro}>(+57) 601 736 60 60</a>
-                </span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Phone size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Línea gratuita{' '}
-                  <a href="tel:018000910270" className={enlaceClaro}>018000 910270</a>
-                </span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <MessageCircle size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>WhatsApp <span className="font-semibold text-white">3112545028</span></span>
-              </li>
-            </ul>
-
-            <div className="mt-8">
-              <TituloColumna>Síguenos en redes</TituloColumna>
-              <nav aria-label="Redes sociales del SENA" className="mt-4">
-                <ul className="flex flex-wrap justify-center gap-2 lg:justify-start">
-                  {socialLinks.map(({ icon: Icon, label, href }) => (
+          {/* Redes, enlaces institucionales y certificaciones */}
+          <div className="relative px-4 pt-8 text-xs font-semibold text-white md:text-sm lg:px-6">
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-x-8 lg:gap-y-6">
+              {/* Redes */}
+              <nav aria-label="Redes sociales del SENA" className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">
+                <ul className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-3">
+                  {socialLinks.map(({ icon: Icon, red, label, href }) => (
                     <li key={href}>
                       <a
                         href={href}
                         target="_blank"
                         rel="noreferrer"
-                        title={label}
-                        className="flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-lime-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
+                        aria-label={`${red}: ${label}`}
+                        className="flex items-center gap-3 rounded outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:gap-2"
                       >
-                        <span aria-hidden="true" className="shrink-0">
-                          <Icon size={14} />
+                        <span aria-hidden="true" className="shrink-0 text-[#6CC5FF]">
+                          <Icon size={20} />
                         </span>
-                        <span>{label}</span>
+                        <span className="hover:underline">{label}</span>
                       </a>
                     </li>
                   ))}
                 </ul>
               </nav>
-            </div>
-          </div>
-        </div>
 
-        {/* Legales */}
-        <div className="border-t border-white/15">
-          <div className="mx-auto max-w-7xl space-y-2 px-4 py-6 text-center text-[11px] sm:px-6 lg:px-8">
-            <EnlacesLegales items={legalLinks} label="Atención a la ciudadanía" />
-            <EnlacesLegales items={legalLinks2} label="Políticas y condiciones de uso" />
-            <p className="border-t border-white/10 pt-4 text-white/60">
+              {/* Enlaces institucionales */}
+              <div className="order-3 min-w-0 border-t border-white/15 pt-4 lg:order-2 lg:col-start-1 lg:row-start-2 lg:border-0 lg:pt-0 lg:pl-[10px]">
+                <p className="mb-3 font-semibold text-white lg:hidden">Información institucional</p>
+                <nav aria-label="Atención a la ciudadanía y políticas" className="flex flex-col gap-3 lg:gap-2">
+                  <a href={directorioHref} target="_blank" rel="noreferrer" className={enlaceClaro}>
+                    Directorio Institucional
+                  </a>
+                  <Enlaces items={enlacesAtencion} />
+                  <Enlaces items={enlacesPoliticas} />
+                </nav>
+              </div>
+
+              {/* Certificaciones ICONTEC / IQNET */}
+              <div className="order-2 flex min-w-0 justify-center lg:order-3 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:min-w-[14rem] lg:shrink-0">
+                <Image
+                  src="/images/certificaciones-icontec-iqnet.webp"
+                  alt="Certificaciones ISO de ICONTEC"
+                  width={964}
+                  height={312}
+                  className="h-auto w-full max-w-[22rem] object-contain sm:h-32 sm:w-auto sm:max-w-full md:h-40 lg:h-44 xl:h-[8.75rem]"
+                />
+              </div>
+            </div>
+
+            <p className="mt-8 border-t border-white/10 pt-4 text-center text-[11px] font-normal text-white/60">
               © Equipo TIC — GGPC - DSNFT - SENA {new Date().getFullYear()} | v1.0 (Prueba)
             </p>
           </div>
         </div>
       </div>
 
-      {/* Barra inferior: Marca Colombia + GOV.CO */}
-      <div className="bg-[#015dca] py-2 px-4 flex items-center justify-center gap-4">
-        <Image
-          src="/images/channels-616_marca_colombia.png"
-          alt="Colombia"
-          width={20}
-          height={20}
-          className="object-contain"
-        />
-        <div className="w-px h-5 bg-white/30" />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/images/govco.svg"
-          alt="GOV.CO"
-          className="h-5 w-auto object-contain"
-        />
+      {/* Barra inferior GOV.CO */}
+      <div className="bg-[#3366cc] px-4">
+        <div className="mx-auto flex max-w-[96rem] justify-start py-2 pl-1">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/images/govco.svg" alt="Logo Gobierno de Colombia" className="h-6 w-auto" loading="lazy" />
+        </div>
       </div>
     </footer>
   )

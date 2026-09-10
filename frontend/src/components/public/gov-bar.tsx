@@ -3,7 +3,8 @@
 export function GovBar() {
   return (
     <div className="w-full bg-[#3366CC] py-1.5 px-4 flex items-center justify-center">
-      <div className="max-w-7xl w-full flex items-center gap-2">
+      {/* en celular el logo va centrado y desde lg pasa a la izquierda, como en sena.edu.co */}
+      <div className="max-w-7xl w-full flex items-center justify-center gap-2 lg:justify-start">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/images/govco.svg"

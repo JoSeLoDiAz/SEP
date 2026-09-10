@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
+import { APP_GUARD } from '@nestjs/core'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { EstadoController } from './common/estado.controller'
+import { MigracionGuard } from './common/migracion.guard'
 import { AuthModule } from './auth/auth.module'
 import { CapacitadoresModule } from './capacitadores/capacitadores.module'
 import { CertificacionModule } from './certificacion/certificacion.module'
@@ -64,6 +67,13 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ImportarProyectoModule,
     ConvocatoriaProyectosModule,
     UsuariosAdminModule,
+  ],
+  controllers: [EstadoController],
+  providers: [
+    // Guard global: con MODO_MIGRACION puesto cierra TODAS las rutas menos
+    // /estado, incluidas las de quien ya tiene sesión abierta. Es lo que
+    // impide que la base de origen se siga moviendo durante el traslado.
+    { provide: APP_GUARD, useClass: MigracionGuard },
   ],
 })
 export class AppModule {}

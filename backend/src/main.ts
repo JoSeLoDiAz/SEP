@@ -18,6 +18,7 @@ import { AppModule } from './app.module'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { UploadErrorFilter } from './common/filters/upload-error.filter'
 import { OracleErrorFilter } from './common/filters/oracle-error.filter'
+import { enMigracion } from './common/migracion.guard'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
@@ -49,15 +50,20 @@ async function bootstrap() {
     exposedHeaders: ['X-New-Token', 'Content-Disposition'],
   })
 
-  const config = new DocumentBuilder()
-    .setTitle('SEP Local API')
-    .setDescription('API del Sistema Especializado de Proyectos — GGPC SENA')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build()
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config))
-
   const configService = app.get(ConfigService)
+
+  // Swagger se monta como middleware de Express, así que el guard global de
+  // migración NO lo cubre: durante la pausa quedaba sirviendo 200 con el mapa
+  // completo de la API. No deja escribir, pero "no accesible" es no accesible.
+  if (!enMigracion(configService)) {
+    const config = new DocumentBuilder()
+      .setTitle('SEP Local API')
+      .setDescription('API del Sistema Especializado de Proyectos — GGPC SENA')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build()
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config))
+  }
   const port = configService.get<number>('BACKEND_PORT', 4000)
 
   // deben superar el keepalive de nginx (60s) o nginx reusa conexiones que Node ya cerró
@@ -67,6 +73,10 @@ async function bootstrap() {
 
   await app.listen(port)
   console.log(`🚀 SEP API corriendo en puerto ${port}`)
-  console.log(`📚 Swagger: http://localhost:${port}/docs`)
+  if (enMigracion(configService)) {
+    console.log('⏸  EN MIGRACIÓN: solo responde /estado. Se quita con MODO_MIGRACION.')
+  } else {
+    console.log(`📚 Swagger: http://localhost:${port}/docs`)
+  }
 }
 bootstrap()

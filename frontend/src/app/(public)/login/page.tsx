@@ -5,15 +5,18 @@ import { CarruselLogin, type LaminaLogin } from '@/components/public/carrusel-lo
 import { Modal } from '@/components/ui/modal'
 import { ToastBetowa, type ToastTipo } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
-import { ArrowLeft, Building2, Loader2, LogIn, UserPlus } from 'lucide-react'
+import { ArrowLeft, Building2, Loader2, LogIn, UserPlus, Wrench } from 'lucide-react'
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 
 // Site key pública de Cloudflare Turnstile. Configurable por env.
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '0x4AAAAAADD6VVCyoP6eM5Ao'
+
+// Respaldo si el backend no alcanza a decir el suyo. El texto bueno viene de allá.
+const MENSAJE_PAUSA = 'El SEP está en migración y no está disponible en este momento.'
 
 // las fotos las entrega diseño; sin ellas cada lámina queda con su color de marca
 const LAMINAS: LaminaLogin[] = [
@@ -47,6 +50,29 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [registroModal, setRegistroModal] = useState(false)
   const [toast, setToast] = useState<{ tipo: ToastTipo; msg: string } | null>(null)
+  // La pausa por migración manda el backend; aquí solo se muestra. Se pregunta
+  // en caliente para que encenderla y apagarla no obligue a reconstruir esto.
+  //   null       → servicio normal
+  //   'incierto' → el backend no contestó: no se puede afirmar que esté bien
+  //   texto      → en pausa, con el mensaje que se muestra
+  const [pausa, setPausa] = useState<string | null>(null)
+  const enPausa = pausa !== null && pausa !== 'incierto'
+
+  useEffect(() => {
+    let vivo = true
+    api.get<{ enMigracion: boolean; mensaje: string | null }>('/estado')
+      .then(r => {
+        if (vivo && r.data?.enMigracion) setPausa(r.data.mensaje || MENSAJE_PAUSA)
+      })
+      .catch(() => {
+        // Que no conteste es exactamente lo que pasa mientras el backend se
+        // reinicia durante el traslado. Fingir normalidad hacía que la persona
+        // intentara entrar y recibiera un error con pinta de culpa suya. Se
+        // avisa, pero no se le cierra la puerta: puede ser un tropiezo de red.
+        if (vivo) setPausa('incierto')
+      })
+    return () => { vivo = false }
+  }, [])
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
@@ -99,8 +125,16 @@ export default function LoginPage() {
       setToast({ tipo: 'success', msg: `Bienvenido: ${ok.usuario.nombre}` })
       setTimeout(() => router.push('/panel'), 1800)
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      const res = (err as { response?: { status?: number; data?: { message?: string; codigo?: string } } })?.response
+      // Si la pausa empezó con esta pantalla ya abierta, el 503 es la primera
+      // noticia: se cambia la pantalla en vez de acusar a la persona de haber
+      // escrito mal la contraseña.
+      if (res?.status === 503) {
+        setPausa(res.data?.message || MENSAJE_PAUSA)
+        setLoading(false)
+        return
+      }
+      const msg = res?.data?.message
         ?? 'Credenciales inválidas. Verifique e intente nuevamente.'
       setCaptchaToken('')
       turnstileRef.current?.reset()
@@ -143,15 +177,52 @@ export default function LoginPage() {
 
             <div className="flex flex-col gap-6 p-6 sm:p-9">
               <div className="flex flex-col gap-2">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-lime-500 shadow-sm">
-                  <LogIn size={22} className="text-white" aria-hidden="true" />
+                <div
+                  className={`flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm ${
+                    enPausa ? 'bg-amber-500' : 'bg-lime-500'
+                  }`}
+                >
+                  {enPausa
+                    ? <Wrench size={22} className="text-white" aria-hidden="true" />
+                    : <LogIn size={22} className="text-white" aria-hidden="true" />}
                 </div>
-                <h1 className="text-2xl font-bold text-cerulean-500">Iniciar sesión</h1>
+                <h1 className="text-2xl font-bold text-cerulean-500">
+                  {enPausa ? 'Servicio en migración' : 'Iniciar sesión'}
+                </h1>
                 <p className="text-sm text-neutral-500">
-                  Ingresa con la cuenta que registraste en el SEP.
+                  {enPausa
+                    ? 'El SEP no está disponible en este momento.'
+                    : 'Ingresa con la cuenta que registraste en el SEP.'}
                 </p>
               </div>
 
+              {enPausa ? (
+                <div
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 p-4"
+                >
+                  <p className="text-sm leading-relaxed text-amber-900">
+                    {pausa}
+                  </p>
+                  <p className="mt-2.5 text-xs leading-relaxed text-amber-800">
+                    Nada de lo que ya habías registrado se pierde. Vuelve a intentarlo
+                    más tarde.
+                  </p>
+                </div>
+              ) : (
+                <>
+              {pausa === 'incierto' && (
+                <div
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+                >
+                  <p className="text-xs leading-relaxed text-amber-900">
+                    No pudimos comprobar si el servicio está disponible. Si al ingresar
+                    falla, es del sistema y no de tus datos: vuelve a intentarlo en unos
+                    minutos.
+                  </p>
+                </div>
+              )}
               <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                 <div>
                   <label htmlFor="login-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -222,6 +293,8 @@ export default function LoginPage() {
                   Registrarse en el SEP
                 </button>
               </p>
+                </>
+              )}
             </div>
           </section>
 

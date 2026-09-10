@@ -146,9 +146,11 @@ export default function InicioPage() {
             <h2 className="text-2xl font-bold text-cerulean-500">Síguenos en redes</h2>
           </div>
           <SocialButtons />
+          {/* topes de 500px pero encogibles: con w-[500px] fijo los dos widgets
+              sumaban 1024px y sacaban scroll horizontal entre 768 y 1072px */}
           <div className="flex flex-col md:flex-row gap-6 w-full justify-center">
-            <div className="w-full md:w-[500px] shrink-0"><FacebookWidget /></div>
-            <div className="w-full md:w-[500px] shrink-0"><InstagramWidget /></div>
+            <div className="w-full min-w-0 md:max-w-[500px] md:flex-1"><FacebookWidget /></div>
+            <div className="w-full min-w-0 md:max-w-[500px] md:flex-1"><InstagramWidget /></div>
           </div>
         </div>
       </section>

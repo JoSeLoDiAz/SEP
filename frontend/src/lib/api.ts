@@ -43,6 +43,22 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    // Pausa por migración: el backend cierra todo con 503. Sin esto, quien ya
+    // tenía la sesión abierta se queda dentro del panel viendo errores sueltos
+    // en cada tarjeta, sin saber por qué. Se le lleva al ingreso, que es donde
+    // está la explicación. No se le borra el token: la pausa termina.
+    //
+    // Se mira solo el 503 y NO el cuerpo: en las descargas (responseType blob)
+    // axios entrega el error como Blob y `data.codigo` sale undefined, así que
+    // filtrar por el código dejaba las 14 descargas del panel fallando en seco.
+    // Un 503 de nginx porque el backend está caído también merece esta pantalla.
+    if (error.response?.status === 503
+        && typeof window !== 'undefined'
+        && !window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401) {
       // en /auth/* no redirigir: la propia página muestra el error
       const url: string = error.config?.url ?? ''

@@ -1874,7 +1874,7 @@ function SeccionEstudios({ evaluadorId, setToast }: { evaluadorId: number; setTo
           </div>
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">Fecha de grado</label>
-            <input type="date" value={fechaGrado} onChange={e => setFechaGrado(e.target.value)} className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40" />
+            <input type="date" max="9999-12-31" value={fechaGrado} onChange={e => setFechaGrado(e.target.value)} className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/40" />
           </div>
           <div className="sm:col-span-2">
             <label className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">Título</label>

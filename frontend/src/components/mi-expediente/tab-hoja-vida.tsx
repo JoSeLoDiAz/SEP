@@ -328,7 +328,7 @@ export default function TabHojaVida({ setToast, inactivo = false }: {
       </div>
       <div>
         <label className={label}>Fecha de grado</label>
-        <input type="date" value={fechaGrado} onChange={e => setFechaGrado(e.target.value)} className={input} />
+        <input type="date" max="9999-12-31" value={fechaGrado} onChange={e => setFechaGrado(e.target.value)} className={input} />
       </div>
       <div className="sm:col-span-2">
         <label className={label}>Soporte (PDF o imagen, máx. {MAX_MB} MB)</label>

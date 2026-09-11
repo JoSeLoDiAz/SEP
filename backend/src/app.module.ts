@@ -46,6 +46,10 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
           synchronize: false,
           logging: config.get<string>('NODE_ENV') === 'development',
           autoLoadEntities: true,
+          // pool contra el Exadata por la VPN: 2 conexiones siempre abiertas (abrir una nueva por la VPN tarda y una
+          // petición llegó a esperar los 60 s del queueTimeout), hasta 10 para las llamadas en paralelo de cada
+          // página, sin cerrar las quietas al minuto y con keepalive cada 2 min para que la VPN no las corte
+          extra: { poolMin: 2, poolMax: 10, poolTimeout: 300, expireTime: 2 },
         }
       },
     }),

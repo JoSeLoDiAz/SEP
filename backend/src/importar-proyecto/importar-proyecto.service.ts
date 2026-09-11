@@ -3,6 +3,10 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import * as crypto from 'crypto'
 import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { mensajeHerrOtraLarga } from '../necesidades/herr-otra'
+import { matchModalidad } from './match-modalidad'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { twofish } = require('twofish')
 
@@ -43,6 +47,28 @@ export interface ExcelBasicos {
   mesa3: string | null
   modalidadParticipacion: string | null
   tipoIdentificacion: string | null
+}
+
+// columnas de texto de EMPRESA que escriben el INSERT y el UPDATE de la importación, con su tope en caracteres: son
+// NCHAR/NVARCHAR2 con CHAR en AL16UTF16, iguales en el XE y el Exadata, así que el tope es de String.length
+const TOPES_EMPRESA: Array<{ campo: string; tope: number; valor: (b: ExcelBasicos) => string | null }> = [
+  { campo: 'RAZÓN SOCIAL',       tope: 200, valor: b => b.razonSocial },
+  { campo: 'SIGLA',              tope: 40,  valor: b => b.sigla },
+  { campo: 'CORREO ELECTRÓNICO', tope: 100, valor: b => b.email?.trim().toLowerCase() ?? null },
+  { campo: 'DIRECCIÓN',          tope: 100, valor: b => b.direccionDomicilio },
+  { campo: 'CELULAR',            tope: 20,  valor: b => b.celular },
+  { campo: 'TELÉFONO',           tope: 20,  valor: b => b.telefono },
+  { campo: 'PÁGINA WEB',         tope: 100, valor: b => b.paginaWeb },
+]
+
+/**
+ * Los datos de la empresa que no caben en su columna. Se revisan antes de escribir para responder con el campo y
+ * cuánto sobra en vez del ORA-12899 a mitad de la importación. No se recorta en silencio.
+ */
+function datosEmpresaQueNoCaben(b: ExcelBasicos): Array<{ campo: string; tope: number; largo: number }> {
+  return TOPES_EMPRESA
+    .map(({ campo, tope, valor }) => ({ campo, tope, largo: (valor(b) ?? '').trim().length }))
+    .filter(d => d.largo > d.tope)
 }
 
 export interface ExcelContacto {
@@ -278,25 +304,6 @@ export interface PreviewImportacion {
 export class ImportarProyectoService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  // el Excel dice "EMPRESA INDIVIDUAL" y la BD guarda solo "INDIVIDUAL"
-  private matchModalidad(
-    texto: string,
-    catalogo: Array<{ id: number; nombre: string }>,
-  ): { id: number; nombre: string } | undefined {
-    if (!texto) return undefined
-    const norm = (s: string) => s
-      .trim().toUpperCase()
-      .replace(/\s+/g, ' ')
-      .replace(/^EMPRESAS?\s+/, '')
-    const t = norm(texto)
-    const exact = catalogo.find(m => norm(m.nombre) === t)
-    if (exact) return exact
-    return catalogo.find(m => {
-      const c = norm(m.nombre)
-      return c.length > 2 && (t.includes(c) || c.includes(t))
-    })
-  }
-
   private matchModalidadFormacion(
     texto: string,
     catalogo: Array<{ id: number; nombre: string }>,
@@ -401,7 +408,7 @@ export class ImportarProyectoService {
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
     const modTexto = (data.basicos.modalidadParticipacion ?? '').trim().toUpperCase()
-    const modProyecto = this.matchModalidad(modTexto, mods)
+    const modProyecto = matchModalidad(modTexto, mods)
     if (!modProyecto && modTexto) {
       validaciones.push({
         nivel: 'warning',
@@ -426,7 +433,7 @@ export class ImportarProyectoService {
 
     for (const af of data.afs) {
       const evNombre = (af.eventoFormacion ?? '').trim().toUpperCase()
-      if (evNombre && !this.matchModalidad(evNombre, tiposEvento)) {
+      if (evNombre && !matchModalidad(evNombre, tiposEvento)) {
         validaciones.push({
           nivel: 'warning',
           campo: `AF ${af.consecutivo}`,
@@ -607,6 +614,10 @@ export class ImportarProyectoService {
     if (!data.contactos.representanteLegal.nombre.trim()) {
       validaciones.push({ nivel: 'error', campo: 'REPRESENTANTE LEGAL', mensaje: 'Falta el representante legal.' })
     }
+    for (const d of data.diagnosticos) {
+      const largo = mensajeHerrOtraLarga(d.otraHerramienta?.trim())
+      if (largo) validaciones.push({ nivel: 'error', campo: `Diagnóstico ${d.numero}`, mensaje: largo })
+    }
 
     // validaciones por AF
     for (const af of data.afs) {
@@ -766,6 +777,16 @@ export class ImportarProyectoService {
         }
       }
     }
+    // los textos de la empresa van a EMPRESA si es nueva, o si es existente y al confirmar se piden actualizar sus datos
+    for (const d of datosEmpresaQueNoCaben(data.basicos)) {
+      validaciones.push(empresa.estado === 'nueva'
+        ? { nivel: 'error', campo: d.campo, mensaje: `Admite hasta ${d.tope} caracteres y trae ${d.largo}. Acórtelo en el Excel.` }
+        : {
+            nivel: 'warning',
+            campo: d.campo,
+            mensaje: `Admite hasta ${d.tope} caracteres y trae ${d.largo}: si al confirmar se actualizan los datos de la empresa, la importación se rechazará.`,
+          })
+    }
 
     // usuario por email
     const email = data.basicos.email?.trim().toLowerCase() ?? ''
@@ -885,6 +906,20 @@ export class ImportarProyectoService {
     }
     const dvNum = Number(String(data.basicos.digitoVerificacion ?? '').replace(/\D/g, '') || '0')
 
+    // NECESIDADHERROTRA mide 40 bytes en el Exadata: mejor un 400 ahora que un ORA-12899 a mitad de la importación
+    for (const d of data.diagnosticos) {
+      const largo = mensajeHerrOtraLarga(d.otraHerramienta?.trim())
+      if (largo) throw new BadRequestException(`Diagnóstico ${d.numero} del Excel: ${largo}`)
+    }
+    // los textos de EMPRESA solo se escriben si la empresa es nueva o si se piden actualizar sus datos: se revisan en el
+    // paso 1, antes de escribir nada, para responder un 400 en vez de un ORA-12899 a mitad de la importación
+    const noCaben = datosEmpresaQueNoCaben(data.basicos)
+    const exigirQueQuepanDatosEmpresa = () => {
+      if (noCaben.length === 0) return
+      const detalle = noCaben.map(d => `${d.campo} admite hasta ${d.tope} caracteres y trae ${d.largo}`).join('; ')
+      throw new BadRequestException(`Datos básicos del Excel que no caben: ${detalle}.`)
+    }
+
     // el año se usa en el nombre del proyecto
     const conv: Array<{ anio: number }> = await this.dataSource.query(
       `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
@@ -897,7 +932,7 @@ export class ImportarProyectoService {
       `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
-    const modProy = this.matchModalidad(data.basicos.modalidadParticipacion ?? '', modsCat)
+    const modProy = matchModalidad(data.basicos.modalidadParticipacion ?? '', modsCat)
 
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
@@ -912,10 +947,11 @@ export class ImportarProyectoService {
       if (empresaExistente[0]) {
         empresaId = Number(empresaExistente[0].id)
         if (dto.actualizarDatosEmpresa) {
+          exigirQueQuepanDatosEmpresa()
           await qr.query(
             `UPDATE EMPRESA SET
                 EMPRESARAZONSOCIAL = :1, EMPRESASIGLA = :2, EMPRESADIRECCION = :3,
-                EMPRESACELULAR = :4, EMPRESATELEFONO = :5, EMPRESAPAGINAWEB = :6,
+                EMPRESACELULAR = :4, EMPRESATELEFONO = :5, EMPRESAWEBSITE = :6,
                 EMPRESAEMAIL = :7
               WHERE EMPRESAID = :8`,
             [
@@ -931,31 +967,24 @@ export class ImportarProyectoService {
           )
         }
       } else {
-        // los 1 fijos del INSERT son defaults para columnas NOT NULL
-        const seq = await qr.query(`SELECT EMPRESAID.NEXTVAL FROM dual`)
-        empresaId = Number(seq[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO EMPRESA
-             (EMPRESAID, TIPODOCUMENTOIDENTIDADID, EMPRESAIDENTIFICACION, EMPRESADIGITOVERIFICACION,
-              EMPRESARAZONSOCIAL, EMPRESASIGLA, EMPRESAEMAIL, EMPRESAFECHAREGISTRO,
-              EMPRESADIRECCION, EMPRESACELULAR, EMPRESATELEFONO, EMPRESAPAGINAWEB,
-              COBERTURAEMPRESAID, DEPARTAMENTOEMPRESAID, CIUDADEMPRESAID, CIIUID,
-              TIPOEMPRESAID, TAMANOEMPRESAID, SECTORID, SUBSECTORID, TIPOIDENTIFICACIONREP)
-           VALUES (:1, 1, :2, :3, :4, :5, :6, SYSDATE, :7, :8, :9, :10,
-                   1, 1, 1, 1, 1, 1, 1, 1, 1)`,
-          [
-            empresaId,
-            nitNum,
-            dvNum,
-            data.basicos.razonSocial.trim(),
-            (data.basicos.sigla ?? '').trim(),
-            email,
-            (data.basicos.direccionDomicilio ?? '').trim(),
-            (data.basicos.celular ?? '').trim(),
-            (data.basicos.telefono ?? '').trim(),
-            (data.basicos.paginaWeb ?? '').trim(),
-          ],
-        )
+        exigirQueQuepanDatosEmpresa()
+        // los ids salen de insertarConId: en el Exadata los pone el trigger de id (pisa el que se mande) y las filas
+        // hijas usan el que quedó en la fila. Los 1 fijos son defaults para columnas NOT NULL
+        empresaId = await insertarConId(qr, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+          TIPODOCUMENTOIDENTIDADID: 1,
+          EMPRESAIDENTIFICACION: nitNum,
+          EMPRESADIGITOVERIFICACION: dvNum,
+          EMPRESARAZONSOCIAL: data.basicos.razonSocial.trim(),
+          EMPRESASIGLA: (data.basicos.sigla ?? '').trim(),
+          EMPRESAEMAIL: email,
+          EMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          EMPRESADIRECCION: (data.basicos.direccionDomicilio ?? '').trim(),
+          EMPRESACELULAR: (data.basicos.celular ?? '').trim(),
+          EMPRESATELEFONO: (data.basicos.telefono ?? '').trim(),
+          EMPRESAWEBSITE: (data.basicos.paginaWeb ?? '').trim(),
+          COBERTURAEMPRESAID: 1, DEPARTAMENTOEMPRESAID: 1, CIUDADEMPRESAID: 1, CIIUID: 1,
+          TIPOEMPRESAID: 1, TAMANOEMPRESAID: 1, SECTORID: 1, SUBSECTORID: 1, TIPOIDENTIFICACIONREP: 1,
+        })
       }
 
       // 2. usuario + USUARIOPERFIL
@@ -972,19 +1001,19 @@ export class ImportarProyectoService {
         }
         const llave = getEncryptionKey()
         const claveCifrada = encrypt64(dto.claveUsuario.trim(), llave)
-        const seqU = await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)
-        usuarioId = Number(seqU[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO USUARIO
-             (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
-              USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
-           VALUES (:1, 7, :2, SYSDATE, 1, 2, :3, :4)`,
-          [usuarioId, claveCifrada, email, llave],
-        )
+        usuarioId = await insertarConId(qr, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+          PERFILID: 7,
+          USUARIOCLAVE: claveCifrada,
+          USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          USUARIOESTADO: 1,
+          USUARIOTIPO: 2,
+          USUARIOEMAIL: email,
+          USUARIOLLAVEENCRIPTACION: llave,
+        })
         await qr.query(
           `INSERT INTO USUARIOPERFIL
              (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, SYSDATE)`,
+           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, ${AHORA_UTC})`,
           [usuarioId],
         )
       }
@@ -994,18 +1023,16 @@ export class ImportarProyectoService {
       const modalidadId = modProy?.id ?? dto.modalidadProyectoId ?? 1
       const sigla = (data.basicos.sigla ?? '').trim() || data.basicos.razonSocial.trim().slice(0, 30)
       const proyectoNombre = `${sigla}-FCE-${anioConvocatoria}`.slice(0, 100)
-      await qr.query(
-        `INSERT INTO PROYECTO
-           (PROYECTOID, EMPRESAID, PROYECTONOMBRE, PROYECTOOBJETIVO,
-            CONVOCATORIAID, MODALIDADID,
-            PROYECTOCODSEGURIDAD, PROYECTOFECHAREGISTRO, PROYECTOESTADO)
-         VALUES (PROYECTOID.NEXTVAL, :1, :2, :3, :4, :5, :6, SYSDATE, 0)`,
-        [empresaId, proyectoNombre,
-         data.generalidades.objetivoProyecto?.trim() ?? null,
-         dto.convocatoriaId, modalidadId, codSeg],
-      )
-      const seqP: Array<{ id: number }> = await qr.query(`SELECT PROYECTOID.CURRVAL AS "id" FROM dual`)
-      const proyectoId = Number(seqP[0].id)
+      const proyectoId = await insertarConId(qr, 'PROYECTO', 'PROYECTOID', { secuencia: 'PROYECTOID' }, {
+        EMPRESAID: empresaId,
+        PROYECTONOMBRE: proyectoNombre,
+        PROYECTOOBJETIVO: data.generalidades.objetivoProyecto?.trim() ?? null,
+        CONVOCATORIAID: dto.convocatoriaId,
+        MODALIDADID: modalidadId,
+        PROYECTOCODSEGURIDAD: codSeg,
+        PROYECTOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        PROYECTOESTADO: 0,
+      })
 
       // 4. contactos: los cargos salen del listado oficial del SEP
       const contactos = [
@@ -1059,16 +1086,12 @@ export class ImportarProyectoService {
       }
 
       for (const diag of data.diagnosticos) {
-        await qr.query(
-          `INSERT INTO NECESIDAD
-             (NECESIDADID, EMPRESANECESIDADID, NECESIDADFECHAREGISTRO, USUREGISTRONECESIDAD)
-           VALUES (NECESIDADID.NEXTVAL, :1, SYSDATE, :2)`,
-          [empresaId, usuarioId],
-        )
-        const [{ id: necId }]: Array<{ id: number }> = await qr.query(
-          `SELECT NECESIDADID.CURRVAL AS "id" FROM dual`,
-        )
-        necesidadIdPorDiag.set(diag.numero, Number(necId))
+        const necId = await insertarConId(qr, 'NECESIDAD', 'NECESIDADID', { secuencia: 'NECESIDADID' }, {
+          EMPRESANECESIDADID: empresaId,
+          NECESIDADFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          USUREGISTRONECESIDAD: usuarioId,
+        })
+        necesidadIdPorDiag.set(diag.numero, necId)
         necesidadesCreadas++
 
         const isoFecha = toIsoDate(diag.fecha)
@@ -1100,13 +1123,16 @@ export class ImportarProyectoService {
             // noResueltos todavia no existe en este punto: la herramienta se omite
             continue
           }
-          await qr.query(
-            `INSERT INTO HERRAMIENTANECESIDAD
-               (HERRAMIENTANECESIDADID, NECESIDADID, FUENTEHERRAMIENTAID,
-                HERRAMIENTANECESIDADPARTICIP, HERRAMIENTANECESIDADOTRA,
-                USUREGISTROHERRAMIENTA, HERRAMIENTANECESIDADFECHAREG)
-             VALUES (HERRAMIENTANECESIDADID.NEXTVAL, :1, :2, :3, ' ', :4, SYSDATE)`,
-            [Number(necId), fuenteId, Number(h.muestra) || 0, usuarioId],
+          await insertarConId(
+            qr, 'HERRAMIENTANECESIDAD', 'HERRAMIENTANECESIDADID', { secuencia: 'HERRAMIENTANECESIDADID' },
+            {
+              NECESIDADID: necId,
+              FUENTEHERRAMIENTAID: fuenteId,
+              HERRAMIENTANECESIDADPARTICIP: Number(h.muestra) || 0,
+              HERRAMIENTANECESIDADOTRA: ' ',
+              USUREGISTROHERRAMIENTA: usuarioId,
+              HERRAMIENTANECESIDADFECHAREG: sqlCrudo(AHORA_UTC),
+            },
           )
           herramientasCreadas++
         }
@@ -1115,17 +1141,16 @@ export class ImportarProyectoService {
       for (const nec of data.necesidades) {
         const necesidadId = necesidadIdPorDiag.get(nec.numeroDiagnostico)
         if (!necesidadId) continue
-        const seqNF = await qr.query(`SELECT NECESIDADFORMACIONID.NEXTVAL FROM dual`)
-        const necFormId = Number(seqNF[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO NECESIDADFORMACION
-             (NECESIDADFORMACIONID, NECESIDADID, NECESIDADFORMACIONNUMERO,
-              NECESIDADFORMACIONNOMBRE, NECESIDADFORMACIONBENEF,
-              USUREGISTRONECESIDADFORMACION, NECESIDADFORMACIONFECHAREGISTR)
-           VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-          [necFormId, necesidadId, nec.numeroNecesidad,
-           (nec.necesidad ?? '').trim().slice(0, 4000),
-           nec.numeroBeneficiarios ?? 0, usuarioId],
+        const necFormId = await insertarConId(
+          qr, 'NECESIDADFORMACION', 'NECESIDADFORMACIONID', { secuencia: 'NECESIDADFORMACIONID' },
+          {
+            NECESIDADID: necesidadId,
+            NECESIDADFORMACIONNUMERO: nec.numeroNecesidad,
+            NECESIDADFORMACIONNOMBRE: (nec.necesidad ?? '').trim().slice(0, 4000),
+            NECESIDADFORMACIONBENEF: nec.numeroBeneficiarios ?? 0,
+            USUREGISTRONECESIDADFORMACION: usuarioId,
+            NECESIDADFORMACIONFECHAREGISTR: sqlCrudo(AHORA_UTC),
+          },
         )
         necFormIdPor.set(`${nec.numeroDiagnostico}-${nec.numeroNecesidad}`, necFormId)
         necFormCreadas++
@@ -1211,7 +1236,7 @@ export class ImportarProyectoService {
         return null
       }
       const findTipoEvento = (nombre: string | null) =>
-        nombre ? this.matchModalidad(nombre, tiposEvento)?.id ?? null : null
+        nombre ? matchModalidad(nombre, tiposEvento)?.id ?? null : null
       const findModalidad = (nombre: string | null) =>
         nombre ? this.matchModalidadFormacion(nombre, modsForm)?.id ?? null : null
 
@@ -1284,9 +1309,6 @@ export class ImportarProyectoService {
         const benefTot  = (benefPres + benefSinc) * (numGrupos || 1)
         const totHoras  = horasGrupo * (numGrupos || 1)
 
-        const seqA: Array<{ NEXTVAL: number }> = await qr.query(`SELECT ACCIONFORMACIONID.NEXTVAL FROM dual`)
-        const afId = Number(seqA[0].NEXTVAL)
-
         // se concatenan con salto de linea para que el editor del proyecto vivo los separe
         const resDesem = af.impactosTrabajador.filter(Boolean).join('\n').trim() || null
         const resForm  = af.impactosProductividad.filter(Boolean).join('\n').trim() || null
@@ -1300,71 +1322,53 @@ export class ImportarProyectoService {
         const necFormKey = `${af.codigoDiagnostico ?? ''}-${af.codigoNecesidad ?? ''}`
         const necFormIdAf = necFormIdPor.get(necFormKey) ?? null
 
-        await qr.query(
-          `INSERT INTO ACCIONFORMACION
-             (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
-              NECESIDADFORMACIONIDAF,
-              ACCIONFORMACIONJUSTNEC, ACCIONFORMACIONCAUSA, ACCIONFORMACIONRESULTADOS,
-              ACCIONFORMACIONOBJETIVO,
-              TIPOEVENTOID, MODALIDADFORMACIONID, METODOLOGIAAPRENDIZAJEID,
-              ACCIONFORMACIONNUMHORAGRUPO, ACCIONFORMACIONNUMGRUPOS, ACCIONFORMACIONNUMTOTHORASGRUP,
-              ACCIONFORMACIONBENEFGRUPO, ACCIONFORMACIONBENEFVIGRUPO, ACCIONFORMACIONNUMBENEF,
-              AFENFOQUEID, ACCIONFORMACIONAREAFUN, ACCIONFORMACIONNIVELOCUPD,
-              ACCIONFORMACIONMUJER, ACCIONFORMACIONNUMCAMPESINO, ACCIONFORMACIONJUSTCAMPESINO,
-              ACCIONFORMACIONNUMPOPULAR, ACCIONFORMACIONJUSTPOPULAR,
-              ACCIONFORMACIONTRABDISCAPAC, ACCIONFORMACIONTRABAJADORBIC,
-              ACCIONFORMACIONMIPYMES, ACCIONFORMACIONTRABMIPYMES, ACCIONFORMACIONMIPYMESD,
-              ACCIONFORMACIONCADENAPROD, ACCIONFORMACIONTRABCADPROD, ACCIONFORMACIONCADENAPRODD,
-              ACCIONFORMACIONSECSUBD,
-              ACCIONFORMACIONCOMPONENTEID, ACCIONFORMACIONCOMPOD, ACCIONFORMACIONJUSTIFICACION,
-              ACCIONFORMACIONRESDESEM, ACCIONFORMACIONRESFORM,
-              TIPOAMBIENTEID, ACCIONFORMACIONJUSTMAT,
-              ACCIONFORMACIONINSUMO, ACCIONFORMACIONJUSTINSUMO,
-              ACCIONFORMACIONFECHAREGISTRO)
-           VALUES (:1,:2,:3,:4,
-                   :5,
-                   :6,:7,:8,
-                   :9,
-                   :10,:11,:12,
-                   :13,:14,:15,
-                   :16,:17,:18,
-                   :19,:20,:21,
-                   :22,:23,:24,
-                   :25,:26,
-                   :27,:28,
-                   :29,:30,:31,
-                   :32,:33,:34,
-                   :35,
-                   :36,:37,:38,
-                   :39,:40,
-                   :41,:42,
-                   :43,:44,
-                   SYSDATE)`,
-          [
-            afId, proyectoId, af.consecutivo, (af.nombre ?? '').trim().slice(0, 500),
-            necFormIdAf,
-            af.diagnostico?.trim() ?? null, af.causasEfectos?.trim() ?? null, af.efectos?.trim() ?? null,
-            af.objetivos?.trim() ?? null,
-            tipoEventoId, modFormId, metodologiaId,
-            horasGrupo || null, numGrupos || null, totHoras || null,
-            benefPres || null, benefSinc || null, benefTot || null,
-            enfoqueId, af.justificacionAreas?.trim() ?? null, af.justificacionNiveles?.trim() ?? null,
-            af.trabajadoresMujeres ?? null, af.trabajadoresCampesinos ?? null,
-            af.trabajadoresCampesinosTexto?.trim() ?? null,
-            af.trabajadoresPopular ?? null, af.trabajadoresPopularTexto?.trim() ?? null,
-            af.trabajadoresDiscapacidad ?? null, af.empresasBic ?? null,
-            af.mipymesEmpresas ?? null, af.mipymesTrabajadores ?? null,
-            af.justificacionMipymes?.trim() ?? null,
-            af.cadenaEmpresas ?? null, af.cadenaTrabajadores ?? null,
-            af.justificacionCadena?.trim() ?? null,
-            af.justificacionSectores?.trim() ?? null,
-            // COMPOD = justificacion de la alineacion; JUSTIFICACION = AF especializada
-            componenteId, af.justificacionAlineacion?.trim() ?? null, af.justificacionEspecializada?.trim() ?? null,
-            resDesem, resForm,
-            ambienteId, af.justificacionSiAplica?.trim() ?? null,
-            af.insumos?.trim() ?? null, af.justificacionInsumo?.trim() ?? null,
-          ],
-        )
+        const afId = await insertarConId(qr, 'ACCIONFORMACION', 'ACCIONFORMACIONID', { secuencia: 'ACCIONFORMACIONID' }, {
+          PROYECTOID: proyectoId,
+          ACCIONFORMACIONNUMERO: af.consecutivo,
+          ACCIONFORMACIONNOMBRE: (af.nombre ?? '').trim().slice(0, 500),
+          NECESIDADFORMACIONIDAF: necFormIdAf,
+          ACCIONFORMACIONJUSTNEC: af.diagnostico?.trim() ?? null,
+          ACCIONFORMACIONCAUSA: af.causasEfectos?.trim() ?? null,
+          ACCIONFORMACIONRESULTADOS: af.efectos?.trim() ?? null,
+          ACCIONFORMACIONOBJETIVO: af.objetivos?.trim() ?? null,
+          TIPOEVENTOID: tipoEventoId,
+          MODALIDADFORMACIONID: modFormId,
+          METODOLOGIAAPRENDIZAJEID: metodologiaId,
+          ACCIONFORMACIONNUMHORAGRUPO: horasGrupo || null,
+          ACCIONFORMACIONNUMGRUPOS: numGrupos || null,
+          ACCIONFORMACIONNUMTOTHORASGRUP: totHoras || null,
+          ACCIONFORMACIONBENEFGRUPO: benefPres || null,
+          ACCIONFORMACIONBENEFVIGRUPO: benefSinc || null,
+          ACCIONFORMACIONNUMBENEF: benefTot || null,
+          AFENFOQUEID: enfoqueId,
+          ACCIONFORMACIONAREAFUN: af.justificacionAreas?.trim() ?? null,
+          ACCIONFORMACIONNIVELOCUPD: af.justificacionNiveles?.trim() ?? null,
+          ACCIONFORMACIONMUJER: af.trabajadoresMujeres ?? null,
+          ACCIONFORMACIONNUMCAMPESINO: af.trabajadoresCampesinos ?? null,
+          ACCIONFORMACIONJUSTCAMPESINO: af.trabajadoresCampesinosTexto?.trim() ?? null,
+          ACCIONFORMACIONNUMPOPULAR: af.trabajadoresPopular ?? null,
+          ACCIONFORMACIONJUSTPOPULAR: af.trabajadoresPopularTexto?.trim() ?? null,
+          ACCIONFORMACIONTRABDISCAPAC: af.trabajadoresDiscapacidad ?? null,
+          ACCIONFORMACIONTRABAJADORBIC: af.empresasBic ?? null,
+          ACCIONFORMACIONMIPYMES: af.mipymesEmpresas ?? null,
+          ACCIONFORMACIONTRABMIPYMES: af.mipymesTrabajadores ?? null,
+          ACCIONFORMACIONMIPYMESD: af.justificacionMipymes?.trim() ?? null,
+          ACCIONFORMACIONCADENAPROD: af.cadenaEmpresas ?? null,
+          ACCIONFORMACIONTRABCADPROD: af.cadenaTrabajadores ?? null,
+          ACCIONFORMACIONCADENAPRODD: af.justificacionCadena?.trim() ?? null,
+          ACCIONFORMACIONSECSUBD: af.justificacionSectores?.trim() ?? null,
+          // COMPOD = justificacion de la alineacion; JUSTIFICACION = AF especializada
+          ACCIONFORMACIONCOMPONENTEID: componenteId,
+          ACCIONFORMACIONCOMPOD: af.justificacionAlineacion?.trim() ?? null,
+          ACCIONFORMACIONJUSTIFICACION: af.justificacionEspecializada?.trim() ?? null,
+          ACCIONFORMACIONRESDESEM: resDesem,
+          ACCIONFORMACIONRESFORM: resForm,
+          TIPOAMBIENTEID: ambienteId,
+          ACCIONFORMACIONJUSTMAT: af.justificacionSiAplica?.trim() ?? null,
+          ACCIONFORMACIONINSUMO: af.insumos?.trim() ?? null,
+          ACCIONFORMACIONJUSTINSUMO: af.justificacionInsumo?.trim() ?? null,
+          ACCIONFORMACIONFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        })
         if (af.descripcionAlineacion && !componenteId) {
           noResueltos.componente = noResueltos.componente ?? new Set()
           noResueltos.componente.add(af.descripcionAlineacion)
@@ -1385,14 +1389,9 @@ export class ImportarProyectoService {
               continue
             }
           }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFAREAFUNCIONALID), 0) + 1 AS "nid" FROM AFAREAFUNCIONAL`,
-          )
-          await qr.query(
-            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
-             VALUES (:1, :2, :3, :4)`,
-            [Number(nid), afId, aid, textoOtro],
-          )
+          await insertarConId(qr, 'AFAREAFUNCIONAL', 'AFAREAFUNCIONALID', { maxMasUno: true }, {
+            ACCIONFORMACIONIDAF: afId, AREAFUNCIONALIDAF: aid, AFAREAFUNCIONALOTRO: textoOtro,
+          })
           areasCreadas++
         }
 
@@ -1400,14 +1399,9 @@ export class ImportarProyectoService {
         for (const n of af.niveles) {
           const nid2 = findInMap(nivelesCat, n)
           if (!nid2) { noResueltos.niveles.add(n); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFNIVELOCUPACIONALID), 0) + 1 AS "nid" FROM AFNIVELOCUPACIONAL`,
-          )
-          await qr.query(
-            `INSERT INTO AFNIVELOCUPACIONAL (AFNIVELOCUPACIONALID, ACCIONFORMACIONID, NIVELOCUPACIONALIDAF)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, nid2],
-          )
+          await insertarConId(qr, 'AFNIVELOCUPACIONAL', 'AFNIVELOCUPACIONALID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, NIVELOCUPACIONALIDAF: nid2,
+          })
           nivelesCreados++
         }
 
@@ -1419,14 +1413,9 @@ export class ImportarProyectoService {
             if (idxDash >= 0) cid = findInMap(cuocCat, c.slice(idxDash + 1))
           }
           if (!cid) { noResueltos.cuoc.add(c); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(OCUPACIONCOUCAFID), 0) + 1 AS "nid" FROM OCUPACIONCOUCAF`,
-          )
-          await qr.query(
-            `INSERT INTO OCUPACIONCOUCAF (OCUPACIONCOUCAFID, ACCIONFORMACIONID, OCUPACIONCUOCID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, cid],
-          )
+          await insertarConId(qr, 'OCUPACIONCOUCAF', 'OCUPACIONCOUCAFID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, OCUPACIONCUOCID: cid,
+          })
           cuocCreados++
         }
 
@@ -1434,27 +1423,17 @@ export class ImportarProyectoService {
         for (const s of af.sectoresPertenecen) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresPert.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFPSECTORID), 0) + 1 AS "nid" FROM AFPSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFPSECTOR (AFPSECTORID, ACCIONFORMACIONID, SECTORAFID, AFPSECTORESTADO)
-             VALUES (:1, :2, :3, 1)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFPSECTOR', 'AFPSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SECTORAFID: sid, AFPSECTORESTADO: 1,
+          })
           sectoresCreados++
         }
         for (const s of af.subsectoresPertenecen) {
           const sid = findInMap(subsectoresCat, s)
           if (!sid) { noResueltos.subsectoresPert.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFPSUBSECTORID), 0) + 1 AS "nid" FROM AFPSUBSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFPSUBSECTOR (AFPSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID, AFPSUBSECTORESTADO)
-             VALUES (:1, :2, :3, 1)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFPSUBSECTOR', 'AFPSUBSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SUBSECTORAFID: sid, AFPSUBSECTORESTADO: 1,
+          })
           subsectoresCreados++
         }
 
@@ -1462,27 +1441,17 @@ export class ImportarProyectoService {
         for (const s of af.sectoresBeneficia) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresBenef.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFSECTORID), 0) + 1 AS "nid" FROM AFSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFSECTOR (AFSECTORID, ACCIONFORMACIONID, SECTORAFID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFSECTOR', 'AFSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SECTORAFID: sid,
+          })
           sectoresCreados++
         }
         for (const s of af.subsectoresBeneficia) {
           const sid = findInMap(subsectoresCat, s)
           if (!sid) { noResueltos.subsectoresBenef.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFSUBSECTORID), 0) + 1 AS "nid" FROM AFSUBSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFSUBSECTOR (AFSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFSUBSECTOR', 'AFSUBSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SUBSECTORAFID: sid,
+          })
           subsectoresCreados++
         }
 
@@ -1490,14 +1459,9 @@ export class ImportarProyectoService {
         if (af.gestionConocimiento) {
           const gid = findInMap(gestionCat, af.gestionConocimiento)
           if (gid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(AFGESTIONCONOCIMIENTOID), 0) + 1 AS "nid" FROM AFGESTIONCONOCIMIENTO`,
-            )
-            await qr.query(
-              `INSERT INTO AFGESTIONCONOCIMIENTO (AFGESTIONCONOCIMIENTOID, ACCIONFORMACIONID, GESTIONCONOCIMIENTOID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, gid],
-            )
+            await insertarConId(qr, 'AFGESTIONCONOCIMIENTO', 'AFGESTIONCONOCIMIENTOID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, GESTIONCONOCIMIENTOID: gid,
+            })
           } else {
             noResueltos.gestion.add(af.gestionConocimiento)
           }
@@ -1507,14 +1471,9 @@ export class ImportarProyectoService {
         if (af.material) {
           const mid = findInMap(materialesCat, af.material)
           if (mid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(MATERIALFORMACIONAFID), 0) + 1 AS "nid" FROM MATERIALFORMACIONAF`,
-            )
-            await qr.query(
-              `INSERT INTO MATERIALFORMACIONAF (MATERIALFORMACIONAFID, ACCIONFORMACIONID, MATERIALFORMACIONID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, mid],
-            )
+            await insertarConId(qr, 'MATERIALFORMACIONAF', 'MATERIALFORMACIONAFID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, MATERIALFORMACIONID: mid,
+            })
           } else {
             noResueltos.materiales.add(af.material)
           }
@@ -1524,14 +1483,9 @@ export class ImportarProyectoService {
         if (af.recursosDidacticos) {
           const rid = findInMap(recursosCat, af.recursosDidacticos)
           if (rid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(RECURSOSDIDACTICOSAFID), 0) + 1 AS "nid" FROM RECURSOSDIDACTICOSAF`,
-            )
-            await qr.query(
-              `INSERT INTO RECURSOSDIDACTICOSAF (RECURSOSDIDACTICOSAFID, ACCIONFORMACIONID, RECURSOSDIDACTICOSID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, rid],
-            )
+            await insertarConId(qr, 'RECURSOSDIDACTICOSAF', 'RECURSOSDIDACTICOSAFID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, RECURSOSDIDACTICOSID: rid,
+            })
             recursosCreados++
           } else {
             noResueltos.recursos.add(af.recursosDidacticos)
@@ -1543,14 +1497,9 @@ export class ImportarProyectoService {
         for (let i = 0; i < covAf.length; i++) {
           const cov = covAf[i]
           const grupoNumero = (cov.numeroGrupo && cov.numeroGrupo > 0) ? cov.numeroGrupo : (i + 1)
-          const [{ nid: grupoId }] = await qr.query(
-            `SELECT NVL(MAX(AFGRUPOID), 0) + 1 AS "nid" FROM AFGRUPO`,
-          )
-          await qr.query(
-            `INSERT INTO AFGRUPO (AFGRUPOID, ACCIONFORMACIONID, AFGRUPONUMERO, AFGRUPOJUSTIFICACION)
-             VALUES (:1, :2, :3, :4)`,
-            [Number(grupoId), afId, grupoNumero, cov.justificacion?.trim() ?? null],
-          )
+          const grupoId = await insertarConId(qr, 'AFGRUPO', 'AFGRUPOID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, AFGRUPONUMERO: grupoNumero, AFGRUPOJUSTIFICACION: cov.justificacion?.trim() ?? null,
+          })
           gruposCreados++
 
           if (cov.departamentoPresencial) {
@@ -1567,17 +1516,11 @@ export class ImportarProyectoService {
                 )
                 if (ciu[0]) ciudadId = Number(ciu[0].id)
               }
-              const [{ nid: cobId }] = await qr.query(
-                `SELECT NVL(MAX(AFGRUPOCOBERTURAID), 0) + 1 AS "nid" FROM AFGRUPOCOBERTURA`,
-              )
-              await qr.query(
-                `INSERT INTO AFGRUPOCOBERTURA
-                   (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-                    AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-                 VALUES (:1, :2, :3, :4, :5, :6, 'P', 0)`,
-                [Number(cobId), Number(grupoId), did, ciudadId,
-                 cov.beneficiariosPresencial ?? 0, afId],
-              )
+              await insertarConId(qr, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
+                AFGRUPOID: grupoId, DEPARTAMENTOGRUPOID: did, CIUDADGRUPOID: ciudadId,
+                AFGRUPOCOBERTURABENEF: cov.beneficiariosPresencial ?? 0, AFGRUPOFILTRO: afId,
+                AFGRUPOCOBERTURAMOD: 'P', AFGRUPOCOBERTURARURAL: 0,
+              })
               coberturasCreadas++
             }
           }
@@ -1587,16 +1530,11 @@ export class ImportarProyectoService {
           for (const d of cov.departamentos) {
             const did = findInMap(departamentosCat, d.departamento)
             if (!did) { noResueltos.departamentos.add(d.departamento); continue }
-            const [{ nid: cobId }] = await qr.query(
-              `SELECT NVL(MAX(AFGRUPOCOBERTURAID), 0) + 1 AS "nid" FROM AFGRUPOCOBERTURA`,
-            )
-            await qr.query(
-              `INSERT INTO AFGRUPOCOBERTURA
-                 (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-                  AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-               VALUES (:1, :2, :3, NULL, :4, :5, :6, 0)`,
-              [Number(cobId), Number(grupoId), did, d.beneficiarios, afId, modSecundario],
-            )
+            await insertarConId(qr, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
+              AFGRUPOID: grupoId, DEPARTAMENTOGRUPOID: did, CIUDADGRUPOID: null,
+              AFGRUPOCOBERTURABENEF: d.beneficiarios, AFGRUPOFILTRO: afId,
+              AFGRUPOCOBERTURAMOD: modSecundario, AFGRUPOCOBERTURARURAL: 0,
+            })
             coberturasCreadas++
           }
         }
@@ -1604,9 +1542,6 @@ export class ImportarProyectoService {
         // UTs + actividades + perfiles
         const utsAf = data.uts.filter(u => Number(u.numeroAF) === Number(af.consecutivo))
         for (const ut of utsAf) {
-          const [{ id: utId }] = await qr.query(
-            `SELECT NVL(MAX(UNIDADTEMATICAID), 0) + 1 AS "id" FROM UNIDADTEMATICA`,
-          )
           // las horas van a la columna de la modalidad de la AF
           const modUp = norm(af.modalidadFormacion)
           const esPat = modUp === 'PAT' || modUp.includes('ASISTIDA POR TECNOLOG')
@@ -1626,24 +1561,22 @@ export class ImportarProyectoService {
             if (!articulacionId) noResueltos.articulacionTerritorial.add(ut.articulacionTerritorial)
           }
 
-          await qr.query(
-            `INSERT INTO UNIDADTEMATICA (
-               UNIDADTEMATICAID, PROYECTOIDUT, ACCIONFORMACIONID, UNIDADTEMATICANUMERO,
-               UNIDADTEMATICANOMBRE, UNIDADTEMATICACOMPETENCIAS, UNIDADTEMATICACONTENIDO,
-               UNIDADTEMATICAJUSTACTIVIDAD,
-               UNIDADTEMATICAHORASPP, UNIDADTEMATICAHORASPV, UNIDADTEMATICAHORASPPAT, UNIDADTEMATICAHORASPHIB,
-               UNIDADTEMATICAHORASTP, UNIDADTEMATICAHORASTV, UNIDADTEMATICAHORASTPAT, UNIDADTEMATICAHORASTHIB,
-               UNIDADTEMATICAESTRANSVERSAL, ARTICULACIONTERRITORIALID, UNIDADTEMATICAFECHAREGISTRO
-             ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,SYSDATE)`,
-            [Number(utId), proyectoId, afId, ut.numeroUT,
-             (ut.nombre ?? '').trim().slice(0, 500),
-             ut.competencia?.trim() ?? null,
-             ut.contenido?.trim() ?? null,
-             ut.descripcionActividad?.trim() ?? null,
-             horas.pp, horas.pv, horas.ppat, horas.phib,
-             horas.tp, horas.tv, horas.tpat, horas.thib,
-             ut.esArticulacionTerritorial ? 1 : 0, articulacionId],
-          )
+          const utId = await insertarConId(qr, 'UNIDADTEMATICA', 'UNIDADTEMATICAID', { maxMasUno: true }, {
+            PROYECTOIDUT: proyectoId,
+            ACCIONFORMACIONID: afId,
+            UNIDADTEMATICANUMERO: ut.numeroUT,
+            UNIDADTEMATICANOMBRE: (ut.nombre ?? '').trim().slice(0, 500),
+            UNIDADTEMATICACOMPETENCIAS: ut.competencia?.trim() ?? null,
+            UNIDADTEMATICACONTENIDO: ut.contenido?.trim() ?? null,
+            UNIDADTEMATICAJUSTACTIVIDAD: ut.descripcionActividad?.trim() ?? null,
+            UNIDADTEMATICAHORASPP: horas.pp, UNIDADTEMATICAHORASPV: horas.pv,
+            UNIDADTEMATICAHORASPPAT: horas.ppat, UNIDADTEMATICAHORASPHIB: horas.phib,
+            UNIDADTEMATICAHORASTP: horas.tp, UNIDADTEMATICAHORASTV: horas.tv,
+            UNIDADTEMATICAHORASTPAT: horas.tpat, UNIDADTEMATICAHORASTHIB: horas.thib,
+            UNIDADTEMATICAESTRANSVERSAL: ut.esArticulacionTerritorial ? 1 : 0,
+            ARTICULACIONTERRITORIALID: articulacionId,
+            UNIDADTEMATICAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          })
           utsCreadas++
 
           // si la actividad no esta en el catalogo va como "Otra" + ACTIVIDADUTOTRO
@@ -1659,14 +1592,9 @@ export class ImportarProyectoService {
                 continue
               }
             }
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(ACTIVIDADUTID), 0) + 1 AS "nid" FROM ACTIVIDADUT`,
-            )
-            await qr.query(
-              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
-               VALUES (:1, :2, :3, :4)`,
-              [Number(nid), Number(utId), aid, textoOtro],
-            )
+            await insertarConId(qr, 'ACTIVIDADUT', 'ACTIVIDADUTID', { maxMasUno: true }, {
+              UNIDADTEMATICAID: utId, UTACTIVIDADESID: aid, ACTIVIDADUTOTRO: textoOtro,
+            })
             actividadesCreadas++
           }
 
@@ -1678,14 +1606,10 @@ export class ImportarProyectoService {
               rubrosNoEncontrados.add(`${p.perfil} (UT${ut.numeroUT}, AF ${af.consecutivo})`)
               continue
             }
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(PERFILUTID), 0) + 1 AS "nid" FROM PERFILUT`,
-            )
-            await qr.query(
-              `INSERT INTO PERFILUT (PERFILUTID, UNIDADTEMATICAID, RUBROIDUT, PERFILUTHORASCAP, PERFILUTFECHAREGISTRO)
-               VALUES (:1, :2, :3, :4, SYSDATE)`,
-              [Number(nid), Number(utId), rubroId, p.horas ?? 0],
-            )
+            await insertarConId(qr, 'PERFILUT', 'PERFILUTID', { maxMasUno: true }, {
+              UNIDADTEMATICAID: utId, RUBROIDUT: rubroId, PERFILUTHORASCAP: p.horas ?? 0,
+              PERFILUTFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+            })
             perfilesCreados++
           }
         }
@@ -1698,32 +1622,32 @@ export class ImportarProyectoService {
             rubrosNoEncontrados.add(`${r.idRubro || r.nombreRubro} (AF ${af.consecutivo})`)
             continue
           }
-          const [{ id: afrId }] = await qr.query(
-            `SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "id" FROM AFRUBRO`,
-          )
           const total = r.totalRubro ?? 0
           const cof   = r.cofinanciacionSena ?? 0
           const esp   = r.contrapartidaEspecie ?? 0
           const din   = r.contrapartidaDinero ?? 0
           const pct = (v: number) => total > 0 ? Math.round((v / total) * 100) : 0
-          await qr.query(
-            `INSERT INTO AFRUBRO
-               (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-                AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
-                AFRUBROBENEFICIARIOS, AFRUBRODIAS,
-                AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-                AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
-                AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
-                AFRUBROFECHAREGISTRO)
-             VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18, :19, SYSDATE)`,
-            [Number(afrId), proyectoId, afId, rubroId,
-             (r.justificacion ?? '').trim().slice(0, 2000),
-             r.numHoras ?? 0, r.numPaginasUnidades ?? 1,
-             r.numBeneficiarios ?? 0, r.numDias ?? 0,
-             total, cof, esp, din,
-             r.valorMaximo ?? 0, r.valorPorBeneficiarios ?? 0, r.paquete ?? null,
-             pct(cof), pct(esp), pct(din)],
-          )
+          await insertarConId(qr, 'AFRUBRO', 'AFRUBROID', { maxMasUno: true }, {
+            PROYECTOIDRUBROAF: proyectoId,
+            ACCIONFORMACIONID: afId,
+            RUBROID: rubroId,
+            AFRUBROJUSTIFICACION: (r.justificacion ?? '').trim().slice(0, 2000),
+            AFRUBRONUMHORAS: r.numHoras ?? 0,
+            AFRUBROCANTIDAD: r.numPaginasUnidades ?? 1,
+            AFRUBROBENEFICIARIOS: r.numBeneficiarios ?? 0,
+            AFRUBRODIAS: r.numDias ?? 0,
+            AFRUBROVALOR: total,
+            AFRUBROCOFINANCIACION: cof,
+            AFRUBROESPECIE: esp,
+            AFRUBRODINERO: din,
+            AFRUBROVALORMAXIMO: r.valorMaximo ?? 0,
+            AFRUBROVALORPORBENEFICIARIO: r.valorPorBeneficiarios ?? 0,
+            AFRUBROPAQUETE: r.paquete ?? null,
+            AFRUBROPORCENTAJECOFINANCIACION: pct(cof),
+            AFRUBROPORCENTAJEESPECIE: pct(esp),
+            AFRUBROPORCENTAJEDINERO: pct(din),
+            AFRUBROFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          })
           rubrosCreados++
         }
       }

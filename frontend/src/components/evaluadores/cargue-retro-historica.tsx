@@ -2,12 +2,12 @@
 
 import api from '@/lib/api'
 import { getSepUsuario } from '@/lib/auth'
+import { perfilesGestion, usePerfiles } from '@/lib/use-perfiles'
 import { AlertTriangle, Check, ChevronRight, Copy, History, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 const PRIMARY = '#00304D'
 const INSTITUTIONAL = '#39a900'
-const PERFILES_GESTION = [1, 2, 15]
 
 const TIPOS: Array<{ id: string; etiqueta: string; ayuda: string }> = [
   { id: 'ESCALA', etiqueta: 'Nota', ayuda: 'se responde con un número de la escala' },
@@ -78,8 +78,10 @@ export function CargueRetroHistorica({
   anio: number
   onRecargar: () => void
 }) {
+  // el gestor de evaluadores no tiene el mismo id en las dos bases: hasta tener las claves no se muestra
+  const claves = usePerfiles()
   const perfilId = getSepUsuario()?.perfilId ?? 0
-  const puede = PERFILES_GESTION.includes(perfilId) && anio < 2026
+  const puede = claves !== null && perfilesGestion(claves).includes(perfilId) && anio < 2026
 
   const [abierto, setAbierto] = useState(false)
   const [cargando, setCargando] = useState(false)

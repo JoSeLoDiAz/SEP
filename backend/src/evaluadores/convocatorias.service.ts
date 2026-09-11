@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import type { MulterFile } from './evaluadores.service'
 import { fechaSolo } from '../common/fecha-solo'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 // Debe coincidir con el límite del interceptor multer.
 export const MAX_CONV_DOC_BYTES = 8 * 1024 * 1024
@@ -220,7 +221,7 @@ export class ConvocatoriasService {
         `INSERT INTO EVALUADORCONVOCATORIA
            (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
             OBSERVACIONES, CONVOCATORIASEPID, ACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, ${AHORA_UTC})`,
         [
           convocatoriaId,
           Number(dto.anio),
@@ -448,7 +449,7 @@ export class ConvocatoriasService {
       `INSERT INTO CONVOCATORIADOCUMENTO
          (DOCUMENTOID, CONVOCATORIAID, TIPODOCUMENTOCONVID, DOCUMENTODESCRIPCION,
           ARCHIVOBLOB, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, SYSDATE)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, ${AHORA_UTC})`,
       [
         documentoId,
         convocatoriaId,

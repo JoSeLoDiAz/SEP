@@ -5,6 +5,8 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { aTitleCase } from '../common/text/title-case'
 import { bindRepetido, enBloques } from '../common/db/binds'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 import {
   cifrarClave, generarClaveInicial, generarLlaveEncriptacion,
 } from '../common/crypto/usuario-clave'
@@ -214,7 +216,7 @@ const PRUEBA_VIGENTE = `EXISTS (
      WHERE pr.EVALUADORID = e.EVALUADORID
   ) u
    WHERE u.rn = 1
-     AND u.ANIO >= EXTRACT(YEAR FROM SYSDATE) - 1
+     AND u.ANIO >= EXTRACT(YEAR FROM ${AHORA_UTC}) - 1
      AND (u.APROBADA = 1
           OR (u.PUNTAJEMINIMO IS NOT NULL AND u.EFECTIVIDAD >= u.PUNTAJEMINIMO)))`
 
@@ -674,37 +676,33 @@ export class EvaluadoresService {
         // el tecleado: si no, el login y lo que se ve en pantalla no coinciden
         correoDeLaFicha = (yaEsta.email ?? '').trim().toLowerCase() || correoDeLaFicha
       } else {
-        const seq: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
-        personaId = Number(seq[0].NEXTVAL)
         // Title Case solo en nombres y apellidos.
         const nombres = aTitleCase(dto.nombres) ?? ''
         const primerApellido = aTitleCase(dto.primerApellido) ?? ''
         const segundoApellido = aTitleCase(dto.segundoApellido) ?? ''
-        await qr.query(
-          `INSERT INTO PERSONA
-             (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
-              PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION, PERSONAEMAIL, PERSONAEMAILINSTITUCIONAL,
-              PERSONACELULAR, PERSONAFECHAREGISTRO, GENEROID, CIUDADID, PERSONAHABEASDATA, PERSONAHABEASDATAE)
-           -- GENEROID iba quemado en 3, que en el catálogo es NO BINARIO, no
-           -- "sin dato": el alta le atribuía ese género a todo el que registrara,
-           -- y 14 evaluadores quedaron así. La columna admite NULL; no afirmar
-           -- nada es lo honesto, y la ficha ya deja elegirlo después.
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE, NULL, :10, 'SI', 'NA')`,
-          [
-            personaId,
-            dto.tipoDocumentoIdentidadId,
-            nombres,
-            primerApellido,
-            segundoApellido,
-            ident,
-            dto.email.trim().toLowerCase(),
-            (dto.emailInstitucional ?? '').trim() || null,
-            (dto.celular ?? '').trim() || null,
-            // CIUDADID = 1 es "Ninguna" en el catalogo: un centinela que 20
-            // evaluadores tienen puesto. NULL dice lo mismo sin fingir un dato.
-            dto.ciudadId ?? null,
-          ],
-        )
+        // El id sale del mismo INSERT: en el Exadata PERSONA tiene trigger de id, que pisaría un
+        // PERSONAID.NEXTVAL pedido antes y dejaría al EVALUADOR colgado de otra persona.
+        personaId = await insertarConId(qr, 'PERSONA', 'PERSONAID', { secuencia: 'PERSONAID' }, {
+          TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId,
+          PERSONANOMBRES: nombres,
+          PERSONAPRIMERAPELLIDO: primerApellido,
+          PERSONASEGUNDOAPELLIDO: segundoApellido,
+          PERSONAIDENTIFICACION: ident,
+          PERSONAEMAIL: dto.email.trim().toLowerCase(),
+          PERSONAEMAILINSTITUCIONAL: (dto.emailInstitucional ?? '').trim() || null,
+          PERSONACELULAR: (dto.celular ?? '').trim() || null,
+          PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          // GENEROID iba quemado en 3, que en el catálogo es NO BINARIO, no
+          // "sin dato": el alta le atribuía ese género a todo el que registrara,
+          // y 14 evaluadores quedaron así. La columna admite NULL; no afirmar
+          // nada es lo honesto, y la ficha ya deja elegirlo después.
+          GENEROID: sqlCrudo('NULL'),
+          // CIUDADID = 1 es "Ninguna" en el catalogo: un centinela que 20
+          // evaluadores tienen puesto. NULL dice lo mismo sin fingir un dato.
+          CIUDADID: dto.ciudadId ?? null,
+          PERSONAHABEASDATA: sqlCrudo(`'SI'`),
+          PERSONAHABEASDATAE: sqlCrudo(`'NA'`),
+        })
       }
 
       const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL FROM dual`)
@@ -716,7 +714,7 @@ export class EvaluadoresService {
             EVALUADORPOSGRADO,
             EVALUADORJEFENOMBRE, EVALUADORJEFEEMAIL, EVALUADORJEFECARGO, EVALUADORMUNICIPIOID,
             EVALUADORACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 1, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 1, ${AHORA_UTC})`,
         [
           evaluadorId, personaId,
           dto.centroId ?? null, dto.regionalId ?? null,
@@ -822,7 +820,7 @@ export class EvaluadoresService {
       await qr.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 0, 1, SYSDATE)`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 0, 1, ${AHORA_UTC})`,
         [usuarioId, PERFIL_EVALUADOR],
       )
       return {
@@ -836,20 +834,21 @@ export class EvaluadoresService {
     if (clave.length < 6) throw new BadRequestException('La clave inicial debe tener al menos 6 caracteres')
 
     const llave = generarLlaveEncriptacion()
-    const seq = (await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)) as Array<{ NEXTVAL: number }>
-    const usuarioId = Number(seq[0].NEXTVAL)
-
-    await qr.query(
-      `INSERT INTO USUARIO
-         (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
-          USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
-       VALUES (:1, :2, :3, SYSDATE, 1, 1, :4, :5)`,
-      [usuarioId, PERFIL_EVALUADOR, cifrarClave(clave, llave), email, llave],
-    )
+    // Como PERSONA: en el Exadata USUARIO tiene trigger de id, así que el USUARIOID que va a
+    // USUARIOPERFIL y a la respuesta es el que devuelve el INSERT.
+    const usuarioId = await insertarConId(qr, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+      PERFILID: PERFIL_EVALUADOR,
+      USUARIOCLAVE: cifrarClave(clave, llave),
+      USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      USUARIOESTADO: sqlCrudo('1'),
+      USUARIOTIPO: sqlCrudo('1'),
+      USUARIOEMAIL: email,
+      USUARIOLLAVEENCRIPTACION: llave,
+    })
     await qr.query(
       `INSERT INTO USUARIOPERFIL
          (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-       VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, SYSDATE)`,
+       VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, ${AHORA_UTC})`,
       [usuarioId, PERFIL_EVALUADOR],
     )
 
@@ -1246,13 +1245,14 @@ export class EvaluadoresService {
     // DINAMIZADOR es de la v51: si no está, se inserta sin ella.
     const conDinamizador = await this.columnaDinamizador()
     try {
+      // FECHACREACION va explícita en UTC: su DEFAULT SYSDATE da la hora de Colombia en el Exadata
       await this.dataSource.query(
         `INSERT INTO EVALUADORPARTICIPACION
          (PARTICIPACIONID, EVALUADORID, ANIO, PERIODO, ROLEVALUADORID, MODALIDADPARTID,
           PROCESOID, ESTADOPARTID, CONVOCATORIAID, AREAID, ESTRANSVERSAL,
           MESA, EQUIPOEVALUADOR,${conDinamizador ? ' DINAMIZADOR,' : ''}
-          DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES, USUARIOCREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13,${conDinamizador ? ' :14, :15, :16, :17, :18' : ' :14, :15, :16, :17'})`,
+          DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES, USUARIOCREACION, FECHACREACION)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13,${conDinamizador ? ' :14, :15, :16, :17, :18' : ' :14, :15, :16, :17'}, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -1557,7 +1557,7 @@ export class EvaluadoresService {
           SET ESTADOPARTID = :1,
               MOTIVONOPARTICIPA = :2,
               USUARIOMODIFICACION = :3,
-              FECHAMODIFICACION = SYSDATE
+              FECHAMODIFICACION = ${AHORA_UTC}
         WHERE PARTICIPACIONID = :4`,
       [Number(estados[0].id), motivo, ctx.usuarioEmail, participacionId],
     )
@@ -1623,7 +1623,7 @@ export class EvaluadoresService {
     if (existente[0]) {
       await this.dataSource.query(
         `UPDATE EVALUADORESTUDIO
-            SET ARCHIVOPDF = :1, ARCHIVOMIME = :2, ARCHIVONOMBRE = :3, FECHACARGUE = SYSDATE
+            SET ARCHIVOPDF = :1, ARCHIVOMIME = :2, ARCHIVONOMBRE = :3, FECHACARGUE = ${AHORA_UTC}
           WHERE ESTUDIOID = :4`,
         [file.buffer, file.mimetype, file.originalname, Number(existente[0].id)],
       )
@@ -1637,7 +1637,7 @@ export class EvaluadoresService {
     await this.dataSource.query(
       `INSERT INTO EVALUADORESTUDIO
          (ESTUDIOID, EVALUADORID, TIPOESTUDIOID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
+       VALUES (:1, :2, :3, :4, :5, :6, ${AHORA_UTC})`,
       [id, evaluadorId, tipoHV, file.buffer, file.mimetype, file.originalname],
     )
     return { message: 'Hoja de vida cargada', estudioId: id }
@@ -1779,7 +1779,7 @@ export class EvaluadoresService {
       `INSERT INTO EVALUADORESTUDIO
          (ESTUDIOID, EVALUADORID, TIPOESTUDIOID, ESTUDIOTITULO, INSTITUCION, FECHAGRADO,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.tipoEstudioId,
         dto.titulo?.trim() || null,
@@ -2089,7 +2089,7 @@ export class EvaluadoresService {
       `INSERT INTO EVALUADOREXPERIENCIA
          (EXPERIENCIAID, EVALUADORID, CARGOEXP, ENTIDADEXP, FECHAINICIO, FECHAFIN,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
       [
         id, evaluadorId,
         dto.cargo.trim(), dto.entidad.trim(),
@@ -2201,7 +2201,7 @@ export class EvaluadoresService {
       `INSERT INTO EVALUADORTIC
          (TICID, EVALUADORID, TIPOEVENTOID, TICNOMBRE, TICHORAS, FECHAFIN,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
       [
         id, evaluadorId,
         dto.tipoEventoId ?? null,
@@ -2351,12 +2351,13 @@ export class EvaluadoresService {
       `SELECT EVALUADORPRUEBA_SEQ.NEXTVAL FROM dual`,
     )
     const id = Number(seq[0].NEXTVAL)
+    // FECHACREACION va explícita en UTC: su DEFAULT SYSDATE da la hora de Colombia en el Exadata
     await this.dataSource.query(
       `INSERT INTO EVALUADORPRUEBA
          (PRUEBAID, EVALUADORID, ANIO, PERIODO, FECHAPRESENTACION, HORARIO, INTENTOS,
           PUNTAJEMAYOR, PRUEBANUMERO, EFECTIVIDAD, CORRECTAS, INCORRECTAS, TOTALTIEMPO,
-          OBSERVACION, PARTICIPACIONID, PUNTAJEMINIMO, APROBADA)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17)`,
+          OBSERVACION, PARTICIPACIONID, PUNTAJEMINIMO, APROBADA, FECHACREACION)
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -2666,7 +2667,7 @@ export class EvaluadoresService {
         `INSERT INTO EVALUADORDOCUMENTO
            (DOCUMENTOID, EVALUADORID, TIPODOCUMENTOEVALID, DOCUMENTODESCRIPCION,
             ANIOREFERENCIA, PARTICIPACIONID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
         [
           documentoId,
           evaluadorId,

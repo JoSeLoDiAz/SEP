@@ -17,14 +17,9 @@ import type { MulterFile } from './evaluadores.service'
 import { MIMES_CORREO, seEjecutaEnElNavegador } from './formatos-correo'
 import { filtroArchivo } from './subida-archivo'
 import { contentDisposition } from '../common/text/nombre-archivo'
+import { perfilesGestion } from '../common/perfiles'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
-
-// duplicados de evaluadores.controller: se mantienen sincronizados a mano
-const PERFIL_ADMIN = 1
-const PERFIL_COORDINADOR = 2
-const PERFIL_GESTOR_EVALUADORES = 15
-const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 // puerta laxa: quien valida de verdad es el service, contra las extensiones de TIPODOCUMENTOCONV
 const MIMES_CONVOCATORIA = new Set<string>([
@@ -42,7 +37,7 @@ export class ConvocatoriasController {
   constructor(private readonly service: ConvocatoriasService) {}
 
   private exigirGestion(user: JwtUser) {
-    if (!PERFILES_GESTION.includes(user.perfilId)) {
+    if (!perfilesGestion().includes(user.perfilId)) {
       throw new ForbiddenException('No tiene permisos para gestionar convocatorias del banco de evaluadores')
     }
   }

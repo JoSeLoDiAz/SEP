@@ -5,6 +5,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as crypto from 'crypto'
 import { ControlCambiosService } from './control-cambios.service'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument: new (opts?: Record<string, unknown>) => any = require('pdfkit')
@@ -119,7 +120,7 @@ export class CertificadoService {
            (CERTIFICADOID, PARTICIPACIONID, ANIO, CONSECUTIVO, CODIGOVERIFICACION,
             FECHAEMISION, EMITIDOPOR, FIRMACERTIFICADOSID, HORASCERTIFICADAS,
             DATOSSNAPSHOT, ARCHIVOMIME, ARCHIVONOMBRE)
-         VALUES (:1, :2, :3, :4, :5, SYSDATE, :6, :7, :8, :9, 'application/pdf', :10)`,
+         VALUES (:1, :2, :3, :4, :5, ${AHORA_UTC}, :6, :7, :8, :9, 'application/pdf', :10)`,
         [
           certificadoId, participacionId, snapshot.anio, consecutivo, codigo,
           ctx.usuarioEmail, datos.firmaId, snapshot.horas ?? null,
@@ -221,7 +222,7 @@ export class CertificadoService {
 
     await this.dataSource.query(
       `UPDATE EVALUADORCERTIFICADO
-          SET ANULADO = 1, MOTIVOANULACION = :1, FECHAANULACION = SYSDATE, ANULADOPOR = :2
+          SET ANULADO = 1, MOTIVOANULACION = :1, FECHAANULACION = ${AHORA_UTC}, ANULADOPOR = :2
         WHERE CERTIFICADOID = :3`,
       [texto.slice(0, 500), ctx.usuarioEmail, certificadoId],
     )

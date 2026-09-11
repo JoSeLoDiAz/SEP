@@ -1,8 +1,10 @@
 'use client'
 
-import { clearSepAuth, getSepUsuario, type SepUsuario } from '@/lib/auth'
+import { clearSepAuth, getSepUsuario, isEmpresa, type SepUsuario } from '@/lib/auth'
 import api from '@/lib/api'
+import { armarMenu, rutaDe, type MenuItem, type PerfilesBanco } from '@/lib/menu-lateral'
 import { cn } from '@/lib/utils'
+import { cargarClavesPerfil } from '@/lib/use-perfiles'
 import { useTieneConvenios } from '@/lib/use-tiene-convenios'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -16,32 +18,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-// mapa url genexus → ruta next
-
-const URL_MAP: Record<string, string> = {
-  'InicioEmpresa.aspx':        '/panel',
-  'InicioUsuario.aspx':        '/panel',
-  'DatosBasicosEmpresa.aspx':  '/panel/datos',
-  'Necesidades.aspx':          '/panel/necesidades',
-  'Proyectos.aspx':            '/panel/proyectos',
-  'WPConvenios.aspx':          '/panel/convenios',
-  'wptratamientodatos.aspx':   '/panel/beneficiarios',
-  'ContactosEmpresa.aspx':     '/panel/contactos',
-  'AnalisisEmpresarial.aspx':  '/panel/analisis',
-  'Empresas.aspx':             '/panel/empresas',
-  'Convenios.aspx':            '/panel/convenios',
-  'Cronograma.aspx':           '/panel/cronograma',
-  'Certificados.aspx':         '/panel/certificacion',
-  'Desembolsos.aspx':          '/panel/desembolsos',
-  'Evaluaciones.aspx':         '/panel/evaluaciones',
-}
-
-// el mapa solo cubre lo heredado; las pantallas nuevas guardan su ruta next en bd
-function rutaDe(url: string): string | null {
-  const u = (url ?? '').trim()
-  if (!u) return null
-  return u.startsWith('/') ? u : (URL_MAP[u] ?? null)
-}
+// el mapa url genexus → ruta next y el armado del menú viven en lib/menu-lateral
 
 // mapa icono fontawesome → lucide
 
@@ -90,8 +67,6 @@ function faToLucide(iconClass: string): LucideIcon {
   return FileText
 }
 
-interface MenuItem { desc: string; url: string; icono: string }
-
 interface AppSidebarProps {
   usuario: SepUsuario | null
   mobileOpen: boolean
@@ -107,37 +82,17 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   const [intento, setIntento] = useState(0)
   const { tieneConvenios } = useTieneConvenios()
 
-  const LABEL_OVERRIDE: Record<string, string> = {
-    'Mis Proyectos': 'Proyectos',
-    'Mis Necesidades': 'Necesidades',
-  }
-
-  const EXTRA_ITEMS: MenuItem[] = [
-    { desc: 'Convenios', url: 'WPConvenios.aspx', icono: 'ScrollText' },
-  ]
-
-  // perfiles del banco: su menú viene completo de la tabla MENU, no se les inyecta convenios
-  const PERFILES_BANCO = [9, 15]
-
   useEffect(() => {
-    api.get<MenuItem[]>('/empresa/menu')
-      .then(r => {
-        const items = r.data.map(item => ({
-          ...item,
-          desc: LABEL_OVERRIDE[item.desc] ?? item.desc,
-        }))
-        if (!PERFILES_BANCO.includes(getSepUsuario()?.perfilId ?? 0)) {
-          for (const extra of EXTRA_ITEMS) {
-            if (!items.some(it => it.url === extra.url)) {
-              items.push(extra)
-            }
-          }
-        }
-        setMenuItems(items)
+    const perfilId = getSepUsuario()?.perfilId ?? 0
+    // la empresa nunca es del banco: su menú no espera las claves. Los demás sí, porque el gestor no tiene el mismo
+    // id en las dos bases; si no llegan, se ofrece reintentar
+    const banco: Promise<PerfilesBanco | null> = isEmpresa(perfilId) ? Promise.resolve(null) : cargarClavesPerfil()
+    Promise.all([api.get<MenuItem[]>('/empresa/menu'), banco])
+      .then(([r, claves]) => {
+        setMenuItems(armarMenu(r.data, perfilId, claves))
         setMenuFallo(false)
       })
       .catch(() => { setMenuItems([]); setMenuFallo(true) })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intento])
 
   function handleLogout() {

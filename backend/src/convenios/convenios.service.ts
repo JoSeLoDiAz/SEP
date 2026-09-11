@@ -3,6 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import * as XLSX from 'xlsx'
 import { Empresa } from '../auth/entities/empresa.entity'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { fechaSolo } from '../common/fecha-solo'
 
 // CONVENIOSESTADO: 1 = en ejecucion, 0/null = otros estados
 
@@ -35,6 +38,19 @@ export interface PersonaBeneficiarioDto {
   barrio?: string | null
   direccion?: string | null
   habeasData?: boolean
+}
+
+// PersonaBeneficiarioDto es una interfaz: la fecha de nacimiento llega sin validar. Sin esto, new Date
+// correría 1990-02-30 al 2 de marzo y guardaría NULL, sin avisar, con 30/05/1990, donde TO_DATE fallaba.
+// Se exige YYYY-MM-DD (lo que manda el <input type="date">) y un día que exista, al crear y al actualizar
+function validarFechaNacimiento(texto: string | null): void {
+  if (texto == null) return
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto)
+  const [anio, mes, dia] = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0]
+  const fecha = anio >= 1000 ? fechaSolo(texto) : null
+  if (!fecha || fecha.getFullYear() !== anio || fecha.getMonth() + 1 !== mes || fecha.getDate() !== dia) {
+    throw new BadRequestException('Fecha de nacimiento no válida.')
+  }
 }
 
 export interface PostulacionDto {
@@ -458,21 +474,15 @@ export class ConveniosService {
       )
       return { mensaje: 'Empresa beneficiaria actualizada', accion: 'actualizada', empresaId: Number(existente.id) }
     }
-    // id con NVL(MAX)+1: la tabla no tiene secuencia
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(BENEFICIARIOEMPRESAID), 0) + 1 AS "nid" FROM BENEFICIARIOEMPRESA`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO BENEFICIARIOEMPRESA
-         (BENEFICIARIOEMPRESAID, TIPODOCUMENTOIDENTIDADID, BENEFICIARIOEMPRESANUMERO,
-          BENEFICIARIOEMPRESADIGITOVERI, BENEFICIARIOEMPRESANOMBRE, TAMANOEMPRESAID,
-          BENEFICIARIOEMPRESAFECHA)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-      [Number(nid), dto.tipoDocumentoId, num,
-       (dto.digitoVerificacion ?? '').toString().trim() || null,
-       dto.nombre.trim().slice(0, 200), dto.tamanoEmpresaId],
-    )
-    return { mensaje: 'Empresa beneficiaria registrada exitosamente', accion: 'creada', empresaId: Number(nid) }
+    const empresaId = await insertarConId(this.dataSource, 'BENEFICIARIOEMPRESA', 'BENEFICIARIOEMPRESAID', { maxMasUno: true }, {
+      TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoId,
+      BENEFICIARIOEMPRESANUMERO: num,
+      BENEFICIARIOEMPRESADIGITOVERI: (dto.digitoVerificacion ?? '').toString().trim() || null,
+      BENEFICIARIOEMPRESANOMBRE: dto.nombre.trim().slice(0, 200),
+      TAMANOEMPRESAID: dto.tamanoEmpresaId,
+      BENEFICIARIOEMPRESAFECHA: sqlCrudo(AHORA_UTC),
+    })
+    return { mensaje: 'Empresa beneficiaria registrada exitosamente', accion: 'creada', empresaId }
   }
 
   // todos los catalogos de Registrar Beneficiario en un solo call
@@ -670,13 +680,15 @@ export class ConveniosService {
       }
     }
 
-    // 5) si ya hay fila para (persona, grupo) se re-activa, no se duplica
+    // 5) si ya hay fila para (persona, grupo) se re-activa, no se duplica.
+    // Si hay varias (en produccion hay parejas repetidas) va la de registro mas reciente; el id solo desempata:
+    // en el Exadata (RAC, secuencia NOORDER con cache) un id mayor no es una fila mas nueva
     const [existente] = await this.dataSource.query(
       `SELECT AFGRUPOBENEFICIARIOID AS "id",
               TRIM(AFGRUPOBENEESTADO) AS "estado"
          FROM AFGRUPOBENEFICIARIO
         WHERE PERSONAID = :1 AND AFGRUPOID = :2
-        ORDER BY AFGRUPOBENEFICIARIOID DESC FETCH FIRST 1 ROW ONLY`,
+        ORDER BY AFGRUPOBENEFICIARIOFECHAREGIST DESC, AFGRUPOBENEFICIARIOID DESC FETCH FIRST 1 ROW ONLY`,
       [Number(personaId), Number(afGrupoId)],
     )
     if (existente) {
@@ -698,20 +710,24 @@ export class ConveniosService {
     }
 
     // 6) fila nueva con defaults para las columnas NOT NULL
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFGRUPOBENEFICIARIOID), 0) + 1 AS "nid" FROM AFGRUPOBENEFICIARIO`,
+    const afGrupoBeneficiarioId = await insertarConId(
+      this.dataSource, 'AFGRUPOBENEFICIARIO', 'AFGRUPOBENEFICIARIOID', { maxMasUno: true }, {
+        AFGRUPOID: Number(afGrupoId),
+        PERSONAID: Number(personaId),
+        AFGRUPOBENEESTADO: 'ACTIVO',
+        AFGRUPOBENEFICIARIOFECHAREGIST: sqlCrudo(AHORA_UTC),
+        POSTULACIONANO: ano,
+        VALIDACIONINTERVENTOR: 'PENDIENTE',
+        PORCENTAJECUMPLIMIENTO: 0,
+        NUMEROACTIVIDADES: 0,
+        CERTIFICA: 'NO',
+        HORASHIBRIDAS: 0,
+        HORASVIRTUALES: 0,
+        HORASPAT: 0,
+        HORASPRESENCIALES: 0,
+      },
     )
-    await this.dataSource.query(
-      `INSERT INTO AFGRUPOBENEFICIARIO
-         (AFGRUPOBENEFICIARIOID, AFGRUPOID, PERSONAID, AFGRUPOBENEESTADO,
-          AFGRUPOBENEFICIARIOFECHAREGIST, POSTULACIONANO, VALIDACIONINTERVENTOR,
-          PORCENTAJECUMPLIMIENTO, NUMEROACTIVIDADES, CERTIFICA,
-          HORASHIBRIDAS, HORASVIRTUALES, HORASPAT, HORASPRESENCIALES)
-       VALUES (:1, :2, :3, 'ACTIVO', SYSDATE, :4, 'PENDIENTE',
-               0, 0, 'NO', 0, 0, 0, 0)`,
-      [Number(nid), Number(afGrupoId), Number(personaId), ano],
-    )
-    return { mensaje: 'Beneficiario asociado al grupo.', afGrupoBeneficiarioId: Number(nid), sinCambios: false }
+    return { mensaje: 'Beneficiario asociado al grupo.', afGrupoBeneficiarioId, sinCambios: false }
   }
 
   // se marca RETIRADO, no se borra, para conservar trazabilidad
@@ -891,6 +907,7 @@ export class ConveniosService {
     const direccion = (dto.direccion ?? '').trim() || null
     const habeas  = dto.habeasData ? 'SI' : 'NO'
     const fechaNac = (dto.fechaNacimiento ?? '').trim() || null  // YYYY-MM-DD
+    validarFechaNacimiento(fechaNac)
 
     // si no vino personaId, se busca por documento
     let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
@@ -937,32 +954,25 @@ export class ConveniosService {
       return { mensaje: 'Persona actualizada', accion: 'actualizada' as const, personaId }
     }
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(PERSONAID), 0) + 1 AS "nid" FROM PERSONA`,
-    )
-    personaId = Number(nid)
-    await this.dataSource.query(
-      `INSERT INTO PERSONA
-         (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONAIDENTIFICACION,
-          PERSONANOMBRES, PERSONAPRIMERAPELLIDO, PERSONASEGUNDOAPELLIDO,
-          GENEROID, PERSONAESTRATO, PERSONAFECHANACIMIENTO,
-          PERSONACELULAR, CIUDADID,
-          PERSONAEMAIL, PERSONABARRIO, PERSONADIRECCION,
-          PERSONAHABEASDATA, PERSONAFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8,
-               CASE WHEN :9 IS NULL THEN NULL ELSE TO_DATE(:10, 'YYYY-MM-DD') END,
-               :11, :12, :13, :14, :15, :16, SYSDATE)`,
-      [
-        personaId, Number(dto.tipoDocumentoId), ident,
-        nombres, primer, segundo,
-        dto.generoId  ? Number(dto.generoId)  : null,
-        dto.estratoId ? Number(dto.estratoId) : null,
-        fechaNac, fechaNac,
-        celular,
-        dto.ciudadId ? Number(dto.ciudadId) : null,
-        correo, barrio, direccion, habeas,
-      ],
-    )
+    personaId = await insertarConId(this.dataSource, 'PERSONA', 'PERSONAID', { maxMasUno: true }, {
+      TIPODOCUMENTOIDENTIDADID: Number(dto.tipoDocumentoId),
+      PERSONAIDENTIFICACION: ident,
+      PERSONANOMBRES: nombres,
+      PERSONAPRIMERAPELLIDO: primer,
+      PERSONASEGUNDOAPELLIDO: segundo,
+      GENEROID: dto.generoId  ? Number(dto.generoId)  : null,
+      PERSONAESTRATO: dto.estratoId ? Number(dto.estratoId) : null,
+      // insertarConId no admite binds dentro de una expresión (el TO_DATE del UPDATE):
+      // la fecha va armada por partes, a medianoche, que es lo mismo que guardaba TO_DATE
+      PERSONAFECHANACIMIENTO: fechaSolo(fechaNac),
+      PERSONACELULAR: celular,
+      CIUDADID: dto.ciudadId ? Number(dto.ciudadId) : null,
+      PERSONAEMAIL: correo,
+      PERSONABARRIO: barrio,
+      PERSONADIRECCION: direccion,
+      PERSONAHABEASDATA: habeas,
+      PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { mensaje: 'Persona registrada exitosamente', accion: 'creada' as const, personaId }
   }
 
@@ -1113,72 +1123,71 @@ export class ConveniosService {
   }
 
   // crea la PERSONA si no existe e inactiva al director anterior
+  // todo en una transaccion: si falla el director no queda la persona creada ni el anterior inactivo
   async crearDirector(email: string, proyectoId: number, dto: DirectorBasicoDto) {
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
 
-    // 1) resolver persona: por id, por identificacion, o crearla
-    let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
-    if (!personaId) {
-      const [existente] = await this.dataSource.query(
-        `SELECT PERSONAID AS "id" FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1
-            AND TIPODOCUMENTOIDENTIDADID = :2 FETCH FIRST 1 ROW ONLY`,
-        [String(dto.identificacion).trim(), Number(dto.tipoDocumentoId)],
-      )
-      if (existente) {
-        personaId = Number(existente.id)
-      } else {
-        const [{ nid }] = await this.dataSource.query(
-          `SELECT NVL(MAX(PERSONAID), 0) + 1 AS "nid" FROM PERSONA`,
+    const qr = this.dataSource.createQueryRunner()
+    await qr.connect()
+    await qr.startTransaction()
+    try {
+      // 1) resolver persona: por id, por identificacion, o crearla
+      let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
+      if (!personaId) {
+        const [existente] = await qr.query(
+          `SELECT PERSONAID AS "id" FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1
+              AND TIPODOCUMENTOIDENTIDADID = :2 FETCH FIRST 1 ROW ONLY`,
+          [String(dto.identificacion).trim(), Number(dto.tipoDocumentoId)],
         )
-        personaId = Number(nid)
-        await this.dataSource.query(
-          `INSERT INTO PERSONA
-             (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES,
-              PERSONAPRIMERAPELLIDO, PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION,
-              PERSONAEMAIL, PERSONACELULAR, PERSONATELEFONO, CIUDADID,
-              PERSONAFECHAREGISTRO)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE)`,
-          [
-            personaId, Number(dto.tipoDocumentoId),
-            (dto.nombres ?? '').trim(),
-            (dto.primerApellido ?? '').trim(),
-            (dto.segundoApellido ?? '').trim() || null,
-            String(dto.identificacion).trim(),
-            (dto.email ?? '').trim(),
-            (dto.celular ?? '').trim() || null,
-            (dto.telefono ?? '').trim() || null,
-            dto.ciudadId ? Number(dto.ciudadId) : null,
-          ],
-        )
+        if (existente) {
+          personaId = Number(existente.id)
+        } else {
+          personaId = await insertarConId(qr, 'PERSONA', 'PERSONAID', { maxMasUno: true }, {
+            TIPODOCUMENTOIDENTIDADID: Number(dto.tipoDocumentoId),
+            PERSONANOMBRES: (dto.nombres ?? '').trim(),
+            PERSONAPRIMERAPELLIDO: (dto.primerApellido ?? '').trim(),
+            PERSONASEGUNDOAPELLIDO: (dto.segundoApellido ?? '').trim() || null,
+            PERSONAIDENTIFICACION: String(dto.identificacion).trim(),
+            PERSONAEMAIL: (dto.email ?? '').trim(),
+            PERSONACELULAR: (dto.celular ?? '').trim() || null,
+            PERSONATELEFONO: (dto.telefono ?? '').trim() || null,
+            CIUDADID: dto.ciudadId ? Number(dto.ciudadId) : null,
+            PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          })
+        }
       }
-    }
 
-    // 2) solo puede haber un director activo por proyecto
-    await this.dataSource.query(
-      `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
-                              DIREFECHAACTUALIZACION = SYSDATE
-        WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
-      [proyectoId],
-    )
+      // 2) solo puede haber un director activo por proyecto
+      await qr.query(
+        `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
+                                DIREFECHAACTUALIZACION = ${AHORA_UTC}
+          WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
+        [proyectoId],
+      )
 
-    // 3) entra con interventoria en PENDIENTE
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(DIRECTORID), 0) + 1 AS "nid" FROM DIRECTORES`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO DIRECTORES
-         (DIRECTORID, PERSONAID, PROYECTOID,
-          DIREFECHAREGISTRO, DIREFECHAACTUALIZACION,
-          DIREESTADO, DIREINTERESTADO, DIREINTERFECHAACTUALIZACION)
-       VALUES (:1, :2, :3, SYSDATE, SYSDATE, 'ACTIVO', 'PENDIENTE', SYSDATE)`,
-      [Number(nid), Number(personaId), proyectoId],
-    )
+      // 3) entra con interventoria en PENDIENTE
+      const directorId = await insertarConId(qr, 'DIRECTORES', 'DIRECTORID', { maxMasUno: true }, {
+        PERSONAID: Number(personaId),
+        PROYECTOID: proyectoId,
+        DIREFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        DIREFECHAACTUALIZACION: sqlCrudo(AHORA_UTC),
+        DIREESTADO: 'ACTIVO',
+        DIREINTERESTADO: 'PENDIENTE',
+        DIREINTERFECHAACTUALIZACION: sqlCrudo(AHORA_UTC),
+      })
 
-    return {
-      message: 'Director registrado. Queda pendiente de aprobación por la interventoría.',
-      directorId: Number(nid),
-      personaId: Number(personaId),
+      await qr.commitTransaction()
+      return {
+        message: 'Director registrado. Queda pendiente de aprobación por la interventoría.',
+        directorId,
+        personaId: Number(personaId),
+      }
+    } catch (e) {
+      await qr.rollbackTransaction()
+      throw e
+    } finally {
+      await qr.release()
     }
   }
 
@@ -1230,27 +1239,38 @@ export class ConveniosService {
       )
     }
 
-    await this.dataSource.query(
-      `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
-                              DIREFECHAACTUALIZACION = SYSDATE
-        WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
-      [proyectoId],
-    )
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(DIRECTORID), 0) + 1 AS "nid" FROM DIRECTORES`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO DIRECTORES
-         (DIRECTORID, PERSONAID, PROYECTOID,
-          DIREFECHAREGISTRO, DIREFECHAACTUALIZACION,
-          DIREESTADO, DIREINTERESTADO, DIREINTERFECHAACTUALIZACION)
-       VALUES (:1, :2, :3, SYSDATE, SYSDATE, 'ACTIVO', 'PENDIENTE', SYSDATE)`,
-      [Number(nid), Number(personaId), proyectoId],
-    )
-    return {
-      message: 'Director asociado al convenio. Queda pendiente de aprobación por la interventoría.',
-      directorId: Number(nid),
-      personaId: Number(personaId),
+    // inactivar al anterior y crear el nuevo van en una transaccion: si falla el INSERT el proyecto no queda
+    // sin director ACTIVO, y una peticion simultanea espera el commit en vez de dejar dos ACTIVO
+    const qr = this.dataSource.createQueryRunner()
+    await qr.connect()
+    await qr.startTransaction()
+    try {
+      await qr.query(
+        `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
+                                DIREFECHAACTUALIZACION = ${AHORA_UTC}
+          WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
+        [proyectoId],
+      )
+      const directorId = await insertarConId(qr, 'DIRECTORES', 'DIRECTORID', { maxMasUno: true }, {
+        PERSONAID: Number(personaId),
+        PROYECTOID: proyectoId,
+        DIREFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        DIREFECHAACTUALIZACION: sqlCrudo(AHORA_UTC),
+        DIREESTADO: 'ACTIVO',
+        DIREINTERESTADO: 'PENDIENTE',
+        DIREINTERFECHAACTUALIZACION: sqlCrudo(AHORA_UTC),
+      })
+      await qr.commitTransaction()
+      return {
+        message: 'Director asociado al convenio. Queda pendiente de aprobación por la interventoría.',
+        directorId,
+        personaId: Number(personaId),
+      }
+    } catch (e) {
+      await qr.rollbackTransaction()
+      throw e
+    } finally {
+      await qr.release()
     }
   }
 
@@ -1272,10 +1292,12 @@ export class ConveniosService {
       [proyectoId],
     )
     if (!conv) throw new NotFoundException('Este proyecto no tiene convenio.')
+    // el ACTIVO de registro mas reciente; el id solo desempata: en el Exadata (RAC, secuencia NOORDER
+    // con cache) un DIRECTORID mayor no es una fila mas nueva
     const [dir] = await this.dataSource.query(
       `SELECT DIRECTORID AS "id" FROM DIRECTORES
         WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'
-        ORDER BY DIRECTORID DESC FETCH FIRST 1 ROW ONLY`,
+        ORDER BY DIREFECHAREGISTRO DESC, DIRECTORID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     if (!dir) throw new BadRequestException('No hay director registrado para aprobar/rechazar.')
@@ -1287,7 +1309,7 @@ export class ConveniosService {
       `UPDATE DIRECTORES
           SET DIREINTERESTADO = :1,
               DIREOBSERVACION = :2,
-              DIREINTERFECHAACTUALIZACION = SYSDATE,
+              DIREINTERFECHAACTUALIZACION = ${AHORA_UTC},
               DIRINTERPERSONAID = :3
         WHERE DIRECTORID = :4`,
       [

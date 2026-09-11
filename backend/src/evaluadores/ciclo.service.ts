@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm'
 import { ControlCambiosService } from './control-cambios.service'
 import type { MulterFile } from './evaluadores.service'
 import { EXTENSIONES_CORREO, MIMES_CORREO } from './formatos-correo'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 // lo que cuelga de un ciclo del evaluador; todo se ancla a PARTICIPACIONID
 
@@ -81,11 +82,12 @@ export class CicloService {
     )
     const id = Number(seq[0].NEXTVAL)
 
+    // FECHACREACION va explícita en UTC: su DEFAULT SYSDATE da la hora de Colombia en el Exadata
     await this.dataSource.query(
       `INSERT INTO EVALUADORAPROBACION
          (APROBACIONID, PARTICIPACIONID, APROBADORNOMBRE, APROBADOREMAIL, APROBADORCARGO,
-          FECHAAPROBACION, OBSERVACIONES, USUARIOCREACION)
-       VALUES (:1, :2, :3, :4, :5, TO_DATE(:6, 'YYYY-MM-DD'), :7, :8)`,
+          FECHAAPROBACION, OBSERVACIONES, USUARIOCREACION, FECHACREACION)
+       VALUES (:1, :2, :3, :4, :5, TO_DATE(:6, 'YYYY-MM-DD'), :7, :8, ${AHORA_UTC})`,
       [
         id, participacionId,
         dto.aprobadorNombre.trim(),
@@ -128,7 +130,7 @@ export class CicloService {
     if (sets.length === 0) return { message: 'Sin cambios' }
 
     push('USUARIOMODIFICACION', ctx.usuarioEmail)
-    sets.push('FECHAMODIFICACION = SYSDATE')
+    sets.push(`FECHAMODIFICACION = ${AHORA_UTC}`)
 
     params.push(aprobacionId)
     await this.dataSource.query(
@@ -154,7 +156,7 @@ export class CicloService {
     await this.dataSource.query(
       `UPDATE EVALUADORAPROBACION
           SET CORREOEVIDENCIA = :1, CORREOEVIDENCIAMIME = :2, CORREOEVIDENCIANOMBRE = :3,
-              USUARIOMODIFICACION = :4, FECHAMODIFICACION = SYSDATE
+              USUARIOMODIFICACION = :4, FECHAMODIFICACION = ${AHORA_UTC}
         WHERE APROBACIONID = :5`,
       [file.buffer, file.mimetype || 'application/octet-stream', file.originalname, ctx.usuarioEmail, aprobacionId],
     )
@@ -218,10 +220,10 @@ export class CicloService {
       `INSERT INTO EVALUADORCAPACITACION
          (CAPACITACIONID, PARTICIPACIONID, NOMBRE, ORIGEN, PLATAFORMA, HORAS,
           FECHAINICIO, FECHAFIN, CALIFICACION, CALIFICACIONMINIMA, APROBADO,
-          INTENTOS, OBSERVACIONES, USUARIOCREACION)
+          INTENTOS, OBSERVACIONES, USUARIOCREACION, FECHACREACION)
        VALUES (:1, :2, :3, :4, :5, :6,
                TO_DATE(:7,'YYYY-MM-DD'), TO_DATE(:8,'YYYY-MM-DD'), :9, :10, :11,
-               :12, :13, :14)`,
+               :12, :13, :14, ${AHORA_UTC})`,
       [
         id, participacionId,
         dto.nombre.trim(),
@@ -284,7 +286,7 @@ export class CicloService {
     if (sets.length === 0) return { message: 'Sin cambios' }
 
     push('USUARIOMODIFICACION', ctx.usuarioEmail)
-    sets.push('FECHAMODIFICACION = SYSDATE')
+    sets.push(`FECHAMODIFICACION = ${AHORA_UTC}`)
 
     params.push(capacitacionId)
     await this.dataSource.query(
@@ -312,7 +314,7 @@ export class CicloService {
     await this.dataSource.query(
       `UPDATE EVALUADORCAPACITACION
           SET ARCHIVOPDF = :1, ARCHIVOMIME = :2, ARCHIVONOMBRE = :3,
-              USUARIOMODIFICACION = :4, FECHAMODIFICACION = SYSDATE
+              USUARIOMODIFICACION = :4, FECHAMODIFICACION = ${AHORA_UTC}
         WHERE CAPACITACIONID = :5`,
       [file.buffer, file.mimetype, file.originalname, ctx.usuarioEmail, capacitacionId],
     )
@@ -392,8 +394,9 @@ export class CicloService {
       await this.dataSource.query(
         `INSERT INTO EVALUADORPARTPROYECTO
            (PARTPROYECTOID, PARTICIPACIONID, PROYECTOID, GUARDADOID, NIT, RAZONSOCIAL,
-            NOMBREPROYECTO, PUNTAJEOTORGADO, FECHAEVALUACION, OBSERVACIONES, USUARIOCREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, TO_DATE(:9,'YYYY-MM-DD'), :10, :11)`,
+            NOMBREPROYECTO, PUNTAJEOTORGADO, FECHAEVALUACION, OBSERVACIONES, USUARIOCREACION,
+            FECHACREACION)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, TO_DATE(:9,'YYYY-MM-DD'), :10, :11, ${AHORA_UTC})`,
         [
           id, participacionId,
           dto.proyectoId ?? null,

@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { bytesUtf8, limitarEdicionBytes } from '@/lib/bytes-utf8'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { Modal } from '@/components/ui/modal'
 import {
@@ -29,6 +30,9 @@ interface Diagnostico {
 const inputCls    = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D] transition bg-white'
 const selectCls   = inputCls + ' appearance-none cursor-pointer'
 const textareaCls = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D] transition bg-white resize-y min-h-[110px]'
+
+// NECESIDADHERROTRA es VARCHAR2(40 BYTE) en el Exadata (en el XE, 100): una letra con tilde o una ñ ocupan 2
+const HERR_OTRA_MAX_BYTES = 40
 
 function SectionCard({ title, color = '#00304D', children }: {
   title: string; color?: string; children: React.ReactNode
@@ -72,6 +76,7 @@ export default function DetalleDiagnosticoPage() {
 
   const [periodoI,      setPeriodoI]      = useState('')
   const [herrOtra,      setHerrOtra]      = useState('')
+  const [herrOtraRecortada, setHerrOtraRecortada] = useState(false)
   const [herrCreacion,  setHerrCreacion]  = useState('0')
   const [planCapa,      setPlanCapa]      = useState('0')
   const [herrDescrip,   setHerrDescrip]   = useState('')
@@ -112,6 +117,7 @@ export default function DetalleDiagnosticoPage() {
       setDiag(d)
       setPeriodoI(d.periodoI ? d.periodoI.slice(0, 10) : '')
       setHerrOtra(d.herrOtra ?? '')
+      setHerrOtraRecortada(false)
       setHerrCreacion(String(d.herrCreacion ?? 0))
       setPlanCapa(String(d.planCapa ?? 0))
       setHerrDescrip(d.herrDescrip ?? '')
@@ -130,9 +136,28 @@ export default function DetalleDiagnosticoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // si no cabe, se recorta lo que se escribió o pegó, no la cola del texto; un valor que ya venía largo (el XE
+  // admite 100) no se deja crecer, solo acortar a mano
+  function cambiarHerrOtra(e: React.ChangeEvent<HTMLInputElement>) {
+    const campo = e.target
+    const r = limitarEdicionBytes(herrOtra, campo.value, campo.selectionStart, HERR_OTRA_MAX_BYTES)
+    setHerrOtraRecortada(r.recortado)
+    setHerrOtra(r.valor)
+    // React devuelve el campo al valor recortado y el cursor salta al final: se deja donde acabó lo que sí cupo
+    if (r.recortado) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === campo) campo.setSelectionRange(r.cursor, r.cursor)
+      })
+    }
+  }
+
   async function guardarDiagnostico() {
     if (!herrDescrip.trim() || !herrResultados.trim()) {
       showToast('error', 'La descripción y el resumen de resultados son obligatorios')
+      return
+    }
+    if (bytesUtf8(herrOtra) > HERR_OTRA_MAX_BYTES) {
+      showToast('error', `"Otro tipo de herramienta" ocupa ${bytesUtf8(herrOtra)} de ${HERR_OTRA_MAX_BYTES} posibles (cada tilde o ñ cuenta 2): acórtelo para guardar`)
       return
     }
     setGuardando(true)
@@ -248,6 +273,9 @@ export default function DetalleDiagnosticoPage() {
       <Loader2 size={32} className="animate-spin text-[#00304D]" />
     </div>
   )
+
+  const herrOtraBytes = bytesUtf8(herrOtra)
+  const herrOtraExcedida = herrOtraBytes > HERR_OTRA_MAX_BYTES
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -410,9 +438,21 @@ export default function DetalleDiagnosticoPage() {
               <input type="date" value={periodoI} onChange={e => setPeriodoI(e.target.value)}
                 className={inputCls} />
             </Field>
-            <Field label="Otro tipo de herramienta, ¿cuál?">
-              <input type="text" value={herrOtra} onChange={e => setHerrOtra(e.target.value)}
+            <Field label="Otro tipo de herramienta, ¿cuál?" hint={`Máx. ${HERR_OTRA_MAX_BYTES}`}>
+              <input type="text" value={herrOtra} onChange={cambiarHerrOtra}
                 className={inputCls} placeholder="Especifique si aplica…" />
+              <span className={`text-xs text-right ${herrOtraExcedida ? 'text-red-600' : 'text-neutral-400'}`}>
+                {herrOtraBytes}/{HERR_OTRA_MAX_BYTES} · cada tilde o ñ cuenta 2
+              </span>
+              {herrOtraExcedida ? (
+                <span className="text-xs text-red-600">
+                  Ocupa {herrOtraBytes} de {HERR_OTRA_MAX_BYTES} posibles: acórtelo para poder guardar.
+                </span>
+              ) : herrOtraRecortada && (
+                <span className="text-xs text-amber-700">
+                  Se recortó al máximo de {HERR_OTRA_MAX_BYTES}: revise que haya quedado completo.
+                </span>
+              )}
             </Field>
             <Field label="¿La herramienta es de creación propia?">
               <div className="relative">

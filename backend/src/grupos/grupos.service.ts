@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 // grupos por acción de formación: cupos, beneficiarios y validación de interventoría
 @Injectable()
@@ -337,7 +338,7 @@ export class GruposService {
          p.PERSONAESTRATO                                    AS "personaEstrato",
          TO_CHAR(p.PERSONAFECHANACIMIENTO, 'DD/MM/YYYY')     AS "personaFechaNacimiento",
          CASE WHEN p.PERSONAFECHANACIMIENTO IS NULL THEN NULL
-              ELSE FLOOR(MONTHS_BETWEEN(SYSDATE, p.PERSONAFECHANACIMIENTO) / 12) END AS "postulacionEdad",
+              ELSE FLOOR(MONTHS_BETWEEN(${AHORA_UTC}, p.PERSONAFECHANACIMIENTO) / 12) END AS "postulacionEdad",
          UPPER(TRIM(re.RANGOEDADNOMBRE))                     AS "rangoEdadNombre",
          TRIM(p.PERSONACELULAR)                              AS "personaCelular",
          TRIM(p.PERSONAEMAIL)                                AS "personaEmail",

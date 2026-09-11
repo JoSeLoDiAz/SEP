@@ -2,6 +2,7 @@
 
 import api from '@/lib/api'
 import { getSepUsuario, isEmpresa } from '@/lib/auth'
+import { cargarClavesPerfil, type ClavesPerfil } from '@/lib/use-perfiles'
 import { useRouter } from 'next/navigation'
 import {
     BarChart2,
@@ -268,36 +269,72 @@ const ADMIN_CARDS: AdminCard[] = [
   },
 ]
 
-// perfiles con landing propia: se redirige al entrar
-const PERFIL_REDIRECT: Record<number, string> = {
-  15: '/panel/evaluadores',   // GESTOR EVALUADORES
-  9: '/panel/mi-expediente',  // EVALUADORGFCE
+// perfiles con landing propia: se redirige al entrar. El id del gestor cambia de una base a otra
+// (15 en el XE, 103 en el Exadata), así que el mapa se arma con las claves que da el backend
+function perfilRedirect(claves: ClavesPerfil): Record<number, string> {
+  return {
+    [claves.gestorEvaluadores]: '/panel/evaluadores',   // GESTOR EVALUADORES
+    [claves.evaluador]: '/panel/mi-expediente',          // EVALUADORGFCE
+  }
 }
 
 export default function PanelHome() {
   const router = useRouter()
   const [usuario, setUsuario] = useState<ReturnType<typeof getSepUsuario>>(null)
   const [redirigiendo, setRedirigiendo] = useState(false)
+  // hasta tener las claves no se sabe si el perfil tiene landing propia: no se pinta ninguna portada
+  const [decidiendo, setDecidiendo] = useState(true)
+  // sin las claves, el gestor y el evaluador caerían en la portada de administrador: se ofrece reintentar
+  const [clavesFallo, setClavesFallo] = useState(false)
+  const [intento, setIntento] = useState(0)
 
   useEffect(() => { document.title = 'Inicio | SEP' }, [])
 
   useEffect(() => {
     const u = getSepUsuario()
     setUsuario(u)
-    const dest = u ? PERFIL_REDIRECT[u.perfilId] : undefined
-    if (dest) {
-      setRedirigiendo(true)
-      router.replace(dest)
+    // la empresa no tiene landing propia: no espera las claves
+    if (!u || isEmpresa(u.perfilId)) {
+      setDecidiendo(false)
+      return
     }
-  }, [router])
+    let cancelado = false
+    setDecidiendo(true)
+    setClavesFallo(false)
+    cargarClavesPerfil()
+      .then(claves => {
+        const dest = perfilRedirect(claves)[u.perfilId]
+        if (dest && !cancelado) {
+          setRedirigiendo(true)
+          router.replace(dest)
+        }
+      })
+      .catch(() => { if (!cancelado) setClavesFallo(true) })
+      .finally(() => { if (!cancelado) setDecidiendo(false) })
+    return () => { cancelado = true }
+  }, [router, intento])
 
   const perfilId = usuario?.perfilId ?? 0
 
-  if (redirigiendo) {
+  if (redirigiendo || decidiendo) {
     return (
       <div className="p-10 flex items-center gap-2 text-neutral-500 text-sm">
         <Loader2 size={14} className="animate-spin" />
-        Redirigiendo a tu panel...
+        {redirigiendo ? 'Redirigiendo a tu panel...' : 'Cargando...'}
+      </div>
+    )
+  }
+
+  if (clavesFallo) {
+    return (
+      <div className="p-10 flex flex-col items-start gap-3 text-sm text-neutral-600">
+        <p>No se pudo cargar tu panel.</p>
+        <button
+          onClick={() => setIntento(n => n + 1)}
+          className="rounded-xl bg-[#00304D] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 active:scale-95"
+        >
+          Reintentar
+        </button>
       </div>
     )
   }

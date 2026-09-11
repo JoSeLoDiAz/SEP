@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const oracledb = require('oracledb') as { DB_TYPE_BLOB: number }
@@ -33,7 +35,7 @@ export class CapacitadoresService {
 
   private async assertConvenioActivoPorCapacitador(capacitadorId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT PROYECTOID AS "proyectoId" FROM CAPACITADOR
+      `SELECT PROYECTOID AS "proyectoId" FROM CAPACITADORES
         WHERE CAPACITADORID = :1 FETCH FIRST 1 ROW ONLY`,
       [capacitadorId],
     )
@@ -41,6 +43,8 @@ export class CapacitadoresService {
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
+  // las dos listas van por fecha de registro y el id solo desempata: en el Exadata (RAC, secuencia
+  // NOORDER con caché) un id mayor no es un registro más reciente
   async listarPersonas(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID              AS "capacitadorId",
@@ -59,7 +63,7 @@ export class CapacitadoresService {
         WHERE c.PROYECTOID = :1
           AND TRIM(c.CAPATIPO) = 'PE'
           AND NVL(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
-        ORDER BY c.CAPACITADORID ASC`,
+        ORDER BY c.CAPAFECHAREGISTRO ASC, c.CAPACITADORID ASC`,
       [proyectoId],
     )
   }
@@ -74,16 +78,15 @@ export class CapacitadoresService {
     )
     if (dup.length) throw new BadRequestException('Esta persona ya está registrada como capacitadora en este proyecto.')
 
-    const [{ id }] = await this.ds.query<{ id: number }[]>(
-      `SELECT NVL(MAX(CAPACITADORID), 0) + 1 AS "id" FROM CAPACITADORES`,
-    )
-    await this.ds.query(
-      `INSERT INTO CAPACITADORES
-         (CAPACITADORID, PROYECTOID, CAPACITADORPERSONAID, CAPATIPO,
-          CAPAESTADO, CAPAINTERESTADO, CAPAFECHAREGISTRO, CAPAFECHAACTUALIZAR)
-       VALUES (:1, :2, :3, 'PE', 'ACTIVO', 'PENDIENTE DE APROBACION', SYSDATE, SYSDATE)`,
-      [id, proyectoId, personaId],
-    )
+    const id = await insertarConId(this.ds, 'CAPACITADORES', 'CAPACITADORID', { maxMasUno: true }, {
+      PROYECTOID: proyectoId,
+      CAPACITADORPERSONAID: personaId,
+      CAPATIPO: 'PE',
+      CAPAESTADO: 'ACTIVO',
+      CAPAINTERESTADO: 'PENDIENTE DE APROBACION',
+      CAPAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      CAPAFECHAACTUALIZAR: sqlCrudo(AHORA_UTC),
+    })
     return { capacitadorId: id }
   }
 
@@ -105,7 +108,7 @@ export class CapacitadoresService {
         WHERE c.PROYECTOID = :1
           AND TRIM(c.CAPATIPO) = 'EM'
           AND NVL(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
-        ORDER BY c.CAPACITADORID ASC`,
+        ORDER BY c.CAPAFECHAREGISTRO ASC, c.CAPACITADORID ASC`,
       [proyectoId],
     )
   }
@@ -120,16 +123,15 @@ export class CapacitadoresService {
     )
     if (dup.length) throw new BadRequestException('Esta empresa ya está registrada como capacitadora en este proyecto.')
 
-    const [{ id }] = await this.ds.query<{ id: number }[]>(
-      `SELECT NVL(MAX(CAPACITADORID), 0) + 1 AS "id" FROM CAPACITADORES`,
-    )
-    await this.ds.query(
-      `INSERT INTO CAPACITADORES
-         (CAPACITADORID, PROYECTOID, CAPACITADOREMPRESAID, CAPATIPO,
-          CAPAESTADO, CAPAINTERESTADO, CAPAFECHAREGISTRO, CAPAFECHAACTUALIZAR)
-       VALUES (:1, :2, :3, 'EM', 'ACTIVO', 'PENDIENTE DE APROBACION', SYSDATE, SYSDATE)`,
-      [id, proyectoId, empresaId],
-    )
+    const id = await insertarConId(this.ds, 'CAPACITADORES', 'CAPACITADORID', { maxMasUno: true }, {
+      PROYECTOID: proyectoId,
+      CAPACITADOREMPRESAID: empresaId,
+      CAPATIPO: 'EM',
+      CAPAESTADO: 'ACTIVO',
+      CAPAINTERESTADO: 'PENDIENTE DE APROBACION',
+      CAPAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      CAPAFECHAACTUALIZAR: sqlCrudo(AHORA_UTC),
+    })
     return { capacitadorId: id }
   }
 
@@ -145,7 +147,7 @@ export class CapacitadoresService {
       throw new BadRequestException('No se puede cambiar el estado de un capacitador ya aprobado.')
     }
     await this.ds.query(
-      `UPDATE CAPACITADORES SET CAPAESTADO = :1, CAPAFECHAACTUALIZAR = SYSDATE
+      `UPDATE CAPACITADORES SET CAPAESTADO = :1, CAPAFECHAACTUALIZAR = ${AHORA_UTC}
         WHERE CAPACITADORID = :2`,
       [nuevoEstado, capacitadorId],
     )
@@ -213,20 +215,18 @@ export class CapacitadoresService {
     telefono: string
     direccion: string
   }) {
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(EMPRESAID), 0) + 1 AS "id" FROM EMPRESA`,
-    )
-    await this.ds.query(
-      `INSERT INTO EMPRESA
-         (EMPRESAID, TIPODOCUMENTOIDENTIDADID, EMPRESAIDENTIFICACION, EMPRESADIGITOVERIFICACION,
-          EMPRESARAZONSOCIAL, EMPRESASIGLA, EMPRESAEMAIL, EMPRESATELEFONO,
-          EMPRESADIRECCION, EMPRESAFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
-      [
-        id, dto.tipoDocumentoId, dto.identificacion, dto.digitoVerificacion ?? 0,
-        dto.razonSocial, dto.sigla, dto.email, dto.telefono, dto.direccion,
-      ],
-    )
+    // sin trigger (hoy, el XE) sale de la secuencia EMPRESAID, la misma que usa el registro de empresas
+    const id = await insertarConId(this.ds, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+      TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoId,
+      EMPRESAIDENTIFICACION: dto.identificacion,
+      EMPRESADIGITOVERIFICACION: dto.digitoVerificacion ?? 0,
+      EMPRESARAZONSOCIAL: dto.razonSocial,
+      EMPRESASIGLA: dto.sigla,
+      EMPRESAEMAIL: dto.email,
+      EMPRESATELEFONO: dto.telefono,
+      EMPRESADIRECCION: dto.direccion,
+      EMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { empresaId: id }
   }
 
@@ -274,16 +274,14 @@ export class CapacitadoresService {
     if (proyectoId) await this.assertConvenioEnEjecucion(proyectoId)
     const existing = await this.getHVEmpresa(empresaId)
     if (existing) return existing
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(HVEMPRESAID), 0) + 1 AS "id" FROM HVEMPRESA`,
-    )
-    await this.ds.query(
-      `INSERT INTO HVEMPRESA
-         (HVEMPRESAID, EMPRESAID, HVEMPRESAPROYECTO, HVEMPRESANOMBREARCHIVO,
-          HVEMPRESAHABEASDATA, HVEMPRESAHABEASDATAE, HVEMPRESAFECHAREGISTRO)
-       VALUES (:1, :2, :3, 'PENDIENTE', 'SI', 'SI', SYSDATE)`,
-      [id, empresaId, proyectoId],
-    )
+    const id = await insertarConId(this.ds, 'HVEMPRESA', 'HVEMPRESAID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      HVEMPRESAPROYECTO: proyectoId,
+      HVEMPRESANOMBREARCHIVO: 'PENDIENTE',
+      HVEMPRESAHABEASDATA: 'SI',
+      HVEMPRESAHABEASDATAE: 'SI',
+      HVEMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { hvEmpresaId: id }
   }
 
@@ -307,17 +305,16 @@ export class CapacitadoresService {
         WHERE EMPRESAID = :1 AND TRIM(DOCUMENTOSCAPJURIDICOTIPO) = :2 AND DOCUMENTOSCAPJURIDICONUM = :3`,
       [empresaId, tipo, num],
     )
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(DOCUMENTOSCAPJURIDICOID), 0) + 1 AS "id" FROM DOCUMENTOSCAPJURIDICO`,
-    )
-    await this.ds.query(
-      `INSERT INTO DOCUMENTOSCAPJURIDICO
-         (DOCUMENTOSCAPJURIDICOID, EMPRESAID, DOCUMENTOSCAPJURIDICONUM,
-          DOCUMENTOSCAPJURIDICOTIPO, DOCUMENTOSCAPJURIDICONOMBREARC,
-          DOCUMENTOSCAPJURIDICODOC, DOCUMENTOSCAPJURIDICOFECHAREG)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-      [id, empresaId, num, tipo, file.originalname, file.buffer],
-    )
+    const id = await insertarConId(this.ds, 'DOCUMENTOSCAPJURIDICO', 'DOCUMENTOSCAPJURIDICOID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      DOCUMENTOSCAPJURIDICONUM: num,
+      DOCUMENTOSCAPJURIDICOTIPO: tipo,
+      DOCUMENTOSCAPJURIDICONOMBREARC: file.originalname,
+      // como BLOB, igual que en DOCUMENTOSPERSONAS: el driver lo sube como LOB temporal; un Buffer
+      // suelto de más de 4000 bytes viaja como LONG RAW, y eso junto al RETURNING puede dar ORA-22816
+      DOCUMENTOSCAPJURIDICODOC: { type: oracledb.DB_TYPE_BLOB, val: file.buffer },
+      DOCUMENTOSCAPJURIDICOFECHAREG: sqlCrudo(AHORA_UTC),
+    })
     return { docId: id }
   }
 
@@ -378,16 +375,13 @@ export class CapacitadoresService {
   }
 
   async crearDocAdicionalEmpresa(empresaId: number, dto: { tipoDocId: number; proyectoId?: number }) {
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(HVEMPRESADOCID), 0) + 1 AS "id" FROM HVEMPRESADOCUMETOS`,
-    )
-    await this.ds.query(
-      `INSERT INTO HVEMPRESADOCUMETOS
-         (HVEMPRESADOCID, EMPRESAID, PERSONADOCREQID, HVEMPRESADOCNOMBREARCHIVO,
-          HVEMPRESADOCUMETOSPROYECTO, HVEMPRESADOCFECHAREGISTRO)
-       VALUES (:1, :2, :3, 'PENDIENTE', :4, SYSDATE)`,
-      [id, empresaId, dto.tipoDocId, dto.proyectoId ?? 0],
-    )
+    const id = await insertarConId(this.ds, 'HVEMPRESADOCUMETOS', 'HVEMPRESADOCID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      PERSONADOCREQID: dto.tipoDocId,
+      HVEMPRESADOCNOMBREARCHIVO: 'PENDIENTE',
+      HVEMPRESADOCUMETOSPROYECTO: dto.proyectoId ?? 0,
+      HVEMPRESADOCFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { hvEmpresaDocId: id }
   }
 

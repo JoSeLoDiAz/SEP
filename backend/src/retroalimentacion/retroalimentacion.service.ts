@@ -6,9 +6,12 @@ import { DataSource } from 'typeorm'
 import { ControlCambiosService } from '../evaluadores/control-cambios.service'
 import { ES_DINAMIZADOR_SQL, NOMBRE_DINAMIZADOR } from './dinamizador'
 import { bindRepetido } from '../common/db/binds'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { perfilesGestion } from '../common/perfiles'
 import { RetroMatrizService } from './retro-matriz.service'
 
 // todo se ancla a PARTICIPACIONID, no a la persona: separa por año
+// las fechas van en UTC y explícitas en cada INSERT: SYSDATE y los DEFAULT SYSDATE dan la hora de Colombia en el Exadata
 
 export interface CtxUsuario {
   usuarioEmail: string
@@ -22,11 +25,6 @@ export interface RespuestaEnviada {
   /** pregunta TEXTO_POR_PERSONA */
   comentario?: string
 }
-
-const PERFIL_ADMIN = 1
-const PERFIL_COORDINADOR = 2
-const PERFIL_GESTOR_EVALUADORES = 15
-const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 @Injectable()
 export class RetroalimentacionService {
@@ -91,10 +89,10 @@ export class RetroalimentacionService {
         `INSERT INTO RETROFORMULARIO
            (RETROFORMULARIOID, CONVOCATORIAID, NOMBRE, VERSION, ANIO, ESCALAMIN, ESCALAMAX,
             DURACIONMINUTOS, RESULTADOANONIMO, ACTIVO, ABIERTO, REGLASMATRIZ,
-            ESCALAETIQUETAS, USUARIOCREACION)
+            ESCALAETIQUETAS, USUARIOCREACION, FECHACREACION)
          SELECT :1, :2, N'Retroalimentación ' || :3, 1, :4,
                 ESCALAMIN, ESCALAMAX, DURACIONMINUTOS, RESULTADOANONIMO, 1, 0,
-                REGLASMATRIZ, ESCALAETIQUETAS, 'clon-plantilla'
+                REGLASMATRIZ, ESCALAETIQUETAS, 'clon-plantilla', ${AHORA_UTC}
            FROM RETROFORMULARIO WHERE RETROFORMULARIOID = :5`,
         [nuevoId, convocatoriaId, conv.nombre, conv.anio, plantillaId],
       )
@@ -127,8 +125,8 @@ export class RetroalimentacionService {
 
     await this.dataSource.query(
       `UPDATE RETROFORMULARIO
-          SET ABIERTO = :1, ${abierto ? 'FECHAAPERTURA' : 'FECHACIERRE'} = SYSDATE,
-              USUARIOMODIFICACION = :2, FECHAMODIFICACION = SYSDATE
+          SET ABIERTO = :1, ${abierto ? 'FECHAAPERTURA' : 'FECHACIERRE'} = ${AHORA_UTC},
+              USUARIOMODIFICACION = :2, FECHAMODIFICACION = ${AHORA_UTC}
         WHERE RETROFORMULARIOID = :3`,
       [abierto ? 1 : 0, ctx.usuarioEmail, form.retroFormularioId],
     )
@@ -286,8 +284,8 @@ export class RetroalimentacionService {
           await m.query(
             `INSERT INTO RETROASIGNACION
                (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
-                ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION)
-             VALUES (:1, :2, :3, :4, N'PENDIENTE', N'AUTOMATICA', :5, :6)`,
+                ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
+             VALUES (:1, :2, :3, :4, N'PENDIENTE', N'AUTOMATICA', :5, :6, ${AHORA_UTC})`,
             [
               Number(seq[0].NEXTVAL), form.retroFormularioId,
               p.evaluadorParticipacionId, p.evaluadoParticipacionId,
@@ -335,8 +333,8 @@ export class RetroalimentacionService {
     await this.dataSource.query(
       `INSERT INTO RETROASIGNACION
          (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
-          ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION)
-       VALUES (:1, :2, :3, :4, N'PENDIENTE', N'MANUAL', N'agregado a mano', :5)`,
+          ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
+       VALUES (:1, :2, :3, :4, N'PENDIENTE', N'MANUAL', N'agregado a mano', :5, ${AHORA_UTC})`,
       [id, form.retroFormularioId, dto.evaluadorParticipacionId, dto.evaluadoParticipacionId, ctx.usuarioEmail],
     )
 
@@ -495,11 +493,12 @@ export class RetroalimentacionService {
       `SELECT RETROSESION_SEQ.NEXTVAL FROM dual`)
     const id = Number(seq[0].NEXTVAL)
 
+    // FECHAINICIO en UTC, igual que el reloj con que minutosDesdeInicio la resta
     await this.dataSource.query(
       `INSERT INTO RETROSESION
          (RETROSESIONID, RETROFORMULARIOID, PARTICIPACIONID, FECHAINICIO,
           DURACIONMINUTOS, IPORIGEN, USUARIOEMAIL)
-       VALUES (:1, :2, :3, SYSDATE, :4, :5, :6)`,
+       VALUES (:1, :2, :3, ${AHORA_UTC}, :4, :5, :6)`,
       [id, Number(form[0].id), participacionId, Number(form[0].duracion), ctx.ip ?? null, ctx.usuarioEmail],
     )
 
@@ -611,7 +610,7 @@ export class RetroalimentacionService {
           `INSERT INTO RETRORESPUESTA
              (RETRORESPUESTAID, RETROSESIONID, RETROASIGNACIONID, RETROFORMULARIOID,
               PARTEVALUADORID, PARTEVALUADOID, PUNTAJEESCALA, PUNTAJEMAXIMO, PROMEDIO, FECHAENVIO)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
           [respuestaId, sesionId, asignacionId, form.retroFormularioId,
            participacionId, evaluadoId, suma, maximo, promedio],
         )
@@ -654,15 +653,15 @@ export class RetroalimentacionService {
           `SELECT RETROSUGERENCIA_SEQ.NEXTVAL FROM dual`)
         await m.query(
           `INSERT INTO RETROSUGERENCIA
-             (RETROSUGERENCIAID, RETROSESIONID, RETROPREGUNTAID, PARTICIPACIONID, TEXTO)
-           VALUES (:1, :2, :3, :4, :5)`,
+             (RETROSUGERENCIAID, RETROSESIONID, RETROPREGUNTAID, PARTICIPACIONID, TEXTO, FECHAENVIO)
+           VALUES (:1, :2, :3, :4, :5, ${AHORA_UTC})`,
           [Number(seqS[0].NEXTVAL), sesionId, general.preguntaId, participacionId, sugerencia],
         )
       }
 
       await m.query(
         `UPDATE RETROSESION
-            SET FECHAENVIO = SYSDATE, MINUTOSTRANSCURRIDOS = :1, SEEXCEDIO = :2
+            SET FECHAENVIO = ${AHORA_UTC}, MINUTOSTRANSCURRIDOS = :1, SEEXCEDIO = :2
           WHERE RETROSESIONID = :3`,
         [minutos, seExcedio ? 1 : 0, sesionId],
       )
@@ -677,9 +676,9 @@ export class RetroalimentacionService {
   }
 
   private async minutosDesdeInicio(sesionId: number): Promise<number> {
-    // se calcula en BD para no depender del reloj ni la zona horaria de Node
+    // se calcula en BD para no depender del reloj ni la zona horaria de Node; en UTC, como se grabó FECHAINICIO
     const rows: Array<{ minutos: number }> = await this.dataSource.query(
-      `SELECT ROUND((SYSDATE - FECHAINICIO) * 24 * 60) AS "minutos"
+      `SELECT ROUND((${AHORA_UTC} - FECHAINICIO) * 24 * 60) AS "minutos"
          FROM RETROSESION WHERE RETROSESIONID = :1`, [sesionId],
     )
     return Math.max(0, Number(rows[0]?.minutos ?? 0))
@@ -710,7 +709,7 @@ export class RetroalimentacionService {
     if (!meta[0]) throw new NotFoundException('Participación no encontrada')
 
     const anonimo = Number(meta[0].anonimo ?? 1) === 1
-    const puedeVerNombres = PERFILES_GESTION.includes(perfilId)
+    const puedeVerNombres = perfilesGestion().includes(perfilId)
     const revelar = !anonimo || puedeVerNombres
 
     const porCriterio: Array<Record<string, unknown>> = await this.dataSource.query(

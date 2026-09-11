@@ -2,6 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
 import { Empresa } from '../auth/entities/empresa.entity'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { mensajeHerrOtraLarga } from './herr-otra'
 
 @Injectable()
 export class NecesidadesService {
@@ -39,15 +42,13 @@ export class NecesidadesService {
 
   async crear(email: string, usuarioId: number) {
     const empresaId = await this.getEmpresaId(email)
-    await this.dataSource.query(
-      `INSERT INTO NECESIDAD (NECESIDADID, EMPRESANECESIDADID, NECESIDADFECHAREGISTRO, USUREGISTRONECESIDAD)
-       VALUES (NECESIDADID.NEXTVAL, :1, SYSDATE, :2)`,
-      [empresaId, usuarioId],
-    )
-    const [{ id }] = await this.dataSource.query(
-      `SELECT NECESIDADID.CURRVAL AS "id" FROM DUAL`,
-    )
-    return { message: 'Diagnóstico creado correctamente', necesidadId: Number(id) }
+    // el id vuelve en la misma sentencia: el CURRVAL en otra llamada podía caer en otra conexión del pool
+    const necesidadId = await insertarConId(this.dataSource, 'NECESIDAD', 'NECESIDADID', { secuencia: 'NECESIDADID' }, {
+      EMPRESANECESIDADID: empresaId,
+      NECESIDADFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      USUREGISTRONECESIDAD: usuarioId,
+    })
+    return { message: 'Diagnóstico creado correctamente', necesidadId }
   }
 
   async eliminar(necesidadId: number) {
@@ -121,6 +122,8 @@ export class NecesidadesService {
     herrDescrip?: string | null
     herrResultados?: string | null
   }) {
+    const largo = mensajeHerrOtraLarga(dto.herrOtra)
+    if (largo) throw new BadRequestException(largo)
     await this.dataSource.query(
       `UPDATE NECESIDAD
           SET NECESIDADPERIODOI       = ${dto.periodoI ? "TO_DATE(:1, 'YYYY-MM-DD')" : 'NULL'},
@@ -152,13 +155,16 @@ export class NecesidadesService {
   }
 
   async registrarHerramienta(necesidadId: number, fuenteId: number, muestra: number, usuarioId: number) {
-    await this.dataSource.query(
-      `INSERT INTO HERRAMIENTANECESIDAD
-             (HERRAMIENTANECESIDADID, NECESIDADID, FUENTEHERRAMIENTAID,
-              HERRAMIENTANECESIDADPARTICIP, HERRAMIENTANECESIDADOTRA,
-              USUREGISTROHERRAMIENTA, HERRAMIENTANECESIDADFECHAREG)
-       VALUES (HERRAMIENTANECESIDADID.NEXTVAL, :1, :2, :3, ' ', :4, SYSDATE)`,
-      [necesidadId, fuenteId, muestra, usuarioId],
+    await insertarConId(
+      this.dataSource, 'HERRAMIENTANECESIDAD', 'HERRAMIENTANECESIDADID', { secuencia: 'HERRAMIENTANECESIDADID' },
+      {
+        NECESIDADID: necesidadId,
+        FUENTEHERRAMIENTAID: fuenteId,
+        HERRAMIENTANECESIDADPARTICIP: muestra,
+        HERRAMIENTANECESIDADOTRA: ' ',
+        USUREGISTROHERRAMIENTA: usuarioId,
+        HERRAMIENTANECESIDADFECHAREG: sqlCrudo(AHORA_UTC),
+      },
     )
     return { message: 'Herramienta registrada' }
   }
@@ -177,13 +183,16 @@ export class NecesidadesService {
       [necesidadId],
     )
     const numero = Number(total) + 1
-    await this.dataSource.query(
-      `INSERT INTO NECESIDADFORMACION
-             (NECESIDADFORMACIONID, NECESIDADID, NECESIDADFORMACIONNUMERO,
-              NECESIDADFORMACIONNOMBRE, NECESIDADFORMACIONBENEF,
-              USUREGISTRONECESIDADFORMACION, NECESIDADFORMACIONFECHAREGISTR)
-       VALUES (NECESIDADFORMACIONID.NEXTVAL, :1, :2, :3, :4, :5, SYSDATE)`,
-      [necesidadId, numero, nombre, benef, usuarioId],
+    await insertarConId(
+      this.dataSource, 'NECESIDADFORMACION', 'NECESIDADFORMACIONID', { secuencia: 'NECESIDADFORMACIONID' },
+      {
+        NECESIDADID: necesidadId,
+        NECESIDADFORMACIONNUMERO: numero,
+        NECESIDADFORMACIONNOMBRE: nombre,
+        NECESIDADFORMACIONBENEF: benef,
+        USUREGISTRONECESIDADFORMACION: usuarioId,
+        NECESIDADFORMACIONFECHAREGISTR: sqlCrudo(AHORA_UTC),
+      },
     )
     return { message: 'Necesidad registrada' }
   }

@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { DataSource } from 'typeorm'
 import { fechaSolo } from '../common/fecha-solo'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const oracledb = require('oracledb') as { DB_TYPE_BLOB: number }
@@ -85,32 +87,22 @@ export class PersonasService {
     const existente = await this.buscarPorDocumento(dto.tipoDocumentoId, dto.identificacion)
     if (existente) return { personaId: existente.personaId, creada: false }
     this.validar(dto, /* esCrear */ true)
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(PERSONAID), 0) + 1 AS "nid" FROM PERSONA`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO PERSONA
-         (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
-          PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION,
-          PERSONAEMAIL, PERSONAEMAILINSTITUCIONAL, PERSONACELULAR, PERSONATELEFONO,
-          PERSONAHABEASDATA, PERSONAHABEASDATAE, IDEMPRESA, PERSONAFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, SYSDATE)`,
-      [
-        Number(nid), Number(dto.tipoDocumentoId),
-        dto.nombres.trim().toUpperCase(),
-        dto.primerApellido.trim().toUpperCase(),
-        (dto.segundoApellido ?? '').trim().toUpperCase() || null,
-        String(dto.identificacion).trim(),
-        dto.email.trim(),
-        (dto.emailInstitucional ?? '').trim() || null,
-        (dto.celular ?? '').trim() || null,
-        (dto.telefono ?? '').trim() || null,
-        dto.habeasData ? 'SI' : 'NO',
-        dto.habeasData ? 'SI' : 'NO',
-        empresaId ?? null,
-      ],
-    )
-    return { personaId: Number(nid), creada: true }
+    const personaId = await insertarConId(this.dataSource, 'PERSONA', 'PERSONAID', { maxMasUno: true }, {
+      TIPODOCUMENTOIDENTIDADID: Number(dto.tipoDocumentoId),
+      PERSONANOMBRES: dto.nombres.trim().toUpperCase(),
+      PERSONAPRIMERAPELLIDO: dto.primerApellido.trim().toUpperCase(),
+      PERSONASEGUNDOAPELLIDO: (dto.segundoApellido ?? '').trim().toUpperCase() || null,
+      PERSONAIDENTIFICACION: String(dto.identificacion).trim(),
+      PERSONAEMAIL: dto.email.trim(),
+      PERSONAEMAILINSTITUCIONAL: (dto.emailInstitucional ?? '').trim() || null,
+      PERSONACELULAR: (dto.celular ?? '').trim() || null,
+      PERSONATELEFONO: (dto.telefono ?? '').trim() || null,
+      PERSONAHABEASDATA: dto.habeasData ? 'SI' : 'NO',
+      PERSONAHABEASDATAE: dto.habeasData ? 'SI' : 'NO',
+      IDEMPRESA: empresaId ?? null,
+      PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { personaId, creada: true }
   }
 
   async actualizarPersona(personaId: number, dto: Partial<PersonaDto>) {
@@ -210,23 +202,17 @@ export class PersonasService {
     if (Number(existentes) > 0) {
       throw new BadRequestException('Ya existe un documento asociado al registro. Elimina el actual antes de subir uno nuevo.')
     }
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(DOCUMENTOSPERSONASID), 0) + 1 AS "nid" FROM DOCUMENTOSPERSONAS`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO DOCUMENTOSPERSONAS
-         (DOCUMENTOSPERSONASID, PERSONAID, DOCUMENTOSPERSONASNUM, DOCUMENTOSPERSONASTIPO,
-          DOCUMENTOSPERSONASNOMBREARCH, DOCUMENTOSPERSONASDOC, DOCUMENTOSPERSONASFECHAREGISTR)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-      [
-        Number(nid), personaId, numFinal, tipo,
-        (file.originalname ?? 'archivo.pdf').slice(0, 200),
-        { type: oracledb.DB_TYPE_BLOB, val: file.buffer } as any,
-      ],
-    )
+    const documentoId = await insertarConId(this.dataSource, 'DOCUMENTOSPERSONAS', 'DOCUMENTOSPERSONASID', { maxMasUno: true }, {
+      PERSONAID: personaId,
+      DOCUMENTOSPERSONASNUM: numFinal,
+      DOCUMENTOSPERSONASTIPO: tipo,
+      DOCUMENTOSPERSONASNOMBREARCH: (file.originalname ?? 'archivo.pdf').slice(0, 200),
+      DOCUMENTOSPERSONASDOC: { type: oracledb.DB_TYPE_BLOB, val: file.buffer },
+      DOCUMENTOSPERSONASFECHAREGISTR: sqlCrudo(AHORA_UTC),
+    })
     return {
       message: 'Archivo cargado correctamente.',
-      documentoId: Number(nid),
+      documentoId,
       tamanoBytes: file.size,
     }
   }
@@ -332,7 +318,7 @@ export class PersonasService {
           PERSONAEXPERIENCIAFECHAINICIO, PERSONAEXPERIENCIAFECHAFIN,
           PERSONAEXPERIENCIAFECHAREGISTR, PERSONAEXPERIENCIAFECHAACTUALI,
           PERSONAEXPERIENCIAPROYECTO)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE, SYSDATE, :7)`,
+       VALUES (:1, :2, :3, :4, :5, :6, ${AHORA_UTC}, ${AHORA_UTC}, :7)`,
       [
         Number(nid), personaId, Number(dto.tipoExperienciaId),
         dto.descripcion.trim(),
@@ -400,7 +386,7 @@ export class PersonasService {
       sets.push(`PERSONAEXPERIENCIANOMBREARCHIV = NULL`)
     }
     if (sets.length === 0) return { message: 'Sin cambios.' }
-    sets.push(`PERSONAEXPERIENCIAFECHAACTUALI = SYSDATE`)
+    sets.push(`PERSONAEXPERIENCIAFECHAACTUALI = ${AHORA_UTC}`)
     params.push(experienciaId)
     await this.dataSource.query(
       `UPDATE PERSONAEXPERIENCIA SET ${sets.join(', ')} WHERE PERSONAEXPERIENCIAID = :${i}`,
@@ -549,7 +535,7 @@ export class PersonasService {
           PERSONATITULOSDESCRIPCION, PERSONATITULOFECHAGRADUACION,
           PERSONATITULOFECHAREGISTRO, PERSONATITULOFECHAACTUALIZACIO,
           PERSONATITULOSPROYECTO)
-       VALUES (:1, :2, :3, :4, :5, SYSDATE, SYSDATE, :6)`,
+       VALUES (:1, :2, :3, :4, :5, ${AHORA_UTC}, ${AHORA_UTC}, :6)`,
       [
         Number(nid), personaId, Number(dto.tipoTituloId),
         dto.descripcion.trim(),
@@ -611,7 +597,7 @@ export class PersonasService {
       sets.push(`PERSONATITULONOMBREARCHIVO = NULL`)
     }
     if (sets.length === 0) return { message: 'Sin cambios.' }
-    sets.push(`PERSONATITULOFECHAACTUALIZACIO = SYSDATE`)
+    sets.push(`PERSONATITULOFECHAACTUALIZACIO = ${AHORA_UTC}`)
     params.push(tituloId)
     await this.dataSource.query(
       `UPDATE PERSONATITULOS SET ${sets.join(', ')} WHERE PERSONATITULOSID = :${i}`,
@@ -742,17 +728,14 @@ export class PersonasService {
       [dto.tipoDocId],
     )
     if (!tipo) throw new BadRequestException('Tipo de documento no encontrado.')
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(HVPERSONADOCADICID), 0) + 1 AS "nid" FROM HVPERSONADOCADICIONAL`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO HVPERSONADOCADICIONAL
-         (HVPERSONADOCADICID, PERSONAID, PERSONADOCREQID, HVPERSONADOCADICIONALPROYECTO,
-          HVPERSONADOCADICNOMBREARCHIVO, HVPERSONADOCADICFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, 'PENDIENTE', SYSDATE)`,
-      [Number(nid), personaId, Number(dto.tipoDocId), dto.proyectoId ? Number(dto.proyectoId) : null],
-    )
-    return { message: 'Documento adicional registrado.', docAdicId: Number(nid) }
+    const docAdicId = await insertarConId(this.dataSource, 'HVPERSONADOCADICIONAL', 'HVPERSONADOCADICID', { maxMasUno: true }, {
+      PERSONAID: personaId,
+      PERSONADOCREQID: Number(dto.tipoDocId),
+      HVPERSONADOCADICIONALPROYECTO: dto.proyectoId ? Number(dto.proyectoId) : null,
+      HVPERSONADOCADICNOMBREARCHIVO: 'PENDIENTE',
+      HVPERSONADOCADICFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { message: 'Documento adicional registrado.', docAdicId }
   }
 
   async eliminarDocAdicional(docAdicId: number, perfilId: number) {

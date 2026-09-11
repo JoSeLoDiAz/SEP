@@ -11,13 +11,9 @@ import type { RespuestaEnviada } from './retroalimentacion.service'
 import { RetroReporteService } from './retro-reporte.service'
 import { RetroHistoricoService } from './retro-historico.service'
 import type { RetroHistoricaDto } from './retro-historico.service'
+import { perfilesGestion } from '../common/perfiles'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
-
-const PERFIL_ADMIN = 1
-const PERFIL_COORDINADOR = 2
-const PERFIL_GESTOR_EVALUADORES = 15
-const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 // el participacionId del evaluador nunca llega por parámetro: sale del JWT
 @ApiTags('retroalimentacion')
@@ -32,7 +28,7 @@ export class RetroalimentacionController {
   ) {}
 
   private exigirGestion(user: JwtUser) {
-    if (!PERFILES_GESTION.includes(user.perfilId)) {
+    if (!perfilesGestion().includes(user.perfilId)) {
       throw new ForbiddenException('No tiene permisos para gestionar la retroalimentación')
     }
   }

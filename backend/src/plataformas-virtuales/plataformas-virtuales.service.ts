@@ -2,6 +2,18 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { leerId, tieneTriggerDeId } from '../common/db/ids'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const oracledb = require('oracledb') as { BIND_OUT: number; NUMBER: unknown }
+
+// NUMBER NOT NULL con DEFAULT NULL en las dos bases, así que un INSERT que las omite da ORA-01400. Son los criterios
+// que califica la interventoría en GeneXus; las filas que GeneXus crea los traen en 0. El SEP no los lee ni los edita
+const CRITERIOS_GENEXUS = [
+  'RENDI', 'COMTEC', 'DISPO', 'INTHERRA', 'IA', 'REDIGI', 'REDIDA', 'FORVIR', 'SESINC', 'FORHIB', 'PAT', 'DISATE',
+  'GESAF', 'GESGRU', 'GESUSU', 'ASIGUSU', 'GESPER', 'GESADM', 'GESCAP', 'GESBEN', 'GESINTER', 'GESSENA',
+  'GESSESSINC', 'REPEXCEL',
+].map((c) => `PLATAFORMASVIRTUALES${c}`)
 
 // solo los 4 campos que edita el conveniente; interventoría y SENA van por otros módulos
 export interface PlataformaVirtualDto {
@@ -123,13 +135,19 @@ export class PlataformasVirtualesService {
 
   async crear(proyectoId: number, dto: PlataformaVirtualDto): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
-    const [{ nid }] = await this.ds.query(
-      `SELECT NVL(MAX(PLATAFORMASVIRTUALESID), 0) + 1 AS "nid" FROM PLATAFORMASVIRTUALES`,
-    )
-    const id = Number(nid)
+    // el id lo pone el trigger de id, que la tabla tiene en las dos bases (va NULL); si faltara, MAX+1 como antes.
+    // No va por insertarConId porque la fecha de remisión entra con TO_DATE(:x); el RETURNING trae el id que quedó
+    let idPrevio: number | null = null
+    if (!(await tieneTriggerDeId(this.ds, 'PLATAFORMASVIRTUALES', 'PLATAFORMASVIRTUALESID'))) {
+      const [{ nid }] = await this.ds.query(
+        `SELECT NVL(MAX(PLATAFORMASVIRTUALESID), 0) + 1 AS "nid" FROM PLATAFORMASVIRTUALES`,
+      )
+      idPrevio = Number(nid)
+    }
 
-    // todas las columnas son NOT NULL: lo que no aplica va con placeholder
-    await this.ds.query(
+    // todas las columnas son NOT NULL: lo que no aplica va con placeholder. FECHACON no tiene default y el
+    // formulario no trae una fecha para ella: va la de hoy, en UTC
+    const salida: unknown = await this.ds.query(
       `INSERT INTO PLATAFORMASVIRTUALES
          (PLATAFORMASVIRTUALESID, PROYECTOID,
           PLATAFORMASVIRTUALESFECHAREMI, PLATAFORMASVIRTUALESRADINTER, PLATAFORMASVIRTUALESRADRESINTE,
@@ -137,20 +155,25 @@ export class PlataformasVirtualesService {
           PLATAFORMASVIRTUALESFECRADSENA, PLATAFORMASVIRTUALESLINK, PLATAFORMASVIRTUALESUSUARIO,
           PLATAFORMASVIRTUALESCLAVE, PLATAFORMASVIRTUALESESTADO, PLATAFORMASVIRTUALESFECHAREG,
           PLATAFORMASVIRTUALESUSUREGISTR, PLATAFORMASVIRTUALESOBSERVACIO,
-          PLATAFORMASVIRTUALESUSUSENA, PLATAFORMASVIRTUALESOBSSENA, PLATAFORMASVIRTUALESVALSENA)
+          PLATAFORMASVIRTUALESUSUSENA, PLATAFORMASVIRTUALESOBSSENA, PLATAFORMASVIRTUALESVALSENA,
+          PLATAFORMASVIRTUALESFECHACON, ${CRITERIOS_GENEXUS.join(', ')})
        VALUES (:1, :2,
                TO_DATE(:3, 'YYYY-MM-DD'), N' ', N' ',
-               SYSDATE, N' ', N' ',
-               SYSDATE, :4, :5,
-               :6, 0, SYSDATE,
+               ${AHORA_UTC}, N' ', N' ',
+               ${AHORA_UTC}, :4, :5,
+               :6, 0, ${AHORA_UTC},
                0, N' ',
-               0, N' ', 0)`,
+               0, N' ', 0,
+               ${AHORA_UTC}, ${CRITERIOS_GENEXUS.map(() => '0').join(', ')})
+       RETURNING PLATAFORMASVIRTUALESID INTO :7`,
       [
-        id, proyectoId,
+        idPrevio, proyectoId,
         dto.fechaRemi,
         dto.link.trim(), dto.usuario.trim(), dto.clave.trim(),
+        { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       ],
     )
+    const id = leerId(salida, 'PLATAFORMASVIRTUALES')
     return { mensaje: 'Plataforma virtual registrada correctamente.', id }
   }
 

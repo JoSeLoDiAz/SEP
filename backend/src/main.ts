@@ -14,11 +14,14 @@ import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
+import { DataSource } from 'typeorm'
 import { AppModule } from './app.module'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { UploadErrorFilter } from './common/filters/upload-error.filter'
 import { OracleErrorFilter } from './common/filters/oracle-error.filter'
 import { enMigracion } from './common/migracion.guard'
+import { triggersDeId } from './common/db/ids'
+import { resolverPerfiles } from './common/perfiles'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)
@@ -51,6 +54,16 @@ async function bootstrap() {
   })
 
   const configService = app.get(ConfigService)
+
+  // Lo que cambia de una base a otra se lee al arrancar: qué tablas tienen trigger de id (en el Exadata, los de
+  // GeneXus) y el id del perfil gestor de evaluadores (15 en el XE, 103 en el Exadata). Si no se puede, no arranca:
+  // adivinar sería peor.
+  const ds = app.get(DataSource)
+  const triggers = await triggersDeId(ds)
+  const perfiles = await resolverPerfiles(ds, configService.get<string>('PERFIL_GESTOR_EVALUADORES'))
+  console.log(
+    `🧭 Triggers de id: ${triggers.size} tablas · perfil gestor de evaluadores: ${perfiles.gestorEvaluadores} (${perfiles.origen})`,
+  )
 
   // Swagger se monta como middleware de Express, así que el guard global de
   // migración NO lo cubre: durante la pausa quedaba sirviendo 200 con el mapa

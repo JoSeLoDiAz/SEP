@@ -25,13 +25,9 @@ import { FichaPdfService } from './ficha-pdf.service'
 import { ReportesEvaluadorService } from './reportes.service'
 import type { AprobacionDto, CapacitacionDto, PartProyectoDto } from './ciclo.service'
 import { contentDisposition } from '../common/text/nombre-archivo'
+import { PERFIL_ADMIN, perfilesGestion } from '../common/perfiles'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
-
-const PERFIL_ADMIN = 1
-const PERFIL_COORDINADOR = 2
-const PERFIL_GESTOR_EVALUADORES = 15
-const PERFILES_GESTION = [PERFIL_ADMIN, PERFIL_COORDINADOR, PERFIL_GESTOR_EVALUADORES]
 
 // Tope único para todo lo que se suba: PDFs, fotos y correos.
 const MAX_ARCHIVO_BYTES = 8 * 1024 * 1024
@@ -81,7 +77,7 @@ export class EvaluadoresController {
 
   // Quien gestiona el banco lo gestiona completo; solo los catálogos son de admin.
   private exigirGestion(user: JwtUser) {
-    if (!PERFILES_GESTION.includes(user.perfilId)) {
+    if (!perfilesGestion().includes(user.perfilId)) {
       throw new ForbiddenException('No tiene permisos para gestionar el banco de evaluadores')
     }
   }

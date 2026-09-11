@@ -2,11 +2,24 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
 
 // modalidades 1, 2 y 3 graban en CRONOGRAMAPRESENCIAL; solo la 4 va a CRONOGRAMAVIRTUAL
 type Modalidad = 1 | 2 | 3 | 4
 
 const MAX_SESIONES = 20
+
+// columnas de una fila nueva de UTHORAS, sin la llave (la pone insertarConId)
+export function valoresUtHoras(
+  afGrupoId: number, personaId: number, utId: number, horas: number[], total: number,
+): Record<string, unknown> {
+  const valores: Record<string, unknown> = { AFGRUPOID: afGrupoId, PERSONAID: personaId, UNIDADTEMATICAID: utId }
+  for (let i = 0; i < MAX_SESIONES; i++) valores[`UTHORAS${i + 1}`] = horas[i]
+  valores.UTHORASTOTAL = total
+  valores.UTHORASFECHAREGISTRO = sqlCrudo(AHORA_UTC)
+  return valores
+}
 
 @Injectable()
 export class CertificacionService {
@@ -285,24 +298,13 @@ export class CertificacionService {
       uthorasId = Number(exist.id)
       const setCols = Array.from({ length: MAX_SESIONES }, (_, i) => `UTHORAS${i + 1} = :${i + 1}`).join(', ')
       await this.ds.query(
-        `UPDATE UTHORAS SET ${setCols}, UTHORASTOTAL = :${MAX_SESIONES + 1}, UTHORASFECHAREGISTRO = SYSDATE
+        `UPDATE UTHORAS SET ${setCols}, UTHORASTOTAL = :${MAX_SESIONES + 1}, UTHORASFECHAREGISTRO = ${AHORA_UTC}
           WHERE UTHORASID = :${MAX_SESIONES + 2}`,
         [...limpias, total, uthorasId],
       )
     } else {
-      const [{ nid }] = await this.ds.query(
-        `SELECT NVL(MAX(UTHORASID), 0) + 1 AS "nid" FROM UTHORAS`,
-      )
-      uthorasId = Number(nid)
-      const cols = Array.from({ length: MAX_SESIONES }, (_, i) => `UTHORAS${i + 1}`).join(', ')
-      const binds = Array.from({ length: MAX_SESIONES }, (_, i) => `:${i + 5}`).join(', ')
-      await this.ds.query(
-        `INSERT INTO UTHORAS
-           (UTHORASID, AFGRUPOID, PERSONAID, UNIDADTEMATICAID, ${cols},
-            UTHORASTOTAL, UTHORASFECHAREGISTRO)
-         VALUES (:1, :2, :3, :4, ${binds}, :${MAX_SESIONES + 5}, SYSDATE)`,
-        [uthorasId, afGrupoId, personaId, utId, ...limpias, total],
-      )
+      uthorasId = await insertarConId(this.ds, 'UTHORAS', 'UTHORASID', { maxMasUno: true },
+        valoresUtHoras(afGrupoId, personaId, utId, limpias, total))
     }
 
     const [agg] = await this.ds.query(
@@ -399,8 +401,6 @@ export class CertificacionService {
     let actualizados = 0
     let omitidos = 0
     const setCols = Array.from({ length: MAX_SESIONES }, (_, i) => `UTHORAS${i + 1} = :${i + 1}`).join(', ')
-    const colsIns = Array.from({ length: MAX_SESIONES }, (_, i) => `UTHORAS${i + 1}`).join(', ')
-    const bindsIns = Array.from({ length: MAX_SESIONES }, (_, i) => `:${i + 5}`).join(', ')
 
     for (const b of benefs) {
       const [exist] = await this.ds.query(
@@ -419,21 +419,13 @@ export class CertificacionService {
         await this.ds.query(
           `UPDATE UTHORAS SET ${setCols},
                               UTHORASTOTAL = :${MAX_SESIONES + 1},
-                              UTHORASFECHAREGISTRO = SYSDATE
+                              UTHORASFECHAREGISTRO = ${AHORA_UTC}
             WHERE UTHORASID = :${MAX_SESIONES + 2}`,
           [...maxHoras, totalAplicar, Number(exist.id)],
         )
       } else {
-        const [{ nid }] = await this.ds.query(
-          `SELECT NVL(MAX(UTHORASID), 0) + 1 AS "nid" FROM UTHORAS`,
-        )
-        await this.ds.query(
-          `INSERT INTO UTHORAS
-             (UTHORASID, AFGRUPOID, PERSONAID, UNIDADTEMATICAID, ${colsIns},
-              UTHORASTOTAL, UTHORASFECHAREGISTRO)
-           VALUES (:1, :2, :3, :4, ${bindsIns}, :${MAX_SESIONES + 5}, SYSDATE)`,
-          [Number(nid), afGrupoId, b.personaId, utId, ...maxHoras, totalAplicar],
-        )
+        await insertarConId(this.ds, 'UTHORAS', 'UTHORASID', { maxMasUno: true },
+          valoresUtHoras(afGrupoId, b.personaId, utId, maxHoras, totalAplicar))
       }
 
       const [agg] = await this.ds.query(

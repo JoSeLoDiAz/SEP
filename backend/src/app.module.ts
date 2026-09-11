@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { EstadoController } from './common/estado.controller'
+import { PerfilesController } from './common/perfiles.controller'
 import { MigracionGuard } from './common/migracion.guard'
 import { AuthModule } from './auth/auth.module'
 import { CapacitadoresModule } from './capacitadores/capacitadores.module'
@@ -68,7 +69,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ConvocatoriaProyectosModule,
     UsuariosAdminModule,
   ],
-  controllers: [EstadoController],
+  controllers: [EstadoController, PerfilesController],
   providers: [
     // Guard global: con MODO_MIGRACION puesto cierra TODAS las rutas menos
     // /estado, incluidas las de quien ya tiene sesión abierta. Es lo que

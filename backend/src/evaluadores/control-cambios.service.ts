@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { AHORA_UTC_TS } from '../common/db/fecha-utc'
 
 // control de cambios del banco: SEP_APP solo tiene SELECT e INSERT sobre EVALUADORLOG, sin UPDATE ni DELETE
 
@@ -48,12 +49,13 @@ export class ControlCambiosService {
       const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
         `SELECT EVALUADORLOG_SEQ.NEXTVAL FROM dual`,
       )
+      // FECHA explícita en UTC: su DEFAULT SYSTIMESTAMP da la hora de Colombia en el Exadata
       await this.dataSource.query(
         `INSERT INTO EVALUADORLOG
            (EVALUADORLOGID, EVALUADORID, PARTICIPACIONID, TABLA, OPERACION,
             REGISTROID, USUARIOEMAIL, USUARIOPERFILID, COMENTARIO,
-            VALORANTES, VALORDESPUES)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11)`,
+            VALORANTES, VALORDESPUES, FECHA)
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, ${AHORA_UTC_TS})`,
         [
           Number(seq[0].NEXTVAL),
           r.evaluadorId ?? null,

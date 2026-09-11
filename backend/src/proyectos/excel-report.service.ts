@@ -159,6 +159,8 @@ const HEADERS_COBERTURA = (() => {
 
 type AnyRec = Record<string, any>
 type Row = Array<string | number | null>
+type GoTrans = { go?: AnyRec; trans?: AnyRec }
+interface RubrosGoTrans { porId: Map<number, GoTrans>; porNumero: Map<number, GoTrans> }
 
 function s(v: any): string { return v == null ? '' : String(v).trim() }
 function n(v: any): number | '' { const x = Number(v); return isNaN(x) ? '' : x }
@@ -225,6 +227,7 @@ export class ExcelReportService {
     // aqui solo metadata: el CLOB del snapshot va aparte en readSnapshotJson
     const [version] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID  AS "versionId",
+              PROYECTOID         AS "proyectoId",
               VERSIONNUMERO      AS "numero",
               VERSIONCODIGO      AS "codigo"
          FROM PROYECTOVERSION
@@ -240,7 +243,7 @@ export class ExcelReportService {
     }
     const snapshot = await this.readSnapshotJson(Number(version.versionId))
     const filename = `${version.codigo}.xlsx`
-    const buffer = await this.buildWorkbook(snapshot)
+    const buffer = await this.buildWorkbook(snapshot, Number(version.proyectoId))
     return { filename, buffer }
   }
 
@@ -309,10 +312,13 @@ export class ExcelReportService {
   }
 
   // R09 y R015: el snapshot solo guarda los montos, el nombre y la descripcion salen del catalogo
-  private async loadGoTransRubros(proyectoId: number) {
-    if (!proyectoId) return new Map<number, { go?: any; trans?: any }>()
+  private async loadGoTransRubros(proyectoId: number): Promise<RubrosGoTrans> {
+    const porId = new Map<number, GoTrans>()
+    const porNumero = new Map<number, GoTrans>()
+    if (!proyectoId) return { porId, porNumero }
     const rows = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID                       AS "afId",
+              af.ACCIONFORMACIONNUMERO                   AS "afNumero",
               ar.RUBROID                                 AS "rubroId",
               TRIM(r.RUBROCODIGO)                        AS "codigo",
               TRIM(r.RUBRONOMBRE)                        AS "nombre",
@@ -330,18 +336,18 @@ export class ExcelReportService {
           AND TRIM(r.RUBROCODIGO) IN ('R09', 'R015')`,
       [proyectoId],
     ).catch(() => [])
-    const map = new Map<number, { go?: any; trans?: any }>()
     for (const r of rows as any[]) {
       const afId = Number(r.afId)
-      const entry = map.get(afId) ?? {}
+      const entry = porId.get(afId) ?? {}
       if (r.codigo === 'R09') entry.go = r
       else if (r.codigo === 'R015') entry.trans = r
-      map.set(afId, entry)
+      porId.set(afId, entry)
+      porNumero.set(Number(r.afNumero), entry)
     }
-    return map
+    return { porId, porNumero }
   }
 
-  private async buildWorkbook(snap: AnyRec): Promise<Buffer> {
+  private async buildWorkbook(snap: AnyRec, proyectoId: number): Promise<Buffer> {
     const cats = await this.loadCatalogs()
     const wb = XLSX.utils.book_new()
 
@@ -352,8 +358,8 @@ export class ExcelReportService {
       if (id) diagSeq.set(id, i + 1)
     })
 
-    // una sola query por proyecto, no por AF
-    const proyectoId = Number(snap?.proyecto?.id) || 0
+    // una sola query por proyecto, no por AF. Los datos vivos van por el PROYECTOID de la version: el id que trae
+    // el snapshot puede ser de otra base (en el Exadata los proyectos migrados tienen otro numero)
     const goTransRubros = await this.loadGoTransRubros(proyectoId)
 
     this.appendSheet(wb, 'Datos_Cobertura',     this.buildCobertura(snap))
@@ -738,7 +744,7 @@ export class ExcelReportService {
   private buildRubros(
     snap: AnyRec,
     cats: { rubrosDesc: Map<number, string> },
-    goTransRubros: Map<number, { go?: any; trans?: any }>,
+    goTransRubros: RubrosGoTrans,
   ): Row[] {
     const rows: Row[] = [HEADERS_RUBROS]
     const detalleByAfId: Record<number, AnyRec> = {}
@@ -746,6 +752,10 @@ export class ExcelReportService {
       detalleByAfId[Number(d.afId)] = d
     }
     const acciones = (snap.acciones as AnyRec[]) ?? []
+    // al aprobar en el Exadata las AF vivas quedan con el id que pone el trigger: si ninguna AF del snapshot esta
+    // entre las vivas, se emparejan por numero de AF
+    const porNumero = goTransRubros.porId.size > 0
+      && !acciones.some(af => goTransRubros.porId.has(Number(af.afId)))
     acciones.forEach(af => {
       const det = detalleByAfId[Number(af.afId)] ?? {}
       const rubros = (det.rubros as AnyRec[]) ?? []
@@ -802,7 +812,9 @@ export class ExcelReportService {
       })
 
       // R09 y R015 no viven en det.rubros pero el reporte los quiere como fila extra por AF
-      const goTrans = goTransRubros.get(Number(af.afId))
+      const goTrans = porNumero
+        ? goTransRubros.porNumero.get(Number(af.numero))
+        : goTransRubros.porId.get(Number(af.afId))
       if (goTrans?.go) {
         const g = goTrans.go
         const total = Number(g.valor) || 0

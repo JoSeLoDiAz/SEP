@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { cifrarClave, generarLlaveEncriptacion } from '../common/crypto/usuario-clave'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 export interface CrearUsuarioDto {
   email: string
@@ -266,7 +268,7 @@ export class UsuariosAdminService {
     await this.dataSource.query(
       `INSERT INTO USUARIOPERFIL
          (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-       VALUES (:1, :2, :3, 0, 1, SYSDATE)`,
+       VALUES (:1, :2, :3, 0, 1, ${AHORA_UTC})`,
       [nuevoId, usuarioId, perfilId],
     )
 
@@ -352,44 +354,39 @@ export class UsuariosAdminService {
     await qr.connect()
     await qr.startTransaction()
     try {
-      const seqU: Array<{ NEXTVAL: number }> = await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)
-      const usuarioId = Number(seqU[0].NEXTVAL)
-
-      await qr.query(
-        `INSERT INTO USUARIO
-           (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
-            USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
-         VALUES (:1, :2, :3, SYSDATE, 1, 1, :4, :5)`,
-        [usuarioId, perfilId, claveCifrada, email, llave],
-      )
+      // el id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(qr, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: perfilId,
+        USUARIOCLAVE: claveCifrada,
+        USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 1,
+        USUARIOEMAIL: email,
+        USUARIOLLAVEENCRIPTACION: llave,
+      })
 
       await qr.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, SYSDATE)`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, ${AHORA_UTC})`,
         [usuarioId, perfilId],
       )
 
       // PERSONA es opcional
       if (dto.nombres?.trim() && dto.primerApellido?.trim() && dto.identificacion?.trim()) {
-        const seqP: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
-        const personaId = Number(seqP[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO PERSONA
-             (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
-              PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION, PERSONAEMAIL, PERSONAFECHAREGISTRO,
-              GENEROID, CIUDADID, PERSONAHABEASDATA, PERSONAHABEASDATAE)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, SYSDATE, 3, 1, 'SI', 'NA')`,
-          [
-            personaId,
-            dto.tipoDocumentoIdentidadId ?? 1,
-            dto.nombres.trim(),
-            dto.primerApellido.trim(),
-            (dto.segundoApellido ?? '').trim(),
-            dto.identificacion.trim(),
-            email,
-          ],
-        )
+        await insertarConId(qr, 'PERSONA', 'PERSONAID', { secuencia: 'PERSONAID' }, {
+          TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId ?? 1,
+          PERSONANOMBRES: dto.nombres.trim(),
+          PERSONAPRIMERAPELLIDO: dto.primerApellido.trim(),
+          PERSONASEGUNDOAPELLIDO: (dto.segundoApellido ?? '').trim(),
+          PERSONAIDENTIFICACION: dto.identificacion.trim(),
+          PERSONAEMAIL: email,
+          PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          GENEROID: 3,
+          CIUDADID: 1,
+          PERSONAHABEASDATA: 'SI',
+          PERSONAHABEASDATAE: 'NA',
+        })
       }
 
       await qr.commitTransaction()

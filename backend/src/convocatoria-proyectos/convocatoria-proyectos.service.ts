@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 import { ImportarProyectoService, PreviewImportacion } from '../importar-proyecto/importar-proyecto.service'
 
 // banco de proyectos guardados de una convocatoria.
@@ -142,7 +143,7 @@ export class ConvocatoriaProyectosService {
       `INSERT INTO CONVPROYGUARDADO
          (GUARDADOID, CONVOCATORIAID, NIT, RAZONSOCIAL, NOMBREPROYECTO, MODALIDAD,
           NUMAF, NUMBENEF, VALORTOTAL, COFINSENA, USUARIOID, FECHAGUARDADO, DATOSJSON)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, SYSDATE, ${clobExpr})`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, ${AHORA_UTC}, ${clobExpr})`,
       [
         id,
         convocatoriaId,

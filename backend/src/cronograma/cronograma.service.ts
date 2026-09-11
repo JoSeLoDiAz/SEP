@@ -7,6 +7,11 @@ import { PatchSesionPresencialDto } from './dto/patch-sesion-presencial.dto'
 import { PatchSesionVirtualDto } from './dto/patch-sesion-virtual.dto'
 import { UpsertCronogramaDto } from './dto/upsert-cronograma.dto'
 import { fechaSolo } from '../common/fecha-solo'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const oracledb = require('oracledb') as { DB_TYPE_NCLOB: number }
 
 // editable solo si esta sin radicar (PENDIENTE) o devuelta para corregir (MODIFICAR)
 function estadoBloqueaEdicion(estadoRadicado: string | null | undefined): boolean {
@@ -34,9 +39,10 @@ export class CronogramaService {
     }
   }
 
+  // CRONOGRAMA guarda el proyecto en CRONOPROYECTO: no tiene columna PROYECTOID
   private async assertConvenioActivoPorCronograma(cronogramaId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMA
+      `SELECT CRONOPROYECTO AS "proyectoId" FROM CRONOGRAMA
         WHERE CRONOGRAMAID = :1 FETCH FIRST 1 ROW ONLY`,
       [cronogramaId],
     )
@@ -46,7 +52,7 @@ export class CronogramaService {
 
   private async assertConvenioActivoPorSesionPresencial(sesionId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT cr.PROYECTOID AS "proyectoId"
+      `SELECT cr.CRONOPROYECTO AS "proyectoId"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA cr ON cr.CRONOGRAMAID = cp.CRONOGRAMAID
         WHERE cp.CRONOGRAMAPRESENCIALID = :1 FETCH FIRST 1 ROW ONLY`,
@@ -58,7 +64,7 @@ export class CronogramaService {
 
   private async assertConvenioActivoPorSesionVirtual(actividadId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT cr.PROYECTOID AS "proyectoId"
+      `SELECT cr.CRONOPROYECTO AS "proyectoId"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA cr ON cr.CRONOGRAMAID = cv.CRONOGRAMAID
         WHERE cv.CRONOGRAMAVIRTUALID = :1 FETCH FIRST 1 ROW ONLY`,
@@ -70,10 +76,7 @@ export class CronogramaService {
 
   private async assertConvenioActivoPorRadicado(radicadoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT cr.PROYECTOID AS "proyectoId"
-         FROM CRONOGRAMARADICADO crr
-         JOIN CRONOGRAMA cr ON cr.CRONOGRAMAID = crr.CRONOGRAMAID
-        WHERE crr.CRONOGRAMARADICADOID = :1 FETCH FIRST 1 ROW ONLY`,
+      `SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMARADICADO WHERE RADICADOID = :1`,
       [radicadoId],
     )
     // si no se resuelve el radicado no bloqueamos, para no romper flujos legacy
@@ -285,7 +288,7 @@ export class CronogramaService {
     return rows.map(r => ({ ...r, capacitadorNombre: armarNombreCap(r) }))
   }
 
-  // el ID sale de MAX+1 dentro de la transaccion: la tabla no tiene secuencia
+  // el id lo pone el trigger de CRONOGRAMA; sin trigger sale de MAX+1 dentro de la transaccion
   async upsertCronograma(proyectoId: number, dto: UpsertCronogramaDto) {
     await this.assertConvenioEnEjecucion(proyectoId)
     const fi = fechaSolo(dto.fechaInicio) as Date
@@ -322,20 +325,18 @@ export class CronogramaService {
           [fi, ff, cronogramaId],
         )
       } else {
-        const next: { id: number }[] = await qr.query(
-          `SELECT NVL(MAX(CRONOGRAMAID), 0) + 1 AS "id" FROM CRONOGRAMA`,
-        )
-        cronogramaId = Number(next[0].id)
+        cronogramaId = await insertarConId(qr, 'CRONOGRAMA', 'CRONOGRAMAID', { maxMasUno: true }, {
+          AFGRUPOID: dto.grupoId,
+          UNIDADTEMATICAID: dto.utId,
+          CRONOGRAMAFECHAINICIO: fi,
+          CRONOGRAMAFECHAFIN: ff,
+          CRONONUMSESIONES: 0,
+          CRONONUMTOTALACT: 0,
+          CRONOPROYECTO: proyectoId,
+          CRONOESTADO: 'ACTIVO',
+          CRONOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        })
         action = 'created'
-        await qr.query(
-          `INSERT INTO CRONOGRAMA
-             (CRONOGRAMAID, AFGRUPOID, UNIDADTEMATICAID,
-              CRONOGRAMAFECHAINICIO, CRONOGRAMAFECHAFIN,
-              CRONONUMSESIONES, CRONONUMTOTALACT,
-              CRONOPROYECTO, CRONOESTADO, CRONOFECHAREGISTRO)
-           VALUES (:1, :2, :3, :4, :5, 0, 0, :6, 'ACTIVO', SYSDATE)`,
-          [cronogramaId, dto.grupoId, dto.utId, fi, ff, proyectoId],
-        )
       }
 
       await qr.commitTransaction()
@@ -493,11 +494,6 @@ export class CronogramaService {
       )
       const numSesion = Number(nsRows[0].next)
 
-      const idRows: any[] = await qr.query(
-        `SELECT NVL(MAX(CRONOGRAMAPRESENCIALID), 0) + 1 AS "id" FROM CRONOGRAMAPRESENCIAL`,
-      )
-      const newId = Number(idRows[0].id)
-
       const covRows: any[] = await qr.query(
         `SELECT AFGRUPOCOBERTURAID AS "id" FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1 ORDER BY AFGRUPOCOBERTURAID`,
         [crono.grupoId],
@@ -515,38 +511,37 @@ export class CronogramaService {
       // en PAT (modalidad 2) el capacitador no aplica
       const tipoCapacitador = dto.modalidadId === 2 ? 'NO APLICA' : 'CAPACITADOR NACIONAL'
 
-      await qr.query(
-        `INSERT INTO CRONOGRAMAPRESENCIAL
-           (CRONOGRAMAPRESENCIALID, CRONOGRAMAID, AFGRUPOCOBERTURAID,
-            CRONOGRAMAPRESENCIALNOMBRESESI, CRONOGRAMAPRESENCIALNUMSESION,
-            CRONOGRAMAPRESENCIALFECHAINICI, CRONOGRAMAPRESENCIALHORAINICIO,
-            CRONOGRAMAPRESENCIALHORAFIN,    CRONOGRAMAPRESENCIALNUMHORAS,
-            CRONOGRAMAPRESENCIALNOMBRESEDE, CRONOGRAMAPRESENCIALDIRECCION,
-            CRONOGRAMAPRESENCIALAULA,       CRONOGRAMAPRESENCIALSIGLA,
-            CRONOGRAMAHERRAMIENTA, CRONOGRAMAURL,
-            CRONOGRAMAESTADO, CRONOGRAMAESTADORADICADO, TIPOCAPACIADORPRE,
-            CRONOGRAMAPRESENCIALCAPAID, CRONOGRAMAPREPERFILUTID,
-            CRONOGRAMAPRESENCIALCAPASUPDOS, CRONOGRAMAPRESENCIALCAPASUPUNO,
-            CRONOGRAMAPRESENCIALCAPASUPTRE, CRONOGRAMAPRESENCIALCAPASUPCUA,
-            CRONOGRAMAPRESENCIALPERFILUTUN, CRONOGRAMAPRESENCIALPERFILUTDO,
-            CRONOGRAMAPRESENCIALPERFILUTTR, CRONOGRAMAPRESENCIALPERFILUTCU,
-            CRONOGRAMAPRESENCIALRADICADOID, CRONOGRAMAPRESENCIALRADICADOTR)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15,
-                 'ACTIVO', 'PENDIENTE', :16, :17, :18,
-                 :19, :20, :21, :22, :23, :24, :25, :26, 0, 0)`,
-        [
-          newId, cronogramaId, coberturaId,
-          dto.nombreSesion, numSesion,
-          fechaSesion, horaInicioDate, horaFinDate, numHoras,
-          dto.nombreSede ?? null, dto.direccion ?? null, dto.aula ?? null, sigla,
-          dto.herramienta ?? null, dto.url ?? null,
-          tipoCapacitador, dto.capacitadorId, dto.perfilUTId,
-          dto.capSup2Id ?? 0, dto.capSup1Id ?? 0,
-          dto.capSup3Id ?? 0, dto.capSup4Id ?? 0,
-          dto.perfilSup1Id ?? 0, dto.perfilSup2Id ?? 0,
-          dto.perfilSup3Id ?? 0, dto.perfilSup4Id ?? 0,
-        ],
-      )
+      const newId = await insertarConId(qr, 'CRONOGRAMAPRESENCIAL', 'CRONOGRAMAPRESENCIALID', { maxMasUno: true }, {
+        CRONOGRAMAID: cronogramaId,
+        AFGRUPOCOBERTURAID: coberturaId,
+        CRONOGRAMAPRESENCIALNOMBRESESI: dto.nombreSesion,
+        CRONOGRAMAPRESENCIALNUMSESION: numSesion,
+        CRONOGRAMAPRESENCIALFECHAINICI: fechaSesion,
+        CRONOGRAMAPRESENCIALHORAINICIO: horaInicioDate,
+        CRONOGRAMAPRESENCIALHORAFIN: horaFinDate,
+        CRONOGRAMAPRESENCIALNUMHORAS: numHoras,
+        CRONOGRAMAPRESENCIALNOMBRESEDE: dto.nombreSede ?? null,
+        CRONOGRAMAPRESENCIALDIRECCION: dto.direccion ?? null,
+        CRONOGRAMAPRESENCIALAULA: dto.aula ?? null,
+        CRONOGRAMAPRESENCIALSIGLA: sigla,
+        CRONOGRAMAHERRAMIENTA: dto.herramienta ?? null,
+        CRONOGRAMAURL: dto.url ?? null,
+        CRONOGRAMAESTADO: 'ACTIVO',
+        CRONOGRAMAESTADORADICADO: 'PENDIENTE',
+        TIPOCAPACIADORPRE: tipoCapacitador,
+        CRONOGRAMAPRESENCIALCAPAID: dto.capacitadorId,
+        CRONOGRAMAPREPERFILUTID: dto.perfilUTId,
+        CRONOGRAMAPRESENCIALCAPASUPDOS: dto.capSup2Id ?? 0,
+        CRONOGRAMAPRESENCIALCAPASUPUNO: dto.capSup1Id ?? 0,
+        CRONOGRAMAPRESENCIALCAPASUPTRE: dto.capSup3Id ?? 0,
+        CRONOGRAMAPRESENCIALCAPASUPCUA: dto.capSup4Id ?? 0,
+        CRONOGRAMAPRESENCIALPERFILUTUN: dto.perfilSup1Id ?? 0,
+        CRONOGRAMAPRESENCIALPERFILUTDO: dto.perfilSup2Id ?? 0,
+        CRONOGRAMAPRESENCIALPERFILUTTR: dto.perfilSup3Id ?? 0,
+        CRONOGRAMAPRESENCIALPERFILUTCU: dto.perfilSup4Id ?? 0,
+        CRONOGRAMAPRESENCIALRADICADOID: 0,
+        CRONOGRAMAPRESENCIALRADICADOTR: 0,
+      })
 
       await qr.query(
         `UPDATE CRONOGRAMA SET CRONONUMSESIONES = NVL(CRONONUMSESIONES, 0) + 1
@@ -1103,45 +1098,39 @@ export class CronogramaService {
       )
       const numSesion = Number(nsRows[0].next)
 
-      const idRows: any[] = await qr.query(
-        `SELECT NVL(MAX(CRONOGRAMAVIRTUALID), 0) + 1 AS "id" FROM CRONOGRAMAVIRTUAL`,
-      )
-      const newId = Number(idRows[0].id)
-
       const fechaIni = new Date(`${dto.fechaInicio}T05:00:00.000Z`)
       const fechaFin = new Date(`${dto.fechaFin}T05:00:00.000Z`)
 
-      await qr.query(
-        `INSERT INTO CRONOGRAMAVIRTUAL
-           (CRONOGRAMAVIRTUALID, CRONOGRAMAID,
-            CRONOGRAMAVIRTUALNOMBRE, CRONOGRAMAVIRTUALNUMSESION,
-            CRONOGRAMAVIRTUALFECHAINICIO, CRONOGRAMAVIRTUALFECHAFINAL,
-            CRONOGRAMAVIRTUALNUMHORAS,
-            CRONOGRAMAVIRTUALPROVEEDOR, CRONOGRAMAVIRTUALURL,
-            CRONOGRAMAVIRTUALUSUARIOSENA, CRONOGRAMAVIRTUALCLAVESENA,
-            CRONOGRAMAVIRTUALSIGLA,
-            CRONOGRAMAVIRESTADO, CRONOGRAMAVIRESTADORADICADO,
-            CRONOGRAMAVIRCAPACITADORVIRTUA, CRONOGRAMAVIRPERFILUTID,
-            CRONOGRAMAVIRCAPACITADORLSUPUN, CRONOGRAMAVIRCAPACITADORSUPDOS,
-            CRONOGRAMAVIRCAPACITADORSUPTRE, CRONOGRAMAVIRCAPACITADORSUPCUA,
-            CRONOGRAMAVIRTUALPERFILUTSUPUN, CRONOGRAMAVIRTUALPERFILUTSUPDO,
-            CRONOGRAMAVIRTUALPERFILUTSUPTR, CRONOGRAMAVIRTUALPERFILUTSUPCU,
-            CRONOGRAMAVIRTUALRADICADOID, CRONOGRAMAVIRTUALRADICADOTRANS)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12,
-                 'ACTIVO', 'PENDIENTE', :13, :14,
-                 :15, :16, :17, :18, :19, :20, :21, :22, 0, 0)`,
-        [
-          newId, cronogramaId,
-          dto.nombreActividad, numSesion,
-          fechaIni, fechaFin, Number(dto.horas),
-          dto.plataforma, dto.url,
-          dto.usuarioSena ?? null, dto.claveSena ?? null,
-          sigla,
-          dto.capacitadorId, dto.perfilUTId,
-          dto.capSup1Id ?? 0, dto.capSup2Id ?? 0, dto.capSup3Id ?? 0, dto.capSup4Id ?? 0,
-          dto.perfilSup1Id ?? 0, dto.perfilSup2Id ?? 0, dto.perfilSup3Id ?? 0, dto.perfilSup4Id ?? 0,
-        ],
-      )
+      const newId = await insertarConId(qr, 'CRONOGRAMAVIRTUAL', 'CRONOGRAMAVIRTUALID', { maxMasUno: true }, {
+        CRONOGRAMAID: cronogramaId,
+        CRONOGRAMAVIRTUALNOMBRE: dto.nombreActividad,
+        CRONOGRAMAVIRTUALNUMSESION: numSesion,
+        CRONOGRAMAVIRTUALFECHAINICIO: fechaIni,
+        CRONOGRAMAVIRTUALFECHAFINAL: fechaFin,
+        CRONOGRAMAVIRTUALNUMHORAS: Number(dto.horas),
+        CRONOGRAMAVIRTUALPROVEEDOR: dto.plataforma,
+        CRONOGRAMAVIRTUALURL: dto.url,
+        CRONOGRAMAVIRTUALUSUARIOSENA: dto.usuarioSena ?? null,
+        CRONOGRAMAVIRTUALCLAVESENA: dto.claveSena ?? null,
+        CRONOGRAMAVIRTUALSIGLA: sigla,
+        CRONOGRAMAVIRESTADO: 'ACTIVO',
+        CRONOGRAMAVIRESTADORADICADO: 'PENDIENTE',
+        // NOT NULL sin default. La virtual solo admite modalidad 3 o 4 (lo exige el DTO): no hay caso PAT,
+        // así que va el valor fijo que la presencial pone fuera de PAT
+        TIPOCAPACIADORVIR: 'CAPACITADOR NACIONAL',
+        CRONOGRAMAVIRCAPACITADORVIRTUA: dto.capacitadorId,
+        CRONOGRAMAVIRPERFILUTID: dto.perfilUTId,
+        CRONOGRAMAVIRCAPACITADORLSUPUN: dto.capSup1Id ?? 0,
+        CRONOGRAMAVIRCAPACITADORSUPDOS: dto.capSup2Id ?? 0,
+        CRONOGRAMAVIRCAPACITADORSUPTRE: dto.capSup3Id ?? 0,
+        CRONOGRAMAVIRCAPACITADORSUPCUA: dto.capSup4Id ?? 0,
+        CRONOGRAMAVIRTUALPERFILUTSUPUN: dto.perfilSup1Id ?? 0,
+        CRONOGRAMAVIRTUALPERFILUTSUPDO: dto.perfilSup2Id ?? 0,
+        CRONOGRAMAVIRTUALPERFILUTSUPTR: dto.perfilSup3Id ?? 0,
+        CRONOGRAMAVIRTUALPERFILUTSUPCU: dto.perfilSup4Id ?? 0,
+        CRONOGRAMAVIRTUALRADICADOID: 0,
+        CRONOGRAMAVIRTUALRADICADOTRANS: 0,
+      })
 
       await qr.query(
         `UPDATE CRONOGRAMA SET CRONONUMTOTALACT = NVL(CRONONUMTOTALACT, 0) + 1
@@ -1363,11 +1352,6 @@ export class CronogramaService {
         throw new BadRequestException('No hay sesiones ni actividades pendientes por radicar.')
       }
 
-      const idRows: any[] = await qr.query(
-        `SELECT NVL(MAX(RADICADOID), 0) + 1 AS "id" FROM CRONOGRAMARADICADO`,
-      )
-      const radicadoId = Number(idRows[0].id)
-
       const numRows: any[] = await qr.query(
         `SELECT NVL(MAX(NUMERORADICADO), 0) + 1 AS "n"
            FROM CRONOGRAMARADICADO WHERE PROYECTOID = :1`,
@@ -1378,14 +1362,18 @@ export class CronogramaService {
       const histP = presenciales.map(s => `${s.sigla}-RADICADO`).join(';')
       const histV = virtuales.map(s => `${s.sigla}-RADICADO`).join(';')
 
-      await qr.query(
-        `INSERT INTO CRONOGRAMARADICADO
-           (RADICADOID, PROYECTOID, NUMERORADICADO, RADICADOFECHA,
-            RADICADOESTADOGENERAL, RADICONVENIOHISTORICO, RADICONVENIOHISTORICOV,
-            CRONOGRAMARADICADOTRANSFERENCI)
-         VALUES (:1, :2, :3, SYSDATE, 'RADICADO', :4, :5, 0)`,
-        [radicadoId, proyectoId, numero, histP, histV],
-      )
+      // las sesiones se marcan con el id que quedó en la fila: con el trigger no es el MAX+1.
+      // Los históricos van como NCLOB (LOB temporal): un texto suelto de más de 4000 bytes viaja
+      // como LONG, y eso junto al RETURNING puede dar ORA-22816
+      const radicadoId = await insertarConId(qr, 'CRONOGRAMARADICADO', 'RADICADOID', { maxMasUno: true }, {
+        PROYECTOID: proyectoId,
+        NUMERORADICADO: numero,
+        RADICADOFECHA: sqlCrudo(AHORA_UTC),
+        RADICADOESTADOGENERAL: 'RADICADO',
+        CRONOGRAMARADICADOTRANSFERENCI: 0,
+        RADICONVENIOHISTORICO: { type: oracledb.DB_TYPE_NCLOB, val: histP },
+        RADICONVENIOHISTORICOV: { type: oracledb.DB_TYPE_NCLOB, val: histV },
+      })
 
       if (presenciales.length) {
         const ids = presenciales.map(s => Number(s.id))
@@ -1572,7 +1560,7 @@ export class CronogramaService {
     await this.ds.query(
       `UPDATE CRONOGRAMARADICADO
           SET RADICADOESTADOGENERAL = 'RADICADO',
-              RADICADOFECHAESTADO   = SYSDATE
+              RADICADOFECHAESTADO   = ${AHORA_UTC}
         WHERE RADICADOID = :1`,
       [radicadoId],
     )

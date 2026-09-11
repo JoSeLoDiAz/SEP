@@ -21,8 +21,14 @@ import { LoginDto } from './dto/login.dto'
 import { RegistrarEmpresaDto } from './dto/registrar-empresa.dto'
 import { RegistrarPersonaDto } from './dto/registrar-persona.dto'
 import { MailService } from './mail.service'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { AHORA_UTC, AHORA_UTC_TS } from '../common/db/fecha-utc'
 
 interface ResetToken { email: string; expira: Date }
+
+// El registro guardaba con manager.save, y TypeORM escribe las columnas 'date' de la entidad como
+// TO_DATE('YYYY-MM-DD') del día (UTC, el backend corre con TZ=UTC): solo el día, sin hora. Se conserva.
+const HOY_UTC = `TRUNC(${AHORA_UTC})`
 
 // replica GetEncryptionKey() de GeneXus
 function getEncryptionKey(): string {
@@ -141,7 +147,7 @@ export class AuthService {
 
   private async marcarUltimoAcceso(usuarioPerfilId: number) {
     await this.dataSource.query(
-      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = SYSTIMESTAMP WHERE USUARIOPERFILID = :1`,
+      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = ${AHORA_UTC_TS} WHERE USUARIOPERFILID = :1`,
       [usuarioPerfilId],
     )
   }
@@ -394,60 +400,50 @@ export class AuthService {
     await queryRunner.startTransaction()
 
     try {
-      const seqResult = await queryRunner.query('SELECT USUARIOID.NEXTVAL FROM dual')
-      const nextUsuarioId: number = seqResult[0]['NEXTVAL']
-
-      // perfil 7 = empresa
-      const usuario = new Usuario()
-      usuario.usuarioId = nextUsuarioId
-      usuario.perfilId = 7
-      usuario.usuarioClave = claveEncriptada
-      usuario.usuarioFechaRegistro = new Date()
-      usuario.usuarioEstado = 1
-      usuario.usuarioTipo = 2
-      usuario.usuarioEmail = dto.usuarioEmail
-      usuario.usuarioLlaveEncriptacion = llaveEncriptacion
-
-      const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
+      // perfil 7 = empresa. El id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(queryRunner, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: 7,
+        USUARIOCLAVE: claveEncriptada,
+        USUARIOFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 2,
+        USUARIOEMAIL: dto.usuarioEmail,
+        USUARIOLLAVEENCRIPTACION: llaveEncriptacion,
+      })
 
       // USUARIO.PERFILID se conserva solo como fallback
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, SYSDATE)`,
-        [usuarioGuardado.usuarioId],
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, ${AHORA_UTC})`,
+        [usuarioId],
       )
 
-      const seqEmpresa = await queryRunner.query('SELECT EMPRESAID.NEXTVAL FROM dual')
-      const nextEmpresaId: number = seqEmpresa[0]['NEXTVAL']
-
       // los ids en 1 son los valores por defecto que ya usaba GeneXus
-      const empresa = new Empresa()
-      empresa.empresaId = nextEmpresaId
-      empresa.tipoDocumentoIdentidadId = dto.tipoDocumentoIdentidadId
-      empresa.empresaIdentificacion = dto.empresaIdentificacion
-      empresa.empresaDigitoVerificacion = dto.empresaDigitoVerificacion
-      empresa.empresaRazonSocial = dto.empresaRazonSocial.trim()
-      empresa.empresaSigla = (dto.empresaSigla ?? '').trim()
-      empresa.empresaEmail = dto.usuarioEmail
-      empresa.empresaFechaRegistro = new Date()
-      empresa.coberturaEmpresaId = 1
-      empresa.departamentoEmpresaId = 1
-      empresa.ciudadEmpresaId = 1
-      empresa.ciiuId = 1
-      empresa.tipoEmpresaId = 1
-      empresa.tamanoEmpresaId = 1
-      empresa.sectorId = 1
-      empresa.subSectorId = 1
-      empresa.tipoIdentificacionRep = 1
-
-      await queryRunner.manager.save(empresa)
+      await insertarConId(queryRunner, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+        TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId,
+        EMPRESAIDENTIFICACION: dto.empresaIdentificacion,
+        EMPRESADIGITOVERIFICACION: dto.empresaDigitoVerificacion,
+        EMPRESARAZONSOCIAL: dto.empresaRazonSocial.trim(),
+        EMPRESASIGLA: (dto.empresaSigla ?? '').trim(),
+        EMPRESAEMAIL: dto.usuarioEmail,
+        EMPRESAFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        COBERTURAEMPRESAID: 1,
+        DEPARTAMENTOEMPRESAID: 1,
+        CIUDADEMPRESAID: 1,
+        CIIUID: 1,
+        TIPOEMPRESAID: 1,
+        TAMANOEMPRESAID: 1,
+        SECTORID: 1,
+        SUBSECTORID: 1,
+        TIPOIDENTIFICACIONREP: 1,
+      })
 
       await queryRunner.commitTransaction()
 
       return {
         message: 'Usuario registrado exitosamente',
-        usuarioId: usuarioGuardado.usuarioId,
+        usuarioId,
       }
     } catch (err: any) {
       await queryRunner.rollbackTransaction()
@@ -501,53 +497,43 @@ export class AuthService {
     await queryRunner.startTransaction()
 
     try {
-      const seqUsuario = await queryRunner.query('SELECT USUARIOID.NEXTVAL FROM dual')
-      const nextUsuarioId: number = seqUsuario[0]['NEXTVAL']
-
-      // perfil 8 = persona
-      const usuario = new Usuario()
-      usuario.usuarioId = nextUsuarioId
-      usuario.perfilId = 8
-      usuario.usuarioClave = claveEncriptada
-      usuario.usuarioFechaRegistro = new Date()
-      usuario.usuarioEstado = 1
-      usuario.usuarioTipo = 1
-      usuario.usuarioEmail = dto.usuarioEmail
-      usuario.usuarioLlaveEncriptacion = llaveEncriptacion
-
-      const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
+      // perfil 8 = persona. El id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(queryRunner, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: 8,
+        USUARIOCLAVE: claveEncriptada,
+        USUARIOFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 1,
+        USUARIOEMAIL: dto.usuarioEmail,
+        USUARIOLLAVEENCRIPTACION: llaveEncriptacion,
+      })
 
       // USUARIO.PERFILID se conserva solo como fallback
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 8, 1, 1, SYSDATE)`,
-        [usuarioGuardado.usuarioId],
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 8, 1, 1, ${AHORA_UTC})`,
+        [usuarioId],
       )
 
-      const seqPersona = await queryRunner.query('SELECT PERSONAID.NEXTVAL FROM dual')
-      const nextPersonaId: number = seqPersona[0]['NEXTVAL']
-
-      const persona = new Persona()
-      persona.personaId = nextPersonaId
-      persona.tipoDocumentoIdentidadId = dto.tipoDocumentoIdentidadId
-      persona.personaIdentificacion = dto.personaIdentificacion
-      persona.personaNombres = dto.personaNombres.trim()
-      persona.personaPrimerApellido = dto.personaPrimerApellido.trim()
-      persona.personaSegundoApellido = (dto.personaSegundoApellido ?? '').trim()
-      persona.personaEmail = dto.usuarioEmail
-      persona.personaFechaRegistro = new Date()
-      persona.generoId = 3
-      persona.ciudadId = 1
-      persona.personaHabeasData = 'SI'
-      persona.personaHabeasDataE = 'NA'
-
-      await queryRunner.manager.save(persona)
+      await insertarConId(queryRunner, 'PERSONA', 'PERSONAID', { secuencia: 'PERSONAID' }, {
+        TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId,
+        PERSONAIDENTIFICACION: dto.personaIdentificacion,
+        PERSONANOMBRES: dto.personaNombres.trim(),
+        PERSONAPRIMERAPELLIDO: dto.personaPrimerApellido.trim(),
+        PERSONASEGUNDOAPELLIDO: (dto.personaSegundoApellido ?? '').trim(),
+        PERSONAEMAIL: dto.usuarioEmail,
+        PERSONAFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        GENEROID: 3,
+        CIUDADID: 1,
+        PERSONAHABEASDATA: 'SI',
+        PERSONAHABEASDATAE: 'NA',
+      })
       await queryRunner.commitTransaction()
 
       return {
         message: 'Usuario registrado exitosamente',
-        usuarioId: usuarioGuardado.usuarioId,
+        usuarioId,
       }
     } catch (err: any) {
       await queryRunner.rollbackTransaction()

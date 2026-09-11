@@ -5,6 +5,17 @@ import { Empresa } from '../auth/entities/empresa.entity'
 import { NecesidadesService } from '../necesidades/necesidades.service'
 import { createHash, randomBytes } from 'crypto'
 import { fechaSolo } from '../common/fecha-solo'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { Ejecutor, insertarConId, sqlCrudo } from '../common/db/ids'
+import {
+  MapasRestauracion,
+  aceptarTambienVivos,
+  emparejarSiMismoContenido,
+  planDesdeSnapshot,
+  restaurarContenido,
+  snapshotRestaurable,
+  traducirAfs,
+} from './restaurar-snapshot'
 
 const PROYECTO_SIN_ASIGNAR = 1
 
@@ -582,7 +593,7 @@ export class ProyectosService {
          (PROYECTOVERSIONID, PROYECTOID, VERSIONNUMERO, VERSIONCODIGO,
           VERSIONFECHA, VERSIONUSUARIO, VERSIONSNAPSHOT, VERSIONHASH,
           VERSIONESTADOAL, VERSIONCOMENTARIO)
-       VALUES (:1, :2, :3, :4, SYSDATE, :5, :6, :7, 1, :8)`,
+       VALUES (:1, :2, :3, :4, ${AHORA_UTC}, :5, :6, :7, 1, :8)`,
       [nid, proyectoId, versionNumero, versionCodigo, email,
        snapshotJson, fullHash, comentario?.trim() || null],
     )
@@ -734,14 +745,14 @@ export class ProyectosService {
     await this.dataSource.query(
       `UPDATE PROYECTOVERSION
           SET VERSIONESFINAL = 1,
-              VERSIONFINALFECHA = SYSDATE,
+              VERSIONFINALFECHA = ${AHORA_UTC},
               VERSIONFINALUSUARIO = :1
         WHERE PROYECTOVERSIONID = :2`,
       [email, versionId],
     )
     await this.dataSource.query(
       `UPDATE PROYECTO
-          SET PROYECTOESTADO = 1, PROYECTOFECHARADICACION = SYSDATE
+          SET PROYECTOESTADO = 1, PROYECTOFECHARADICACION = ${AHORA_UTC}
         WHERE PROYECTOID = :1`,
       [proyectoId],
     )
@@ -864,7 +875,7 @@ export class ProyectosService {
     await this.dataSource.query(
       `UPDATE PROYECTOVERSION
           SET VERSIONANULADA = 1,
-              VERSIONANULADAFECHA = SYSDATE,
+              VERSIONANULADAFECHA = ${AHORA_UTC},
               VERSIONANULADAUSUARIO = :1
         WHERE PROYECTOVERSIONID = :2`,
       [email, versionId],
@@ -949,7 +960,9 @@ export class ProyectosService {
   }
 
   // el snapshot tiene la misma forma que getReporteProyecto + accionesDetalle
-  async getVersionSnapshot(versionId: number) {
+  // con proyectoId (aprobar, restaurar) la versión tiene que ser de ese proyecto
+  async getVersionSnapshot(versionId: number, proyectoId?: number) {
+    const conProyecto = proyectoId !== undefined
     const [row] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID AS "versionId",
               PROYECTOID         AS "proyectoId",
@@ -962,8 +975,8 @@ export class ProyectosService {
               VERSIONHASH        AS "hash",
               VERSIONSNAPSHOT    AS "snapshotRaw"
          FROM PROYECTOVERSION
-        WHERE PROYECTOVERSIONID = :1`,
-      [versionId],
+        WHERE PROYECTOVERSIONID = :1${conProyecto ? ' AND PROYECTOID = :2' : ''}`,
+      conProyecto ? [versionId, proyectoId] : [versionId],
     )
     if (!row) throw new NotFoundException('Versión no encontrada')
 
@@ -1002,415 +1015,16 @@ export class ProyectosService {
 
   // aprobacion de proyecto + restauracion desde snapshot
 
-  // restaura las tablas vivas desde el snapshot conservando los IDs originales
-  async restaurarLiveDesdeSnapshot(proyectoId: number, versionId: number): Promise<void> {
-    const versionData = await this.getVersionSnapshot(versionId)
+  // restaura las tablas vivas desde el snapshot. En el Exadata los padres (AF, grupo, UT) toman el id que pone el
+  // trigger y las hijas se enlazan a ese id: ver restaurar-snapshot.ts. Con `ej` corre en la transacción de quien llama
+  async restaurarLiveDesdeSnapshot(proyectoId: number, versionId: number, ej?: Ejecutor): Promise<MapasRestauracion> {
+    const versionData = await this.getVersionSnapshot(versionId, proyectoId)
     if (Number(versionData.proyectoId) !== Number(proyectoId)) {
       throw new BadRequestException('La versión no pertenece a este proyecto.')
     }
-    const snap = versionData.snapshot as Record<string, any>
-    if (!snap || typeof snap !== 'object') {
-      throw new BadRequestException('Snapshot inválido: no se puede restaurar.')
-    }
-    const acciones: any[] = Array.isArray(snap.acciones) ? snap.acciones : []
-    const detalles: any[] = Array.isArray(snap.accionesDetalle) ? snap.accionesDetalle : []
-    const contactos: any[] = Array.isArray(snap.contactos) ? snap.contactos : []
-    const proyectoSnap = snap.proyecto as Record<string, any> | undefined
-
-    const accionesById = new Map<number, any>()
-    for (const a of acciones) accionesById.set(Number(a.afId), a)
-
-    await this.dataSource.transaction(async (m) => {
-      const q = (sql: string, params: any[] = []) => m.query(sql, params)
-
-      // DELETE en orden de FKs
-      const afIds: number[] = (await q(
-        `SELECT ACCIONFORMACIONID AS "id" FROM ACCIONFORMACION WHERE PROYECTOID = :1`,
-        [proyectoId],
-      )).map((r: any) => Number(r.id))
-
-      if (afIds.length > 0) {
-        await q(`DELETE FROM AFRUBRO WHERE PROYECTOIDRUBROAF = :1`, [proyectoId])
-        await q(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID IN
-                   (SELECT AFGRUPOID FROM AFGRUPO WHERE ACCIONFORMACIONID IN
-                     (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1))`, [proyectoId])
-        await q(`DELETE FROM AFGRUPO WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID IN
-                   (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1)`, [proyectoId])
-        await q(`DELETE FROM PERFILUT WHERE UNIDADTEMATICAID IN
-                   (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1)`, [proyectoId])
-        await q(`DELETE FROM UNIDADTEMATICA WHERE PROYECTOIDUT = :1`, [proyectoId])
-        await q(`DELETE FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFPSECTOR WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFPSUBSECTOR WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFSECTOR WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFSUBSECTOR WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID IN
-                   (SELECT ACCIONFORMACIONID FROM ACCIONFORMACION WHERE PROYECTOID = :1)`, [proyectoId])
-        await q(`DELETE FROM ACCIONFORMACION WHERE PROYECTOID = :1`, [proyectoId])
-      }
-      // Contactos del proyecto (no contactos generales de la empresa)
-      await q(`DELETE FROM CONTACTOEMPRESA WHERE PROYECTOIDCONTACTOS = :1`, [proyectoId])
-
-      // UPDATE PROYECTO con datos del snapshot
-      if (proyectoSnap) {
-        await q(
-          `UPDATE PROYECTO
-              SET PROYECTONOMBRE  = :1,
-                  PROYECTOOBJETIVO = :2
-            WHERE PROYECTOID = :3`,
-          [proyectoSnap.nombre ?? null, proyectoSnap.objetivo ?? null, proyectoId],
-        )
-      }
-
-      // INSERT CONTACTOEMPRESA: el snapshot guarda el tipo de documento por nombre, no por id
-      const [proy] = await q(
-        `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = :1`, [proyectoId],
-      )
-      const empresaIdProy = Number(proy.empresaId)
-      for (const c of contactos) {
-        let tipoIdentId: number | null = null
-        if (c.tipoDoc) {
-          const tipoRows = await q(
-            `SELECT TIPODOCUMENTOIDENTIDADID AS "id"
-               FROM TIPODOCUMENTOIDENTIDAD
-              WHERE UPPER(TRIM(TIPODOCUMENTOIDENTIDADNOMBRE)) = UPPER(TRIM(:1))`,
-            [c.tipoDoc],
-          )
-          tipoIdentId = tipoRows[0]?.id ?? null
-        }
-        const [{ nid }] = await q(
-          `SELECT NVL(MAX(CONTACTOEMPRESAID), 0) + 1 AS "nid" FROM CONTACTOEMPRESA`,
-        )
-        await q(
-          `INSERT INTO CONTACTOEMPRESA
-             (CONTACTOEMPRESAID, EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
-              CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
-              TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)`,
-          [nid, empresaIdProy, c.nombre, c.cargo, c.correo,
-           c.telefono ?? null, c.documento ?? null, tipoIdentId, proyectoId],
-        )
-      }
-
-      // fallback para snapshots viejos: buscar IDs por nombre si no vienen
-      const lookupId = async (
-        table: string, nameCol: string, idCol: string, name: string | null | undefined,
-      ): Promise<number | null> => {
-        if (!name) return null
-        const rows = await q(
-          `SELECT ${idCol} AS "id" FROM ${table} WHERE UPPER(TRIM(${nameCol})) = UPPER(TRIM(:1))`,
-          [String(name).trim()],
-        )
-        return rows[0]?.id ? Number(rows[0].id) : null
-      }
-
-      // INSERT por cada AF
-      for (const det of detalles) {
-        const afId = Number(det.afId)
-        const meta = accionesById.get(afId) ?? {}
-        const perfil = det.perfil ?? null
-        const sectores = det.sectores ?? null
-        const grupos: any[] = Array.isArray(det.grupos) ? det.grupos : []
-        const uts: any[] = Array.isArray(det.unidadesTematicas) ? det.unidadesTematicas : []
-        const material = det.material ?? null
-        const alineacion = det.alineacion ?? null
-        const rubros: any[] = Array.isArray(det.rubros) ? det.rubros : []
-        const goAf = det.gastoOperacion ?? null
-        const transAf = det.transferencia ?? null
-
-        const tipoEventoId = meta.tipoEventoId
-          ?? await lookupId('TIPOEVENTO', 'TIPOEVENTONOMBRE', 'TIPOEVENTOID', meta.tipoEvento)
-        const modalidadFormacionId = meta.modalidadFormacionId
-          ?? await lookupId('MODALIDADFORMACION', 'MODALIDADFORMACIONNOMBRE', 'MODALIDADFORMACIONID', meta.modalidad)
-        const metodologiaAprendizajeId = meta.metodologiaAprendizajeId
-          ?? await lookupId('METODOLOGIAAPRENDIZAJE', 'METODOLOGIAAPRENDIZAJENOMBRE', 'METODOLOGIAAPRENDIZAJEID', meta.metodologia)
-        const modeloAprendizajeId = meta.modeloAprendizajeId ?? null
-
-        if (modalidadFormacionId == null) {
-          throw new BadRequestException(
-            `No se pudo resolver MODALIDADFORMACIONID para la AF ${meta.numero ?? afId} (modalidad="${meta.modalidad ?? ''}"). ` +
-            'El snapshot está incompleto. Crea una nueva versión con el código actualizado y márcala como FINAL antes de aprobar.',
-          )
-        }
-        if (tipoEventoId == null) {
-          throw new BadRequestException(
-            `No se pudo resolver TIPOEVENTOID para la AF ${meta.numero ?? afId} (evento="${meta.tipoEvento ?? ''}"). ` +
-            'El snapshot está incompleto. Crea una nueva versión con el código actualizado y márcala como FINAL antes de aprobar.',
-          )
-        }
-
-        await q(
-          `INSERT INTO ACCIONFORMACION
-             (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
-              NECESIDADFORMACIONIDAF, ACCIONFORMACIONJUSTNEC, ACCIONFORMACIONCAUSA,
-              ACCIONFORMACIONRESULTADOS, ACCIONFORMACIONOBJETIVO,
-              TIPOEVENTOID, MODALIDADFORMACIONID, METODOLOGIAAPRENDIZAJEID, MODELOAPRENDIZAJEID,
-              ACCIONFORMACIONNUMHORAGRUPO, ACCIONFORMACIONNUMGRUPOS, ACCIONFORMACIONNUMTOTHORASGRUP,
-              ACCIONFORMACIONBENEFGRUPO, ACCIONFORMACIONBENEFVIGRUPO, ACCIONFORMACIONNUMBENEF,
-              AFENFOQUEID, ACCIONFORMACIONAREAFUN, ACCIONFORMACIONNIVELOCUPD,
-              ACCIONFORMACIONMUJER, ACCIONFORMACIONNUMCAMPESINO, ACCIONFORMACIONJUSTCAMPESINO,
-              ACCIONFORMACIONNUMPOPULAR, ACCIONFORMACIONJUSTPOPULAR,
-              ACCIONFORMACIONTRABDISCAPAC, ACCIONFORMACIONTRABAJADORBIC,
-              ACCIONFORMACIONMIPYMES, ACCIONFORMACIONTRABMIPYMES, ACCIONFORMACIONMIPYMESD,
-              ACCIONFORMACIONCADENAPROD, ACCIONFORMACIONTRABCADPROD, ACCIONFORMACIONCADENAPRODD,
-              ACCIONFORMACIONSECSUBD, ACCIONFORMACIONCOMPONENTEID,
-              ACCIONFORMACIONCOMPOD, ACCIONFORMACIONJUSTIFICACION,
-              ACCIONFORMACIONRESDESEM, ACCIONFORMACIONRESFORM,
-              TIPOAMBIENTEID, ACCIONFORMACIONJUSTMAT,
-              ACCIONFORMACIONINSUMO, ACCIONFORMACIONJUSTINSUMO,
-              ACCIONFORMACIONFECHAREGISTRO)
-           VALUES (:1,:2,:3,:4,
-                   :5,:6,:7,:8,:9,
-                   :10,:11,:12,:13,
-                   :14,:15,:16,:17,:18,:19,
-                   :20,:21,:22,
-                   :23,:24,:25,:26,:27,
-                   :28,:29,
-                   :30,:31,:32,
-                   :33,:34,:35,
-                   :36,:37,
-                   :38,:39,:40,:41,
-                   :42,:43,
-                   :44,:45,
-                   SYSDATE)`,
-          [
-            afId, proyectoId, meta.numero ?? null, meta.nombre ?? null,
-            meta.necesidadFormacionId ?? null, meta.justnec ?? null, meta.causa ?? null,
-            meta.efectos ?? null, meta.objetivo ?? null,
-            tipoEventoId, modalidadFormacionId,
-            metodologiaAprendizajeId, modeloAprendizajeId,
-            meta.numHorasGrupo ?? null, meta.numGrupos ?? null, meta.numTotHoras ?? null,
-            meta.benefGrupo ?? null, meta.benefViGrupo ?? null, meta.numBenef ?? null,
-            perfil?.afEnfoqueId ?? null, perfil?.justAreas ?? null, perfil?.justNivelesOcu ?? null,
-            perfil?.mujer ?? null, perfil?.numCampesino ?? null, perfil?.justCampesino ?? null,
-            perfil?.numPopular ?? null, perfil?.justPopular ?? null,
-            perfil?.trabDiscapac ?? null, perfil?.trabajadorBic ?? null,
-            perfil?.mipymes ?? null, perfil?.trabMipymes ?? null, perfil?.mipymesD ?? null,
-            perfil?.cadenaProd ?? null, perfil?.trabCadProd ?? null, perfil?.cadenaProdD ?? null,
-            sectores?.justificacion ?? null, alineacion?.componenteId ?? null,
-            alineacion?.compod ?? null, alineacion?.justificacion ?? null,
-            alineacion?.resDesem ?? null, alineacion?.resForm ?? null,
-            material?.tipoAmbienteId ?? null, material?.justMat ?? null,
-            material?.insumo ?? null, material?.justInsumo ?? null,
-          ],
-        )
-
-        // Áreas funcionales / Niveles / CUOC
-        for (const a of (perfil?.areas ?? [])) {
-          await q(
-            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
-             VALUES (:1, :2, :3, :4)`,
-            [Number(a.aafId), afId, Number(a.areaId), a.otro ?? null],
-          )
-        }
-        for (const n of (perfil?.niveles ?? [])) {
-          await q(
-            `INSERT INTO AFNIVELOCUPACIONAL (AFNIVELOCUPACIONALID, ACCIONFORMACIONID, NIVELOCUPACIONALIDAF)
-             VALUES (:1, :2, :3)`,
-            [Number(n.anId), afId, Number(n.nivelId)],
-          )
-        }
-        for (const c of (perfil?.cuoc ?? [])) {
-          await q(
-            `INSERT INTO OCUPACIONCOUCAF (OCUPACIONCOUCAFID, ACCIONFORMACIONID, OCUPACIONCUOCID)
-             VALUES (:1, :2, :3)`,
-            [Number(c.ocAfId), afId, Number(c.cuocId)],
-          )
-        }
-
-        // Sectores / Subsectores benef + AF
-        for (const s of (sectores?.sectoresBenef ?? [])) {
-          await q(
-            `INSERT INTO AFPSECTOR (AFPSECTORID, ACCIONFORMACIONID, SECTORAFID, AFPSECTORESTADO) VALUES (:1, :2, :3, 1)`,
-            [Number(s.psId), afId, Number(s.sectorId)],
-          )
-        }
-        for (const s of (sectores?.subsectoresBenef ?? [])) {
-          await q(
-            `INSERT INTO AFPSUBSECTOR (AFPSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID, AFPSUBSECTORESTADO) VALUES (:1, :2, :3, 1)`,
-            [Number(s.pssId), afId, Number(s.subsectorId)],
-          )
-        }
-        for (const s of (sectores?.sectoresAf ?? [])) {
-          await q(
-            `INSERT INTO AFSECTOR (AFSECTORID, ACCIONFORMACIONID, SECTORAFID) VALUES (:1, :2, :3)`,
-            [Number(s.saId), afId, Number(s.sectorId)],
-          )
-        }
-        for (const s of (sectores?.subsectoresAf ?? [])) {
-          await q(
-            `INSERT INTO AFSUBSECTOR (AFSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID) VALUES (:1, :2, :3)`,
-            [Number(s.ssaId), afId, Number(s.subsectorId)],
-          )
-        }
-
-        // Material — gestión / material / recursos
-        if (material?.gestionConocimientoId) {
-          const [{ nid }] = await q(`SELECT NVL(MAX(AFGESTIONCONOCIMIENTOID), 0) + 1 AS "nid" FROM AFGESTIONCONOCIMIENTO`)
-          await q(
-            `INSERT INTO AFGESTIONCONOCIMIENTO (AFGESTIONCONOCIMIENTOID, ACCIONFORMACIONID, GESTIONCONOCIMIENTOID) VALUES (:1, :2, :3)`,
-            [nid, afId, Number(material.gestionConocimientoId)],
-          )
-        }
-        if (material?.materialFormacionId) {
-          const [{ nid }] = await q(`SELECT NVL(MAX(MATERIALFORMACIONAFID), 0) + 1 AS "nid" FROM MATERIALFORMACIONAF`)
-          await q(
-            `INSERT INTO MATERIALFORMACIONAF (MATERIALFORMACIONAFID, ACCIONFORMACIONID, MATERIALFORMACIONID) VALUES (:1, :2, :3)`,
-            [nid, afId, Number(material.materialFormacionId)],
-          )
-        }
-        for (const r of (material?.recursos ?? [])) {
-          await q(
-            `INSERT INTO RECURSOSDIDACTICOSAF (RECURSOSDIDACTICOSAFID, ACCIONFORMACIONID, RECURSOSDIDACTICOSID)
-             VALUES (:1, :2, :3)`,
-            [Number(r.rdafId), afId, Number(r.recursoId)],
-          )
-        }
-
-        // Grupos + coberturas
-        for (const g of grupos) {
-          await q(
-            `INSERT INTO AFGRUPO (AFGRUPOID, ACCIONFORMACIONID, AFGRUPONUMERO, AFGRUPOJUSTIFICACION) VALUES (:1, :2, :3, :4)`,
-            [Number(g.grupoId), afId, Number(g.grupoNumero), g.justificacion ?? null],
-          )
-          for (const cob of (g.coberturas ?? [])) {
-            await q(
-              `INSERT INTO AFGRUPOCOBERTURA
-                 (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-                  AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-               VALUES (:1, :2, :3, :4, :5, :6, :7, :8)`,
-              [Number(cob.cobId), Number(g.grupoId), cob.deptoId ?? null, cob.ciudadId ?? null,
-               cob.benef ?? 0, afId, cob.modal ?? 'P', cob.rural ?? 0],
-            )
-          }
-        }
-
-        // Unidades temáticas + actividades + perfiles
-        for (const ut of uts) {
-          await q(
-            `INSERT INTO UNIDADTEMATICA (
-               UNIDADTEMATICAID, PROYECTOIDUT, ACCIONFORMACIONID, UNIDADTEMATICANUMERO,
-               UNIDADTEMATICANOMBRE, UNIDADTEMATICACOMPETENCIAS, UNIDADTEMATICACONTENIDO,
-               UNIDADTEMATICAJUSTACTIVIDAD,
-               UNIDADTEMATICAHORASPP, UNIDADTEMATICAHORASPV, UNIDADTEMATICAHORASPPAT, UNIDADTEMATICAHORASPHIB,
-               UNIDADTEMATICAHORASTP, UNIDADTEMATICAHORASTV, UNIDADTEMATICAHORASTPAT, UNIDADTEMATICAHORASTHIB,
-               UNIDADTEMATICAESTRANSVERSAL, UNIDADTEMATICAHORASTRANSVERSAL,
-               ARTICULACIONTERRITORIALID, UNIDADTEMATICAFECHAREGISTRO
-             ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,SYSDATE)`,
-            [Number(ut.utId), proyectoId, afId, Number(ut.numero),
-             ut.nombre, ut.competencias ?? null, ut.contenido ?? null, ut.justActividad ?? null,
-             ut.horasPP ?? 0, ut.horasPV ?? 0, ut.horasPPAT ?? 0, ut.horasPHib ?? 0,
-             ut.horasTP ?? 0, ut.horasTV ?? 0, ut.horasTPAT ?? 0, ut.horasTHib ?? 0,
-             Number(ut.esTransversal) || 0, ut.horasTransversal ?? null,
-             ut.articulacionTerritorialId ?? null],
-          )
-          for (const act of (ut.actividades ?? [])) {
-            await q(
-              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
-               VALUES (:1, :2, :3, :4)`,
-              [Number(act.actId), Number(ut.utId), Number(act.actividadId), act.otro ?? null],
-            )
-          }
-          for (const p of (ut.perfiles ?? [])) {
-            await q(
-              `INSERT INTO PERFILUT (PERFILUTID, UNIDADTEMATICAID, RUBROIDUT, PERFILUTHORASCAP, PERFILUTDIAS, PERFILUTFECHAREGISTRO)
-               VALUES (:1, :2, :3, :4, :5, SYSDATE)`,
-              [Number(p.perfilId), Number(ut.utId), Number(p.rubroId),
-               p.horasCap ?? 0, p.dias ?? null],
-            )
-          }
-        }
-
-        // Rubros (excluye R09 / R015 que se insertan aparte abajo)
-        for (const r of rubros) {
-          await q(
-            `INSERT INTO AFRUBRO (
-               AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-               AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
-               AFRUBROBENEFICIARIOS, AFRUBRODIAS, AFRUBRONUMEROGRUPOS,
-               AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-               AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
-               AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
-               AFRUBROFECHAREGISTRO)
-             VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,SYSDATE)`,
-            [Number(r.afrubroid), proyectoId, afId, Number(r.rubroId),
-             r.justificacion ?? null, r.numHoras ?? 0, r.cantidad ?? 0,
-             r.beneficiarios ?? 0, r.dias ?? 0, r.numGrupos ?? 0,
-             Number(r.totalRubro) || 0, Number(r.cofSena) || 0,
-             Number(r.contraEspecie) || 0, Number(r.contraDinero) || 0,
-             Number(r.valorMaximo) || 0, Number(r.valorBenef) || 0, r.paquete ?? null,
-             Number(r.porcSena) || 0, Number(r.porcEspecie) || 0, Number(r.porcDinero) || 0],
-          )
-        }
-
-        // Gasto de operación (R09)
-        if (goAf && Number(goAf.total) > 0) {
-          const [r09] = await q(
-            `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
-               FROM RUBRO r
-              WHERE TRIM(r.RUBROCODIGO) = 'R09'
-                AND ROWNUM = 1`,
-          )
-          if (r09) {
-            await q(
-              `INSERT INTO AFRUBRO (
-                 AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-                 AFRUBROJUSTIFICACION, AFRUBROCANTIDAD,
-                 AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-                 AFRUBROPAQUETE, AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
-                 AFRUBROFECHAREGISTRO)
-               VALUES (:1,:2,:3,:4,'GASTOS DE OPERACIÓN',1,:5,:6,:7,:8,:9,:10,:11,:12,SYSDATE)`,
-              [Number(goAf.afrubroid), proyectoId, afId, Number(r09.rubroId),
-               Number(goAf.total) || 0, Number(goAf.cofSena) || 0,
-               Number(goAf.especie) || 0, Number(goAf.dinero) || 0,
-               r09.paquete ?? null,
-               Number(goAf.total) > 0 ? (Number(goAf.cofSena) / Number(goAf.total)) * 100 : 0,
-               Number(goAf.total) > 0 ? (Number(goAf.especie) / Number(goAf.total)) * 100 : 0,
-               Number(goAf.total) > 0 ? (Number(goAf.dinero) / Number(goAf.total)) * 100 : 0],
-            )
-          }
-        }
-
-        // Transferencia (R015)
-        if (transAf && Number(transAf.valor) > 0) {
-          const [r015] = await q(
-            `SELECT r.RUBROID AS "rubroId", r.RUBROPAQUETE AS "paquete"
-               FROM RUBRO r
-              WHERE TRIM(r.RUBROCODIGO) = 'R015'
-                AND ROWNUM = 1`,
-          )
-          if (r015) {
-            await q(
-              `INSERT INTO AFRUBRO (
-                 AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-                 AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROBENEFICIARIOS,
-                 AFRUBROVALOR, AFRUBRODINERO,
-                 AFRUBROPAQUETE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
-               VALUES (:1,:2,:3,:4,'TRANSFERENCIA CONOCIMIENTO',1,:5,:6,:7,:8,100,SYSDATE)`,
-              [Number(transAf.afrubroid), proyectoId, afId, Number(r015.rubroId),
-               Number(transAf.beneficiarios) || 0,
-               Number(transAf.valor) || 0, Number(transAf.valor) || 0,
-               r015.paquete ?? null],
-            )
-          }
-        }
-      }
-    })
+    const snap = snapshotRestaurable(versionData.snapshot)
+    if (ej) return restaurarContenido(ej, proyectoId, snap)
+    return this.dataSource.transaction((m) => restaurarContenido(m, proyectoId, snap))
   }
 
   // aprobar restaura las tablas vivas desde la version FINAL y pasa a estado 3
@@ -1443,14 +1057,30 @@ export class ProyectosService {
       throw new BadRequestException('No hay versión marcada como FINAL en este proyecto.')
     }
 
-    // 2) restaurar tablas vivas (transaccion propia; si falla, no avanza)
-    await this.restaurarLiveDesdeSnapshot(proyectoId, Number(versionFinal.versionId))
+    // 2) si el vivo ya tiene el contenido del FINAL (aunque sus filas tengan otros ids) no se reescribe nada; si no,
+    //    se restaura desde el FINAL. Va en la misma transacción que 3-5: si algo falla no queda nada a medias
+    const versionData = await this.getVersionSnapshot(Number(versionFinal.versionId), proyectoId)
+    const snapFinal = snapshotRestaurable(versionData.snapshot)
+    const snapVivo = await this.getProyectoSnapshot(proyectoId)
+      .then((s) => snapshotRestaurable(JSON.parse(JSON.stringify(s))))
+      .catch(() => null)
+    const emparejados = snapVivo
+      ? emparejarSiMismoContenido(planDesdeSnapshot(snapVivo), planDesdeSnapshot(snapFinal))
+      : null
 
-    // 3-5) van juntos; el paso 2 ya quedo commiteado pero reintentar es idempotente
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
     await qr.startTransaction()
     try {
+      // afId del FINAL (los que manda el frontend) -> afId vivo; restaurando en el Exadata, el que puso el trigger
+      const enviados = [
+        ...(afsRechazadas ?? []).map((a) => Number(a.afId)),
+        ...(conceptosAprobadas ?? []).map((c) => Number(c.afId)),
+      ]
+      const afsVivas = emparejados
+        ? aceptarTambienVivos(emparejados, enviados)
+        : (await restaurarContenido(qr, proyectoId, snapFinal)).af
+
       // 3) MOTIVORECHAZO guarda el motivo si ESTADO=0 y el concepto si ESTADO=1
       await qr.query(
         `UPDATE ACCIONFORMACION
@@ -1460,22 +1090,22 @@ export class ProyectosService {
         [proyectoId],
       )
       const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
-      for (const c of conceptos) {
+      for (const c of traducirAfs(conceptos, afsVivas)) {
         await qr.query(
           `UPDATE ACCIONFORMACION
               SET ACCIONFORMACIONMOTIVORECHAZO = :1
             WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
-          [c.concepto.trim(), Number(c.afId), proyectoId],
+          [c.concepto.trim(), c.afIdVivo, proyectoId],
         )
       }
       const rechazadas = (afsRechazadas ?? []).filter(r => Number(r.afId) > 0 && (r.motivo ?? '').trim())
-      for (const r of rechazadas) {
+      for (const r of traducirAfs(rechazadas, afsVivas)) {
         await qr.query(
           `UPDATE ACCIONFORMACION
               SET ACCIONFORMACIONESTADOAPROBACION = 0,
                   ACCIONFORMACIONMOTIVORECHAZO   = :1
             WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
-          [r.motivo.trim(), Number(r.afId), proyectoId],
+          [r.motivo.trim(), r.afIdVivo, proyectoId],
         )
       }
 
@@ -1487,7 +1117,7 @@ export class ProyectosService {
         `INSERT INTO PROYECTOAPROBADO
            (PROYECTOID, PROYECTOVERSIONID, VERSIONCODIGO, VERSIONHASH,
             FECHAAPROBACION, USUARIOAPROBO, COMENTARIOAPROBACION)
-         VALUES (:1, :2, :3, :4, SYSDATE, :5, :6)`,
+         VALUES (:1, :2, :3, :4, ${AHORA_UTC}, :5, :6)`,
         [proyectoId, Number(versionFinal.versionId), versionFinal.codigo,
          versionFinal.hash, email, comentario?.trim() || null],
       )
@@ -1680,7 +1310,7 @@ export class ProyectosService {
           CONVOCATORIAESTADOCONVOCATORIA, CONVOCATORIAFECHAREGISTRO,
           CONVOCATORIAESTADO, CONVOCATORIAOCULTAR, CONVOCATORIASUBSANACION,
           PROGRAMAID, CONVOCATORIARESULTADOSPUBLICADOS)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, SYSDATE, 1, 0, 0, :11, 0)`,
+       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC}, 1, 0, 0, :11, 0)`,
       [
         Number(nid), nombre, Number(dto.anio),
         fechaSolo(dto.fechaInicio),
@@ -1915,18 +1545,17 @@ export class ProyectosService {
 
     const codSeguridad = randomBytes(12).toString('hex').toUpperCase()
 
-    await this.dataSource.query(
-      `INSERT INTO PROYECTO
-         (PROYECTOID, EMPRESAID, PROYECTONOMBRE, CONVOCATORIAID, MODALIDADID,
-          PROYECTOCODSEGURIDAD, PROYECTOFECHAREGISTRO, PROYECTOESTADO)
-       VALUES (PROYECTOID.NEXTVAL, :1, :2, :3, :4, :5, SYSDATE, 0)`,
-      [empresaId, nombre, dto.convocatoriaId, dto.modalidadId, codSeguridad],
-    )
-
-    const [{ id }] = await this.dataSource.query(
-      `SELECT PROYECTOID.CURRVAL AS "id" FROM DUAL`,
-    )
-    return { message: 'Proyecto creado correctamente', proyectoId: Number(id) }
+    // el id vuelve en la misma sentencia: el CURRVAL pedido aparte podía salir de otra conexión del pool
+    const proyectoId = await insertarConId(this.dataSource, 'PROYECTO', 'PROYECTOID', { secuencia: 'PROYECTOID' }, {
+      EMPRESAID: empresaId,
+      PROYECTONOMBRE: nombre,
+      CONVOCATORIAID: dto.convocatoriaId,
+      MODALIDADID: dto.modalidadId,
+      PROYECTOCODSEGURIDAD: codSeguridad,
+      PROYECTOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      PROYECTOESTADO: 0,
+    })
+    return { message: 'Proyecto creado correctamente', proyectoId }
   }
 
   // contactos del proyecto
@@ -2056,15 +1685,20 @@ export class ProyectosService {
 
   async crearAF(proyectoId: number, dto: AfDto) {
     await this.validarEdicionPermitida(proyectoId)
-    await this.dataSource.query(
-      `INSERT INTO ACCIONFORMACION
-         (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
-          TIPOEVENTOID, MODALIDADFORMACIONID, ACCIONFORMACIONNUMBENEF, ACCIONFORMACIONFECHAREGISTRO)
-       VALUES (ACCIONFORMACIONID.NEXTVAL, :1,
-               (SELECT NVL(MAX(ACCIONFORMACIONNUMERO), 0) + 1 FROM ACCIONFORMACION WHERE PROYECTOID = :2),
-               :3, :4, :5, :6, SYSDATE)`,
-      [proyectoId, proyectoId, dto.nombre.trim(), dto.tipoEventoId, dto.modalidadFormacionId, dto.numBenef],
+    // el número va aparte: Oracle no acepta una subconsulta en un INSERT ... VALUES con RETURNING (ORA-22816)
+    const [{ nextNum }] = await this.dataSource.query(
+      `SELECT NVL(MAX(ACCIONFORMACIONNUMERO), 0) + 1 AS "nextNum" FROM ACCIONFORMACION WHERE PROYECTOID = :1`,
+      [proyectoId],
     )
+    await insertarConId(this.dataSource, 'ACCIONFORMACION', 'ACCIONFORMACIONID', { secuencia: 'ACCIONFORMACIONID' }, {
+      PROYECTOID: proyectoId,
+      ACCIONFORMACIONNUMERO: Number(nextNum),
+      ACCIONFORMACIONNOMBRE: dto.nombre.trim(),
+      TIPOEVENTOID: dto.tipoEventoId,
+      MODALIDADFORMACIONID: dto.modalidadFormacionId,
+      ACCIONFORMACIONNUMBENEF: dto.numBenef,
+      ACCIONFORMACIONFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { message: 'Acción de formación creada correctamente' }
   }
 
@@ -2427,15 +2061,12 @@ export class ProyectosService {
     if (Number(dup) > 0)
       throw new BadRequestException('El área funcional ya está registrada en esta acción de formación')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFAREAFUNCIONALID), 0) + 1 AS "nid" FROM AFAREAFUNCIONAL`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
-       VALUES (:1, :2, :3, :4)`,
-      [nid, afId, dto.areaId, dto.otro ?? null],
-    )
-    return { message: 'Área funcional agregada', aafId: nid }
+    const aafId = await insertarConId(this.dataSource, 'AFAREAFUNCIONAL', 'AFAREAFUNCIONALID', { maxMasUno: true }, {
+      ACCIONFORMACIONIDAF: afId,
+      AREAFUNCIONALIDAF: dto.areaId,
+      AFAREAFUNCIONALOTRO: dto.otro ?? null,
+    })
+    return { message: 'Área funcional agregada', aafId }
   }
 
   async eliminarArea(aafId: number) {
@@ -2462,15 +2093,11 @@ export class ProyectosService {
     if (Number(dup) > 0)
       throw new BadRequestException('El nivel ocupacional ya está registrado en esta acción de formación')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFNIVELOCUPACIONALID), 0) + 1 AS "nid" FROM AFNIVELOCUPACIONAL`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFNIVELOCUPACIONAL (AFNIVELOCUPACIONALID, ACCIONFORMACIONID, NIVELOCUPACIONALIDAF)
-       VALUES (:1, :2, :3)`,
-      [nid, afId, nivelId],
-    )
-    return { message: 'Nivel ocupacional agregado', anId: nid }
+    const anId = await insertarConId(this.dataSource, 'AFNIVELOCUPACIONAL', 'AFNIVELOCUPACIONALID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      NIVELOCUPACIONALIDAF: nivelId,
+    })
+    return { message: 'Nivel ocupacional agregado', anId }
   }
 
   async eliminarNivel(anId: number) {
@@ -2497,15 +2124,11 @@ export class ProyectosService {
     if (Number(dup) > 0)
       throw new BadRequestException('La ocupación CUOC ya está registrada en esta acción de formación')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(OCUPACIONCOUCAFID), 0) + 1 AS "nid" FROM OCUPACIONCOUCAF`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO OCUPACIONCOUCAF (OCUPACIONCOUCAFID, ACCIONFORMACIONID, OCUPACIONCUOCID)
-       VALUES (:1, :2, :3)`,
-      [nid, afId, cuocId],
-    )
-    return { message: 'Ocupación CUOC agregada', ocAfId: nid }
+    const ocAfId = await insertarConId(this.dataSource, 'OCUPACIONCOUCAF', 'OCUPACIONCOUCAFID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      OCUPACIONCUOCID: cuocId,
+    })
+    return { message: 'Ocupación CUOC agregada', ocAfId }
   }
 
   async eliminarCuoc(ocAfId: number) {
@@ -2585,14 +2208,12 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('El sector ya está registrado en esta acción de formación')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFPSECTORID), 0) + 1 AS "nid" FROM AFPSECTOR`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFPSECTOR (AFPSECTORID, ACCIONFORMACIONID, SECTORAFID, AFPSECTORESTADO) VALUES (:1, :2, :3, 1)`,
-      [nid, afId, sectorId],
-    )
-    return { message: 'Sector beneficiario agregado', psId: nid }
+    const psId = await insertarConId(this.dataSource, 'AFPSECTOR', 'AFPSECTORID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      SECTORAFID: sectorId,
+      AFPSECTORESTADO: 1,
+    })
+    return { message: 'Sector beneficiario agregado', psId }
   }
 
   async eliminarSectorBenef(psId: number) {
@@ -2606,14 +2227,12 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('El sub-sector ya está registrado en esta acción de formación')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFPSUBSECTORID), 0) + 1 AS "nid" FROM AFPSUBSECTOR`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFPSUBSECTOR (AFPSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID, AFPSUBSECTORESTADO) VALUES (:1, :2, :3, 1)`,
-      [nid, afId, subsectorId],
-    )
-    return { message: 'Sub-sector beneficiario agregado', pssId: nid }
+    const pssId = await insertarConId(this.dataSource, 'AFPSUBSECTOR', 'AFPSUBSECTORID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      SUBSECTORAFID: subsectorId,
+      AFPSUBSECTORESTADO: 1,
+    })
+    return { message: 'Sub-sector beneficiario agregado', pssId }
   }
 
   async eliminarSubSectorBenef(pssId: number) {
@@ -2632,14 +2251,11 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('El sector AF ya está registrado')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFSECTORID), 0) + 1 AS "nid" FROM AFSECTOR`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFSECTOR (AFSECTORID, ACCIONFORMACIONID, SECTORAFID) VALUES (:1, :2, :3)`,
-      [nid, afId, sectorId],
-    )
-    return { message: 'Sector AF agregado', saId: nid }
+    const saId = await insertarConId(this.dataSource, 'AFSECTOR', 'AFSECTORID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      SECTORAFID: sectorId,
+    })
+    return { message: 'Sector AF agregado', saId }
   }
 
   async eliminarSectorAf(saId: number) {
@@ -2658,14 +2274,11 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('El sub-sector AF ya está registrado')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFSUBSECTORID), 0) + 1 AS "nid" FROM AFSUBSECTOR`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFSUBSECTOR (AFSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID) VALUES (:1, :2, :3)`,
-      [nid, afId, subsectorId],
-    )
-    return { message: 'Sub-sector AF agregado', ssaId: nid }
+    const ssaId = await insertarConId(this.dataSource, 'AFSUBSECTOR', 'AFSUBSECTORID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      SUBSECTORAFID: subsectorId,
+    })
+    return { message: 'Sub-sector AF agregado', ssaId }
   }
 
   async eliminarSubSectorAf(ssaId: number) {
@@ -2879,32 +2492,32 @@ export class ProyectosService {
       `SELECT NVL(MAX(UNIDADTEMATICANUMERO), 0) + 1 AS "nextNum" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
       [afId],
     )
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(UNIDADTEMATICAID), 0) + 1 AS "nid" FROM UNIDADTEMATICA`,
-    )
-
     const esArticulacion = dto.articulacionTerritorialId ? 1 : 0
 
-    await this.dataSource.query(
-      `INSERT INTO UNIDADTEMATICA (
-         UNIDADTEMATICAID, PROYECTOIDUT, ACCIONFORMACIONID, UNIDADTEMATICANUMERO,
-         UNIDADTEMATICANOMBRE, UNIDADTEMATICACOMPETENCIAS, UNIDADTEMATICACONTENIDO,
-         UNIDADTEMATICAJUSTACTIVIDAD,
-         UNIDADTEMATICAHORASPP, UNIDADTEMATICAHORASPV, UNIDADTEMATICAHORASPPAT, UNIDADTEMATICAHORASPHIB,
-         UNIDADTEMATICAHORASTP, UNIDADTEMATICAHORASTV, UNIDADTEMATICAHORASTPAT, UNIDADTEMATICAHORASTHIB,
-         UNIDADTEMATICAESTRANSVERSAL, UNIDADTEMATICAHORASTRANSVERSAL,
-         ARTICULACIONTERRITORIALID, UNIDADTEMATICAFECHAREGISTRO
-       ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,SYSDATE)`,
-      [nid, proyectoId, afId, nextNum,
-       dto.nombre.trim(), dto.competencias?.trim() ?? null, dto.contenido?.trim() ?? null,
-       dto.justActividad?.trim() ?? null,
-       h.pp, h.pv, h.ppat, h.phib, h.tp, h.tv, h.tpat, h.thib,
-       esArticulacion, dto.horasTransversal ?? null,
-       dto.articulacionTerritorialId ?? null],
-    )
+    const utId = await insertarConId(this.dataSource, 'UNIDADTEMATICA', 'UNIDADTEMATICAID', { maxMasUno: true }, {
+      PROYECTOIDUT: proyectoId,
+      ACCIONFORMACIONID: afId,
+      UNIDADTEMATICANUMERO: nextNum,
+      UNIDADTEMATICANOMBRE: dto.nombre.trim(),
+      UNIDADTEMATICACOMPETENCIAS: dto.competencias?.trim() ?? null,
+      UNIDADTEMATICACONTENIDO: dto.contenido?.trim() ?? null,
+      UNIDADTEMATICAJUSTACTIVIDAD: dto.justActividad?.trim() ?? null,
+      UNIDADTEMATICAHORASPP: h.pp,
+      UNIDADTEMATICAHORASPV: h.pv,
+      UNIDADTEMATICAHORASPPAT: h.ppat,
+      UNIDADTEMATICAHORASPHIB: h.phib,
+      UNIDADTEMATICAHORASTP: h.tp,
+      UNIDADTEMATICAHORASTV: h.tv,
+      UNIDADTEMATICAHORASTPAT: h.tpat,
+      UNIDADTEMATICAHORASTHIB: h.thib,
+      UNIDADTEMATICAESTRANSVERSAL: esArticulacion,
+      UNIDADTEMATICAHORASTRANSVERSAL: dto.horasTransversal ?? null,
+      ARTICULACIONTERRITORIALID: dto.articulacionTerritorialId ?? null,
+      UNIDADTEMATICAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     // los warnings cumulativos informan al usuario pero no bloquean
     const warnings = await this.calcularWarningsUTs(afId)
-    return { message: 'Unidad temática creada correctamente', utId: nid, warnings }
+    return { message: 'Unidad temática creada correctamente', utId, warnings }
   }
 
   // QA #2 — bloquea la UT de articulacion territorial bajo el 5% en CURSO/DIPLOMADO
@@ -3065,15 +2678,12 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('La actividad ya está registrada en esta UT')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(ACTIVIDADUTID), 0) + 1 AS "nid" FROM ACTIVIDADUT`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
-       VALUES (:1, :2, :3, :4)`,
-      [nid, utId, dto.actividadId, dto.otro ?? null],
-    )
-    return { message: 'Actividad agregada', actId: nid }
+    const actId = await insertarConId(this.dataSource, 'ACTIVIDADUT', 'ACTIVIDADUTID', { maxMasUno: true }, {
+      UNIDADTEMATICAID: utId,
+      UTACTIVIDADESID: dto.actividadId,
+      ACTIVIDADUTOTRO: dto.otro ?? null,
+    })
+    return { message: 'Actividad agregada', actId }
   }
 
   async eliminarActividadUT(actId: number) {
@@ -3093,15 +2703,14 @@ export class ProyectosService {
     )
     if (Number(dup) > 0) throw new BadRequestException('Este perfil ya está registrado en la UT')
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(PERFILUTID), 0) + 1 AS "nid" FROM PERFILUT`,
-    )
-    await this.dataSource.query(
-      `INSERT INTO PERFILUT (PERFILUTID, UNIDADTEMATICAID, RUBROIDUT, PERFILUTHORASCAP, PERFILUTDIAS, PERFILUTFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, :5, SYSDATE)`,
-      [nid, utId, dto.rubroId, dto.horasCap, dto.dias ?? null],
-    )
-    return { message: 'Perfil de capacitador agregado', perfilId: nid }
+    const perfilId = await insertarConId(this.dataSource, 'PERFILUT', 'PERFILUTID', { maxMasUno: true }, {
+      UNIDADTEMATICAID: utId,
+      RUBROIDUT: dto.rubroId,
+      PERFILUTHORASCAP: dto.horasCap,
+      PERFILUTDIAS: dto.dias ?? null,
+      PERFILUTFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { message: 'Perfil de capacitador agregado', perfilId }
   }
 
   async eliminarPerfilUT(perfilId: number) {
@@ -3246,18 +2855,15 @@ export class ProyectosService {
 
   async crearGrupo(afId: number) {
     await this.validarEdicionPermitidaPorAf(afId)
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFGRUPOID), 0) + 1 AS "nid" FROM AFGRUPO`,
-    )
     const [{ nextNum }] = await this.dataSource.query(
       `SELECT NVL(MAX(AFGRUPONUMERO), 0) + 1 AS "nextNum" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
       [afId],
     )
-    await this.dataSource.query(
-      `INSERT INTO AFGRUPO (AFGRUPOID, ACCIONFORMACIONID, AFGRUPONUMERO) VALUES (:1, :2, :3)`,
-      [nid, afId, nextNum],
-    )
-    return { grupoId: nid, grupoNumero: nextNum }
+    const grupoId = await insertarConId(this.dataSource, 'AFGRUPO', 'AFGRUPOID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      AFGRUPONUMERO: nextNum,
+    })
+    return { grupoId, grupoNumero: nextNum }
   }
 
   async eliminarGrupo(grupoId: number) {
@@ -3337,16 +2943,15 @@ export class ProyectosService {
 
     await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1`, [grupoId])
     for (const cob of coberturas) {
-      const [{ nid }] = await this.dataSource.query(
-        `SELECT NVL(MAX(AFGRUPOCOBERTURAID), 0) + 1 AS "nid" FROM AFGRUPOCOBERTURA`,
-      )
-      await this.dataSource.query(
-        `INSERT INTO AFGRUPOCOBERTURA
-           (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-            AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8)`,
-        [nid, grupoId, cob.deptoId, cob.ciudadId ?? null, cob.benef, afId, cob.modal, cob.rural ?? 0],
-      )
+      await insertarConId(this.dataSource, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
+        AFGRUPOID: grupoId,
+        DEPARTAMENTOGRUPOID: cob.deptoId,
+        CIUDADGRUPOID: cob.ciudadId ?? null,
+        AFGRUPOCOBERTURABENEF: cob.benef,
+        AFGRUPOFILTRO: afId,
+        AFGRUPOCOBERTURAMOD: cob.modal,
+        AFGRUPOCOBERTURARURAL: cob.rural ?? 0,
+      })
     }
     return { message: 'Cobertura guardada' }
   }
@@ -3448,19 +3053,17 @@ export class ProyectosService {
     )
     await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID = :1`, [afId])
     if (dto.gestionConocimientoId) {
-      const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(AFGESTIONCONOCIMIENTOID), 0) + 1 AS "nid" FROM AFGESTIONCONOCIMIENTO`)
-      await this.dataSource.query(
-        `INSERT INTO AFGESTIONCONOCIMIENTO (AFGESTIONCONOCIMIENTOID, ACCIONFORMACIONID, GESTIONCONOCIMIENTOID) VALUES (:1, :2, :3)`,
-        [nid, afId, dto.gestionConocimientoId],
-      )
+      await insertarConId(this.dataSource, 'AFGESTIONCONOCIMIENTO', 'AFGESTIONCONOCIMIENTOID', { maxMasUno: true }, {
+        ACCIONFORMACIONID: afId,
+        GESTIONCONOCIMIENTOID: dto.gestionConocimientoId,
+      })
     }
     await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID = :1`, [afId])
     if (dto.materialFormacionId) {
-      const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(MATERIALFORMACIONAFID), 0) + 1 AS "nid" FROM MATERIALFORMACIONAF`)
-      await this.dataSource.query(
-        `INSERT INTO MATERIALFORMACIONAF (MATERIALFORMACIONAFID, ACCIONFORMACIONID, MATERIALFORMACIONID) VALUES (:1, :2, :3)`,
-        [nid, afId, dto.materialFormacionId],
-      )
+      await insertarConId(this.dataSource, 'MATERIALFORMACIONAF', 'MATERIALFORMACIONAFID', { maxMasUno: true }, {
+        ACCIONFORMACIONID: afId,
+        MATERIALFORMACIONID: dto.materialFormacionId,
+      })
     }
     return { message: 'Material guardado' }
   }
@@ -3471,12 +3074,11 @@ export class ProyectosService {
       [afId, recursoId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El recurso ya está registrado')
-    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(RECURSOSDIDACTICOSAFID), 0) + 1 AS "nid" FROM RECURSOSDIDACTICOSAF`)
-    await this.dataSource.query(
-      `INSERT INTO RECURSOSDIDACTICOSAF (RECURSOSDIDACTICOSAFID, ACCIONFORMACIONID, RECURSOSDIDACTICOSID) VALUES (:1, :2, :3)`,
-      [nid, afId, recursoId],
-    )
-    return { message: 'Recurso agregado', rdafId: nid }
+    const rdafId = await insertarConId(this.dataSource, 'RECURSOSDIDACTICOSAF', 'RECURSOSDIDACTICOSAFID', { maxMasUno: true }, {
+      ACCIONFORMACIONID: afId,
+      RECURSOSDIDACTICOSID: recursoId,
+    })
+    return { message: 'Recurso agregado', rdafId }
   }
 
   async eliminarRecursoAF(rdafId: number) {
@@ -3819,7 +3421,7 @@ export class ProyectosService {
            AFRUBROPORCENTAJECOFINANCIACION = :14,
            AFRUBROPORCENTAJEESPECIE      = :15,
            AFRUBROPORCENTAJEDINERO       = :16,
-           AFRUBROFECHAREGISTRO          = SYSDATE
+           AFRUBROFECHAREGISTRO          = ${AHORA_UTC}
          WHERE AFRUBROID = :17`,
         [justificacion, numHoras, cantidad, beneficiarios, dias, numGrupos,
          totalRubro, cofSena, contraEspecie, contraDinero, valorMaximo, valorBenef,
@@ -3828,27 +3430,29 @@ export class ProyectosService {
       return { message: 'Rubro actualizado', afrubroid: existing.id }
     }
 
-    const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`
-    )
-    await this.dataSource.query(
-      `INSERT INTO AFRUBRO (
-         AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-         AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
-         AFRUBROBENEFICIARIOS, AFRUBRODIAS, AFRUBRONUMEROGRUPOS,
-         AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-         AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
-         AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
-         AFRUBROFECHAREGISTRO
-       ) VALUES (
-         :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,SYSDATE
-       )`,
-      [nid, proyectoId, afId, rubroId,
-       justificacion, numHoras, cantidad, beneficiarios, dias, numGrupos,
-       totalRubro, cofSena, contraEspecie, contraDinero, valorMaximo, valorBenef,
-       paquete, porcSena, porcEspecie, porcDinero]
-    )
-    return { message: 'Rubro guardado', afrubroid: nid }
+    const afrubroid = await insertarConId(this.dataSource, 'AFRUBRO', 'AFRUBROID', { maxMasUno: true }, {
+      PROYECTOIDRUBROAF: proyectoId,
+      ACCIONFORMACIONID: afId,
+      RUBROID: rubroId,
+      AFRUBROJUSTIFICACION: justificacion,
+      AFRUBRONUMHORAS: numHoras,
+      AFRUBROCANTIDAD: cantidad,
+      AFRUBROBENEFICIARIOS: beneficiarios,
+      AFRUBRODIAS: dias,
+      AFRUBRONUMEROGRUPOS: numGrupos,
+      AFRUBROVALOR: totalRubro,
+      AFRUBROCOFINANCIACION: cofSena,
+      AFRUBROESPECIE: contraEspecie,
+      AFRUBRODINERO: contraDinero,
+      AFRUBROVALORMAXIMO: valorMaximo,
+      AFRUBROVALORPORBENEFICIARIO: valorBenef,
+      AFRUBROPAQUETE: paquete,
+      AFRUBROPORCENTAJECOFINANCIACION: porcSena,
+      AFRUBROPORCENTAJEESPECIE: porcEspecie,
+      AFRUBROPORCENTAJEDINERO: porcDinero,
+      AFRUBROFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { message: 'Rubro guardado', afrubroid }
   }
 
   async eliminarRubroAF(afId: number, afrubroid: number) {
@@ -3905,21 +3509,28 @@ export class ProyectosService {
       await this.dataSource.query(
         `UPDATE AFRUBRO SET AFRUBROVALOR=:1, AFRUBROCOFINANCIACION=:2, AFRUBROESPECIE=:3, AFRUBRODINERO=:4,
            AFRUBROPORCENTAJECOFINANCIACION=:5, AFRUBROPORCENTAJEESPECIE=:6, AFRUBROPORCENTAJEDINERO=:7,
-           AFRUBROCANTIDAD=1, AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:8`,
+           AFRUBROCANTIDAD=1, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=:8`,
         [total, dto.cofSena, dto.especie, dto.dinero, porcSena, porcEspecie, porcDinero, existing.id]
       )
       return { afrubroid: existing.id }
     }
-    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`)
-    await this.dataSource.query(
-      `INSERT INTO AFRUBRO (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-         AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-         AFRUBROPAQUETE, AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
-       VALUES (:1,:2,:3,:4,'GASTOS DE OPERACIÓN',1,:5,:6,:7,:8,:9,:10,:11,:12,SYSDATE)`,
-      [nid, proyectoId, afId, rubro.rubroId, total, dto.cofSena, dto.especie, dto.dinero,
-       rubro.paquete, porcSena, porcEspecie, porcDinero]
-    )
-    return { afrubroid: nid }
+    const afrubroid = await insertarConId(this.dataSource, 'AFRUBRO', 'AFRUBROID', { maxMasUno: true }, {
+      PROYECTOIDRUBROAF: proyectoId,
+      ACCIONFORMACIONID: afId,
+      RUBROID: rubro.rubroId,
+      AFRUBROJUSTIFICACION: 'GASTOS DE OPERACIÓN',
+      AFRUBROCANTIDAD: 1,
+      AFRUBROVALOR: total,
+      AFRUBROCOFINANCIACION: dto.cofSena,
+      AFRUBROESPECIE: dto.especie,
+      AFRUBRODINERO: dto.dinero,
+      AFRUBROPAQUETE: rubro.paquete,
+      AFRUBROPORCENTAJECOFINANCIACION: porcSena,
+      AFRUBROPORCENTAJEESPECIE: porcEspecie,
+      AFRUBROPORCENTAJEDINERO: porcDinero,
+      AFRUBROFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { afrubroid }
   }
 
   // transferencia
@@ -3947,20 +3558,25 @@ export class ProyectosService {
     if (existing) {
       await this.dataSource.query(
         `UPDATE AFRUBRO SET AFRUBROBENEFICIARIOS=:1, AFRUBROVALOR=:2, AFRUBRODINERO=:3,
-           AFRUBROPORCENTAJEDINERO=100, AFRUBROFECHAREGISTRO=SYSDATE WHERE AFRUBROID=:4`,
+           AFRUBROPORCENTAJEDINERO=100, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=:4`,
         [dto.beneficiarios, dto.valor, dto.valor, existing.id]
       )
       return { afrubroid: existing.id }
     }
-    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "nid" FROM AFRUBRO`)
-    await this.dataSource.query(
-      `INSERT INTO AFRUBRO (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-         AFRUBROJUSTIFICACION, AFRUBROCANTIDAD, AFRUBROBENEFICIARIOS, AFRUBROVALOR, AFRUBRODINERO,
-         AFRUBROPAQUETE, AFRUBROPORCENTAJEDINERO, AFRUBROFECHAREGISTRO)
-       VALUES (:1,:2,:3,:4,'TRANSFERENCIA CONOCIMIENTO',1,:5,:6,:7,:8,100,SYSDATE)`,
-      [nid, proyectoId, afId, rubro.rubroId, dto.beneficiarios, dto.valor, dto.valor, rubro.paquete]
-    )
-    return { afrubroid: nid }
+    const afrubroid = await insertarConId(this.dataSource, 'AFRUBRO', 'AFRUBROID', { maxMasUno: true }, {
+      PROYECTOIDRUBROAF: proyectoId,
+      ACCIONFORMACIONID: afId,
+      RUBROID: rubro.rubroId,
+      AFRUBROJUSTIFICACION: 'TRANSFERENCIA CONOCIMIENTO',
+      AFRUBROCANTIDAD: 1,
+      AFRUBROBENEFICIARIOS: dto.beneficiarios,
+      AFRUBROVALOR: dto.valor,
+      AFRUBRODINERO: dto.valor,
+      AFRUBROPAQUETE: rubro.paquete,
+      AFRUBROPORCENTAJEDINERO: 100,
+      AFRUBROFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { afrubroid }
   }
 
   // presupuesto general del proyecto
@@ -4282,28 +3898,29 @@ export class ProyectosService {
             PRESUPUESTOCOFINANCIACION       = :12,
             PRESUPUESTOESPECIE              = :13,
             PRESUPUESTODINERO               = :14,
-            PRESUPUESTOFECHAREGISTRO        = SYSDATE
+            PRESUPUESTOFECHAREGISTRO        = ${AHORA_UTC}
           WHERE PRESUPUESTOID = :15`,
         [...params, existing.id],
       )
       return { id: existing.id, message: 'Presupuesto del proyecto actualizado correctamente' }
     }
 
-    const [{ nid }] = await this.dataSource.query(`SELECT NVL(MAX(PRESUPUESTOID), 0) + 1 AS "nid" FROM PRESUPUESTO`)
-    await this.dataSource.query(
-      `INSERT INTO PRESUPUESTO (PRESUPUESTOID, PROYECTOID,
-          PRESUPUESTOTOTALAF, PRESUPUESTONUMEROBENEFICIARIOS,
-          PRESUPUESTOGASTOSOPERACION, PRESUPUESTOGOCOFINANCIACION,
-          PRESUPUESTOGOESPECIE, PRESUPUESTOGODINERO,
-          PRESUPUESTOVALORTRANSFERENCIA, PRESUPUESTOBENEFICIARIOSTRANSF,
-          PRESUPUESTOPORCENTAJEGO, PRESUPUESTOVALORAF,
-          PRESUPUESTOVALORTOTALPROYECTO, PRESUPUESTOCOFINANCIACION,
-          PRESUPUESTOESPECIE, PRESUPUESTODINERO,
-          PRESUPUESTOFECHAREGISTRO)
-        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, SYSDATE)`,
-      [nid, proyectoId, ...params],
-    )
-    return { id: nid, message: 'Presupuesto del proyecto guardado correctamente' }
+    // mismas columnas y en el mismo orden que params (y que el UPDATE de arriba)
+    const columnas = [
+      'PRESUPUESTOTOTALAF', 'PRESUPUESTONUMEROBENEFICIARIOS',
+      'PRESUPUESTOGASTOSOPERACION', 'PRESUPUESTOGOCOFINANCIACION',
+      'PRESUPUESTOGOESPECIE', 'PRESUPUESTOGODINERO',
+      'PRESUPUESTOVALORTRANSFERENCIA', 'PRESUPUESTOBENEFICIARIOSTRANSF',
+      'PRESUPUESTOPORCENTAJEGO', 'PRESUPUESTOVALORAF',
+      'PRESUPUESTOVALORTOTALPROYECTO', 'PRESUPUESTOCOFINANCIACION',
+      'PRESUPUESTOESPECIE', 'PRESUPUESTODINERO',
+    ]
+    const id = await insertarConId(this.dataSource, 'PRESUPUESTO', 'PRESUPUESTOID', { maxMasUno: true }, {
+      PROYECTOID: proyectoId,
+      ...Object.fromEntries(columnas.map((c, i) => [c, params[i]])),
+      PRESUPUESTOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
+    return { id, message: 'Presupuesto del proyecto guardado correctamente' }
   }
 
   // reporte completo del proyecto

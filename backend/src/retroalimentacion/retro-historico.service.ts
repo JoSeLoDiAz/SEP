@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { ControlCambiosService } from '../evaluadores/control-cambios.service'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 import {
   ES_DINAMIZADOR_SQL, IDENTIFICACION_DINAMIZADOR, MOTIVO_DINAMIZADOR, NOMBRE_DINAMIZADOR,
 } from './dinamizador'
@@ -584,7 +585,7 @@ export class RetroHistoricoService {
         `INSERT INTO RETROSESION
            (RETROSESIONID, RETROFORMULARIOID, PARTICIPACIONID, FECHAINICIO, FECHAENVIO,
             DURACIONMINUTOS, MINUTOSTRANSCURRIDOS, SEEXCEDIO, USUARIOEMAIL)
-         VALUES (:1, :2, :3, SYSDATE, SYSDATE, :4, 0, 0, :5)`,
+         VALUES (:1, :2, :3, ${AHORA_UTC}, ${AHORA_UTC}, :4, 0, 0, :5)`,
         [sesionId, meta.formularioId, autor, meta.duracion, ctx.usuarioEmail],
       )
 
@@ -592,8 +593,8 @@ export class RetroHistoricoService {
       await m.query(
         `INSERT INTO RETROASIGNACION
            (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
-            ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION)
-         VALUES (:1, :2, :3, :4, N'ENVIADA', N'MANUAL', :5, :6)`,
+            ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
+         VALUES (:1, :2, :3, :4, N'ENVIADA', N'MANUAL', :5, :6, ${AHORA_UTC})`,
         [asignacionId, meta.formularioId, autor, destinatario,
           esDelDinamizador ? MOTIVO_DINAMIZADOR : MOTIVO_HISTORICO, ctx.usuarioEmail],
       )
@@ -603,7 +604,7 @@ export class RetroHistoricoService {
         `INSERT INTO RETRORESPUESTA
            (RETRORESPUESTAID, RETROSESIONID, RETROASIGNACIONID, RETROFORMULARIOID,
             PARTEVALUADORID, PARTEVALUADOID, PUNTAJEESCALA, PUNTAJEMAXIMO, PROMEDIO, FECHAENVIO)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
+         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
         [id, sesionId, asignacionId, meta.formularioId, autor, destinatario, suma, maximo, promedio],
       )
       await m.query(

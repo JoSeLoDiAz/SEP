@@ -2,6 +2,10 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { leerId, tieneTriggerDeId } from '../common/db/ids'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const oracledb = require('oracledb') as { BIND_OUT: number; NUMBER: unknown }
 
 // lo que envía el conveniente; interventoría y SENA responden en otro módulo
 export interface ModificacionDto {
@@ -136,12 +140,17 @@ export class ModificacionesService {
 
   async crear(proyectoId: number, dto: ModificacionDto, _usuarioId: number, _perfilId: number): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
-    const [{ nid }] = await this.ds.query(
-      `SELECT NVL(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
-    )
-    const id = Number(nid)
+    // el id lo pone el trigger de id, que la tabla tiene en las dos bases (va NULL); si faltara, MAX+1 como antes.
+    // No va por insertarConId porque la fecha de envío entra con TO_DATE(:x); el RETURNING trae el id que quedó
+    let idPrevio: number | null = null
+    if (!(await tieneTriggerDeId(this.ds, 'MODIFICACIONES', 'MODIFICACIONESID'))) {
+      const [{ nid }] = await this.ds.query(
+        `SELECT NVL(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
+      )
+      idPrevio = Number(nid)
+    }
 
-    await this.ds.query(
+    const salida: unknown = await this.ds.query(
       `INSERT INTO MODIFICACIONES
          (MODIFICACIONESID, PROYECTOID, TIPOMODIFICACIONID,
           MODIFICACIONESFECHAREGIS, MODIFICACIONESFECHAENVIO, MODIFICACIONESFECHAREMI,
@@ -154,22 +163,25 @@ export class ModificacionesService {
           MODIFICACIONESRADIINTERAPRO, MODIFICACIONESRADIINTERAPROFEC,
           MODIFICACIONESESTADO, MODIFICACIONESUSUARIOSENA, MODIFICACIONESUSUARIOINTER,
           MODIFICACIONESOBSERSENA, MODIFICACIONESVALSENA)
-       VALUES (:1, :2, :3, SYSDATE,
+       VALUES (:1, :2, :3, ${AHORA_UTC},
                TO_DATE(:4, 'YYYY-MM-DD'),
-               SYSDATE,
+               ${AHORA_UTC},
                4, 4, :5, N' ',
                N' ', NULL,
                N' ', NULL,
                0, N' ', NULL,
                N' ', N' ', 1,
                N' ', NULL,
-               1, NULL, NULL, N' ', NULL)`,
+               1, NULL, NULL, N' ', NULL)
+       RETURNING MODIFICACIONESID INTO :6`,
       [
-        id, proyectoId, Number(dto.tipoModificacionId),
+        idPrevio, proyectoId, Number(dto.tipoModificacionId),
         dto.fechaEnvio,
         (dto.observaciones ?? '').trim() || ' ',
+        { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       ],
     )
+    const id = leerId(salida, 'MODIFICACIONES')
     return { mensaje: 'Modificación registrada correctamente.', id }
   }
 

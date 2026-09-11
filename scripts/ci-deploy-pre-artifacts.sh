@@ -78,6 +78,9 @@ BE_PORT='${BE_PORT}'
 IMAGE='${RUNTIME_IMAGE}'
 IN="\$APP/.ci-in"
 
+echo "=== Stop containers before replacing bind mounts ==="
+podman rm -f "\${FE}" "\${BE}" 2>/dev/null || true
+
 echo "=== Publish .env from CI secrets ==="
 test -f "\$IN/pre.env"
 if [[ -f "\$APP/.env" ]]; then
@@ -89,18 +92,16 @@ echo "=== Publish frontend standalone ==="
 ST="\$(mktemp -d /tmp/sep-fe-XXXXXX)"
 tar -C "\$ST" -xzf "\$IN/frontend-standalone.tgz"
 test -f "\$ST/frontend/server.js"
-rm -rf "\$APP/frontend"
 mkdir -p "\$APP/frontend"
-rsync -a "\$ST"/ "\$APP/frontend/"
+rsync -a --delete "\$ST"/ "\$APP/frontend/"
 rm -rf "\$ST"
 
 echo "=== Publish backend app ==="
 BT="\$(mktemp -d /tmp/sep-be-XXXXXX)"
 tar -C "\$BT" -xzf "\$IN/backend-app.tgz"
 test -f "\$BT/backend/dist/main.js"
-rm -rf "\$APP/app"
 mkdir -p "\$APP/app"
-rsync -a "\$BT"/ "\$APP/app/"
+rsync -a --delete "\$BT"/ "\$APP/app/"
 rm -rf "\$BT"
 cp -f "\$IN/build-meta.txt" "\$APP/.deploy-build-meta.txt" 2>/dev/null || true
 

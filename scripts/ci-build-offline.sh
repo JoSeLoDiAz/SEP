@@ -16,6 +16,8 @@ NODE_TAR="${OFFLINE_ROOT}/imagenes/node-22-bookworm-slim.tar"
 NODE_MODULES_TGZ="${OFFLINE_ROOT}/node_modules.tgz"
 PNPM_BIN="${OFFLINE_ROOT}/pnpm"
 REMOTE_APP="${DEPLOY_REMOTE_APP_DIR:-/data/SEP}"
+# El disco raiz de vmpmgit (~36G) no aguanta extraer el seed en el checkout.
+SEED_NM="${SEP_SEED_NM:-/FS/maintenance/sep-offline-nm}"
 
 [[ -f "${REPO_ROOT}/pnpm-lock.yaml" ]] || { echo "ERROR: falta pnpm-lock.yaml" >&2; exit 1; }
 command -v podman >/dev/null || { echo "ERROR: podman requerido en runner build" >&2; exit 1; }
@@ -128,12 +130,20 @@ ensure_image_from_tar() {
 seed_offline_from_pre_if_needed
 ensure_image_from_tar "${NODE_IMAGE}" "${NODE_TAR}"
 
-if [[ -f "${NODE_MODULES_TGZ}" ]] && [[ ! -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
-  echo "=== Restaurando node_modules desde seed ==="
-  tar -C "${REPO_ROOT}" -xzf "${NODE_MODULES_TGZ}"
+if [[ -f "${NODE_MODULES_TGZ}" ]]; then
+  if [[ -d "${SEED_NM}/node_modules/.pnpm" ]]; then
+    echo "=== Seed node_modules ya en ${SEED_NM} ==="
+  else
+    echo "=== Restaurando node_modules en ${SEED_NM} (fuera del disco raiz) ==="
+    mkdir -p "${SEED_NM}"
+    tar -C "${SEED_NM}" -xzf "${NODE_MODULES_TGZ}"
+    test -d "${SEED_NM}/node_modules/.pnpm"
+  fi
 fi
 
-if [[ -z "$(ls -A "${PNPM_STORE}" 2>/dev/null || true)" ]] && [[ ! -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
+if [[ -z "$(ls -A "${PNPM_STORE}" 2>/dev/null || true)" ]] \
+  && [[ ! -d "${SEED_NM}/node_modules/.pnpm" ]] \
+  && [[ ! -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
   echo "ERROR: sin pnpm-store ni node_modules; no se permite install con red" >&2
   exit 1
 fi
@@ -164,6 +174,16 @@ echo "=== CI build Next standalone + Nest dist offline ==="
 PODMAN_VOLS=(-v "${REPO_ROOT}:/app:Z" -v "${PNPM_STORE}:/store:Z")
 if [[ -x "${PNPM_BIN}" && -f "${PNPM_BIN}" ]]; then
   PODMAN_VOLS+=(-v "${PNPM_BIN}:/opt/pnpm:Z")
+fi
+if [[ -d "${SEED_NM}/node_modules/.pnpm" ]]; then
+  echo "=== Montando node_modules desde ${SEED_NM} ==="
+  PODMAN_VOLS+=(-v "${SEED_NM}/node_modules:/app/node_modules:Z")
+  if [[ -d "${SEED_NM}/frontend/node_modules" ]]; then
+    PODMAN_VOLS+=(-v "${SEED_NM}/frontend/node_modules:/app/frontend/node_modules:Z")
+  fi
+  if [[ -d "${SEED_NM}/backend/node_modules" ]]; then
+    PODMAN_VOLS+=(-v "${SEED_NM}/backend/node_modules:/app/backend/node_modules:Z")
+  fi
 fi
 if [[ -n "${STAGE_ROOT}" ]]; then
   PODMAN_VOLS+=(-v "${STAGE_ROOT}:/stage:Z")
@@ -211,7 +231,7 @@ podman run --rm \
       echo "=== pnpm deploy backend --prod (sin Next/SWC) ==="
       rm -rf /stage/be-root
       mkdir -p /stage/be-root
-      if "${PNPM}" --filter backend deploy --legacy --prod /stage/be-root/backend \
+      if "${PNPM}" --filter backend deploy --legacy --prod --offline /stage/be-root/backend \
         && test -f /stage/be-root/backend/dist/main.js; then
         echo "pnpm deploy backend OK"
       else

@@ -254,8 +254,13 @@ pack_backend_tarball() {
     return 0
   fi
 
-  echo "=== Empaquetando backend (rsync sin Next/SWC; fallback) ==="
-  local stage
+  echo "=== Empaquetando backend (rsync seed; fallback) ==="
+  local stage nm_src=""
+  if [[ -d "${SEED_NM}/node_modules/.pnpm" ]]; then
+    nm_src="${SEED_NM}"
+  elif [[ -d "${REPO_ROOT}/node_modules/.pnpm" ]]; then
+    nm_src="${REPO_ROOT}"
+  fi
   if [[ -n "${STAGE_ROOT}" ]]; then
     stage="${STAGE_ROOT}/be-root"
     rm -rf "${stage}"
@@ -267,20 +272,24 @@ pack_backend_tarball() {
   cp -a "${REPO_ROOT}/package.json" "${REPO_ROOT}/pnpm-workspace.yaml" "${REPO_ROOT}/pnpm-lock.yaml" "${stage}/"
   cp -a "${REPO_ROOT}/frontend/package.json" "${stage}/frontend/"
   cp -a "${REPO_ROOT}/backend/package.json" "${REPO_ROOT}/backend/dist" "${stage}/backend/"
-  if [[ -d "${REPO_ROOT}/node_modules" ]]; then
+  if [[ -n "${nm_src}" ]]; then
+    echo "=== node_modules desde ${nm_src} ==="
     rsync -a \
       --exclude='.pnpm/@next*' \
       --exclude='.pnpm/next@*' \
-      --exclude='.pnpm/@swc*' \
       --exclude='.pnpm/react@*' \
       --exclude='.pnpm/react-dom@*' \
       --exclude='.pnpm/sharp@*' \
       --exclude='.pnpm/@esbuild*' \
       --exclude='.cache' \
-      "${REPO_ROOT}/node_modules/" "${stage}/node_modules/"
-  fi
-  if [[ -d "${REPO_ROOT}/backend/node_modules" ]]; then
-    rsync -a "${REPO_ROOT}/backend/node_modules/" "${stage}/backend/node_modules/"
+      "${nm_src}/node_modules/" "${stage}/node_modules/"
+    if [[ -d "${nm_src}/backend/node_modules" ]]; then
+      rsync -a "${nm_src}/backend/node_modules/" "${stage}/backend/node_modules/"
+    fi
+  else
+    echo "ERROR: no hay node_modules para empaquetar el backend" >&2
+    rm -rf "${stage}"
+    return 1
   fi
   tar -C "${stage}" -czf "${OUT_DIR}/backend-app.tgz" .
   rm -rf "${stage}"

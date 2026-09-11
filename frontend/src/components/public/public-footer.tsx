@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { FacebookIcon, InstagramIcon, LinkedinIcon, MapPin, MessageCircle, Phone, PhoneCall, Radio, Users, X, YoutubeIcon } from 'lucide-react'
-=======
 import { FacebookIcon, InstagramIcon, LinkedinIcon, MessageCircle, Radio, X, YoutubeIcon } from 'lucide-react'
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
 import Image from 'next/image'
 import { MinisteriosMarquee } from './ministerios-marquee'
 
@@ -57,17 +53,6 @@ const socialLinks = [
   { icon: TikTokIcon,     red: 'TikTok',            label: '@senacomunica_', href: 'https://www.tiktok.com/@senacomunica_' },
 ]
 
-<<<<<<< HEAD
-const directorioHref = '/es-co/sena/Paginas/directorio.aspx'
-
-const legalLinks = [
-  { label: 'Directorio SENA',                                    href: directorioHref },
-  { label: 'PQRS',                                               href: 'http://sciudadanos.sena.edu.co/SolicitudIndex.aspx' },
-  { label: 'Chat en línea',                                      href: '/es-co/ciudadano/Paginas/chat.aspx' },
-  { label: 'Denuncias por actos de corrupción',                  href: '/es-co/ciudadano/Paginas/Denuncias_Corrupcion.aspx' },
-  { label: 'Notificaciones judiciales',                          href: '/es-co/transparencia/Paginas/mecanismosContacto.aspx#notificacionesJudiciales' },
-  { label: 'Mapa del sitio',                                     href: '/es-co/Paginas/mapaSitio.aspx' },
-=======
 // Las .aspx del portal viejo siguen vivas, pero mudadas a historico.sena.edu.co:
 // en relativo apuntaban a este mismo host y morian en 404.
 const PORTAL = 'https://www.sena.edu.co'
@@ -83,7 +68,6 @@ const enlacesAtencion = [
   { label: 'Denuncias por actos de corrupción', href: `${HISTORICO}/es-co/ciudadano/Paginas/Denuncias_Corrupcion.aspx` },
   { label: 'Mapa del sitio',                    href: `${PORTAL}/mapa-del-sitio` },
   { label: 'Notificaciones judiciales',         href: `${PORTAL}/transparencia#transparency-10` },
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
 ]
 
 const enlacesPoliticas = [
@@ -93,34 +77,6 @@ const enlacesPoliticas = [
   { label: 'Política de seguridad y privacidad de la información',        href: `${PORTAL}/transparencia/politicas-y-lineamientos` },
 ]
 
-<<<<<<< HEAD
-const enlaceClaro =
-  'text-white/80 transition hover:text-white hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500'
-
-function TituloColumna({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-sm font-bold text-white">
-      {children}
-      <span aria-hidden="true" className="mx-auto mt-2 block h-0.5 w-10 rounded-full bg-lime-500 lg:mx-0" />
-    </h3>
-  )
-}
-
-function EnlacesLegales({ items, label }: { items: { label: string; href: string }[]; label: string }) {
-  return (
-    <nav aria-label={label}>
-      <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        {items.map(({ label: texto, href }, i) => (
-          <li key={href} className="flex items-center gap-2">
-            <a href={href} target="_blank" rel="noreferrer" className={enlaceClaro}>
-              {texto}
-            </a>
-            {i < items.length - 1 && <span aria-hidden="true" className="text-white/30">|</span>}
-          </li>
-        ))}
-      </ul>
-    </nav>
-=======
 const datosSede: { etiqueta: string; valor: string; tel?: string }[] = [
   { etiqueta: 'Dirección',            valor: 'Calle 57 No. 8 - 69 Bogotá D.C. (Cundinamarca), Colombia' },
   { etiqueta: 'Código postal',        valor: '110231' },
@@ -143,17 +99,12 @@ function Enlaces({ items }: { items: { label: string; href: string }[] }) {
         </a>
       ))}
     </div>
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
   )
 }
 
 export function PublicFooter() {
   return (
-<<<<<<< HEAD
-    <footer>
-=======
     <footer aria-label="Pie de página SENA">
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
       {/* Sector Trabajo — tarjeta blanca sobre gris para que flote */}
       <section aria-labelledby="pie-sector-trabajo" className="border-t border-neutral-200 bg-neutral-50 px-4 py-10 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
@@ -191,91 +142,6 @@ export function PublicFooter() {
         </div>
       </div>
 
-<<<<<<< HEAD
-      {/* Bloque institucional azul */}
-      {/* esquinas redondeadas arriba, como en betowa y ape */}
-      <div className="overflow-hidden rounded-t-[2rem] bg-cerulean-500 sm:rounded-t-[3rem] lg:rounded-t-[4rem]">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-3 lg:gap-12 lg:px-8">
-
-          {/* Identidad + sellos */}
-          <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
-            <Image
-              src="/images/sena-logo.svg"
-              alt="SENA"
-              width={120}
-              height={120}
-              className="h-20 w-20 object-contain brightness-0 invert"
-            />
-            <p className="mt-4 text-sm font-bold uppercase leading-snug text-white">
-              Servicio Nacional de Aprendizaje SENA
-            </p>
-            <p className="text-sm font-semibold uppercase text-white/70">Dirección General</p>
-            {/* el png de los sellos es oscuro: sobre azul necesita fondo blanco */}
-            <div className="mt-6 rounded-xl bg-white px-4 py-3">
-              <Image
-                src="/images/normas-iso-logos.png"
-                alt="Normas ISO"
-                width={220}
-                height={110}
-                className="h-14 w-auto object-contain sm:h-16"
-              />
-            </div>
-          </div>
-
-          {/* Atención presencial */}
-          <div className="text-center lg:text-left">
-            <TituloColumna>Atención presencial</TituloColumna>
-            <ul className="mt-4 space-y-3 text-xs leading-relaxed text-white/80">
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <MapPin size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>Calle 57 No. 8 – 69 Bogotá D.C. (Cundinamarca), Colombia</span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Users size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>El SENA brinda atención presencial en las 33 Regionales y 118 Centros de Formación</span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Phone size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Horarios de atención por sede en el{' '}
-                  <a href={directorioHref} target="_blank" rel="noreferrer" className={enlaceClaro}>
-                    Directorio SENA
-                  </a>
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Líneas y redes */}
-          <div className="text-center lg:text-left">
-            <TituloColumna>Líneas de atención</TituloColumna>
-            <ul className="mt-4 space-y-3 text-xs text-white/80">
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <PhoneCall size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Bogotá{' '}
-                  <a href="tel:+576017366060" className={enlaceClaro}>(+57) 601 736 60 60</a>
-                </span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <Phone size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>
-                  Línea gratuita{' '}
-                  <a href="tel:018000910270" className={enlaceClaro}>018000 910270</a>
-                </span>
-              </li>
-              <li className="flex justify-center gap-2 lg:justify-start">
-                <MessageCircle size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-lime-500" />
-                <span>WhatsApp <span className="font-semibold text-white">3112545028</span></span>
-              </li>
-            </ul>
-
-            <div className="mt-8">
-              <TituloColumna>Síguenos en redes</TituloColumna>
-              <nav aria-label="Redes sociales del SENA" className="mt-4">
-                <ul className="flex flex-wrap justify-center gap-2 lg:justify-start">
-                  {socialLinks.map(({ icon: Icon, label, href }) => (
-=======
       {/* Bloque institucional — tarjeta azul flotando sobre la franja verde,
           igual que el pie nuevo de sena.edu.co */}
       <div className="bg-[linear-gradient(to_bottom,#ffffff_0%,#ffffff_30%,#39a900_30%,#39a900_100%)] px-4 py-10">
@@ -374,21 +240,11 @@ export function PublicFooter() {
               <nav aria-label="Redes sociales del SENA" className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">
                 <ul className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-3">
                   {socialLinks.map(({ icon: Icon, red, label, href }) => (
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
                     <li key={href}>
                       <a
                         href={href}
                         target="_blank"
                         rel="noreferrer"
-<<<<<<< HEAD
-                        title={label}
-                        className="flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-lime-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
-                      >
-                        <span aria-hidden="true" className="shrink-0">
-                          <Icon size={14} />
-                        </span>
-                        <span>{label}</span>
-=======
                         aria-label={`${red}: ${label}`}
                         className="flex items-center gap-3 rounded outline-none focus-visible:ring-2 focus-visible:ring-white/80 sm:gap-2"
                       >
@@ -396,24 +252,11 @@ export function PublicFooter() {
                           <Icon size={20} />
                         </span>
                         <span className="hover:underline">{label}</span>
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
                       </a>
                     </li>
                   ))}
                 </ul>
               </nav>
-<<<<<<< HEAD
-            </div>
-          </div>
-        </div>
-
-        {/* Legales */}
-        <div className="border-t border-white/15">
-          <div className="mx-auto max-w-7xl space-y-2 px-4 py-6 text-center text-[11px] sm:px-6 lg:px-8">
-            <EnlacesLegales items={legalLinks} label="Atención a la ciudadanía" />
-            <EnlacesLegales items={legalLinks2} label="Políticas y condiciones de uso" />
-            <p className="border-t border-white/10 pt-4 text-white/60">
-=======
 
               {/* Enlaces institucionales */}
               <div className="order-3 min-w-0 border-t border-white/15 pt-4 lg:order-2 lg:col-start-1 lg:row-start-2 lg:border-0 lg:pt-0 lg:pl-[10px]">
@@ -440,38 +283,18 @@ export function PublicFooter() {
             </div>
 
             <p className="mt-8 border-t border-white/10 pt-4 text-center text-[11px] font-normal text-white/60">
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
               © Equipo TIC — GGPC - DSNFT - SENA {new Date().getFullYear()} | v1.0 (Prueba)
             </p>
           </div>
         </div>
       </div>
 
-<<<<<<< HEAD
-      {/* Barra inferior: Marca Colombia + GOV.CO */}
-      <div className="bg-[#015dca] py-2 px-4 flex items-center justify-center gap-4">
-        <Image
-          src="/images/channels-616_marca_colombia.png"
-          alt="Colombia"
-          width={20}
-          height={20}
-          className="object-contain"
-        />
-        <div className="w-px h-5 bg-white/30" />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/images/govco.svg"
-          alt="GOV.CO"
-          className="h-5 w-auto object-contain"
-        />
-=======
       {/* Barra inferior GOV.CO */}
       <div className="bg-[#3366cc] px-4">
         <div className="mx-auto flex max-w-[96rem] justify-start py-2 pl-1">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/images/govco.svg" alt="Logo Gobierno de Colombia" className="h-6 w-auto" loading="lazy" />
         </div>
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
       </div>
     </footer>
   )

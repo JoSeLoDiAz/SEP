@@ -18,10 +18,7 @@ import { AppModule } from './app.module'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { UploadErrorFilter } from './common/filters/upload-error.filter'
 import { OracleErrorFilter } from './common/filters/oracle-error.filter'
-<<<<<<< HEAD
-=======
 import { enMigracion } from './common/migracion.guard'
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule)

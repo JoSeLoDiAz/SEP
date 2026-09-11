@@ -67,8 +67,6 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ImportarProyectoModule,
     ConvocatoriaProyectosModule,
     UsuariosAdminModule,
-<<<<<<< HEAD
-=======
   ],
   controllers: [EstadoController],
   providers: [
@@ -76,7 +74,6 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     // /estado, incluidas las de quien ya tiene sesión abierta. Es lo que
     // impide que la base de origen se siga moviendo durante el traslado.
     { provide: APP_GUARD, useClass: MigracionGuard },
->>>>>>> 0d4ab6269712bcbc866dfd36768cdcf425595fb7
   ],
 })
 export class AppModule {}

@@ -7,10 +7,10 @@ import { ToastBetowa, type ToastTipo } from '@/components/ui/toast-betowa'
 import api from '@/lib/api'
 import { ArrowLeft, Building2, Loader2, LogIn, UserPlus, Wrench } from 'lucide-react'
 
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 
 // Site key pública de Cloudflare Turnstile. Configurable por env.
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '0x4AAAAAADD6VVCyoP6eM5Ao'
@@ -289,7 +289,7 @@ export default function LoginPage() {
                 ) : (
                   // que se vea: si esto aparece en producción, alguien dejó puesta la variable de pruebas
                   <p className="rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 ring-1 ring-amber-200">
-                    Verificación de seguridad desactivada en este entorno
+                    Verificación de seguridad desactivada
                   </p>
                 )}
 

@@ -15,6 +15,20 @@ import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 // Site key pública de Cloudflare Turnstile. Configurable por env.
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '0x4AAAAAADD6VVCyoP6eM5Ao'
 
+/**
+ * `NEXT_PUBLIC_CAPTCHA=off` quita el captcha del login. Es para los entornos sin salida a internet.
+ *
+ * El widget de Turnstile lo pinta Cloudflare desde `challenges.cloudflare.com`. Donde no se llega a ese dominio
+ * —la red interna del SENA, por ejemplo— el widget nunca termina, el token se queda vacío y el botón de entrar no
+ * se habilita nunca: no se puede probar nada, y la pantalla no explica por qué.
+ *
+ * Apagarlo es una decisión consciente y se nota: hay que escribir `off` a propósito, y mientras esté apagado la
+ * pantalla lo dice en un aviso. Sin la variable el captcha está puesto, que es como tiene que estar en producción.
+ * La contraseña se comprueba igual en los dos casos; el captcha solo frena los intentos automáticos.
+ */
+const CAPTCHA_ACTIVO =
+  (process.env.NEXT_PUBLIC_CAPTCHA ?? 'on').trim().toLowerCase() !== 'off'
+
 // Respaldo si el backend no alcanza a decir el suyo. El texto bueno viene de allá.
 const MENSAJE_PAUSA = 'El SEP está en migración y no está disponible en este momento.'
 
@@ -82,7 +96,7 @@ export default function LoginPage() {
       setToast({ tipo: 'error', msg: 'Correo y contraseña son requeridos' })
       return
     }
-    if (!captchaToken) {
+    if (CAPTCHA_ACTIVO && !captchaToken) {
       setToast({ tipo: 'error', msg: 'Por favor espera a que se complete la validación de seguridad' })
       return
     }
@@ -261,20 +275,27 @@ export default function LoginPage() {
                 </div>
 
                 {/* Cloudflare Turnstile — verificación automática, casi siempre invisible */}
-                <div className="flex justify-center">
-                  <Turnstile
-                    ref={turnstileRef}
-                    siteKey={TURNSTILE_SITE_KEY}
-                    options={{ language: 'es', theme: 'light' }}
-                    onSuccess={(token) => setCaptchaToken(token)}
-                    onExpire={() => setCaptchaToken('')}
-                    onError={() => setCaptchaToken('')}
-                  />
-                </div>
+                {CAPTCHA_ACTIVO ? (
+                  <div className="flex justify-center">
+                    <Turnstile
+                      ref={turnstileRef}
+                      siteKey={TURNSTILE_SITE_KEY}
+                      options={{ language: 'es', theme: 'light' }}
+                      onSuccess={(token) => setCaptchaToken(token)}
+                      onExpire={() => setCaptchaToken('')}
+                      onError={() => setCaptchaToken('')}
+                    />
+                  </div>
+                ) : (
+                  // que se vea: si esto aparece en producción, alguien dejó puesta la variable de pruebas
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 ring-1 ring-amber-200">
+                    Verificación de seguridad desactivada en este entorno
+                  </p>
+                )}
 
                 <button
                   type="submit"
-                  disabled={loading || !captchaToken}
+                  disabled={loading || (CAPTCHA_ACTIVO && !captchaToken)}
                   aria-busy={loading}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-lime-500 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-500"
                 >

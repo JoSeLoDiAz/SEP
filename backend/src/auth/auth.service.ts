@@ -147,9 +147,24 @@ export class AuthService {
   }
 
   // si no se llega a Cloudflare se deja pasar (la clave igual se verifica); un rechazo explícito sí bloquea
+  /** Para no repetir el aviso del captcha en cada intento de entrada. */
+  private avisoCaptchaDado = false
+
   private async verifyCaptcha(token?: string): Promise<void> {
-    const secret = process.env.TURNSTILE_SECRET
+    // `.trim()` a propósito: el guion de GitLab sube un espacio cuando la variable está vacía, y un espacio en
+    // JavaScript cuenta como valor. Sin esto, el SEP intentaría validar contra Cloudflare con un secreto en blanco
+    // y cada entrada costaría los 16 s de los dos intentos antes de dejar pasar igual.
+    const secret = process.env.TURNSTILE_SECRET?.trim()
     if (!secret) {
+      // Sin clave no hay nada que comprobar, y así se puede entrar donde no hay salida a Cloudflare. Pero que quede
+      // dicho una vez en el registro: si esto aparece en producción, el login está sin captcha y nadie se enteró.
+      if (!this.avisoCaptchaDado) {
+        this.avisoCaptchaDado = true
+        this.log.warn(
+          'TURNSTILE_SECRET no está definida: el captcha no se comprueba. La contraseña sí. ' +
+          'Correcto en un entorno de pruebas; en producción hay que ponerla.',
+        )
+      }
       return
     }
     if (!token) {

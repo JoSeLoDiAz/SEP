@@ -14,7 +14,15 @@ out/
 .env
 .env.local
 .env.*.local
+.env.pre.sep
 !.env.example
+!.env.pre.example
+
+# ── CI local ──
+.ci-artifacts/
+.ci-be-deploy/
+.ci-offline-seed/
+.ci-ssh-*-pre.key
 
 # ── Logs ──
 logs/

@@ -64,3 +64,9 @@ docs/migraciones/*-datos.json
 # ── OS ──
 .DS_Store
 Thumbs.db
+
+# lo que deja ts-node al compilar los guiones de scripts/
+backend/scripts/*.js
+backend/scripts/*.js.map
+backend/scripts/*.d.ts
+!backend/scripts/probar-correo.js

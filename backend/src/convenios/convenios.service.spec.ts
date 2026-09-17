@@ -31,7 +31,7 @@ function falsos(responderQr: Responder, responderDs?: Responder) {
       const propia = responderDs?.(sql, params)
       if (propia !== undefined) return propia
       if (sql.includes('AS "convenioId"')) return [{ convenioId: 1, empresaId: 50 }]
-      if (sql.includes('NVL(CONVENIOSESTADO, 0)')) return [{ estado: 1 }]
+      if (sql.includes('COALESCE(CONVENIOSESTADO, 0)')) return [{ estado: 1 }]
       return []
     }),
     createQueryRunner: () => qr,
@@ -68,7 +68,7 @@ describe('ConveniosService.crearDirector', () => {
     expect(enQr.some((l) => l.sql.includes('MAX(PERSONAID)') || l.sql.includes('MAX(DIRECTORID)'))).toBe(false)
     // nada escribe fuera de la transacción
     expect(enDs.some(escribe)).toBe(false)
-    expect(enQr.find((l) => l.sql.includes('UPDATE DIRECTORES'))?.sql).toContain('CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)')
+    expect(enQr.find((l) => l.sql.includes('UPDATE DIRECTORES'))?.sql).toContain('CAST((now() AT TIME ZONE \'UTC\') AS timestamp)')
     expect(qr.startTransaction).toHaveBeenCalledTimes(1)
     expect(qr.commitTransaction).toHaveBeenCalledTimes(1)
     expect(qr.rollbackTransaction).not.toHaveBeenCalled()
@@ -92,8 +92,8 @@ describe('ConveniosService.crearDirector', () => {
   it('sin trigger (XE) sigue con MAX+1, dentro de la misma transacción', async () => {
     reiniciarTriggersDeId(new Map())
     const { servicio, enDs, enQr } = falsos((sql) => {
-      if (sql.startsWith('SELECT NVL(MAX(PERSONAID)')) return [{ id: 313071 }]
-      if (sql.startsWith('SELECT NVL(MAX(DIRECTORID)')) return [{ id: 1609 }]
+      if (sql.startsWith('SELECT COALESCE(MAX(PERSONAID)')) return [{ id: 313071 }]
+      if (sql.startsWith('SELECT COALESCE(MAX(DIRECTORID)')) return [{ id: 1609 }]
       if (sql.startsWith('INSERT INTO PERSONA')) return [[313071]]
       if (sql.startsWith('INSERT INTO DIRECTORES')) return [[1609]]
       return []
@@ -113,7 +113,7 @@ describe('ConveniosService.asociarDirector', () => {
 
   // la persona existe, todavía no es el director activo y no tiene conflicto en la convocatoria
   const lecturas: Responder = (sql) =>
-    sql.includes('FROM PERSONA WHERE PERSONAID = :1') ? [{ id: 313500 }] : undefined
+    sql.includes('FROM PERSONA WHERE PERSONAID = $1') ? [{ id: 313500 }] : undefined
 
   it('inactiva al anterior y crea el nuevo en una transacción, con el id que devolvió la base', async () => {
     reiniciarTriggersDeId(new Map([['DIRECTORES', 'DIRECTORID']]))

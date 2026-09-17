@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { DataSource } from 'typeorm';
+import { leerDocumento } from '../common/documentos/documentos-disco';
 
 const PDFDocument: new (
   opts?: Record<string, unknown>,
@@ -152,19 +153,35 @@ const ENTIDAD_EVALUADOR =
 export class CertificadosService {
   constructor(private readonly dataSource: DataSource) {}
 
+  /** Un documento se escribe de muchas formas: `53.068.755`, `53 068 755`. Todas son el mismo número. */
+  private normalizarDocumento(v: string): string {
+    return v.replace(/[.\s-]/g, '').trim();
+  }
+
+  /**
+   * Busca la persona por documento exacto, no por coincidencia.
+   *
+   * Antes iba con `LIKE '%numero%'`, y un comodín por delante impide usar el índice: PostgreSQL recorría las 292.201
+   * filas de `persona` y descartaba 284.029 una a una, **160 ms**. Con igualdad entra por `ipersona2`, el índice
+   * único del documento: **0,6 ms**.
+   *
+   * Además de más rápido es más correcto: con `LIKE`, escribir `5306` devolvía los certificados de cualquiera cuyo
+   * documento contuviera esas cifras.
+   */
   private async findPersonaId(
     tipoDocAbrev: string,
     identificacion: string,
   ): Promise<number | null> {
     const substring = TIPO_DOC_MAP[tipoDocAbrev.toUpperCase()] ?? tipoDocAbrev;
     const rows = await this.dataSource.query(
-      `SELECT P.PERSONAID FROM PERSONA P
-       JOIN TIPODOCUMENTOIDENTIDAD T ON T.TIPODOCUMENTOIDENTIDADID = P.TIPODOCUMENTOIDENTIDADID
-       WHERE UPPER(TO_CHAR(T.TIPODOCUMENTOIDENTIDADNOMBRE)) LIKE UPPER(:param_0)
-         AND TO_CHAR(P.PERSONAIDENTIFICACION) LIKE :param_1`,
-      [`%${substring}%`, `%${identificacion}%`],
+      `SELECT p.personaid AS "personaId"
+         FROM persona p
+         JOIN tipodocumentoidentidad t ON t.tipodocumentoidentidadid = p.tipodocumentoidentidadid
+        WHERE p.personaidentificacion = $1
+          AND upper(t.tipodocumentoidentidadnombre) LIKE upper($2)`,
+      [this.normalizarDocumento(identificacion), `%${substring}%`],
     );
-    return rows.length ? (rows[0]['PERSONAID'] as number) : null;
+    return rows.length ? (rows[0]['personaId'] as number) : null;
   }
 
   // Beneficiario y evaluador van juntos: es la misma persona buscando con su cédula
@@ -185,7 +202,7 @@ export class CertificadosService {
     const rows = await this.dataSource.query(
       `SELECT P.PERSONAID FROM AFGRUPOBENEFICIARIO AFGB
        JOIN PERSONA P ON P.PERSONAID = AFGB.PERSONAID
-       WHERE TO_CHAR(AFGB.EVIDENCIAVALIDACION) LIKE :param_0`,
+       WHERE AFGB.EVIDENCIAVALIDACION LIKE $1`,
       [`%${limpio}%`],
     );
     const beneficiario = rows.length
@@ -197,7 +214,7 @@ export class CertificadosService {
       `SELECT E.PERSONAID FROM EVALUADORCERTIFICADO C
        JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
        JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
-       WHERE UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER(:param_0)`,
+       WHERE UPPER(C.CODIGOVERIFICACION) = UPPER($1)`,
       [limpio],
     );
     const evaluador = evalRows.length
@@ -239,13 +256,13 @@ export class CertificadosService {
       JOIN ACCIONFORMACION AF ON AF.ACCIONFORMACIONID = AFG.ACCIONFORMACIONID
       JOIN PROYECTO PR ON PR.PROYECTOID = AF.PROYECTOID
       JOIN EMPRESA E ON E.EMPRESAID = PR.EMPRESAID
-      WHERE AFGB.PERSONAID = :param_0
-        AND TRIM(TO_CHAR(AFGB.CERTIFICA)) = 'SI'
-        AND TRIM(TO_CHAR(AFGB.VALIDACIONINTERVENTOR)) = 'VERIFICADO'`;
+      WHERE AFGB.PERSONAID = $1
+        AND AFGB.CERTIFICA = 'SI'
+        AND AFGB.VALIDACIONINTERVENTOR = 'VERIFICADO'`;
 
     const params: unknown[] = [personaId];
     if (soloEvidencia) {
-      sql += ` AND TO_CHAR(AFGB.EVIDENCIAVALIDACION) LIKE :param_1`;
+      sql += ` AND AFGB.EVIDENCIAVALIDACION LIKE $2`;
       params.push(`%${soloEvidencia}%`);
     }
     sql += ` ORDER BY AFGB.FECHAVALIDACIONINTERVENTOR DESC`;
@@ -288,7 +305,7 @@ export class CertificadosService {
     const params: unknown[] = [personaId];
     let filtroCodigo = '';
     if (soloCodigo) {
-      filtroCodigo = ` AND UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER(:param_1)`;
+      filtroCodigo = ` AND UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER($2)`;
       params.push(soloCodigo);
     }
 
@@ -298,7 +315,7 @@ export class CertificadosService {
          FROM EVALUADORCERTIFICADO C
          JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
          JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
-        WHERE E.PERSONAID = :param_0
+        WHERE E.PERSONAID = $1
           AND C.ANULADO = 0${filtroCodigo}
         ORDER BY C.ANIO DESC, C.CONSECUTIVO DESC`,
       params,
@@ -349,7 +366,7 @@ export class CertificadosService {
          FROM EVALUADORCERTIFICADO C
          JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
          JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
-        WHERE C.CERTIFICADOID = :param_0 AND E.PERSONAID = :param_1`,
+        WHERE C.CERTIFICADOID = $1 AND E.PERSONAID = $2`,
       [certificadoId, personaId],
     );
     if (!rows.length) throw new NotFoundException('Certificado no encontrado');
@@ -373,7 +390,7 @@ export class CertificadosService {
        FROM AFGRUPOBENEFICIARIO AFGB
        JOIN PERSONA P ON P.PERSONAID = AFGB.PERSONAID
        JOIN TIPODOCUMENTOIDENTIDAD TD ON TD.TIPODOCUMENTOIDENTIDADID = P.TIPODOCUMENTOIDENTIDADID
-       WHERE AFGB.AFGRUPOBENEFICIARIOID = :param_0 AND AFGB.PERSONAID = :param_1`,
+       WHERE AFGB.AFGRUPOBENEFICIARIOID = $1 AND AFGB.PERSONAID = $2`,
       [afGrupoBeneficiarioId, personaId],
     );
     if (!afgb) throw new NotFoundException('Certificado no encontrado');
@@ -383,7 +400,7 @@ export class CertificadosService {
               AF.MODALIDADFORMACIONID, AF.TIPOEVENTOID
        FROM AFGRUPO AFG
        JOIN ACCIONFORMACION AF ON AF.ACCIONFORMACIONID = AFG.ACCIONFORMACIONID
-       WHERE AFG.AFGRUPOID = :param_0`,
+       WHERE AFG.AFGRUPOID = $1`,
       [afgb['AFGRUPOID']],
     );
 
@@ -394,7 +411,7 @@ export class CertificadosService {
        FROM PROYECTO PR
        LEFT JOIN CONVENIOS C ON C.PROYECTOID = PR.PROYECTOID
        LEFT JOIN CONVOCATORIA CV ON CV.CONVOCATORIAID = PR.CONVOCATORIAID
-       WHERE PR.PROYECTOID = :param_0`,
+       WHERE PR.PROYECTOID = $1`,
       [af['PROYECTOID']],
     );
 
@@ -402,7 +419,7 @@ export class CertificadosService {
       `SELECT E.EMPRESARAZONSOCIAL, CI.CIUDADNOMBRE
        FROM EMPRESA E
        LEFT JOIN CIUDAD CI ON CI.CIUDADID = E.CIUDADEMPRESAID
-       WHERE E.EMPRESAID = :param_0`,
+       WHERE E.EMPRESAID = $1`,
       [proy['EMPRESAID']],
     );
 
@@ -412,25 +429,25 @@ export class CertificadosService {
       const [prog] = await this.dataSource.query(
         `SELECT PG.PROGRAMANOMBRE FROM CONVOCATORIA CV
          JOIN PROGRAMA PG ON PG.PROGRAMAID = CV.PROGRAMAID
-         WHERE CV.CONVOCATORIAID = :param_0`,
+         WHERE CV.CONVOCATORIAID = $1`,
         [convocatoriaId],
       );
       programaNombre = prog?.['PROGRAMANOMBRE'] ?? '';
     }
 
     const [tipoEvento] = await this.dataSource.query(
-      `SELECT TIPOEVENTONOMBRE FROM TIPOEVENTO WHERE TIPOEVENTOID = :param_0`,
+      `SELECT TIPOEVENTONOMBRE FROM TIPOEVENTO WHERE TIPOEVENTOID = $1`,
       [af['TIPOEVENTOID']],
     );
 
     // Las modalidades 5 y 6 del GeneXus suman dos columnas de horas, el resto una
     const [horas] = await this.dataSource.query(
       `SELECT
-         SUM(NVL(UNIDADTEMATICAHORASPP,0)   + NVL(UNIDADTEMATICAHORASTP,0))   AS HORAS_PP,
-         SUM(NVL(UNIDADTEMATICAHORASPPAT,0) + NVL(UNIDADTEMATICAHORASTPAT,0)) AS HORAS_PAT,
-         SUM(NVL(UNIDADTEMATICAHORASPHIB,0) + NVL(UNIDADTEMATICAHORASTHIB,0)) AS HORAS_HIB,
-         SUM(NVL(UNIDADTEMATICAHORASPV,0)   + NVL(UNIDADTEMATICAHORASTV,0))   AS HORAS_VIR
-       FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :param_0`,
+         SUM(COALESCE(UNIDADTEMATICAHORASPP,0)   + COALESCE(UNIDADTEMATICAHORASTP,0))   AS HORAS_PP,
+         SUM(COALESCE(UNIDADTEMATICAHORASPPAT,0) + COALESCE(UNIDADTEMATICAHORASTPAT,0)) AS HORAS_PAT,
+         SUM(COALESCE(UNIDADTEMATICAHORASPHIB,0) + COALESCE(UNIDADTEMATICAHORASTHIB,0)) AS HORAS_HIB,
+         SUM(COALESCE(UNIDADTEMATICAHORASPV,0)   + COALESCE(UNIDADTEMATICAHORASTV,0))   AS HORAS_VIR
+       FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
       [af['ACCIONFORMACIONID']],
     );
     const modalidad = Number(af['MODALIDADFORMACIONID'] ?? 1);
@@ -456,14 +473,14 @@ export class CertificadosService {
     if (firmaCertId) {
       const [f] = await this.dataSource.query(
         `SELECT FIRMACERTIFICADOSNOMBRE, FIRMACERTIFICADOSCARGO, FIRMACERTIFICADOSFIRMA
-         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = :param_0`,
+         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = $1`,
         [firmaCertId],
       );
       firma = f ?? {};
     }
 
     const [proyLogo] = await this.dataSource.query(
-      `SELECT PROYECTOLOGOEMPRESA FROM PROYECTO WHERE PROYECTOID = :param_0`,
+      `SELECT PROYECTOLOGOEMPRESA FROM PROYECTO WHERE PROYECTOID = $1`,
       [af['PROYECTOID']],
     );
 
@@ -471,17 +488,26 @@ export class CertificadosService {
     let logoCap: Record<string, unknown> = {};
     if (logoCapId) {
       const [lc] = await this.dataSource.query(
-        `SELECT LOGOCAPACITADORESLOGO FROM LOGOCAPACITADORES WHERE LOGOCAPACITADORESID = :param_0`,
+        `SELECT LOGOCAPACITADORESLOGO FROM LOGOCAPACITADORES WHERE LOGOCAPACITADORESID = $1`,
         [logoCapId],
       );
       logoCap = lc ?? {};
     }
 
+    // El archivo del volumen si está; si no, el BLOB de siempre. Mientras los documentos vivan en los dos sitios el
+    // resultado es el mismo, y así el certificado deja de depender de que la imagen siga dentro de la base.
     const [proyLogoBuffer, capacitadorLogoBuffer, firmaImgBuffer] =
       await Promise.all([
-        this.readLob(proyLogo?.['PROYECTOLOGOEMPRESA']),
-        this.readLob(logoCap?.['LOGOCAPACITADORESLOGO']),
-        this.readLob(firma['FIRMACERTIFICADOSFIRMA']),
+        leerDocumento('proyecto', 'proyectologoempresa', af['PROYECTOID'] as number) ??
+          this.readLob(proyLogo?.['PROYECTOLOGOEMPRESA']),
+        logoCapId
+          ? (leerDocumento('logocapacitadores', 'logocapacitadoreslogo', logoCapId as number) ??
+            this.readLob(logoCap?.['LOGOCAPACITADORESLOGO']))
+          : null,
+        firmaCertId
+          ? (leerDocumento('firmacertificados', 'firmacertificadosfirma', firmaCertId as number) ??
+            this.readLob(firma['FIRMACERTIFICADOSFIRMA']))
+          : null,
       ]);
 
     const str = (v: unknown) => String(v ?? '').trim();
@@ -744,15 +770,26 @@ export class CertificadosService {
 
   // El driver de Oracle devuelve el LOB como stream o ya como Buffer
 
+  /**
+   * GeneXus deja un solo byte `0x00` en la columna cuando no hay documento: no es una imagen, y contarla como tal
+   * corría de sitio los logos del encabezado. Es el mismo criterio con el que se extrajeron los 49.910 archivos al
+   * volumen, así que la base y el disco responden igual.
+   */
+  private esDocumento(b: Buffer): boolean {
+    return b.length > 1 || (b.length === 1 && b[0] !== 0);
+  }
+
   private readLob(lob: any): Promise<Buffer | null> {
     if (!lob) return Promise.resolve(null);
-    if (Buffer.isBuffer(lob)) return Promise.resolve(lob.length ? lob : null);
+    if (Buffer.isBuffer(lob))
+      return Promise.resolve(this.esDocumento(lob) ? lob : null);
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       lob.on('data', (c: Buffer) => chunks.push(c));
       lob.on('end', () => {
         lob.close?.(() => {});
-        resolve(chunks.length ? Buffer.concat(chunks) : null);
+        const b = chunks.length ? Buffer.concat(chunks) : null;
+        resolve(b && this.esDocumento(b) ? b : null);
       });
       lob.on('error', () => {
         lob.close?.(() => {});

@@ -47,7 +47,7 @@ export class ControlCambiosService {
   async registrar(r: RegistroLog): Promise<void> {
     try {
       const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-        `SELECT EVALUADORLOG_SEQ.NEXTVAL FROM dual`,
+        `SELECT EVALUADORLOG_SEQ.NEXTVAL `,
       )
       // FECHA explícita en UTC: su DEFAULT SYSTIMESTAMP da la hora de Colombia en el Exadata
       await this.dataSource.query(
@@ -55,7 +55,7 @@ export class ControlCambiosService {
            (EVALUADORLOGID, EVALUADORID, PARTICIPACIONID, TABLA, OPERACION,
             REGISTROID, USUARIOEMAIL, USUARIOPERFILID, COMENTARIO,
             VALORANTES, VALORDESPUES, FECHA)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, ${AHORA_UTC_TS})`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, ${AHORA_UTC_TS})`,
         [
           Number(seq[0].NEXTVAL),
           r.evaluadorId ?? null,
@@ -129,16 +129,16 @@ export class ControlCambiosService {
       `SELECT l.EVALUADORLOGID     AS "logId",
               l.EVALUADORID        AS "evaluadorId",
               l.PARTICIPACIONID    AS "participacionId",
-              TRIM(l.TABLA)        AS "tabla",
-              TRIM(l.OPERACION)    AS "operacion",
+              btrim((l.TABLA)::text)        AS "tabla",
+              btrim((l.OPERACION)::text)    AS "operacion",
               l.REGISTROID         AS "registroId",
-              TRIM(l.USUARIOEMAIL) AS "usuarioEmail",
+              btrim((l.USUARIOEMAIL)::text) AS "usuarioEmail",
               l.USUARIOPERFILID    AS "usuarioPerfilId",
               l.FECHA              AS "fecha",
-              TRIM(l.COMENTARIO)   AS "comentario",
+              btrim((l.COMENTARIO)::text)   AS "comentario",
               CASE WHEN l.VALORANTES   IS NULL THEN 0 ELSE 1 END AS "tieneAntes",
               CASE WHEN l.VALORDESPUES IS NULL THEN 0 ELSE 1 END AS "tieneDespues",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "evaluadorNombre"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "evaluadorNombre"
          FROM EVALUADORLOG l
          LEFT JOIN EVALUADOR e ON e.EVALUADORID = l.EVALUADORID
          LEFT JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
@@ -170,7 +170,7 @@ export class ControlCambiosService {
               l.VALORANTES     AS "valorAntes",
               l.VALORDESPUES   AS "valorDespues"
          FROM EVALUADORLOG l
-        WHERE l.EVALUADORLOGID = :1`,
+        WHERE l.EVALUADORLOGID = $1`,
       [logId],
     )
     if (!rows[0]) return null

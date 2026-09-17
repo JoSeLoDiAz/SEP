@@ -42,7 +42,7 @@ describe('NecesidadesService', () => {
     expect(llamadas).toHaveLength(1)
     expect(llamadas[0].sql).toBe(
       'INSERT INTO NECESIDAD (NECESIDADID, EMPRESANECESIDADID, NECESIDADFECHAREGISTRO, USUREGISTRONECESIDAD) ' +
-        'VALUES (NULL, :1, CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE), :2) RETURNING NECESIDADID INTO :3',
+        'VALUES (NULL, $1, CAST((now() AT TIME ZONE \'UTC\') AS timestamp), $2) RETURNING NECESIDADID INTO $3',
     )
     expect(llamadas[0].params?.slice(0, 2)).toEqual([55, 9])
   })
@@ -55,9 +55,9 @@ describe('NecesidadesService', () => {
     await servicio.registrarHerramienta(10, 3, 25, 9)
     await servicio.registrarNecesidadFormacion(10, 'Soldadura', 20, 9)
 
-    expect(llamadas[0].sql).toContain('VALUES (NECESIDADID.NEXTVAL, :1,')
-    expect(llamadas[1].sql).toContain('VALUES (HERRAMIENTANECESIDADID.NEXTVAL, :1,')
-    expect(llamadas[3].sql).toContain('VALUES (NECESIDADFORMACIONID.NEXTVAL, :1,')
+    expect(llamadas[0].sql).toContain('VALUES (NECESIDADID.NEXTVAL, $1,')
+    expect(llamadas[1].sql).toContain('VALUES (HERRAMIENTANECESIDADID.NEXTVAL, $1,')
+    expect(llamadas[3].sql).toContain('VALUES (NECESIDADFORMACIONID.NEXTVAL, $1,')
   })
 
   it('herramienta y necesidad de formación dejan el id al trigger y graban la hora en UTC', async () => {

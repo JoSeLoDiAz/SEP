@@ -15,10 +15,10 @@ export class CatalogosEvaluadorService {
   async listarEstadosParticipacion(soloActivos = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ESTADOPARTID     AS "id",
-              TRIM(CODIGO)     AS "codigo",
-              TRIM(NOMBRE)     AS "nombre",
-              TRIM(DESCRIPCION) AS "descripcion",
-              TRIM(COLOR)      AS "color",
+              btrim((CODIGO)::text)     AS "codigo",
+              btrim((NOMBRE)::text)     AS "nombre",
+              btrim((DESCRIPCION)::text) AS "descripcion",
+              btrim((COLOR)::text)      AS "color",
               ORDEN            AS "orden",
               ESFINAL          AS "esFinal",
               ESNEGATIVO       AS "esNegativo",
@@ -42,9 +42,9 @@ export class CatalogosEvaluadorService {
   async listarAreas(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT AREAID            AS "id",
-              TRIM(CODIGO)      AS "codigo",
-              TRIM(NOMBRE)      AS "nombre",
-              TRIM(GRUPOSDEFECTO) AS "gruposDefecto",
+              btrim((CODIGO)::text)      AS "codigo",
+              btrim((NOMBRE)::text)      AS "nombre",
+              btrim((GRUPOSDEFECTO)::text) AS "gruposDefecto",
               ORDEN             AS "orden",
               ACTIVO            AS "activo"
          FROM AREAEVALUACION ${soloActivas ? 'WHERE ACTIVO = 1' : ''}
@@ -80,8 +80,8 @@ export class CatalogosEvaluadorService {
   async listarFirmasCertificado() {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT FIRMACERTIFICADOSID        AS "id",
-              TRIM(FIRMACERTIFICADOSNOMBRE) AS "nombre",
-              TRIM(FIRMACERTIFICADOSCARGO)  AS "cargo",
+              btrim((FIRMACERTIFICADOSNOMBRE)::text) AS "nombre",
+              btrim((FIRMACERTIFICADOSCARGO)::text)  AS "cargo",
               CASE WHEN FIRMACERTIFICADOSFIRMA IS NULL THEN 0 ELSE 1 END AS "tieneImagen"
          FROM FIRMACERTIFICADOS
         ORDER BY FIRMACERTIFICADOSNOMBRE`,
@@ -102,9 +102,9 @@ export class CatalogosEvaluadorService {
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT c.CONVOCATORIAID              AS "id",
-              TRIM(c.CONVOCATORIANOMBRE)    AS "nombre",
+              btrim((c.CONVOCATORIANOMBRE)::text)    AS "nombre",
               c.CONVOCATORIAANIO            AS "anio",
-              TRIM(c.CONVOCATORIAESTADOCONVOCATORIA) AS "estado",
+              btrim((c.CONVOCATORIAESTADOCONVOCATORIA)::text) AS "estado",
               (SELECT COUNT(*) FROM EVALUADORCONVOCATORIA e
                 WHERE e.CONVOCATORIASEPID = c.CONVOCATORIAID) AS "ciclos"
          FROM CONVOCATORIA c${filtro}
@@ -123,9 +123,9 @@ export class CatalogosEvaluadorService {
   async listarModalidades(soloActivas = true) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT MODALIDADPARTID   AS "id",
-              TRIM(CODIGO)      AS "codigo",
-              TRIM(NOMBRE)      AS "nombre",
-              TRIM(DESCRIPCION) AS "descripcion",
+              btrim((CODIGO)::text)      AS "codigo",
+              btrim((NOMBRE)::text)      AS "nombre",
+              btrim((DESCRIPCION)::text) AS "descripcion",
               ORDEN             AS "orden",
               ACTIVO            AS "activo"
          FROM MODALIDADPART ${soloActivas ? 'WHERE ACTIVO = 1' : ''}
@@ -146,13 +146,13 @@ export class CatalogosEvaluadorService {
     const where = soloActivos ? `WHERE ROLEVALUADORACTIVO = 1` : ''
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ROLEVALUADORID           AS "id",
-              TRIM(ROLEVALUADORNOMBRE) AS "nombre",
-              TRIM(ROLEVALUADORCODIGO) AS "codigo",
-              TRIM(ROLEVALUADORDESC)   AS "descripcion",
-              NVL(ROLEVALUADORORDEN, 100) AS "orden",
+              btrim((ROLEVALUADORNOMBRE)::text) AS "nombre",
+              btrim((ROLEVALUADORCODIGO)::text) AS "codigo",
+              btrim((ROLEVALUADORDESC)::text)   AS "descripcion",
+              COALESCE(ROLEVALUADORORDEN, 100) AS "orden",
               ROLEVALUADORACTIVO       AS "activo"
          FROM ROLEVALUADOR ${where}
-        ORDER BY NVL(ROLEVALUADORORDEN, 100), ROLEVALUADORNOMBRE`,
+        ORDER BY COALESCE(ROLEVALUADORORDEN, 100), ROLEVALUADORNOMBRE`,
     )
     return rows.map(r => ({
       id: Number(r.id),
@@ -168,24 +168,24 @@ export class CatalogosEvaluadorService {
     const n = (nombre ?? '').trim()
     if (!n) throw new BadRequestException('El nombre es obligatorio')
     const dup = await this.dataSource.query(
-      `SELECT 1 FROM ROLEVALUADOR WHERE UPPER(ROLEVALUADORNOMBRE) = UPPER(:1)`, [n],
+      `SELECT 1 FROM ROLEVALUADOR WHERE UPPER(ROLEVALUADORNOMBRE) = UPPER($1)`, [n],
     )
     if (dup[0]) throw new ConflictException('Ya existe un rol con ese nombre')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT ROLEVALUADOR_SEQ.NEXTVAL FROM dual`,
+      `SELECT ROLEVALUADOR_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO ROLEVALUADOR (ROLEVALUADORID, ROLEVALUADORNOMBRE, ROLEVALUADORDESC, ROLEVALUADORACTIVO)
-       VALUES (:1, :2, :3, 1)`,
+       VALUES ($1, $2, $3, 1)`,
       [id, n, (descripcion ?? '').trim() || null],
     )
     return { id, nombre: n }
   }
 
   async actualizarRol(id: number, cambios: { nombre?: string; descripcion?: string; activo?: boolean }) {
-    const filas = await this.dataSource.query(`SELECT 1 FROM ROLEVALUADOR WHERE ROLEVALUADORID = :1`, [id])
+    const filas = await this.dataSource.query(`SELECT 1 FROM ROLEVALUADOR WHERE ROLEVALUADORID = $1`, [id])
     if (!filas[0]) throw new NotFoundException('Rol no encontrado')
 
     const sets: string[] = []
@@ -205,7 +205,7 @@ export class CatalogosEvaluadorService {
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE ROLEVALUADOR SET ${sets.join(', ')} WHERE ROLEVALUADORID = :${params.length}`,
+      `UPDATE ROLEVALUADOR SET ${sets.join(', ')} WHERE ROLEVALUADORID = $${params.length}`,
       params,
     )
     return { message: 'Rol actualizado' }
@@ -216,8 +216,8 @@ export class CatalogosEvaluadorService {
     const rows: Array<{ id: number; nombre: string; descripcion: string | null; activo: number }> =
       await this.dataSource.query(
         `SELECT PROCESOID            AS "id",
-                TRIM(PROCESONOMBRE)  AS "nombre",
-                TRIM(PROCESODESC)    AS "descripcion",
+                btrim((PROCESONOMBRE)::text)  AS "nombre",
+                btrim((PROCESODESC)::text)    AS "descripcion",
                 PROCESOACTIVO        AS "activo"
            FROM PROCESOEVAL ${where}
           ORDER BY PROCESONOMBRE`,
@@ -229,24 +229,24 @@ export class CatalogosEvaluadorService {
     const n = (nombre ?? '').trim()
     if (!n) throw new BadRequestException('El nombre es obligatorio')
     const dup = await this.dataSource.query(
-      `SELECT 1 FROM PROCESOEVAL WHERE UPPER(PROCESONOMBRE) = UPPER(:1)`, [n],
+      `SELECT 1 FROM PROCESOEVAL WHERE UPPER(PROCESONOMBRE) = UPPER($1)`, [n],
     )
     if (dup[0]) throw new ConflictException('Ya existe un proceso con ese nombre')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT PROCESOEVAL_SEQ.NEXTVAL FROM dual`,
+      `SELECT PROCESOEVAL_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO PROCESOEVAL (PROCESOID, PROCESONOMBRE, PROCESODESC, PROCESOACTIVO)
-       VALUES (:1, :2, :3, 1)`,
+       VALUES ($1, $2, $3, 1)`,
       [id, n, (descripcion ?? '').trim() || null],
     )
     return { id, nombre: n }
   }
 
   async actualizarProceso(id: number, cambios: { nombre?: string; descripcion?: string; activo?: boolean }) {
-    const filas = await this.dataSource.query(`SELECT 1 FROM PROCESOEVAL WHERE PROCESOID = :1`, [id])
+    const filas = await this.dataSource.query(`SELECT 1 FROM PROCESOEVAL WHERE PROCESOID = $1`, [id])
     if (!filas[0]) throw new NotFoundException('Proceso no encontrado')
 
     const sets: string[] = []
@@ -266,7 +266,7 @@ export class CatalogosEvaluadorService {
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE PROCESOEVAL SET ${sets.join(', ')} WHERE PROCESOID = :${params.length}`,
+      `UPDATE PROCESOEVAL SET ${sets.join(', ')} WHERE PROCESOID = $${params.length}`,
       params,
     )
     return { message: 'Proceso actualizado' }
@@ -279,7 +279,7 @@ export class CatalogosEvaluadorService {
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
     const rows: Array<{ id: number; nombre: string; activo: number }> = await this.dataSource.query(
       `SELECT TIPOESTUDIOID          AS "id",
-              TRIM(TIPOESTUDIONOMBRE) AS "nombre",
+              btrim((TIPOESTUDIONOMBRE)::text) AS "nombre",
               TIPOESTUDIOACTIVO       AS "activo"
          FROM TIPOESTUDIO ${where}
         ORDER BY TIPOESTUDIONOMBRE`,
@@ -291,24 +291,24 @@ export class CatalogosEvaluadorService {
     const n = (nombre ?? '').trim()
     if (!n) throw new BadRequestException('El nombre es obligatorio')
     const dup = await this.dataSource.query(
-      `SELECT 1 FROM TIPOESTUDIO WHERE UPPER(TIPOESTUDIONOMBRE) = UPPER(:1)`, [n],
+      `SELECT 1 FROM TIPOESTUDIO WHERE UPPER(TIPOESTUDIONOMBRE) = UPPER($1)`, [n],
     )
     if (dup[0]) throw new ConflictException('Ya existe un tipo con ese nombre')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT TIPOESTUDIO_SEQ.NEXTVAL FROM dual`,
+      `SELECT TIPOESTUDIO_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO TIPOESTUDIO (TIPOESTUDIOID, TIPOESTUDIONOMBRE, TIPOESTUDIOACTIVO)
-       VALUES (:1, :2, 1)`,
+       VALUES ($1, $2, 1)`,
       [id, n],
     )
     return { id, nombre: n }
   }
 
   async actualizarTipoEstudio(id: number, cambios: { nombre?: string; activo?: boolean }) {
-    const filas = await this.dataSource.query(`SELECT 1 FROM TIPOESTUDIO WHERE TIPOESTUDIOID = :1`, [id])
+    const filas = await this.dataSource.query(`SELECT 1 FROM TIPOESTUDIO WHERE TIPOESTUDIOID = $1`, [id])
     if (!filas[0]) throw new NotFoundException('Tipo no encontrado')
 
     const sets: string[] = []
@@ -324,7 +324,7 @@ export class CatalogosEvaluadorService {
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE TIPOESTUDIO SET ${sets.join(', ')} WHERE TIPOESTUDIOID = :${params.length}`,
+      `UPDATE TIPOESTUDIO SET ${sets.join(', ')} WHERE TIPOESTUDIOID = $${params.length}`,
       params,
     )
     return { message: 'Tipo actualizado' }
@@ -336,8 +336,8 @@ export class CatalogosEvaluadorService {
       id: number; codigo: string; nombre: string; admiteMultiple: number; orden: number; activo: number
     }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOEVALID AS "id",
-              TRIM(CODIGO)        AS "codigo",
-              TRIM(NOMBRE)        AS "nombre",
+              btrim((CODIGO)::text)        AS "codigo",
+              btrim((NOMBRE)::text)        AS "nombre",
               ADMITEMULTIPLE      AS "admiteMultiple",
               ORDEN               AS "orden",
               ACTIVO              AS "activo"
@@ -369,19 +369,19 @@ export class CatalogosEvaluadorService {
     if (!nombre) throw new BadRequestException('El nombre es obligatorio')
 
     const dup = await this.dataSource.query(
-      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE UPPER(CODIGO) = :1`, [codigo],
+      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE UPPER(CODIGO) = $1`, [codigo],
     )
     if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
 
     // MAX+1: la tabla no tiene secuencia asociada
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
-      `SELECT NVL(MAX(TIPODOCUMENTOEVALID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOEVAL`,
+      `SELECT COALESCE(MAX(TIPODOCUMENTOEVALID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOEVAL`,
     )
     const id = Number(seq[0].NUEVO)
     await this.dataSource.query(
       `INSERT INTO TIPODOCUMENTOEVAL
          (TIPODOCUMENTOEVALID, CODIGO, NOMBRE, ADMITEMULTIPLE, ORDEN, ACTIVO)
-       VALUES (:1, :2, :3, :4, :5, 1)`,
+       VALUES ($1, $2, $3, $4, $5, 1)`,
       [id, codigo, nombre, cambios.admiteMultiple === false ? 0 : 1, cambios.orden ?? 100],
     )
     return { id, codigo, nombre }
@@ -391,7 +391,7 @@ export class CatalogosEvaluadorService {
     nombre?: string; admiteMultiple?: boolean; orden?: number; activo?: boolean;
   }) {
     const filas = await this.dataSource.query(
-      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE TIPODOCUMENTOEVALID = :1`, [id],
+      `SELECT 1 FROM TIPODOCUMENTOEVAL WHERE TIPODOCUMENTOEVALID = $1`, [id],
     )
     if (!filas[0]) throw new NotFoundException('Tipo de documento no encontrado')
 
@@ -416,7 +416,7 @@ export class CatalogosEvaluadorService {
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE TIPODOCUMENTOEVAL SET ${sets.join(', ')} WHERE TIPODOCUMENTOEVALID = :${params.length}`,
+      `UPDATE TIPODOCUMENTOEVAL SET ${sets.join(', ')} WHERE TIPODOCUMENTOEVALID = $${params.length}`,
       params,
     )
     return { message: 'Tipo de documento actualizado' }
@@ -429,9 +429,9 @@ export class CatalogosEvaluadorService {
       extensionesPermitidas: string; orden: number; activo: number
     }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOCONVID     AS "id",
-              TRIM(CODIGO)            AS "codigo",
-              TRIM(NOMBRE)            AS "nombre",
-              TRIM(EXTENSIONESPERMITIDAS) AS "extensionesPermitidas",
+              btrim((CODIGO)::text)            AS "codigo",
+              btrim((NOMBRE)::text)            AS "nombre",
+              btrim((EXTENSIONESPERMITIDAS)::text) AS "extensionesPermitidas",
               ORDEN                   AS "orden",
               ACTIVO                  AS "activo"
          FROM TIPODOCUMENTOCONV ${where}
@@ -466,20 +466,20 @@ export class CatalogosEvaluadorService {
     if (!nombre) throw new BadRequestException('El nombre es obligatorio')
 
     const dup = await this.dataSource.query(
-      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE UPPER(CODIGO) = :1`, [codigo],
+      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE UPPER(CODIGO) = $1`, [codigo],
     )
     if (dup[0]) throw new ConflictException('Ya existe un tipo con ese código')
 
     // MAX+1: la tabla no tiene secuencia asociada
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
-      `SELECT NVL(MAX(TIPODOCUMENTOCONVID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOCONV`,
+      `SELECT COALESCE(MAX(TIPODOCUMENTOCONVID), 0) + 1 AS "NUEVO" FROM TIPODOCUMENTOCONV`,
     )
     const id = Number(seq[0].NUEVO)
     const extensiones = this.normalizarExtensiones(cambios.extensionesPermitidas) || 'pdf'
     await this.dataSource.query(
       `INSERT INTO TIPODOCUMENTOCONV
          (TIPODOCUMENTOCONVID, CODIGO, NOMBRE, EXTENSIONESPERMITIDAS, ORDEN, ACTIVO)
-       VALUES (:1, :2, :3, :4, :5, 1)`,
+       VALUES ($1, $2, $3, $4, $5, 1)`,
       [id, codigo, nombre, extensiones, cambios.orden ?? 100],
     )
     return { id, codigo, nombre, extensionesPermitidas: extensiones }
@@ -489,7 +489,7 @@ export class CatalogosEvaluadorService {
     nombre?: string; extensionesPermitidas?: string; orden?: number; activo?: boolean;
   }) {
     const filas = await this.dataSource.query(
-      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE TIPODOCUMENTOCONVID = :1`, [id],
+      `SELECT 1 FROM TIPODOCUMENTOCONV WHERE TIPODOCUMENTOCONVID = $1`, [id],
     )
     if (!filas[0]) throw new NotFoundException('Tipo de documento no encontrado')
 
@@ -515,7 +515,7 @@ export class CatalogosEvaluadorService {
     if (sets.length === 0) return { message: 'Sin cambios' }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE TIPODOCUMENTOCONV SET ${sets.join(', ')} WHERE TIPODOCUMENTOCONVID = :${params.length}`,
+      `UPDATE TIPODOCUMENTOCONV SET ${sets.join(', ')} WHERE TIPODOCUMENTOCONVID = $${params.length}`,
       params,
     )
     return { message: 'Tipo de documento actualizado' }
@@ -535,7 +535,7 @@ export class CatalogosEvaluadorService {
     const where = soloActivas ? `WHERE REGIONALACTIVO = 1` : ''
     const rows: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT REGIONALID           AS "id",
-              TRIM(REGIONALNOMBRE) AS "nombre"
+              btrim((REGIONALNOMBRE)::text) AS "nombre"
          FROM REGIONAL ${where}
         ORDER BY REGIONALNOMBRE`,
     )
@@ -554,7 +554,7 @@ export class CatalogosEvaluadorService {
     const rows: Array<{ id: number; regionalId: number; nombre: string }> = await this.dataSource.query(
       `SELECT CENTROID          AS "id",
               REGIONALID        AS "regionalId",
-              TRIM(CENTRONOMBRE) AS "nombre"
+              btrim((CENTRONOMBRE)::text) AS "nombre"
          FROM CENTROFORMACION ${where}
         ORDER BY CENTRONOMBRE`,
       params,
@@ -576,13 +576,13 @@ export class CatalogosEvaluadorService {
     const rows: Array<{ id: number; ciudad: string; depto: string }> = await this.dataSource.query(
       `SELECT * FROM (
          SELECT c.CIUDADID                AS "id",
-                TRIM(c.CIUDADNOMBRE)      AS "ciudad",
-                TRIM(d.DEPARTAMENTONOMBRE) AS "depto"
+                btrim((c.CIUDADNOMBRE)::text)      AS "ciudad",
+                btrim((d.DEPARTAMENTONOMBRE)::text) AS "depto"
            FROM CIUDAD       c
            JOIN DEPARTAMENTO d ON d.DEPARTAMENTOID = c.DEPARTAMENTOID
-          WHERE UPPER(TRIM(c.CIUDADNOMBRE)) LIKE :1 ESCAPE '\\'
+          WHERE UPPER(btrim((c.CIUDADNOMBRE)::text)) LIKE $1 ESCAPE '\\'
           ORDER BY c.CIUDADNOMBRE ASC
-       ) WHERE ROWNUM <= :2`,
+       ) LIMIT $2`,
       [like, lim],
     )
     return rows.map(r => ({

@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { leerDocumento } from '../common/documentos/documentos-disco'
 
 export interface MiEvaluador {
   evaluadorId: number
@@ -26,10 +27,10 @@ export class MiExpedienteService {
                 e.EVALUADORACTIVO     AS "activo"
            FROM USUARIO u
            JOIN PERSONA p
-             ON LOWER(TRIM(p.PERSONAEMAIL))              = LOWER(TRIM(u.USUARIOEMAIL))
-             OR LOWER(TRIM(p.PERSONAEMAILINSTITUCIONAL)) = LOWER(TRIM(u.USUARIOEMAIL))
+             ON LOWER(btrim((p.PERSONAEMAIL)::text))              = LOWER(btrim((u.USUARIOEMAIL)::text))
+             OR LOWER(btrim((p.PERSONAEMAILINSTITUCIONAL)::text)) = LOWER(btrim((u.USUARIOEMAIL)::text))
            JOIN EVALUADOR e ON e.PERSONAID = p.PERSONAID
-          WHERE u.USUARIOID = :1
+          WHERE u.USUARIOID = $1
             AND u.USUARIOESTADO = 1`,
         [usuarioId],
       )
@@ -65,25 +66,25 @@ export class MiExpedienteService {
 
   esMiDocumento(docId: number, evaluadorId: number) {
     return this.exigirPropio(
-      `SELECT 1 FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1 AND EVALUADORID = :2`,
+      `SELECT 1 FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = $1 AND EVALUADORID = $2`,
       docId, evaluadorId, 'el documento')
   }
 
   esMiEstudio(estudioId: number, evaluadorId: number) {
     return this.exigirPropio(
-      `SELECT 1 FROM EVALUADORESTUDIO WHERE ESTUDIOID = :1 AND EVALUADORID = :2`,
+      `SELECT 1 FROM EVALUADORESTUDIO WHERE ESTUDIOID = $1 AND EVALUADORID = $2`,
       estudioId, evaluadorId, 'el estudio')
   }
 
   esMiExperiencia(experienciaId: number, evaluadorId: number) {
     return this.exigirPropio(
-      `SELECT 1 FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = :1 AND EVALUADORID = :2`,
+      `SELECT 1 FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = $1 AND EVALUADORID = $2`,
       experienciaId, evaluadorId, 'la experiencia')
   }
 
   esMiTic(ticId: number, evaluadorId: number) {
     return this.exigirPropio(
-      `SELECT 1 FROM EVALUADORTIC WHERE TICID = :1 AND EVALUADORID = :2`,
+      `SELECT 1 FROM EVALUADORTIC WHERE TICID = $1 AND EVALUADORID = $2`,
       ticId, evaluadorId, 'la certificación')
   }
 
@@ -91,7 +92,7 @@ export class MiExpedienteService {
     return this.exigirPropio(
       `SELECT 1 FROM EVALUADORAPROBACION a
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = a.PARTICIPACIONID
-        WHERE a.APROBACIONID = :1 AND pa.EVALUADORID = :2`,
+        WHERE a.APROBACIONID = $1 AND pa.EVALUADORID = $2`,
       aprobacionId, evaluadorId, 'la evidencia')
   }
 
@@ -100,7 +101,7 @@ export class MiExpedienteService {
     return this.exigirPropio(
       `SELECT 1 FROM EVALUADORCERTIFICADO ce
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = ce.PARTICIPACIONID
-        WHERE ce.CERTIFICADOID = :1 AND pa.EVALUADORID = :2`,
+        WHERE ce.CERTIFICADOID = $1 AND pa.EVALUADORID = $2`,
       certificadoId, evaluadorId, 'el certificado')
   }
 
@@ -111,16 +112,16 @@ export class MiExpedienteService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID       AS "participacionId",
               pa.ANIO                  AS "anio",
-              TRIM(pa.PERIODO)         AS "periodo",
+              btrim((pa.PERIODO)::text)         AS "periodo",
               pa.CONVOCATORIAID        AS "convocatoriaId",
-              TRIM(cv.NOMBRE)          AS "convocatoria",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(ar.NOMBRE)          AS "area",
-              TRIM(pe.PROCESONOMBRE)   AS "proceso",
-              TRIM(es.CODIGO)          AS "estadoCodigo",
-              TRIM(es.NOMBRE)          AS "estado",
-              NVL(es.ESNEGATIVO, 0)    AS "estadoNegativo",
-              TRIM(pa.MOTIVONOPARTICIPA) AS "motivo",
+              btrim((cv.NOMBRE)::text)          AS "convocatoria",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((ar.NOMBRE)::text)          AS "area",
+              btrim((pe.PROCESONOMBRE)::text)   AS "proceso",
+              btrim((es.CODIGO)::text)          AS "estadoCodigo",
+              btrim((es.NOMBRE)::text)          AS "estado",
+              COALESCE(es.ESNEGATIVO, 0)    AS "estadoNegativo",
+              btrim((pa.MOTIVONOPARTICIPA)::text) AS "motivo",
               cv.FECHAINICIO           AS "fechaInicio",
               cv.FECHAFIN              AS "fechaFin"
          FROM EVALUADORPARTICIPACION pa
@@ -129,7 +130,7 @@ export class MiExpedienteService {
          LEFT JOIN AREAEVALUACION  ar ON ar.AREAID = pa.AREAID
          LEFT JOIN PROCESOEVAL      pe ON pe.PROCESOID = pa.PROCESOID
          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
-        WHERE pa.EVALUADORID = :1
+        WHERE pa.EVALUADORID = $1
         ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC`,
       [evaluadorId],
     )
@@ -152,15 +153,15 @@ export class MiExpedienteService {
       `SELECT a.APROBACIONID           AS "aprobacionId",
               a.PARTICIPACIONID        AS "participacionId",
               pa.ANIO                  AS "anio",
-              TRIM(cv.NOMBRE)          AS "convocatoria",
-              TRIM(a.CORREOEVIDENCIANOMBRE) AS "nombre",
-              TRIM(a.CORREOEVIDENCIAMIME)   AS "mime",
-              DBMS_LOB.GETLENGTH(a.CORREOEVIDENCIA) AS "bytes",
+              btrim((cv.NOMBRE)::text)          AS "convocatoria",
+              btrim((a.CORREOEVIDENCIANOMBRE)::text) AS "nombre",
+              btrim((a.CORREOEVIDENCIAMIME)::text)   AS "mime",
+              length(a.CORREOEVIDENCIA) AS "bytes",
               a.FECHAAPROBACION        AS "fecha"
          FROM EVALUADORAPROBACION a
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = a.PARTICIPACIONID
          LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-        WHERE pa.EVALUADORID = :1
+        WHERE pa.EVALUADORID = $1
           AND a.CORREOEVIDENCIA IS NOT NULL
         ORDER BY pa.ANIO DESC, a.APROBACIONID DESC`,
       [evaluadorId],
@@ -172,15 +173,16 @@ export class MiExpedienteService {
     const filas: Array<{ blob: Buffer | null; mime: string | null; nombre: string | null }> =
       await this.dataSource.query(
         `SELECT CORREOEVIDENCIA           AS "blob",
-                TRIM(CORREOEVIDENCIAMIME) AS "mime",
-                TRIM(CORREOEVIDENCIANOMBRE) AS "nombre"
-           FROM EVALUADORAPROBACION WHERE APROBACIONID = :1`,
+                btrim((CORREOEVIDENCIAMIME)::text) AS "mime",
+                btrim((CORREOEVIDENCIANOMBRE)::text) AS "nombre"
+           FROM EVALUADORAPROBACION WHERE APROBACIONID = $1`,
         [aprobacionId],
       )
     const f = filas[0]
     if (!f?.blob || f.blob.length === 0) throw new NotFoundException('La evidencia no tiene archivo')
+    const enDisco = leerDocumento('evaluadoraprobacion', 'correoevidencia', aprobacionId)
     return {
-      buffer: f.blob,
+      buffer: enDisco ?? f.blob,
       mime: f.mime || 'application/octet-stream',
       nombre: f.nombre || `evidencia-${aprobacionId}`,
     }

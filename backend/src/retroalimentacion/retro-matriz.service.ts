@@ -247,18 +247,18 @@ export class RetroMatrizService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID  AS "participacionId",
               pa.EVALUADORID      AS "evaluadorId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(r.ROLEVALUADORCODIGO) AS "rol",
-              TRIM(ar.CODIGO)     AS "area",
-              NVL(pa.ESTRANSVERSAL, 0)   AS "esTransversal"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((r.ROLEVALUADORCODIGO)::text) AS "rol",
+              btrim((ar.CODIGO)::text)     AS "area",
+              COALESCE(pa.ESTRANSVERSAL, 0)   AS "esTransversal"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e  ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p  ON p.PERSONAID   = e.PERSONAID
          LEFT JOIN ROLEVALUADOR    r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION  ar ON ar.AREAID        = pa.AREAID
          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
-        WHERE pa.CONVOCATORIAID = :1
-          AND NVL(es.ESNEGATIVO, 0) = 0
+        WHERE pa.CONVOCATORIAID = $1
+          AND COALESCE(es.ESNEGATIVO, 0) = 0
         ORDER BY pa.PARTICIPACIONID`,
       [convocatoriaId],
     )
@@ -294,7 +294,7 @@ export class RetroMatrizService {
       `SELECT pg.PARTICIPACIONID AS "participacionId", pg.GRUPONUMERO AS "grupo"
          FROM EVALUADORPARTGRUPO pg
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = pg.PARTICIPACIONID
-        WHERE pa.CONVOCATORIAID = :1
+        WHERE pa.CONVOCATORIAID = $1
         ORDER BY pg.GRUPONUMERO`,
       [convocatoriaId],
     )
@@ -312,13 +312,13 @@ export class RetroMatrizService {
   ): Promise<Map<number, Array<{ area: string; roles: string[] }>>> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT al.PARTICIPACIONID AS "participacionId",
-              TRIM(ar.CODIGO)    AS "area",
-              TRIM(r.ROLEVALUADORCODIGO) AS "rol"
+              btrim((ar.CODIGO)::text)    AS "area",
+              btrim((r.ROLEVALUADORCODIGO)::text) AS "rol"
          FROM EVALUADORPARTALCANCE al
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = al.PARTICIPACIONID
          JOIN AREAEVALUACION ar ON ar.AREAID = al.AREAID
          JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = al.ROLEVALUADORID
-        WHERE pa.CONVOCATORIAID = :1`,
+        WHERE pa.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     const mapa = new Map<number, Array<{ area: string; roles: string[] }>>()

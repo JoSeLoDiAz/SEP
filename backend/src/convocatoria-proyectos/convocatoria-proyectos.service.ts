@@ -128,7 +128,7 @@ export class ConvocatoriaProyectosService {
     const json = JSON.stringify(preview)
 
     const idRow: Array<{ id: number }> = await this.dataSource.query(
-      `SELECT CONVPROYGUARDADO_SEQ.NEXTVAL AS "id" FROM dual`,
+      `SELECT CONVPROYGUARDADO_SEQ.NEXTVAL AS "id" `,
     )
     const id = Number(idRow[0].id)
 
@@ -143,7 +143,7 @@ export class ConvocatoriaProyectosService {
       `INSERT INTO CONVPROYGUARDADO
          (GUARDADOID, CONVOCATORIAID, NIT, RAZONSOCIAL, NOMBREPROYECTO, MODALIDAD,
           NUMAF, NUMBENEF, VALORTOTAL, COFINSENA, USUARIOID, FECHAGUARDADO, DATOSJSON)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, ${AHORA_UTC}, ${clobExpr})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, ${AHORA_UTC}, ${clobExpr})`,
       [
         id,
         convocatoriaId,
@@ -204,7 +204,7 @@ export class ConvocatoriaProyectosService {
   async convocatorias() {
     return this.dataSource.query(
       `SELECT c.CONVOCATORIAID           AS "id",
-              TRIM(c.CONVOCATORIANOMBRE) AS "nombre",
+              btrim((c.CONVOCATORIANOMBRE)::text) AS "nombre",
               c.CONVOCATORIAANIO         AS "anio",
               (SELECT COUNT(*) FROM CONVPROYGUARDADO g WHERE g.CONVOCATORIAID = c.CONVOCATORIAID) AS "guardados"
          FROM CONVOCATORIA c
@@ -218,10 +218,10 @@ export class ConvocatoriaProyectosService {
     if (convocatoriaId) { params.push(convocatoriaId); where += ` AND CONVOCATORIAID = :1` }
     const r = await this.dataSource.query(
       `SELECT COUNT(*)                 AS "proyectos",
-              NVL(SUM(NUMAF), 0)       AS "afs",
-              NVL(SUM(NUMBENEF), 0)    AS "beneficiarios",
-              NVL(SUM(VALORTOTAL), 0)  AS "valorTotal",
-              NVL(SUM(COFINSENA), 0)   AS "cofinSena"
+              COALESCE(SUM(NUMAF), 0)       AS "afs",
+              COALESCE(SUM(NUMBENEF), 0)    AS "beneficiarios",
+              COALESCE(SUM(VALORTOTAL), 0)  AS "valorTotal",
+              COALESCE(SUM(COFINSENA), 0)   AS "cofinSena"
          FROM CONVPROYGUARDADO WHERE ${where}`,
       params,
     )
@@ -234,7 +234,7 @@ export class ConvocatoriaProyectosService {
 
   async detalle(id: number): Promise<PreviewImportacion> {
     const rows = await this.dataSource.query(
-      `SELECT DATOSJSON AS "datos" FROM CONVPROYGUARDADO WHERE GUARDADOID = :1`,
+      `SELECT DATOSJSON AS "datos" FROM CONVPROYGUARDADO WHERE GUARDADOID = $1`,
       [id],
     )
     if (!rows[0]) throw new NotFoundException('Proyecto guardado no encontrado')
@@ -250,7 +250,7 @@ export class ConvocatoriaProyectosService {
 }
 
   async eliminar(id: number) {
-    await this.dataSource.query(`DELETE FROM CONVPROYGUARDADO WHERE GUARDADOID = :1`, [id])
+    await this.dataSource.query(`DELETE FROM CONVPROYGUARDADO WHERE GUARDADOID = $1`, [id])
     return { ok: true }
   }
 

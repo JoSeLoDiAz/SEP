@@ -62,8 +62,8 @@ describe('CronogramaService.radicarCronograma', () => {
     const ins = enQr.find((l) => l.sql.startsWith('INSERT INTO CRONOGRAMARADICADO'))
     expect(ins?.sql).toContain('VALUES (NULL, ')
     expect(ins?.sql).toContain('RETURNING RADICADOID INTO')
-    expect(ins?.sql).toContain('CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)')
-    expect(ins?.sql).not.toContain('SYSDATE')
+    expect(ins?.sql).toContain('CAST((now() AT TIME ZONE \'UTC\') AS timestamp)')
+    expect(ins?.sql).not.toContain('(now() AT TIME ZONE \'UTC\')')
     // los históricos van como NCLOB tipado (LOB temporal)
     expect(ins?.params).toContainEqual({ type: expect.anything(), val: 'CP000001-RADICADO;CP000002-RADICADO' })
     expect(ins?.params).toContainEqual({ type: expect.anything(), val: 'CV000001-RADICADO' })
@@ -75,7 +75,7 @@ describe('CronogramaService.radicarCronograma', () => {
   it('sin trigger (XE) sigue con MAX+1 y marca las sesiones con ese mismo id', async () => {
     reiniciarTriggersDeId(new Map())
     const { servicio, enQr } = falsos(pendientes, (sql) => {
-      if (sql.startsWith('SELECT NVL(MAX(RADICADOID)')) return [{ id: 3015 }]
+      if (sql.startsWith('SELECT COALESCE(MAX(RADICADOID)')) return [{ id: 3015 }]
       if (sql.includes('MAX(NUMERORADICADO)')) return [{ n: 1 }]
       if (sql.startsWith('INSERT INTO CRONOGRAMARADICADO')) return [[3015]]
       return []
@@ -85,7 +85,7 @@ describe('CronogramaService.radicarCronograma', () => {
 
     expect(r.radicadoId).toBe(3015)
     const ins = enQr.find((l) => l.sql.startsWith('INSERT INTO CRONOGRAMARADICADO'))
-    expect(ins?.sql).toContain('VALUES (:1, ')
+    expect(ins?.sql).toContain('VALUES ($1, ')
     expect(ins?.params?.[0]).toBe(3015)
     expect(enQr.find((l) => l.sql.includes('UPDATE CRONOGRAMAPRESENCIAL'))?.params).toEqual([3015, 11, 12])
     expect(enQr.find((l) => l.sql.includes('UPDATE CRONOGRAMAVIRTUAL'))?.params).toEqual([3015, 21])
@@ -97,14 +97,14 @@ describe('CronogramaService: gates por convenio', () => {
 
   it('el radicado resuelve su proyecto por RADICADOID y bloquea si el convenio no está en ejecución', async () => {
     const { servicio, qr, enDs } = falsos((sql) => {
-      if (sql.includes('FROM CRONOGRAMARADICADO WHERE RADICADOID = :1')) return [{ proyectoId: 77 }]
+      if (sql.includes('FROM CRONOGRAMARADICADO WHERE RADICADOID = $1')) return [{ proyectoId: 77 }]
       if (sql.includes('FROM CONVENIOS WHERE PROYECTOID')) return [{ estado: 0 }]
       return []
     }, () => [])
 
     await expect(servicio.marcarTodasActualizadas(5)).rejects.toBeInstanceOf(ForbiddenException)
     expect(enDs[0]).toEqual({
-      sql: 'SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMARADICADO WHERE RADICADOID = :1',
+      sql: 'SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMARADICADO WHERE RADICADOID = $1',
       params: [5],
     })
     expect(enDs[1].params).toEqual([77])

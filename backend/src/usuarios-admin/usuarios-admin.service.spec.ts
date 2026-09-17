@@ -57,8 +57,8 @@ describe('UsuariosAdminService.crearUsuario', () => {
     expect(llamadas).toHaveLength(3)
     expect(llamadas[0].sql).toBe(
       'INSERT INTO USUARIO (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO, USUARIOTIPO, ' +
-        'USUARIOEMAIL, USUARIOLLAVEENCRIPTACION) VALUES (NULL, :1, :2, CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE), ' +
-        ':3, :4, :5, :6) RETURNING USUARIOID INTO :7',
+        'USUARIOEMAIL, USUARIOLLAVEENCRIPTACION) VALUES (NULL, $1, $2, CAST((now() AT TIME ZONE \'UTC\') AS timestamp), ' +
+        '$3, $4, $5, $6) RETURNING USUARIOID INTO $7',
     )
     expect(llamadas[0].params?.slice(0, 1)).toEqual([9])
     expect(llamadas[1].sql).toContain('INSERT INTO USUARIOPERFIL')
@@ -77,9 +77,9 @@ describe('UsuariosAdminService.crearUsuario', () => {
     const r = await servicio.crearUsuario(conPersona)
 
     expect(r.usuarioId).toBe(91)
-    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, :1,')
+    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, $1,')
     expect(llamadas[1].params).toEqual([91, 9])
-    expect(llamadas[2].sql).toContain('VALUES (PERSONAID.NEXTVAL, :1,')
+    expect(llamadas[2].sql).toContain('VALUES (PERSONAID.NEXTVAL, $1,')
   })
 
   it('sin datos de persona solo crea el usuario y su perfil', async () => {

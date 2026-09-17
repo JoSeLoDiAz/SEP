@@ -93,18 +93,18 @@ export class TrayectoriaService {
              FROM EVALUADORDOCUMENTO dc
              JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
             WHERE dc.EVALUADORID = :ev
-              AND TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'))      AS "totalCertificados",
+              AND btrim((td.CODIGO)::text) = 'CERTIFICADO_PARTICIPACION'))      AS "totalCertificados",
          (SELECT ROUND(AVG(rr.PROMEDIO), 2)
             FROM RETRORESPUESTA rr
             JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = rr.PARTEVALUADOID
             LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
            WHERE pa.EVALUADORID = :ev
-             AND NVL(es.ESNEGATIVO, 0) = 0)                            AS "promedioRetro",
+             AND COALESCE(es.ESNEGATIVO, 0) = 0)                            AS "promedioRetro",
          (SELECT COUNT(*)
             FROM RETRORESPUESTA rr
             JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = rr.PARTEVALUADOID
            WHERE pa.EVALUADORID = :ev)                                 AS "totalRetroRecibidas"
-       FROM DUAL`,
+       `,
       'ev', evaluadorId,
     )
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
@@ -123,7 +123,7 @@ export class TrayectoriaService {
               pr.PUNTAJEMINIMO  AS "minimo",
               pr.APROBADA       AS "aprobada"
          FROM EVALUADORPRUEBA pr
-        WHERE pr.EVALUADORID = :1
+        WHERE pr.EVALUADORID = $1
         ORDER BY pr.ANIO DESC, pr.EFECTIVIDAD DESC NULLS LAST, pr.PRUEBAID DESC
         FETCH FIRST 1 ROWS ONLY`,
       [evaluadorId],
@@ -190,7 +190,7 @@ export class TrayectoriaService {
               COUNT(*)         AS "pruebas",
               MAX(pr.PUNTAJEMAYOR) AS "mejorPuntaje"
          FROM EVALUADORPRUEBA pr
-        WHERE pr.EVALUADORID = :1
+        WHERE pr.EVALUADORID = $1
           AND pr.PARTICIPACIONID IS NULL
         GROUP BY pr.ANIO
         ORDER BY pr.ANIO DESC`,
@@ -515,7 +515,7 @@ export class TrayectoriaService {
       throw new BadRequestException('Identificador de evaluador inválido')
     }
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId],
+      `SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId],
     )
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
   }
@@ -525,38 +525,38 @@ export class TrayectoriaService {
     SELECT pa.PARTICIPACIONID          AS "participacionId",
            pa.EVALUADORID              AS "evaluadorId",
            pa.ANIO                     AS "anio",
-           TRIM(pa.PERIODO)            AS "periodo",
+           btrim((pa.PERIODO)::text)            AS "periodo",
            pa.ROLEVALUADORID           AS "rolEvaluadorId",
-           TRIM(r.ROLEVALUADORNOMBRE)  AS "rolNombre",
-           TRIM(r.ROLEVALUADORCODIGO)  AS "rolCodigo",
+           btrim((r.ROLEVALUADORNOMBRE)::text)  AS "rolNombre",
+           btrim((r.ROLEVALUADORCODIGO)::text)  AS "rolCodigo",
            pa.PROCESOID                AS "procesoId",
-           TRIM(pe.PROCESONOMBRE)      AS "procesoNombre",
+           btrim((pe.PROCESONOMBRE)::text)      AS "procesoNombre",
            pa.MODALIDADPARTID          AS "modalidadId",
-           TRIM(mo.NOMBRE)             AS "modalidadNombre",
+           btrim((mo.NOMBRE)::text)             AS "modalidadNombre",
            pa.AREAID                   AS "areaId",
-           TRIM(ar.NOMBRE)             AS "areaNombre",
+           btrim((ar.NOMBRE)::text)             AS "areaNombre",
            pa.ESTADOPARTID             AS "estadoId",
-           TRIM(es.CODIGO)             AS "estadoCodigo",
-           TRIM(es.NOMBRE)             AS "estadoNombre",
-           TRIM(es.COLOR)              AS "estadoColor",
-           NVL(es.ESFINAL, 0)          AS "estadoFinal",
-           NVL(es.ESNEGATIVO, 0)       AS "estadoNegativo",
+           btrim((es.CODIGO)::text)             AS "estadoCodigo",
+           btrim((es.NOMBRE)::text)             AS "estadoNombre",
+           btrim((es.COLOR)::text)              AS "estadoColor",
+           COALESCE(es.ESFINAL, 0)          AS "estadoFinal",
+           COALESCE(es.ESNEGATIVO, 0)       AS "estadoNegativo",
            pa.CONVOCATORIAID           AS "convocatoriaId",
-           TRIM(cv.NOMBRE)             AS "convocatoriaNombre",
+           btrim((cv.NOMBRE)::text)             AS "convocatoriaNombre",
            -- sin notas de corte no hay cómo marcar aprobado el curso ni la prueba
            cv.CALIFICACIONMINIMACURSO  AS "corteCurso",
            cv.PUNTAJEMINIMOPRUEBA      AS "cortePrueba",
-           NVL(pa.ESTRANSVERSAL, 0)    AS "esTransversal",
-           TRIM(pa.MOTIVONOPARTICIPA)  AS "motivoNoParticipa",
+           COALESCE(pa.ESTRANSVERSAL, 0)    AS "esTransversal",
+           btrim((pa.MOTIVONOPARTICIPA)::text)  AS "motivoNoParticipa",
            pa.FECHAINICIO              AS "fechaInicio",
            pa.FECHAFIN                 AS "fechaFin",
-           TRIM(pa.MESA)               AS "mesa",
-           TRIM(pa.EQUIPOEVALUADOR)    AS "equipoEvaluador",
+           btrim((pa.MESA)::text)               AS "mesa",
+           btrim((pa.EQUIPOEVALUADOR)::text)    AS "equipoEvaluador",
            pa.DINAMIZADORPERSONAID     AS "dinamizadorPersonaId",
            -- primero el texto libre (v51); si no hay, el nombre de la persona relacionada.
            -- TO_NCHAR: DINAMIZADOR es VARCHAR2 y los nombres NVARCHAR2
-           TRIM(COALESCE(TO_NCHAR(pa.DINAMIZADOR),
-                         TRIM(di.PERSONANOMBRES) || ' ' || TRIM(di.PERSONAPRIMERAPELLIDO))) AS "dinamizadorNombre"
+           btrim((COALESCE((pa.DINAMIZADOR)::text,
+                         btrim((di.PERSONANOMBRES)::text) || ' ' || btrim((di.PERSONAPRIMERAPELLIDO)::text)))::text) AS "dinamizadorNombre"
       FROM EVALUADORPARTICIPACION pa
       LEFT JOIN ROLEVALUADOR         r  ON r.ROLEVALUADORID  = pa.ROLEVALUADORID
       LEFT JOIN PROCESOEVAL          pe ON pe.PROCESOID      = pa.PROCESOID
@@ -670,14 +670,14 @@ export class TrayectoriaService {
          -- los históricos se cargaron sin participación, solo con año
          (SELECT COUNT(*) FROM EVALUADORDOCUMENTO dc
             JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
-           WHERE TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+           WHERE btrim((td.CODIGO)::text) = 'CERTIFICADO_PARTICIPACION'
              AND (dc.PARTICIPACIONID = pa.PARTICIPACIONID
                OR (dc.PARTICIPACIONID IS NULL
                    AND dc.EVALUADORID = pa.EVALUADORID
                    AND dc.ANIOREFERENCIA = pa.ANIO)))                 AS "certificadoCargado"
 
        FROM EVALUADORPARTICIPACION pa
-      WHERE pa.EVALUADORID = :1`,
+      WHERE pa.EVALUADORID = $1`,
       [evaluadorId],
     )
     return rows as unknown as ContadoresRow[]
@@ -686,16 +686,16 @@ export class TrayectoriaService {
   private async cargarAprobacion(participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ap.APROBACIONID                 AS "aprobacionId",
-              TRIM(ap.APROBADORNOMBRE)        AS "aprobadorNombre",
-              TRIM(ap.APROBADOREMAIL)         AS "aprobadorEmail",
-              TRIM(ap.APROBADORCARGO)         AS "aprobadorCargo",
+              btrim((ap.APROBADORNOMBRE)::text)        AS "aprobadorNombre",
+              btrim((ap.APROBADOREMAIL)::text)         AS "aprobadorEmail",
+              btrim((ap.APROBADORCARGO)::text)         AS "aprobadorCargo",
               ap.FECHAAPROBACION              AS "fechaAprobacion",
-              TRIM(ap.CORREOEVIDENCIANOMBRE)  AS "evidenciaNombre",
-              TRIM(ap.CORREOEVIDENCIAMIME)    AS "evidenciaMime",
+              btrim((ap.CORREOEVIDENCIANOMBRE)::text)  AS "evidenciaNombre",
+              btrim((ap.CORREOEVIDENCIAMIME)::text)    AS "evidenciaMime",
               CASE WHEN ap.CORREOEVIDENCIA IS NULL THEN 0 ELSE 1 END AS "tieneEvidencia",
-              TRIM(ap.OBSERVACIONES)          AS "observaciones"
+              btrim((ap.OBSERVACIONES)::text)          AS "observaciones"
          FROM EVALUADORAPROBACION ap
-        WHERE ap.PARTICIPACIONID = :1`,
+        WHERE ap.PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (!rows[0]) return null
@@ -709,9 +709,9 @@ export class TrayectoriaService {
   private async cargarCapacitaciones(participacionId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ca.CAPACITACIONID       AS "capacitacionId",
-              TRIM(ca.NOMBRE)         AS "nombre",
-              TRIM(ca.ORIGEN)         AS "origen",
-              TRIM(ca.PLATAFORMA)     AS "plataforma",
+              btrim((ca.NOMBRE)::text)         AS "nombre",
+              btrim((ca.ORIGEN)::text)         AS "origen",
+              btrim((ca.PLATAFORMA)::text)     AS "plataforma",
               ca.HORAS                AS "horas",
               ca.FECHAINICIO          AS "fechaInicio",
               ca.FECHAFIN             AS "fechaFin",
@@ -719,11 +719,11 @@ export class TrayectoriaService {
               ca.CALIFICACIONMINIMA   AS "calificacionMinima",
               ca.APROBADO             AS "aprobado",
               ca.INTENTOS             AS "intentos",
-              TRIM(ca.ARCHIVONOMBRE)  AS "archivoNombre",
+              btrim((ca.ARCHIVONOMBRE)::text)  AS "archivoNombre",
               CASE WHEN ca.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
-              TRIM(ca.OBSERVACIONES)  AS "observaciones"
+              btrim((ca.OBSERVACIONES)::text)  AS "observaciones"
          FROM EVALUADORCAPACITACION ca
-        WHERE ca.PARTICIPACIONID = :1
+        WHERE ca.PARTICIPACIONID = $1
         ORDER BY ca.FECHAFIN DESC NULLS LAST, ca.CAPACITACIONID DESC`,
       [participacionId],
     )
@@ -739,9 +739,9 @@ export class TrayectoriaService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pr.PRUEBAID         AS "pruebaId",
               pr.ANIO             AS "anio",
-              TRIM(pr.PERIODO)    AS "periodo",
+              btrim((pr.PERIODO)::text)    AS "periodo",
               pr.FECHAPRESENTACION AS "fechaPresentacion",
-              TRIM(pr.HORARIO)    AS "horario",
+              btrim((pr.HORARIO)::text)    AS "horario",
               pr.INTENTOS         AS "intentos",
               pr.PUNTAJEMAYOR     AS "puntajeMayor",
               pr.PUNTAJEMINIMO    AS "puntajeMinimo",
@@ -749,10 +749,10 @@ export class TrayectoriaService {
               pr.EFECTIVIDAD      AS "efectividad",
               pr.CORRECTAS        AS "correctas",
               pr.INCORRECTAS      AS "incorrectas",
-              TRIM(pr.TOTALTIEMPO) AS "totalTiempo",
-              TRIM(pr.OBSERVACION) AS "observacion"
+              btrim((pr.TOTALTIEMPO)::text) AS "totalTiempo",
+              btrim((pr.OBSERVACION)::text) AS "observacion"
          FROM EVALUADORPRUEBA pr
-        WHERE pr.PARTICIPACIONID = :1
+        WHERE pr.PARTICIPACIONID = $1
         ORDER BY pr.FECHAPRESENTACION DESC NULLS LAST, pr.PRUEBAID DESC`,
       [participacionId],
     )
@@ -773,7 +773,7 @@ export class TrayectoriaService {
               pg.GRUPONUMERO AS "grupo",
               pg.ESPRINCIPAL AS "esPrincipal"
          FROM EVALUADORPARTGRUPO pg
-        WHERE pg.PARTICIPACIONID = :1
+        WHERE pg.PARTICIPACIONID = $1
         ORDER BY pg.GRUPONUMERO`,
       [participacionId],
     )
@@ -788,13 +788,13 @@ export class TrayectoriaService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT al.PARTALCANCEID          AS "partAlcanceId",
               al.AREAID                 AS "areaId",
-              TRIM(ar.NOMBRE)           AS "areaNombre",
+              btrim((ar.NOMBRE)::text)           AS "areaNombre",
               al.ROLEVALUADORID         AS "rolEvaluadorId",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre"
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre"
          FROM EVALUADORPARTALCANCE al
          JOIN AREAEVALUACION ar ON ar.AREAID = al.AREAID
          JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = al.ROLEVALUADORID
-        WHERE al.PARTICIPACIONID = :1
+        WHERE al.PARTICIPACIONID = $1
         ORDER BY ar.ORDEN, r.ROLEVALUADORORDEN`,
       [participacionId],
     )
@@ -808,15 +808,15 @@ export class TrayectoriaService {
               pp.PROYECTOID         AS "proyectoId",
               pp.GUARDADOID         AS "guardadoId",
               -- TO_NCHAR: el NIT es NUMBER en EMPRESA y NVARCHAR2 en las otras (ORA-12704)
-              COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
-                       TRIM(pp.NIT))                    AS "nit",
-              COALESCE(TRIM(em.EMPRESARAZONSOCIAL), TRIM(g.RAZONSOCIAL),
-                       TRIM(pp.RAZONSOCIAL))            AS "razonSocial",
-              COALESCE(TRIM(pr.PROYECTONOMBRE), TRIM(g.NOMBREPROYECTO),
-                       TRIM(pp.NOMBREPROYECTO))         AS "nombreProyecto",
+              COALESCE((em.EMPRESAIDENTIFICACION)::text, btrim((g.NIT)::text),
+                       btrim((pp.NIT)::text))                    AS "nit",
+              COALESCE(btrim((em.EMPRESARAZONSOCIAL)::text), btrim((g.RAZONSOCIAL)::text),
+                       btrim((pp.RAZONSOCIAL)::text))            AS "razonSocial",
+              COALESCE(btrim((pr.PROYECTONOMBRE)::text), btrim((g.NOMBREPROYECTO)::text),
+                       btrim((pp.NOMBREPROYECTO)::text))         AS "nombreProyecto",
               pp.PUNTAJEOTORGADO    AS "puntajeOtorgado",
               pp.FECHAEVALUACION    AS "fechaEvaluacion",
-              TRIM(pp.OBSERVACIONES) AS "observaciones",
+              btrim((pp.OBSERVACIONES)::text) AS "observaciones",
               CASE WHEN pp.PROYECTOID IS NOT NULL THEN 'PROYECTO'
                    WHEN pp.GUARDADOID IS NOT NULL THEN 'FORMULADO'
                    ELSE 'HISTORICO' END AS "origen"
@@ -824,7 +824,7 @@ export class TrayectoriaService {
          LEFT JOIN PROYECTO pr ON pr.PROYECTOID = pp.PROYECTOID
          LEFT JOIN EMPRESA  em ON em.EMPRESAID  = pr.EMPRESAID
          LEFT JOIN CONVPROYGUARDADO g ON g.GUARDADOID = pp.GUARDADOID
-        WHERE pp.PARTICIPACIONID = :1
+        WHERE pp.PARTICIPACIONID = $1
         ORDER BY pp.FECHAEVALUACION DESC NULLS LAST, pp.PARTPROYECTOID`,
       [participacionId],
     )
@@ -840,16 +840,16 @@ export class TrayectoriaService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ed.DOCUMENTOID            AS "documentoId",
               ed.TIPODOCUMENTOEVALID    AS "tipoId",
-              TRIM(te.CODIGO)           AS "tipoCodigo",
-              TRIM(te.NOMBRE)           AS "tipoNombre",
-              TRIM(ed.DOCUMENTODESCRIPCION) AS "descripcion",
+              btrim((te.CODIGO)::text)           AS "tipoCodigo",
+              btrim((te.NOMBRE)::text)           AS "tipoNombre",
+              btrim((ed.DOCUMENTODESCRIPCION)::text) AS "descripcion",
               ed.ANIOREFERENCIA         AS "anioReferencia",
-              TRIM(ed.ARCHIVONOMBRE)    AS "archivoNombre",
-              TRIM(ed.ARCHIVOMIME)      AS "mime",
+              btrim((ed.ARCHIVONOMBRE)::text)    AS "archivoNombre",
+              btrim((ed.ARCHIVOMIME)::text)      AS "mime",
               ed.FECHACARGUE            AS "fechaCargue"
          FROM EVALUADORDOCUMENTO ed
          JOIN TIPODOCUMENTOEVAL te ON te.TIPODOCUMENTOEVALID = ed.TIPODOCUMENTOEVALID
-        WHERE ed.PARTICIPACIONID = :1
+        WHERE ed.PARTICIPACIONID = $1
         ORDER BY te.ORDEN, ed.FECHACARGUE DESC`,
       [participacionId],
     )
@@ -862,15 +862,15 @@ export class TrayectoriaService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT cd.DOCUMENTOID           AS "documentoId",
               cd.TIPODOCUMENTOCONVID   AS "tipoId",
-              TRIM(tc.CODIGO)          AS "tipoCodigo",
-              TRIM(tc.NOMBRE)          AS "tipoNombre",
-              TRIM(cd.DOCUMENTODESCRIPCION) AS "descripcion",
-              TRIM(cd.ARCHIVONOMBRE)   AS "archivoNombre",
-              TRIM(cd.ARCHIVOMIME)     AS "mime",
+              btrim((tc.CODIGO)::text)          AS "tipoCodigo",
+              btrim((tc.NOMBRE)::text)          AS "tipoNombre",
+              btrim((cd.DOCUMENTODESCRIPCION)::text) AS "descripcion",
+              btrim((cd.ARCHIVONOMBRE)::text)   AS "archivoNombre",
+              btrim((cd.ARCHIVOMIME)::text)     AS "mime",
               cd.FECHACARGUE           AS "fechaCargue"
          FROM CONVOCATORIADOCUMENTO cd
          JOIN TIPODOCUMENTOCONV tc ON tc.TIPODOCUMENTOCONVID = cd.TIPODOCUMENTOCONVID
-        WHERE cd.CONVOCATORIAID = :1
+        WHERE cd.CONVOCATORIAID = $1
         ORDER BY tc.ORDEN, cd.FECHACARGUE DESC`,
       [convocatoriaId],
     )
@@ -887,17 +887,17 @@ export class TrayectoriaService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ed.DOCUMENTOID            AS "documentoId",
               ed.TIPODOCUMENTOEVALID    AS "tipoId",
-              TRIM(te.CODIGO)           AS "tipoCodigo",
-              TRIM(te.NOMBRE)           AS "tipoNombre",
-              TRIM(ed.DOCUMENTODESCRIPCION) AS "descripcion",
+              btrim((te.CODIGO)::text)           AS "tipoCodigo",
+              btrim((te.NOMBRE)::text)           AS "tipoNombre",
+              btrim((ed.DOCUMENTODESCRIPCION)::text) AS "descripcion",
               -- un permanente con año pertenece a ese ciclo
               ed.ANIOREFERENCIA         AS "anioReferencia",
-              TRIM(ed.ARCHIVONOMBRE)    AS "archivoNombre",
-              TRIM(ed.ARCHIVOMIME)      AS "mime",
+              btrim((ed.ARCHIVONOMBRE)::text)    AS "archivoNombre",
+              btrim((ed.ARCHIVOMIME)::text)      AS "mime",
               ed.FECHACARGUE            AS "fechaCargue"
          FROM EVALUADORDOCUMENTO ed
          JOIN TIPODOCUMENTOEVAL te ON te.TIPODOCUMENTOEVALID = ed.TIPODOCUMENTOEVALID
-        WHERE ed.EVALUADORID = :1
+        WHERE ed.EVALUADORID = $1
           AND ed.PARTICIPACIONID IS NULL
         ORDER BY te.ORDEN, ed.FECHACARGUE DESC`,
       [evaluadorId],
@@ -910,14 +910,14 @@ export class TrayectoriaService {
       `SELECT ce.CERTIFICADOID          AS "certificadoId",
               ce.ANIO                   AS "anio",
               ce.CONSECUTIVO            AS "consecutivo",
-              TRIM(ce.CODIGOVERIFICACION) AS "codigoVerificacion",
+              btrim((ce.CODIGOVERIFICACION)::text) AS "codigoVerificacion",
               ce.FECHAEMISION           AS "fechaEmision",
-              TRIM(ce.EMITIDOPOR)       AS "emitidoPor",
+              btrim((ce.EMITIDOPOR)::text)       AS "emitidoPor",
               ce.HORASCERTIFICADAS      AS "horas",
               ce.ANULADO                AS "anulado",
-              TRIM(ce.MOTIVOANULACION)  AS "motivoAnulacion"
+              btrim((ce.MOTIVOANULACION)::text)  AS "motivoAnulacion"
          FROM EVALUADORCERTIFICADO ce
-        WHERE ce.PARTICIPACIONID = :1
+        WHERE ce.PARTICIPACIONID = $1
         ORDER BY ce.ANULADO, ce.CERTIFICADOID DESC
         FETCH FIRST 1 ROWS ONLY`,
       [participacionId],

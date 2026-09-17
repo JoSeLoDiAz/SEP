@@ -26,8 +26,8 @@ export class CronogramaService {
   // CONVENIOSESTADO = 1 es "en ejecucion"
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
-         FROM CONVENIOS WHERE PROYECTOID = :1
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado"
+         FROM CONVENIOS WHERE PROYECTOID = $1
         ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -43,7 +43,7 @@ export class CronogramaService {
   private async assertConvenioActivoPorCronograma(cronogramaId: number): Promise<void> {
     const [row] = await this.ds.query(
       `SELECT CRONOPROYECTO AS "proyectoId" FROM CRONOGRAMA
-        WHERE CRONOGRAMAID = :1 FETCH FIRST 1 ROW ONLY`,
+        WHERE CRONOGRAMAID = $1 FETCH FIRST 1 ROW ONLY`,
       [cronogramaId],
     )
     if (!row) throw new BadRequestException('Cronograma no encontrado.')
@@ -55,7 +55,7 @@ export class CronogramaService {
       `SELECT cr.CRONOPROYECTO AS "proyectoId"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA cr ON cr.CRONOGRAMAID = cp.CRONOGRAMAID
-        WHERE cp.CRONOGRAMAPRESENCIALID = :1 FETCH FIRST 1 ROW ONLY`,
+        WHERE cp.CRONOGRAMAPRESENCIALID = $1 FETCH FIRST 1 ROW ONLY`,
       [sesionId],
     )
     if (!row) throw new BadRequestException('Sesión no encontrada.')
@@ -67,7 +67,7 @@ export class CronogramaService {
       `SELECT cr.CRONOPROYECTO AS "proyectoId"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA cr ON cr.CRONOGRAMAID = cv.CRONOGRAMAID
-        WHERE cv.CRONOGRAMAVIRTUALID = :1 FETCH FIRST 1 ROW ONLY`,
+        WHERE cv.CRONOGRAMAVIRTUALID = $1 FETCH FIRST 1 ROW ONLY`,
       [actividadId],
     )
     if (!row) throw new BadRequestException('Actividad virtual no encontrada.')
@@ -76,7 +76,7 @@ export class CronogramaService {
 
   private async assertConvenioActivoPorRadicado(radicadoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMARADICADO WHERE RADICADOID = :1`,
+      `SELECT PROYECTOID AS "proyectoId" FROM CRONOGRAMARADICADO WHERE RADICADOID = $1`,
       [radicadoId],
     )
     // si no se resuelve el radicado no bloqueamos, para no romper flujos legacy
@@ -90,8 +90,14 @@ export class CronogramaService {
     for (const t of tables) {
       result[t] = await this.ds.query(
         `SELECT COLUMN_NAME AS "column", DATA_TYPE AS "type", NULLABLE AS "nullable"
-           FROM ALL_TAB_COLUMNS
-          WHERE TABLE_NAME = :1
+           FROM (SELECT upper(table_name) AS table_name, upper(column_name) AS column_name,
+         upper(data_type) AS data_type, ordinal_position AS column_id,
+         CASE WHEN is_nullable = 'YES' THEN 'Y' ELSE 'N' END AS nullable
+    FROM information_schema.columns WHERE table_schema = current_schema()) (SELECT upper(table_name) AS table_name, upper(column_name) AS column_name,
+         upper(data_type) AS data_type, ordinal_position AS column_id,
+         CASE WHEN is_nullable = 'YES' THEN 'Y' ELSE 'N' END AS nullable
+    FROM information_schema.columns WHERE table_schema = current_schema()) all_tab_cols
+          WHERE TABLE_NAME = $1
           ORDER BY COLUMN_ID`,
         [t],
       )
@@ -103,20 +109,20 @@ export class CronogramaService {
     return this.ds.query(
       `SELECT af.ACCIONFORMACIONID                     AS "afId",
               af.ACCIONFORMACIONNUMERO                 AS "numero",
-              TRIM(af.ACCIONFORMACIONNOMBRE)           AS "nombre",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)           AS "nombre",
               af.MODALIDADFORMACIONID                  AS "modalidadId",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE)        AS "modalidad",
+              btrim((mf.MODALIDADFORMACIONNOMBRE)::text)        AS "modalidad",
               af.TIPOEVENTOID                          AS "tipoEventoId",
-              TRIM(te.TIPOEVENTONOMBRE)                AS "tipoEvento",
+              btrim((te.TIPOEVENTONOMBRE)::text)                AS "tipoEvento",
               af.ACCIONFORMACIONNUMBENEF               AS "numBenef",
               af.ACCIONFORMACIONNUMGRUPOS              AS "numGrupos",
-              NVL(af.ACCIONFORMACIONBENEFGRUPO, 0)     AS "benefGrupo",
-              NVL(af.ACCIONFORMACIONBENEFVIGRUPO, 0)   AS "benefViGrupo"
+              COALESCE(af.ACCIONFORMACIONBENEFGRUPO, 0)     AS "benefGrupo",
+              COALESCE(af.ACCIONFORMACIONBENEFVIGRUPO, 0)   AS "benefViGrupo"
          FROM ACCIONFORMACION af
          LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
          LEFT JOIN TIPOEVENTO te         ON te.TIPOEVENTOID         = af.TIPOEVENTOID
-        WHERE af.PROYECTOID = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+        WHERE af.PROYECTOID = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
         ORDER BY af.ACCIONFORMACIONNUMERO ASC`,
       [proyectoId],
     )
@@ -126,10 +132,10 @@ export class CronogramaService {
     const rows = await this.ds.query(
       `SELECT g.AFGRUPOID       AS "grupoId",
               g.AFGRUPONUMERO   AS "grupoNumero",
-              NVL(SUM(c.AFGRUPOCOBERTURABENEF), 0) AS "totalBenef"
+              COALESCE(SUM(c.AFGRUPOCOBERTURABENEF), 0) AS "totalBenef"
          FROM AFGRUPO g
          LEFT JOIN AFGRUPOCOBERTURA c ON c.AFGRUPOID = g.AFGRUPOID
-        WHERE g.ACCIONFORMACIONID = :1
+        WHERE g.ACCIONFORMACIONID = $1
         GROUP BY g.AFGRUPOID, g.AFGRUPONUMERO
         ORDER BY g.AFGRUPONUMERO`,
       [afId],
@@ -141,18 +147,18 @@ export class CronogramaService {
     return this.ds.query(
       `SELECT ut.UNIDADTEMATICAID                AS "utId",
               ut.UNIDADTEMATICANUMERO            AS "numero",
-              TRIM(ut.UNIDADTEMATICANOMBRE)      AS "nombre",
-              NVL(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
-              NVL(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
-              NVL(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
-              NVL(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
-              NVL(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
-              NVL(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
-              NVL(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
-              NVL(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib",
-              NVL(ut.UNIDADTEMATICANACTIVIDAD,0) AS "nActividad"
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)      AS "nombre",
+              COALESCE(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
+              COALESCE(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
+              COALESCE(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
+              COALESCE(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
+              COALESCE(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
+              COALESCE(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
+              COALESCE(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
+              COALESCE(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib",
+              COALESCE(ut.UNIDADTEMATICANACTIVIDAD,0) AS "nActividad"
          FROM UNIDADTEMATICA ut
-        WHERE ut.ACCIONFORMACIONID = :1
+        WHERE ut.ACCIONFORMACIONID = $1
         ORDER BY ut.UNIDADTEMATICANUMERO ASC`,
       [afId],
     )
@@ -170,8 +176,8 @@ export class CronogramaService {
               c.CRONOESTADO           AS "estado",
               c.CRONOPROYECTO         AS "proyectoId"
          FROM CRONOGRAMA c
-        WHERE c.AFGRUPOID = :1
-          AND c.UNIDADTEMATICAID = :2
+        WHERE c.AFGRUPOID = $1
+          AND c.UNIDADTEMATICAID = $2
         ORDER BY c.CRONOGRAMAID ASC`,
       [grupoId, utId],
     )
@@ -182,16 +188,16 @@ export class CronogramaService {
     return this.ds.query(
       `SELECT cob.AFGRUPOCOBERTURAID         AS "coberturaId",
               cob.DEPARTAMENTOGRUPOID        AS "departamentoId",
-              TRIM(dep.DEPARTAMENTONOMBRE)   AS "departamentoNombre",
+              btrim((dep.DEPARTAMENTONOMBRE)::text)   AS "departamentoNombre",
               cob.CIUDADGRUPOID              AS "ciudadId",
-              TRIM(ciu.CIUDADNOMBRE)         AS "ciudadNombre",
+              btrim((ciu.CIUDADNOMBRE)::text)         AS "ciudadNombre",
               cob.AFGRUPOCOBERTURABENEF      AS "beneficiarios",
-              NVL(cob.AFGRUPOCOBERTURAMOD, 'P') AS "modalidad"
+              COALESCE(cob.AFGRUPOCOBERTURAMOD, 'P') AS "modalidad"
          FROM CRONOGRAMA c
          JOIN AFGRUPOCOBERTURA cob ON cob.AFGRUPOID = c.AFGRUPOID
          LEFT JOIN DEPARTAMENTO dep ON dep.DEPARTAMENTOID = cob.DEPARTAMENTOGRUPOID
          LEFT JOIN CIUDAD ciu       ON ciu.CIUDADID      = cob.CIUDADGRUPOID
-        WHERE c.CRONOGRAMAID = :1
+        WHERE c.CRONOGRAMAID = $1
         ORDER BY cob.AFGRUPOCOBERTURAID`,
       [cronogramaId],
     )
@@ -202,19 +208,19 @@ export class CronogramaService {
     const rows: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAPRESENCIALID           AS "sesionId",
               cp.CRONOGRAMAPRESENCIALNUMSESION    AS "numSesion",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESESI) AS "nombreSesion",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESESI)::text) AS "nombreSesion",
               cp.CRONOGRAMAPRESENCIALFECHAINICI   AS "fechaInicio",
               cp.CRONOGRAMAPRESENCIALNUMHORAS     AS "horas",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAINICIO - INTERVAL '5' HOUR, 'HH24:MI') AS "horaInicio",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAFIN - INTERVAL '5' HOUR, 'HH24:MI')    AS "horaFin",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESEDE) AS "nombreSede",
-              TRIM(cp.CRONOGRAMAPRESENCIALAULA)       AS "aula",
-              TRIM(cp.CRONOGRAMAPRESENCIALDIRECCION)  AS "direccion",
-              TRIM(cp.CRONOGRAMAPRESENCIALSIGLA)      AS "sigla",
-              TRIM(cp.CRONOGRAMAHERRAMIENTA)          AS "herramienta",
-              TRIM(cp.CRONOGRAMAURL)                  AS "url",
-              TRIM(cp.CRONOGRAMAESTADO)               AS "estado",
-              TRIM(cp.CRONOGRAMAESTADORADICADO)       AS "estadoRadicado",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESEDE)::text) AS "nombreSede",
+              btrim((cp.CRONOGRAMAPRESENCIALAULA)::text)       AS "aula",
+              btrim((cp.CRONOGRAMAPRESENCIALDIRECCION)::text)  AS "direccion",
+              btrim((cp.CRONOGRAMAPRESENCIALSIGLA)::text)      AS "sigla",
+              btrim((cp.CRONOGRAMAHERRAMIENTA)::text)          AS "herramienta",
+              btrim((cp.CRONOGRAMAURL)::text)                  AS "url",
+              btrim((cp.CRONOGRAMAESTADO)::text)               AS "estado",
+              btrim((cp.CRONOGRAMAESTADORADICADO)::text)       AS "estadoRadicado",
               cp.CRONOGRAMAPRESENCIALCAPAID           AS "capacitadorId",
               cp.CRONOGRAMAPREPERFILUTID              AS "perfilUTId",
               cp.CRONOGRAMAPRESENCIALCAPASUPUNO       AS "capSup1Id",
@@ -225,14 +231,14 @@ export class CronogramaService {
               cp.CRONOGRAMAPRESENCIALPERFILUTDO       AS "perfilSup2Id",
               cp.CRONOGRAMAPRESENCIALPERFILUTTR       AS "perfilSup3Id",
               cp.CRONOGRAMAPRESENCIALPERFILUTCU       AS "perfilSup4Id",
-              TRIM(cap.CAPATIPO)                      AS "capacitadorTipo",
-              TRIM(pcap.PERSONANOMBRES)               AS "capPersonaNom",
-              TRIM(pcap.PERSONAPRIMERAPELLIDO)        AS "capPersonaApe1",
-              TRIM(pcap.PERSONASEGUNDOAPELLIDO)       AS "capPersonaApe2",
-              TRIM(ecap.EMPRESARAZONSOCIAL)           AS "capEmpresaNom",
+              btrim((cap.CAPATIPO)::text)                      AS "capacitadorTipo",
+              btrim((pcap.PERSONANOMBRES)::text)               AS "capPersonaNom",
+              btrim((pcap.PERSONAPRIMERAPELLIDO)::text)        AS "capPersonaApe1",
+              btrim((pcap.PERSONASEGUNDOAPELLIDO)::text)       AS "capPersonaApe2",
+              btrim((ecap.EMPRESARAZONSOCIAL)::text)           AS "capEmpresaNom",
               cp.AFGRUPOCOBERTURAID                   AS "coberturaId",
-              TRIM(dep.DEPARTAMENTONOMBRE)            AS "departamentoNombre",
-              TRIM(ciu.CIUDADNOMBRE)                  AS "ciudadNombre"
+              btrim((dep.DEPARTAMENTONOMBRE)::text)            AS "departamentoNombre",
+              btrim((ciu.CIUDADNOMBRE)::text)                  AS "ciudadNombre"
          FROM CRONOGRAMAPRESENCIAL cp
          LEFT JOIN CAPACITADORES cap ON cap.CAPACITADORID = cp.CRONOGRAMAPRESENCIALCAPAID
          LEFT JOIN PERSONA pcap ON pcap.PERSONAID = cap.CAPACITADORPERSONAID
@@ -240,7 +246,7 @@ export class CronogramaService {
          LEFT JOIN AFGRUPOCOBERTURA cob ON cob.AFGRUPOCOBERTURAID = cp.AFGRUPOCOBERTURAID
          LEFT JOIN DEPARTAMENTO dep ON dep.DEPARTAMENTOID = cob.DEPARTAMENTOGRUPOID
          LEFT JOIN CIUDAD ciu ON ciu.CIUDADID = cob.CIUDADGRUPOID
-        WHERE cp.CRONOGRAMAID = :1
+        WHERE cp.CRONOGRAMAID = $1
         ORDER BY cp.CRONOGRAMAPRESENCIALID ASC`,
       [cronogramaId],
     )
@@ -251,17 +257,17 @@ export class CronogramaService {
     const rows: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAVIRTUALID                AS "actividadId",
               cv.CRONOGRAMAVIRTUALNUMSESION         AS "numSesion",
-              TRIM(cv.CRONOGRAMAVIRTUALNOMBRE)      AS "nombreActividad",
+              btrim((cv.CRONOGRAMAVIRTUALNOMBRE)::text)      AS "nombreActividad",
               cv.CRONOGRAMAVIRTUALFECHAINICIO       AS "fechaInicio",
               cv.CRONOGRAMAVIRTUALFECHAFINAL        AS "fechaFin",
               cv.CRONOGRAMAVIRTUALNUMHORAS          AS "horas",
-              TRIM(cv.CRONOGRAMAVIRTUALPROVEEDOR)   AS "plataforma",
-              TRIM(cv.CRONOGRAMAVIRTUALURL)         AS "url",
-              TRIM(cv.CRONOGRAMAVIRTUALUSUARIOSENA) AS "usuarioSena",
-              TRIM(cv.CRONOGRAMAVIRTUALCLAVESENA)   AS "claveSena",
-              TRIM(cv.CRONOGRAMAVIRTUALSIGLA)       AS "sigla",
-              TRIM(cv.CRONOGRAMAVIRESTADO)          AS "estado",
-              TRIM(cv.CRONOGRAMAVIRESTADORADICADO)  AS "estadoRadicado",
+              btrim((cv.CRONOGRAMAVIRTUALPROVEEDOR)::text)   AS "plataforma",
+              btrim((cv.CRONOGRAMAVIRTUALURL)::text)         AS "url",
+              btrim((cv.CRONOGRAMAVIRTUALUSUARIOSENA)::text) AS "usuarioSena",
+              btrim((cv.CRONOGRAMAVIRTUALCLAVESENA)::text)   AS "claveSena",
+              btrim((cv.CRONOGRAMAVIRTUALSIGLA)::text)       AS "sigla",
+              btrim((cv.CRONOGRAMAVIRESTADO)::text)          AS "estado",
+              btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text)  AS "estadoRadicado",
               cv.CRONOGRAMAVIRCAPACITADORVIRTUA     AS "capacitadorId",
               cv.CRONOGRAMAVIRPERFILUTID            AS "perfilUTId",
               cv.CRONOGRAMAVIRCAPACITADORLSUPUN     AS "capSup1Id",
@@ -272,16 +278,16 @@ export class CronogramaService {
               cv.CRONOGRAMAVIRTUALPERFILUTSUPDO     AS "perfilSup2Id",
               cv.CRONOGRAMAVIRTUALPERFILUTSUPTR     AS "perfilSup3Id",
               cv.CRONOGRAMAVIRTUALPERFILUTSUPCU     AS "perfilSup4Id",
-              TRIM(cap.CAPATIPO)                    AS "capacitadorTipo",
-              TRIM(pcap.PERSONANOMBRES)             AS "capPersonaNom",
-              TRIM(pcap.PERSONAPRIMERAPELLIDO)      AS "capPersonaApe1",
-              TRIM(pcap.PERSONASEGUNDOAPELLIDO)     AS "capPersonaApe2",
-              TRIM(ecap.EMPRESARAZONSOCIAL)         AS "capEmpresaNom"
+              btrim((cap.CAPATIPO)::text)                    AS "capacitadorTipo",
+              btrim((pcap.PERSONANOMBRES)::text)             AS "capPersonaNom",
+              btrim((pcap.PERSONAPRIMERAPELLIDO)::text)      AS "capPersonaApe1",
+              btrim((pcap.PERSONASEGUNDOAPELLIDO)::text)     AS "capPersonaApe2",
+              btrim((ecap.EMPRESARAZONSOCIAL)::text)         AS "capEmpresaNom"
          FROM CRONOGRAMAVIRTUAL cv
          LEFT JOIN CAPACITADORES cap ON cap.CAPACITADORID = cv.CRONOGRAMAVIRCAPACITADORVIRTUA
          LEFT JOIN PERSONA pcap ON pcap.PERSONAID = cap.CAPACITADORPERSONAID
          LEFT JOIN EMPRESA ecap ON ecap.EMPRESAID = cap.CAPACITADOREMPRESAID
-        WHERE cv.CRONOGRAMAID = :1
+        WHERE cv.CRONOGRAMAID = $1
         ORDER BY cv.CRONOGRAMAVIRTUALID ASC`,
       [cronogramaId],
     )
@@ -307,7 +313,7 @@ export class CronogramaService {
       const exist: { id: number }[] = await qr.query(
         `SELECT CRONOGRAMAID AS "id"
            FROM CRONOGRAMA
-          WHERE AFGRUPOID = :1 AND UNIDADTEMATICAID = :2`,
+          WHERE AFGRUPOID = $1 AND UNIDADTEMATICAID = $2`,
         [dto.grupoId, dto.utId],
       )
 
@@ -319,9 +325,9 @@ export class CronogramaService {
         action = 'updated'
         await qr.query(
           `UPDATE CRONOGRAMA
-              SET CRONOGRAMAFECHAINICIO = :1,
-                  CRONOGRAMAFECHAFIN    = :2
-            WHERE CRONOGRAMAID = :3`,
+              SET CRONOGRAMAFECHAINICIO = $1,
+                  CRONOGRAMAFECHAFIN    = $2
+            WHERE CRONOGRAMAID = $3`,
           [fi, ff, cronogramaId],
         )
       } else {
@@ -352,21 +358,21 @@ export class CronogramaService {
   async listarCapacitadoresAprobados(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID                AS "capacitadorId",
-              TRIM(c.CAPATIPO)               AS "tipo",
+              btrim((c.CAPATIPO)::text)               AS "tipo",
               c.CAPACITADORPERSONAID         AS "personaId",
               c.CAPACITADOREMPRESAID         AS "empresaId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) || ' ' ||
-                NVL(TRIM(p.PERSONASEGUNDOAPELLIDO), '')  AS "nombrePersona",
-              TRIM(p.PERSONAIDENTIFICACION)  AS "identificacionPersona",
-              TRIM(e.EMPRESARAZONSOCIAL)     AS "razonSocial",
-              TRIM(e.EMPRESAIDENTIFICACION)  AS "identificacionEmpresa"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) || ' ' ||
+                COALESCE(btrim((p.PERSONASEGUNDOAPELLIDO)::text), '')  AS "nombrePersona",
+              btrim((p.PERSONAIDENTIFICACION)::text)  AS "identificacionPersona",
+              btrim((e.EMPRESARAZONSOCIAL)::text)     AS "razonSocial",
+              btrim((e.EMPRESAIDENTIFICACION)::text)  AS "identificacionEmpresa"
          FROM CAPACITADORES c
          LEFT JOIN PERSONA p ON p.PERSONAID = c.CAPACITADORPERSONAID
          LEFT JOIN EMPRESA e ON e.EMPRESAID = c.CAPACITADOREMPRESAID
-        WHERE c.PROYECTOID = :1
-          AND TRIM(c.CAPAESTADO) = 'ACTIVO'
-          AND (TRIM(c.CAPAINTERESTADO) = 'APROBADO'
-               OR TRIM(c.CAPACITADORESTADOTRANSFERENCIA) = 'APROBADOT')
+        WHERE c.PROYECTOID = $1
+          AND btrim((c.CAPAESTADO)::text) = 'ACTIVO'
+          AND (btrim((c.CAPAINTERESTADO)::text) = 'APROBADO'
+               OR btrim((c.CAPACITADORESTADOTRANSFERENCIA)::text) = 'APROBADOT')
         ORDER BY c.CAPACITADORID ASC`,
       [proyectoId],
     )
@@ -376,11 +382,11 @@ export class CronogramaService {
     return this.ds.query(
       `SELECT pu.PERFILUTID            AS "perfilUTId",
               pu.RUBROIDUT             AS "rubroId",
-              TRIM(r.RUBRONOMBRE)      AS "nombre",
-              NVL(pu.PERFILUTHORASCAP, 0) AS "horasCap"
+              btrim((r.RUBRONOMBRE)::text)      AS "nombre",
+              COALESCE(pu.PERFILUTHORASCAP, 0) AS "horasCap"
          FROM PERFILUT pu
          JOIN RUBRO r ON r.RUBROID = pu.RUBROIDUT
-        WHERE pu.UNIDADTEMATICAID = :1
+        WHERE pu.UNIDADTEMATICAID = $1
         ORDER BY pu.PERFILUTID ASC`,
       [utId],
     )
@@ -411,15 +417,15 @@ export class CronogramaService {
                 c.CRONOGRAMAFECHAINICIO         AS "fechaInicio",
                 c.CRONOGRAMAFECHAFIN            AS "fechaFin",
                 c.CRONOPROYECTO                 AS "proyectoId",
-                NVL(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
-                NVL(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
-                NVL(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
-                NVL(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
-                NVL(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
-                NVL(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
+                COALESCE(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
+                COALESCE(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
+                COALESCE(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
+                COALESCE(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
+                COALESCE(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
+                COALESCE(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
            FROM CRONOGRAMA c
            JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-          WHERE c.CRONOGRAMAID = :1`,
+          WHERE c.CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       if (!cronoRows.length) throw new NotFoundException('Cronograma no encontrado.')
@@ -443,10 +449,10 @@ export class CronogramaService {
 
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
-          WHERE CAPACITADORID = :1 AND PROYECTOID = :2
-            AND TRIM(CAPAESTADO) = 'ACTIVO'
-            AND (TRIM(CAPAINTERESTADO) = 'APROBADO'
-                 OR TRIM(CAPACITADORESTADOTRANSFERENCIA) = 'APROBADOT')`,
+          WHERE CAPACITADORID = $1 AND PROYECTOID = $2
+            AND btrim((CAPAESTADO)::text) = 'ACTIVO'
+            AND (btrim((CAPAINTERESTADO)::text) = 'APROBADO'
+                 OR btrim((CAPACITADORESTADOTRANSFERENCIA)::text) = 'APROBADOT')`,
         [dto.capacitadorId, crono.proyectoId],
       )
       if (!capCheck.length) {
@@ -454,7 +460,7 @@ export class CronogramaService {
       }
 
       const perfilCheck: any[] = await qr.query(
-        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
+        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = $1 AND UNIDADTEMATICAID = $2`,
         [dto.perfilUTId, crono.utId],
       )
       if (!perfilCheck.length) {
@@ -462,8 +468,8 @@ export class CronogramaService {
       }
 
       const acumRows: any[] = await qr.query(
-        `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
-           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
+           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       const horasReg = Number(acumRows[0].horas)
@@ -474,10 +480,10 @@ export class CronogramaService {
       }
 
       const convRows: any[] = await qr.query(
-        `SELECT CONVENIOSID AS "convId", NVL(CONVENIOSCRONOCONSECUTIVO, 0) AS "consec"
+        `SELECT CONVENIOSID AS "convId", COALESCE(CONVENIOSCRONOCONSECUTIVO, 0) AS "consec"
            FROM CONVENIOS
-          WHERE PROYECTOID = :1 AND CONVENIOSESTADO = 1
-            AND ROWNUM = 1`,
+          WHERE PROYECTOID = $1 AND CONVENIOSESTADO = 1
+ LIMIT 1`,
         [crono.proyectoId],
       )
       if (!convRows.length) {
@@ -488,14 +494,14 @@ export class CronogramaService {
       const sigla = `CP${String(consecutivo).padStart(6, '0')}`
 
       const nsRows: any[] = await qr.query(
-        `SELECT NVL(MAX(CRONOGRAMAPRESENCIALNUMSESION), 0) + 1 AS "next"
-           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(MAX(CRONOGRAMAPRESENCIALNUMSESION), 0) + 1 AS "next"
+           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       const numSesion = Number(nsRows[0].next)
 
       const covRows: any[] = await qr.query(
-        `SELECT AFGRUPOCOBERTURAID AS "id" FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1 ORDER BY AFGRUPOCOBERTURAID`,
+        `SELECT AFGRUPOCOBERTURAID AS "id" FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = $1 ORDER BY AFGRUPOCOBERTURAID`,
         [crono.grupoId],
       )
       const covIds: number[] = covRows.map((r: any) => Number(r.id))
@@ -544,12 +550,12 @@ export class CronogramaService {
       })
 
       await qr.query(
-        `UPDATE CRONOGRAMA SET CRONONUMSESIONES = NVL(CRONONUMSESIONES, 0) + 1
-          WHERE CRONOGRAMAID = :1`,
+        `UPDATE CRONOGRAMA SET CRONONUMSESIONES = COALESCE(CRONONUMSESIONES, 0) + 1
+          WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       await qr.query(
-        `UPDATE CONVENIOS SET CONVENIOSCRONOCONSECUTIVO = :1 WHERE CONVENIOSID = :2`,
+        `UPDATE CONVENIOS SET CONVENIOSCRONOCONSECUTIVO = $1 WHERE CONVENIOSID = $2`,
         [consecutivo, convId],
       )
 
@@ -571,9 +577,9 @@ export class CronogramaService {
     try {
       const rows: any[] = await qr.query(
         `SELECT CRONOGRAMAID AS "cronogramaId",
-                TRIM(CRONOGRAMAESTADORADICADO) AS "estadoRadicado"
+                btrim((CRONOGRAMAESTADORADICADO)::text) AS "estadoRadicado"
            FROM CRONOGRAMAPRESENCIAL
-          WHERE CRONOGRAMAPRESENCIALID = :1`,
+          WHERE CRONOGRAMAPRESENCIALID = $1`,
         [sesionId],
       )
       if (!rows.length) throw new NotFoundException('Sesión no encontrada.')
@@ -583,12 +589,12 @@ export class CronogramaService {
       const cronogramaId = Number(rows[0].cronogramaId)
 
       await qr.query(
-        `DELETE FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAPRESENCIALID = :1`, [sesionId],
+        `DELETE FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAPRESENCIALID = $1`, [sesionId],
       )
       await qr.query(
         `UPDATE CRONOGRAMA
-            SET CRONONUMSESIONES = GREATEST(NVL(CRONONUMSESIONES, 0) - 1, 0)
-          WHERE CRONOGRAMAID = :1`,
+            SET CRONONUMSESIONES = GREATEST(COALESCE(CRONONUMSESIONES, 0) - 1, 0)
+          WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
 
@@ -619,22 +625,22 @@ export class CronogramaService {
       const sesRows: any[] = await qr.query(
         `SELECT cp.CRONOGRAMAID                  AS "cronogramaId",
                 cp.CRONOGRAMAPRESENCIALNUMHORAS  AS "horasActuales",
-                TRIM(cp.CRONOGRAMAESTADORADICADO) AS "estadoRadicado",
+                btrim((cp.CRONOGRAMAESTADORADICADO)::text) AS "estadoRadicado",
                 c.AFGRUPOID                      AS "grupoId",
                 c.UNIDADTEMATICAID               AS "utId",
                 c.CRONOGRAMAFECHAINICIO          AS "fechaInicio",
                 c.CRONOGRAMAFECHAFIN             AS "fechaFin",
                 c.CRONOPROYECTO                  AS "proyectoId",
-                NVL(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
-                NVL(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
-                NVL(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
-                NVL(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
-                NVL(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
-                NVL(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
+                COALESCE(ut.UNIDADTEMATICAHORASPP, 0)   AS "horasPP",
+                COALESCE(ut.UNIDADTEMATICAHORASTP, 0)   AS "horasTP",
+                COALESCE(ut.UNIDADTEMATICAHORASPPAT, 0) AS "horasPPAT",
+                COALESCE(ut.UNIDADTEMATICAHORASTPAT, 0) AS "horasTPAT",
+                COALESCE(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
+                COALESCE(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
            FROM CRONOGRAMAPRESENCIAL cp
            JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cp.CRONOGRAMAID
            JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-          WHERE cp.CRONOGRAMAPRESENCIALID = :1`,
+          WHERE cp.CRONOGRAMAPRESENCIALID = $1`,
         [sesionId],
       )
       if (!sesRows.length) throw new NotFoundException('Sesión no encontrada.')
@@ -657,23 +663,23 @@ export class CronogramaService {
 
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
-          WHERE CAPACITADORID = :1 AND PROYECTOID = :2
-            AND TRIM(CAPAESTADO) = 'ACTIVO'
-            AND (TRIM(CAPAINTERESTADO) = 'APROBADO'
-                 OR TRIM(CAPACITADORESTADOTRANSFERENCIA) = 'APROBADOT')`,
+          WHERE CAPACITADORID = $1 AND PROYECTOID = $2
+            AND btrim((CAPAESTADO)::text) = 'ACTIVO'
+            AND (btrim((CAPAINTERESTADO)::text) = 'APROBADO'
+                 OR btrim((CAPACITADORESTADOTRANSFERENCIA)::text) = 'APROBADOT')`,
         [dto.capacitadorId, ses.proyectoId],
       )
       if (!capCheck.length) throw new BadRequestException('El capacitador no pertenece al proyecto o no está aprobado.')
 
       const perfilCheck: any[] = await qr.query(
-        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
+        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = $1 AND UNIDADTEMATICAID = $2`,
         [dto.perfilUTId, ses.utId],
       )
       if (!perfilCheck.length) throw new BadRequestException('El perfil no es válido para esta unidad temática.')
 
       const acumRows: any[] = await qr.query(
-        `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
-           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
+           FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = $1`,
         [ses.cronogramaId],
       )
       const horasReg = Number(acumRows[0].horas) - Number(ses.horasActuales)
@@ -690,29 +696,29 @@ export class CronogramaService {
 
       await qr.query(
         `UPDATE CRONOGRAMAPRESENCIAL
-            SET CRONOGRAMAPRESENCIALNOMBRESESI = :1,
-                CRONOGRAMAPRESENCIALFECHAINICI = :2,
-                CRONOGRAMAPRESENCIALHORAINICIO = :3,
-                CRONOGRAMAPRESENCIALHORAFIN    = :4,
-                CRONOGRAMAPRESENCIALNUMHORAS   = :5,
-                CRONOGRAMAPRESENCIALNOMBRESEDE = :6,
-                CRONOGRAMAPRESENCIALDIRECCION  = :7,
-                CRONOGRAMAPRESENCIALAULA       = :8,
-                CRONOGRAMAHERRAMIENTA          = :9,
-                CRONOGRAMAURL                  = :10,
-                TIPOCAPACIADORPRE              = :11,
-                CRONOGRAMAPRESENCIALCAPAID     = :12,
-                CRONOGRAMAPREPERFILUTID        = :13,
-                CRONOGRAMAPRESENCIALCAPASUPUNO = :14,
-                CRONOGRAMAPRESENCIALCAPASUPDOS = :15,
-                CRONOGRAMAPRESENCIALCAPASUPTRE = :16,
-                CRONOGRAMAPRESENCIALCAPASUPCUA = :17,
-                CRONOGRAMAPRESENCIALPERFILUTUN = :18,
-                CRONOGRAMAPRESENCIALPERFILUTDO = :19,
-                CRONOGRAMAPRESENCIALPERFILUTTR = :20,
-                CRONOGRAMAPRESENCIALPERFILUTCU = :21,
-                AFGRUPOCOBERTURAID             = NVL(:22, AFGRUPOCOBERTURAID)
-          WHERE CRONOGRAMAPRESENCIALID = :23`,
+            SET CRONOGRAMAPRESENCIALNOMBRESESI = $1,
+                CRONOGRAMAPRESENCIALFECHAINICI = $2,
+                CRONOGRAMAPRESENCIALHORAINICIO = $3,
+                CRONOGRAMAPRESENCIALHORAFIN    = $4,
+                CRONOGRAMAPRESENCIALNUMHORAS   = $5,
+                CRONOGRAMAPRESENCIALNOMBRESEDE = $6,
+                CRONOGRAMAPRESENCIALDIRECCION  = $7,
+                CRONOGRAMAPRESENCIALAULA       = $8,
+                CRONOGRAMAHERRAMIENTA          = $9,
+                CRONOGRAMAURL                  = $10,
+                TIPOCAPACIADORPRE              = $11,
+                CRONOGRAMAPRESENCIALCAPAID     = $12,
+                CRONOGRAMAPREPERFILUTID        = $13,
+                CRONOGRAMAPRESENCIALCAPASUPUNO = $14,
+                CRONOGRAMAPRESENCIALCAPASUPDOS = $15,
+                CRONOGRAMAPRESENCIALCAPASUPTRE = $16,
+                CRONOGRAMAPRESENCIALCAPASUPCUA = $17,
+                CRONOGRAMAPRESENCIALPERFILUTUN = $18,
+                CRONOGRAMAPRESENCIALPERFILUTDO = $19,
+                CRONOGRAMAPRESENCIALPERFILUTTR = $20,
+                CRONOGRAMAPRESENCIALPERFILUTCU = $21,
+                AFGRUPOCOBERTURAID             = COALESCE($22, AFGRUPOCOBERTURAID)
+          WHERE CRONOGRAMAPRESENCIALID = $23`,
         [
           dto.nombreSesion, fechaSesion, horaInicioDate, horaFinDate, numHoras,
           dto.nombreSede ?? null, dto.direccion ?? null, dto.aula ?? null,
@@ -738,20 +744,20 @@ export class CronogramaService {
   async exportarCronogramaProyecto(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
     const headers: any[] = await this.ds.query(
       `SELECT c.CRONOGRAMAID                   AS "cronogramaId",
-              TRIM(conv.CONVENIOSNUMERO)       AS "convenio",
-              TRIM(emp.EMPRESARAZONSOCIAL)     AS "empresaNombre",
+              btrim((conv.CONVENIOSNUMERO)::text)       AS "convenio",
+              btrim((emp.EMPRESARAZONSOCIAL)::text)     AS "empresaNombre",
               af.ACCIONFORMACIONNUMERO         AS "afNum",
-              TRIM(af.ACCIONFORMACIONNOMBRE)   AS "af",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE) AS "modalidad",
-              TRIM(te.TIPOEVENTONOMBRE)        AS "evento",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)   AS "af",
+              btrim((mf.MODALIDADFORMACIONNOMBRE)::text) AS "modalidad",
+              btrim((te.TIPOEVENTONOMBRE)::text)        AS "evento",
               g.AFGRUPONUMERO                  AS "grupoNum",
-              NVL(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
+              COALESCE(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
               ut.UNIDADTEMATICANUMERO          AS "utNum",
-              TRIM(ut.UNIDADTEMATICANOMBRE)    AS "utNombre",
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)    AS "utNombre",
               c.CRONOGRAMAFECHAINICIO          AS "cronoIni",
               c.CRONOGRAMAFECHAFIN             AS "cronoFin",
-              NVL(c.CRONONUMSESIONES, 0)       AS "numSesiones",
-              NVL(c.CRONONUMTOTALACT, 0)       AS "numActividades"
+              COALESCE(c.CRONONUMSESIONES, 0)       AS "numSesiones",
+              COALESCE(c.CRONONUMTOTALACT, 0)       AS "numActividades"
          FROM CRONOGRAMA c
          JOIN AFGRUPO g          ON g.AFGRUPOID = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
@@ -761,8 +767,8 @@ export class CronogramaService {
          LEFT JOIN CONVENIOS conv ON conv.PROYECTOID = c.CRONOPROYECTO AND conv.CONVENIOSESTADO = 1
          LEFT JOIN PROYECTO pr  ON pr.PROYECTOID = c.CRONOPROYECTO
          LEFT JOIN EMPRESA emp  ON emp.EMPRESAID = pr.EMPRESAID
-        WHERE c.CRONOPROYECTO = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+        WHERE c.CRONOPROYECTO = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
         ORDER BY af.ACCIONFORMACIONNUMERO, g.AFGRUPONUMERO, ut.UNIDADTEMATICANUMERO`,
       [proyectoId],
     )
@@ -779,19 +785,19 @@ export class CronogramaService {
       `SELECT cp.CRONOGRAMAID                       AS "cronogramaId",
               cp.CRONOGRAMAPRESENCIALID             AS "id",
               'P'                                   AS "tipo",
-              TRIM(cp.CRONOGRAMAPRESENCIALSIGLA)    AS "codigo",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESESI) AS "nombre",
+              btrim((cp.CRONOGRAMAPRESENCIALSIGLA)::text)    AS "codigo",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESESI)::text) AS "nombre",
               cp.CRONOGRAMAPRESENCIALNUMSESION      AS "numSesion",
               cp.CRONOGRAMAPRESENCIALFECHAINICI     AS "fechaIni",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAINICIO - INTERVAL '5' HOUR, 'HH24:MI') AS "horaIni",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAFIN - INTERVAL '5' HOUR, 'HH24:MI')    AS "horaFin",
               cp.CRONOGRAMAPRESENCIALNUMHORAS       AS "horas",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESEDE) AS "sede",
-              TRIM(cp.CRONOGRAMAPRESENCIALDIRECCION)  AS "direccion",
-              TRIM(cp.CRONOGRAMAPRESENCIALAULA)       AS "aula",
-              TRIM(cp.CRONOGRAMAHERRAMIENTA)          AS "herramienta",
-              TRIM(cp.CRONOGRAMAURL)                  AS "url",
-              TRIM(cp.CRONOGRAMAESTADORADICADO)       AS "estadoRadicacion",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESEDE)::text) AS "sede",
+              btrim((cp.CRONOGRAMAPRESENCIALDIRECCION)::text)  AS "direccion",
+              btrim((cp.CRONOGRAMAPRESENCIALAULA)::text)       AS "aula",
+              btrim((cp.CRONOGRAMAHERRAMIENTA)::text)          AS "herramienta",
+              btrim((cp.CRONOGRAMAURL)::text)                  AS "url",
+              btrim((cp.CRONOGRAMAESTADORADICADO)::text)       AS "estadoRadicacion",
               cp.CRONOGRAMAPRESENCIALCAPAID         AS "capPrincipalId",
               cp.CRONOGRAMAPRESENCIALCAPASUPUNO     AS "capSup1Id",
               cp.CRONOGRAMAPRESENCIALCAPASUPDOS     AS "capSup2Id",
@@ -806,8 +812,8 @@ export class CronogramaService {
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cp.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE c.CRONOPROYECTO = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+        WHERE c.CRONOPROYECTO = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
         ORDER BY cp.CRONOGRAMAPRESENCIALID`,
       [proyectoId],
     )
@@ -816,17 +822,17 @@ export class CronogramaService {
       `SELECT cv.CRONOGRAMAID                       AS "cronogramaId",
               cv.CRONOGRAMAVIRTUALID                AS "id",
               'V'                                   AS "tipo",
-              TRIM(cv.CRONOGRAMAVIRTUALSIGLA)       AS "codigo",
-              TRIM(cv.CRONOGRAMAVIRTUALNOMBRE)      AS "nombre",
+              btrim((cv.CRONOGRAMAVIRTUALSIGLA)::text)       AS "codigo",
+              btrim((cv.CRONOGRAMAVIRTUALNOMBRE)::text)      AS "nombre",
               cv.CRONOGRAMAVIRTUALNUMSESION         AS "numSesion",
               cv.CRONOGRAMAVIRTUALFECHAINICIO       AS "fechaIni",
               cv.CRONOGRAMAVIRTUALFECHAFINAL        AS "fechaFin",
               cv.CRONOGRAMAVIRTUALNUMHORAS          AS "horas",
-              TRIM(cv.CRONOGRAMAVIRTUALURL)         AS "url",
-              TRIM(cv.CRONOGRAMAVIRTUALPROVEEDOR)   AS "proveedor",
-              TRIM(cv.CRONOGRAMAVIRTUALUSUARIOSENA) AS "usuarioSena",
-              TRIM(cv.CRONOGRAMAVIRTUALCLAVESENA)   AS "claveSena",
-              TRIM(cv.CRONOGRAMAVIRESTADORADICADO)  AS "estadoRadicacion",
+              btrim((cv.CRONOGRAMAVIRTUALURL)::text)         AS "url",
+              btrim((cv.CRONOGRAMAVIRTUALPROVEEDOR)::text)   AS "proveedor",
+              btrim((cv.CRONOGRAMAVIRTUALUSUARIOSENA)::text) AS "usuarioSena",
+              btrim((cv.CRONOGRAMAVIRTUALCLAVESENA)::text)   AS "claveSena",
+              btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text)  AS "estadoRadicacion",
               cv.CRONOGRAMAVIRCAPACITADORVIRTUA     AS "capPrincipalId",
               cv.CRONOGRAMAVIRCAPACITADORLSUPUN     AS "capSup1Id",
               cv.CRONOGRAMAVIRCAPACITADORSUPDOS     AS "capSup2Id",
@@ -841,8 +847,8 @@ export class CronogramaService {
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cv.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE c.CRONOPROYECTO = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+        WHERE c.CRONOPROYECTO = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
         ORDER BY cv.CRONOGRAMAVIRTUALID`,
       [proyectoId],
     )
@@ -850,20 +856,20 @@ export class CronogramaService {
     // ORA-12704: PERSONAIDENTIFICACION es N-charset y EMPRESAIDENTIFICACION NUMBER, se unen en JS
     const caps: any[] = await this.ds.query(
       `SELECT c.CAPACITADORID                  AS "id",
-              TRIM(c.CAPATIPO)                  AS "tipo",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDoc",
-              TRIM(p.PERSONAIDENTIFICACION)     AS "docPersona",
+              btrim((c.CAPATIPO)::text)                  AS "tipo",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDoc",
+              btrim((p.PERSONAIDENTIFICACION)::text)     AS "docPersona",
               e.EMPRESAIDENTIFICACION           AS "docEmpresa",
-              TRIM(p.PERSONANOMBRES)            AS "personaNombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)     AS "personaApe1",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)    AS "personaApe2",
-              TRIM(e.EMPRESARAZONSOCIAL)        AS "empresaNombre"
+              btrim((p.PERSONANOMBRES)::text)            AS "personaNombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)     AS "personaApe1",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)    AS "personaApe2",
+              btrim((e.EMPRESARAZONSOCIAL)::text)        AS "empresaNombre"
          FROM CAPACITADORES c
          LEFT JOIN PERSONA p ON p.PERSONAID = c.CAPACITADORPERSONAID
          LEFT JOIN EMPRESA e ON e.EMPRESAID = c.CAPACITADOREMPRESAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td
            ON td.TIPODOCUMENTOIDENTIDADID = COALESCE(p.TIPODOCUMENTOIDENTIDADID, e.TIPODOCUMENTOIDENTIDADID)
-        WHERE c.PROYECTOID = :1`,
+        WHERE c.PROYECTOID = $1`,
       [proyectoId],
     )
     const capMap = new Map<number, { tipoDoc: string; doc: string; nombre: string }>()
@@ -883,12 +889,12 @@ export class CronogramaService {
     })
 
     const perfiles: any[] = await this.ds.query(
-      `SELECT pu.PERFILUTID AS "id", TRIM(r.RUBRONOMBRE) AS "nombre"
+      `SELECT pu.PERFILUTID AS "id", btrim((r.RUBRONOMBRE)::text) AS "nombre"
          FROM PERFILUT pu
          JOIN RUBRO r ON r.RUBROID = pu.RUBROIDUT
          JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = pu.UNIDADTEMATICAID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = ut.ACCIONFORMACIONID
-        WHERE af.PROYECTOID = :1`,
+        WHERE af.PROYECTOID = $1`,
       [proyectoId],
     )
     const perfilMap = new Map<number, string>()
@@ -1016,13 +1022,13 @@ export class CronogramaService {
                 c.CRONOGRAMAFECHAINICIO         AS "fechaInicio",
                 c.CRONOGRAMAFECHAFIN            AS "fechaFin",
                 c.CRONOPROYECTO                 AS "proyectoId",
-                NVL(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
-                NVL(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
-                NVL(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
-                NVL(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
+                COALESCE(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
+                COALESCE(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
+                COALESCE(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
+                COALESCE(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
            FROM CRONOGRAMA c
            JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-          WHERE c.CRONOGRAMAID = :1`,
+          WHERE c.CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       if (!cronoRows.length) throw new NotFoundException('Cronograma no encontrado.')
@@ -1039,10 +1045,10 @@ export class CronogramaService {
 
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
-          WHERE CAPACITADORID = :1 AND PROYECTOID = :2
-            AND TRIM(CAPAESTADO) = 'ACTIVO'
-            AND (TRIM(CAPAINTERESTADO) = 'APROBADO'
-                 OR TRIM(CAPACITADORESTADOTRANSFERENCIA) = 'APROBADOT')`,
+          WHERE CAPACITADORID = $1 AND PROYECTOID = $2
+            AND btrim((CAPAESTADO)::text) = 'ACTIVO'
+            AND (btrim((CAPAINTERESTADO)::text) = 'APROBADO'
+                 OR btrim((CAPACITADORESTADOTRANSFERENCIA)::text) = 'APROBADOT')`,
         [dto.capacitadorId, crono.proyectoId],
       )
       if (!capCheck.length) {
@@ -1050,7 +1056,7 @@ export class CronogramaService {
       }
 
       const perfilCheck: any[] = await qr.query(
-        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
+        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = $1 AND UNIDADTEMATICAID = $2`,
         [dto.perfilUTId, crono.utId],
       )
       if (!perfilCheck.length) {
@@ -1060,14 +1066,14 @@ export class CronogramaService {
       // en hibrida (3) las horas presenciales tambien cuentan contra la UT
       const acumP: any[] = dto.modalidadId === 3
         ? await qr.query(
-            `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
-               FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
+            `SELECT COALESCE(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
+               FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = $1`,
             [cronogramaId],
           )
         : [{ horas: 0 }]
       const acumV: any[] = await qr.query(
-        `SELECT NVL(SUM(CRONOGRAMAVIRTUALNUMHORAS), 0) AS "horas"
-           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(SUM(CRONOGRAMAVIRTUALNUMHORAS), 0) AS "horas"
+           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       const horasReg = Number(acumP[0].horas) + Number(acumV[0].horas)
@@ -1078,10 +1084,10 @@ export class CronogramaService {
       }
 
       const convRows: any[] = await qr.query(
-        `SELECT CONVENIOSID AS "convId", NVL(CONVENIOSCRONOCONSECUTIVOV, 0) AS "consec"
+        `SELECT CONVENIOSID AS "convId", COALESCE(CONVENIOSCRONOCONSECUTIVOV, 0) AS "consec"
            FROM CONVENIOS
-          WHERE PROYECTOID = :1 AND CONVENIOSESTADO = 1
-            AND ROWNUM = 1`,
+          WHERE PROYECTOID = $1 AND CONVENIOSESTADO = 1
+ LIMIT 1`,
         [crono.proyectoId],
       )
       if (!convRows.length) {
@@ -1092,8 +1098,8 @@ export class CronogramaService {
       const sigla = `CV${String(consecutivo).padStart(6, '0')}`
 
       const nsRows: any[] = await qr.query(
-        `SELECT NVL(MAX(CRONOGRAMAVIRTUALNUMSESION), 0) + 1 AS "next"
-           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(MAX(CRONOGRAMAVIRTUALNUMSESION), 0) + 1 AS "next"
+           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       const numSesion = Number(nsRows[0].next)
@@ -1133,12 +1139,12 @@ export class CronogramaService {
       })
 
       await qr.query(
-        `UPDATE CRONOGRAMA SET CRONONUMTOTALACT = NVL(CRONONUMTOTALACT, 0) + 1
-          WHERE CRONOGRAMAID = :1`,
+        `UPDATE CRONOGRAMA SET CRONONUMTOTALACT = COALESCE(CRONONUMTOTALACT, 0) + 1
+          WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
       await qr.query(
-        `UPDATE CONVENIOS SET CONVENIOSCRONOCONSECUTIVOV = :1 WHERE CONVENIOSID = :2`,
+        `UPDATE CONVENIOS SET CONVENIOSCRONOCONSECUTIVOV = $1 WHERE CONVENIOSID = $2`,
         [consecutivo, convId],
       )
 
@@ -1168,19 +1174,19 @@ export class CronogramaService {
       const sesRows: any[] = await qr.query(
         `SELECT cv.CRONOGRAMAID                AS "cronogramaId",
                 cv.CRONOGRAMAVIRTUALNUMHORAS   AS "horasActuales",
-                TRIM(cv.CRONOGRAMAVIRESTADORADICADO) AS "estadoRadicado",
+                btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text) AS "estadoRadicado",
                 c.UNIDADTEMATICAID             AS "utId",
                 c.CRONOGRAMAFECHAINICIO        AS "fechaInicio",
                 c.CRONOGRAMAFECHAFIN           AS "fechaFin",
                 c.CRONOPROYECTO                AS "proyectoId",
-                NVL(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
-                NVL(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
-                NVL(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
-                NVL(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
+                COALESCE(ut.UNIDADTEMATICAHORASPV, 0)   AS "horasPV",
+                COALESCE(ut.UNIDADTEMATICAHORASTV, 0)   AS "horasTV",
+                COALESCE(ut.UNIDADTEMATICAHORASPHIB, 0) AS "horasPHib",
+                COALESCE(ut.UNIDADTEMATICAHORASTHIB, 0) AS "horasTHib"
            FROM CRONOGRAMAVIRTUAL cv
            JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cv.CRONOGRAMAID
            JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-          WHERE cv.CRONOGRAMAVIRTUALID = :1`,
+          WHERE cv.CRONOGRAMAVIRTUALID = $1`,
         [actividadId],
       )
       if (!sesRows.length) throw new NotFoundException('Actividad virtual no encontrada.')
@@ -1201,30 +1207,30 @@ export class CronogramaService {
 
       const capCheck: any[] = await qr.query(
         `SELECT 1 AS "ok" FROM CAPACITADORES
-          WHERE CAPACITADORID = :1 AND PROYECTOID = :2
-            AND TRIM(CAPAESTADO) = 'ACTIVO'
-            AND (TRIM(CAPAINTERESTADO) = 'APROBADO'
-                 OR TRIM(CAPACITADORESTADOTRANSFERENCIA) = 'APROBADOT')`,
+          WHERE CAPACITADORID = $1 AND PROYECTOID = $2
+            AND btrim((CAPAESTADO)::text) = 'ACTIVO'
+            AND (btrim((CAPAINTERESTADO)::text) = 'APROBADO'
+                 OR btrim((CAPACITADORESTADOTRANSFERENCIA)::text) = 'APROBADOT')`,
         [dto.capacitadorId, ses.proyectoId],
       )
       if (!capCheck.length) throw new BadRequestException('El capacitador no pertenece al proyecto o no está aprobado.')
 
       const perfilCheck: any[] = await qr.query(
-        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = :1 AND UNIDADTEMATICAID = :2`,
+        `SELECT 1 AS "ok" FROM PERFILUT WHERE PERFILUTID = $1 AND UNIDADTEMATICAID = $2`,
         [dto.perfilUTId, ses.utId],
       )
       if (!perfilCheck.length) throw new BadRequestException('El perfil no es válido para esta unidad temática.')
 
       const acumP: any[] = dto.modalidadId === 3
         ? await qr.query(
-            `SELECT NVL(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
-               FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = :1`,
+            `SELECT COALESCE(SUM(CRONOGRAMAPRESENCIALNUMHORAS), 0) AS "horas"
+               FROM CRONOGRAMAPRESENCIAL WHERE CRONOGRAMAID = $1`,
             [ses.cronogramaId],
           )
         : [{ horas: 0 }]
       const acumV: any[] = await qr.query(
-        `SELECT NVL(SUM(CRONOGRAMAVIRTUALNUMHORAS), 0) AS "horas"
-           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = :1`,
+        `SELECT COALESCE(SUM(CRONOGRAMAVIRTUALNUMHORAS), 0) AS "horas"
+           FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAID = $1`,
         [ses.cronogramaId],
       )
       const horasReg = Number(acumP[0].horas) + Number(acumV[0].horas) - Number(ses.horasActuales)
@@ -1239,25 +1245,25 @@ export class CronogramaService {
 
       await qr.query(
         `UPDATE CRONOGRAMAVIRTUAL
-            SET CRONOGRAMAVIRTUALNOMBRE         = :1,
-                CRONOGRAMAVIRTUALFECHAINICIO    = :2,
-                CRONOGRAMAVIRTUALFECHAFINAL     = :3,
-                CRONOGRAMAVIRTUALNUMHORAS       = :4,
-                CRONOGRAMAVIRTUALPROVEEDOR      = :5,
-                CRONOGRAMAVIRTUALURL            = :6,
-                CRONOGRAMAVIRTUALUSUARIOSENA    = :7,
-                CRONOGRAMAVIRTUALCLAVESENA      = :8,
-                CRONOGRAMAVIRCAPACITADORVIRTUA  = :9,
-                CRONOGRAMAVIRPERFILUTID         = :10,
-                CRONOGRAMAVIRCAPACITADORLSUPUN  = :11,
-                CRONOGRAMAVIRCAPACITADORSUPDOS  = :12,
-                CRONOGRAMAVIRCAPACITADORSUPTRE  = :13,
-                CRONOGRAMAVIRCAPACITADORSUPCUA  = :14,
-                CRONOGRAMAVIRTUALPERFILUTSUPUN  = :15,
-                CRONOGRAMAVIRTUALPERFILUTSUPDO  = :16,
-                CRONOGRAMAVIRTUALPERFILUTSUPTR  = :17,
-                CRONOGRAMAVIRTUALPERFILUTSUPCU  = :18
-          WHERE CRONOGRAMAVIRTUALID = :19`,
+            SET CRONOGRAMAVIRTUALNOMBRE         = $1,
+                CRONOGRAMAVIRTUALFECHAINICIO    = $2,
+                CRONOGRAMAVIRTUALFECHAFINAL     = $3,
+                CRONOGRAMAVIRTUALNUMHORAS       = $4,
+                CRONOGRAMAVIRTUALPROVEEDOR      = $5,
+                CRONOGRAMAVIRTUALURL            = $6,
+                CRONOGRAMAVIRTUALUSUARIOSENA    = $7,
+                CRONOGRAMAVIRTUALCLAVESENA      = $8,
+                CRONOGRAMAVIRCAPACITADORVIRTUA  = $9,
+                CRONOGRAMAVIRPERFILUTID         = $10,
+                CRONOGRAMAVIRCAPACITADORLSUPUN  = $11,
+                CRONOGRAMAVIRCAPACITADORSUPDOS  = $12,
+                CRONOGRAMAVIRCAPACITADORSUPTRE  = $13,
+                CRONOGRAMAVIRCAPACITADORSUPCUA  = $14,
+                CRONOGRAMAVIRTUALPERFILUTSUPUN  = $15,
+                CRONOGRAMAVIRTUALPERFILUTSUPDO  = $16,
+                CRONOGRAMAVIRTUALPERFILUTSUPTR  = $17,
+                CRONOGRAMAVIRTUALPERFILUTSUPCU  = $18
+          WHERE CRONOGRAMAVIRTUALID = $19`,
         [
           dto.nombreActividad, fechaIni, fechaFin, Number(dto.horas),
           dto.plataforma, dto.url,
@@ -1284,10 +1290,10 @@ export class CronogramaService {
       `SELECT r.RADICADOID                AS "radicadoId",
               r.NUMERORADICADO            AS "numero",
               r.RADICADOFECHA             AS "fecha",
-              TRIM(r.RADICADOESTADOGENERAL) AS "estado",
+              btrim((r.RADICADOESTADOGENERAL)::text) AS "estado",
               r.CRONOGRAMARADICADOTRANSFERENCI AS "transferencia"
          FROM CRONOGRAMARADICADO r
-        WHERE r.PROYECTOID = :1
+        WHERE r.PROYECTOID = $1
         ORDER BY r.NUMERORADICADO DESC`,
       [proyectoId],
     )
@@ -1296,44 +1302,44 @@ export class CronogramaService {
   async pendientesRadicar(proyectoId: number) {
     const presenciales: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAPRESENCIALID         AS "id",
-              TRIM(cp.CRONOGRAMAPRESENCIALSIGLA) AS "sigla",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESESI) AS "nombre",
+              btrim((cp.CRONOGRAMAPRESENCIALSIGLA)::text) AS "sigla",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESESI)::text) AS "nombre",
               af.ACCIONFORMACIONNUMERO         AS "afNum",
-              TRIM(af.ACCIONFORMACIONNOMBRE)   AS "af",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)   AS "af",
               g.AFGRUPONUMERO                  AS "grupoNum",
               ut.UNIDADTEMATICANUMERO          AS "utNum",
-              TRIM(ut.UNIDADTEMATICANOMBRE)    AS "utNombre"
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)    AS "utNombre"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cp.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          JOIN UNIDADTEMATICA ut  ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-        WHERE c.CRONOPROYECTO = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
-          AND TRIM(cp.CRONOGRAMAESTADORADICADO) = 'PENDIENTE'
-          AND NVL(cp.CRONOGRAMAPRESENCIALRADICADOID, 0) = 0
+        WHERE c.CRONOPROYECTO = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+          AND btrim((cp.CRONOGRAMAESTADORADICADO)::text) = 'PENDIENTE'
+          AND COALESCE(cp.CRONOGRAMAPRESENCIALRADICADOID, 0) = 0
         ORDER BY cp.CRONOGRAMAPRESENCIALID`,
       [proyectoId],
     )
 
     const virtuales: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAVIRTUALID           AS "id",
-              TRIM(cv.CRONOGRAMAVIRTUALSIGLA)   AS "sigla",
-              TRIM(cv.CRONOGRAMAVIRTUALNOMBRE)  AS "nombre",
+              btrim((cv.CRONOGRAMAVIRTUALSIGLA)::text)   AS "sigla",
+              btrim((cv.CRONOGRAMAVIRTUALNOMBRE)::text)  AS "nombre",
               af.ACCIONFORMACIONNUMERO         AS "afNum",
-              TRIM(af.ACCIONFORMACIONNOMBRE)   AS "af",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)   AS "af",
               g.AFGRUPONUMERO                  AS "grupoNum",
               ut.UNIDADTEMATICANUMERO          AS "utNum",
-              TRIM(ut.UNIDADTEMATICANOMBRE)    AS "utNombre"
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)    AS "utNombre"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cv.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          JOIN UNIDADTEMATICA ut  ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-        WHERE c.CRONOPROYECTO = :1
-          AND NVL(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
-          AND TRIM(cv.CRONOGRAMAVIRESTADORADICADO) = 'PENDIENTE'
-          AND NVL(cv.CRONOGRAMAVIRTUALRADICADOID, 0) = 0
+        WHERE c.CRONOPROYECTO = $1
+          AND COALESCE(af.ACCIONFORMACIONTRANSFERENCIA, 0) = 0
+          AND btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text) = 'PENDIENTE'
+          AND COALESCE(cv.CRONOGRAMAVIRTUALRADICADOID, 0) = 0
         ORDER BY cv.CRONOGRAMAVIRTUALID`,
       [proyectoId],
     )
@@ -1353,8 +1359,8 @@ export class CronogramaService {
       }
 
       const numRows: any[] = await qr.query(
-        `SELECT NVL(MAX(NUMERORADICADO), 0) + 1 AS "n"
-           FROM CRONOGRAMARADICADO WHERE PROYECTOID = :1`,
+        `SELECT COALESCE(MAX(NUMERORADICADO), 0) + 1 AS "n"
+           FROM CRONOGRAMARADICADO WHERE PROYECTOID = $1`,
         [proyectoId],
       )
       const numero = Number(numRows[0].n)
@@ -1381,7 +1387,7 @@ export class CronogramaService {
         await qr.query(
           `UPDATE CRONOGRAMAPRESENCIAL
               SET CRONOGRAMAESTADORADICADO = 'RADICADO',
-                  CRONOGRAMAPRESENCIALRADICADOID = :1
+                  CRONOGRAMAPRESENCIALRADICADOID = $1
             WHERE CRONOGRAMAPRESENCIALID IN (${placeholders})`,
           [radicadoId, ...ids],
         )
@@ -1392,7 +1398,7 @@ export class CronogramaService {
         await qr.query(
           `UPDATE CRONOGRAMAVIRTUAL
               SET CRONOGRAMAVIRESTADORADICADO = 'RADICADO',
-                  CRONOGRAMAVIRTUALRADICADOID = :1
+                  CRONOGRAMAVIRTUALRADICADOID = $1
             WHERE CRONOGRAMAVIRTUALID IN (${placeholders})`,
           [radicadoId, ...ids],
         )
@@ -1419,12 +1425,12 @@ export class CronogramaService {
               r.NUMERORADICADO            AS "numero",
               r.RADICADOFECHA             AS "fecha",
               r.RADICADOFECHAESTADO       AS "fechaEstado",
-              TRIM(r.RADICADOESTADOGENERAL) AS "estado",
-              TO_CHAR(r.RADICADOOBSERVACION) AS "observacion",
-              TO_CHAR(r.RADICONVENIOHISTORICO) AS "histPresencial",
-              TO_CHAR(r.RADICONVENIOHISTORICOV) AS "histVirtual",
-              TO_CHAR(r.RADIINTERVENTORIAHISTORICA) AS "histInterventoriaP",
-              TO_CHAR(r.RADIINTERVENTORIAHISTORICAV) AS "histInterventoriaV",
+              btrim((r.RADICADOESTADOGENERAL)::text) AS "estado",
+              (r.RADICADOOBSERVACION)::text AS "observacion",
+              (r.RADICONVENIOHISTORICO)::text AS "histPresencial",
+              (r.RADICONVENIOHISTORICOV)::text AS "histVirtual",
+              (r.RADIINTERVENTORIAHISTORICA)::text AS "histInterventoriaP",
+              (r.RADIINTERVENTORIAHISTORICAV)::text AS "histInterventoriaV",
               r.CRONOGRAMARADICADOTRANSFERENCI AS "transferencia",
               r.CRONOGRAMARADICADOSENA    AS "radicadoSena",
               r.CRONOGRAMARADICADOSENAFECHA AS "radicadoSenaFecha",
@@ -1434,51 +1440,51 @@ export class CronogramaService {
               r.CRONOGRAMARADICADOFECHAREMI AS "fechaRemi",
               r.CRONOGRAMARADICADOOBSER   AS "obsSena",
               r.RADICADOPERSONAINTERVENTORIA AS "interventorId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "interventorNombre",
-              TRIM(p.PERSONAEMAIL)        AS "interventorEmail"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "interventorNombre",
+              btrim((p.PERSONAEMAIL)::text)        AS "interventorEmail"
          FROM CRONOGRAMARADICADO r
          LEFT JOIN PERSONA p ON p.PERSONAID = r.RADICADOPERSONAINTERVENTORIA
-        WHERE r.RADICADOID = :1`,
+        WHERE r.RADICADOID = $1`,
       [radicadoId],
     )
     if (!cab.length) throw new NotFoundException('Radicado no encontrado.')
 
     const presenciales: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAPRESENCIALID         AS "id",
-              TRIM(cp.CRONOGRAMAPRESENCIALSIGLA) AS "sigla",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESESI) AS "nombre",
-              TRIM(cp.CRONOGRAMAESTADORADICADO) AS "estadoRadicado",
+              btrim((cp.CRONOGRAMAPRESENCIALSIGLA)::text) AS "sigla",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESESI)::text) AS "nombre",
+              btrim((cp.CRONOGRAMAESTADORADICADO)::text) AS "estadoRadicado",
               af.ACCIONFORMACIONNUMERO         AS "afNum",
-              TRIM(af.ACCIONFORMACIONNOMBRE)   AS "af",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)   AS "af",
               g.AFGRUPONUMERO                  AS "grupoNum",
               ut.UNIDADTEMATICANUMERO          AS "utNum",
-              TRIM(ut.UNIDADTEMATICANOMBRE)    AS "utNombre"
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)    AS "utNombre"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cp.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          JOIN UNIDADTEMATICA ut  ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-        WHERE cp.CRONOGRAMAPRESENCIALRADICADOID = :1
+        WHERE cp.CRONOGRAMAPRESENCIALRADICADOID = $1
         ORDER BY cp.CRONOGRAMAPRESENCIALID`,
       [radicadoId],
     )
 
     const virtuales: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAVIRTUALID           AS "id",
-              TRIM(cv.CRONOGRAMAVIRTUALSIGLA)   AS "sigla",
-              TRIM(cv.CRONOGRAMAVIRTUALNOMBRE)  AS "nombre",
-              TRIM(cv.CRONOGRAMAVIRESTADORADICADO) AS "estadoRadicado",
+              btrim((cv.CRONOGRAMAVIRTUALSIGLA)::text)   AS "sigla",
+              btrim((cv.CRONOGRAMAVIRTUALNOMBRE)::text)  AS "nombre",
+              btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text) AS "estadoRadicado",
               af.ACCIONFORMACIONNUMERO         AS "afNum",
-              TRIM(af.ACCIONFORMACIONNOMBRE)   AS "af",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)   AS "af",
               g.AFGRUPONUMERO                  AS "grupoNum",
               ut.UNIDADTEMATICANUMERO          AS "utNum",
-              TRIM(ut.UNIDADTEMATICANOMBRE)    AS "utNombre"
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)    AS "utNombre"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA c       ON c.CRONOGRAMAID = cv.CRONOGRAMAID
          JOIN AFGRUPO g          ON g.AFGRUPOID    = c.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          JOIN UNIDADTEMATICA ut  ON ut.UNIDADTEMATICAID = c.UNIDADTEMATICAID
-        WHERE cv.CRONOGRAMAVIRTUALRADICADOID = :1
+        WHERE cv.CRONOGRAMAVIRTUALRADICADOID = $1
         ORDER BY cv.CRONOGRAMAVIRTUALID`,
       [radicadoId],
     )
@@ -1491,8 +1497,8 @@ export class CronogramaService {
     const r = await this.ds.query(
       `UPDATE CRONOGRAMAPRESENCIAL
           SET CRONOGRAMAESTADORADICADO = 'ACTUALIZADA'
-        WHERE CRONOGRAMAPRESENCIALID = :1
-          AND TRIM(CRONOGRAMAESTADORADICADO) = 'MODIFICAR'`,
+        WHERE CRONOGRAMAPRESENCIALID = $1
+          AND btrim((CRONOGRAMAESTADORADICADO)::text) = 'MODIFICAR'`,
       [sesionId],
     )
     return { ok: true, affected: r?.affectedRows ?? 0 }
@@ -1503,8 +1509,8 @@ export class CronogramaService {
     const r = await this.ds.query(
       `UPDATE CRONOGRAMAVIRTUAL
           SET CRONOGRAMAVIRESTADORADICADO = 'ACTUALIZADA'
-        WHERE CRONOGRAMAVIRTUALID = :1
-          AND TRIM(CRONOGRAMAVIRESTADORADICADO) = 'MODIFICAR'`,
+        WHERE CRONOGRAMAVIRTUALID = $1
+          AND btrim((CRONOGRAMAVIRESTADORADICADO)::text) = 'MODIFICAR'`,
       [actividadId],
     )
     return { ok: true, affected: r?.affectedRows ?? 0 }
@@ -1519,15 +1525,15 @@ export class CronogramaService {
       await qr.query(
         `UPDATE CRONOGRAMAPRESENCIAL
             SET CRONOGRAMAESTADORADICADO = 'ACTUALIZADA'
-          WHERE CRONOGRAMAPRESENCIALRADICADOID = :1
-            AND TRIM(CRONOGRAMAESTADORADICADO) = 'MODIFICAR'`,
+          WHERE CRONOGRAMAPRESENCIALRADICADOID = $1
+            AND btrim((CRONOGRAMAESTADORADICADO)::text) = 'MODIFICAR'`,
         [radicadoId],
       )
       await qr.query(
         `UPDATE CRONOGRAMAVIRTUAL
             SET CRONOGRAMAVIRESTADORADICADO = 'ACTUALIZADA'
-          WHERE CRONOGRAMAVIRTUALRADICADOID = :1
-            AND TRIM(CRONOGRAMAVIRESTADORADICADO) = 'MODIFICAR'`,
+          WHERE CRONOGRAMAVIRTUALRADICADOID = $1
+            AND btrim((CRONOGRAMAVIRESTADORADICADO)::text) = 'MODIFICAR'`,
         [radicadoId],
       )
       await qr.commitTransaction()
@@ -1545,12 +1551,12 @@ export class CronogramaService {
     const pendientes: any[] = await this.ds.query(
       `SELECT (
           (SELECT COUNT(*) FROM CRONOGRAMAPRESENCIAL
-            WHERE CRONOGRAMAPRESENCIALRADICADOID = :1
-              AND TRIM(CRONOGRAMAESTADORADICADO) = 'MODIFICAR')
+            WHERE CRONOGRAMAPRESENCIALRADICADOID = $1
+              AND btrim((CRONOGRAMAESTADORADICADO)::text) = 'MODIFICAR')
         + (SELECT COUNT(*) FROM CRONOGRAMAVIRTUAL
-            WHERE CRONOGRAMAVIRTUALRADICADOID = :2
-              AND TRIM(CRONOGRAMAVIRESTADORADICADO) = 'MODIFICAR')
-        ) AS "C" FROM DUAL`,
+            WHERE CRONOGRAMAVIRTUALRADICADOID = $2
+              AND btrim((CRONOGRAMAVIRESTADORADICADO)::text) = 'MODIFICAR')
+        ) AS "C" `,
       [radicadoId, radicadoId],
     )
     if (Number(pendientes[0].C) > 0) {
@@ -1561,7 +1567,7 @@ export class CronogramaService {
       `UPDATE CRONOGRAMARADICADO
           SET RADICADOESTADOGENERAL = 'RADICADO',
               RADICADOFECHAESTADO   = ${AHORA_UTC}
-        WHERE RADICADOID = :1`,
+        WHERE RADICADOID = $1`,
       [radicadoId],
     )
     return { ok: true }
@@ -1573,18 +1579,18 @@ export class CronogramaService {
               cp.CRONOGRAMAID                   AS "cronogramaId",
               c.UNIDADTEMATICAID                AS "utId",
               c.CRONOPROYECTO                   AS "proyectoId",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESESI) AS "nombreSesion",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESESI)::text) AS "nombreSesion",
               cp.CRONOGRAMAPRESENCIALNUMSESION  AS "numSesion",
               cp.CRONOGRAMAPRESENCIALFECHAINICI AS "fechaInicio",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAINICIO - INTERVAL '5' HOUR, 'HH24:MI') AS "horaInicio",
               TO_CHAR(cp.CRONOGRAMAPRESENCIALHORAFIN - INTERVAL '5' HOUR, 'HH24:MI')    AS "horaFin",
               cp.CRONOGRAMAPRESENCIALNUMHORAS   AS "horas",
-              TRIM(cp.CRONOGRAMAPRESENCIALNOMBRESEDE) AS "nombreSede",
-              TRIM(cp.CRONOGRAMAPRESENCIALDIRECCION)  AS "direccion",
-              TRIM(cp.CRONOGRAMAPRESENCIALAULA)       AS "aula",
-              TRIM(cp.CRONOGRAMAHERRAMIENTA)          AS "herramienta",
-              TRIM(cp.CRONOGRAMAURL)                  AS "url",
-              TRIM(cp.CRONOGRAMAESTADORADICADO)       AS "estadoRadicado",
+              btrim((cp.CRONOGRAMAPRESENCIALNOMBRESEDE)::text) AS "nombreSede",
+              btrim((cp.CRONOGRAMAPRESENCIALDIRECCION)::text)  AS "direccion",
+              btrim((cp.CRONOGRAMAPRESENCIALAULA)::text)       AS "aula",
+              btrim((cp.CRONOGRAMAHERRAMIENTA)::text)          AS "herramienta",
+              btrim((cp.CRONOGRAMAURL)::text)                  AS "url",
+              btrim((cp.CRONOGRAMAESTADORADICADO)::text)       AS "estadoRadicado",
               cp.CRONOGRAMAPRESENCIALCAPAID         AS "capacitadorId",
               cp.CRONOGRAMAPRESENCIALCAPASUPUNO     AS "capSup1Id",
               cp.CRONOGRAMAPRESENCIALCAPASUPDOS     AS "capSup2Id",
@@ -1597,7 +1603,7 @@ export class CronogramaService {
               cp.CRONOGRAMAPRESENCIALPERFILUTCU     AS "perfilSup4Id"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cp.CRONOGRAMAID
-        WHERE cp.CRONOGRAMAPRESENCIALID = :1`,
+        WHERE cp.CRONOGRAMAPRESENCIALID = $1`,
       [sesionId],
     )
     if (!rows.length) throw new NotFoundException('Sesión no encontrada.')
@@ -1610,16 +1616,16 @@ export class CronogramaService {
               cv.CRONOGRAMAID                   AS "cronogramaId",
               c.UNIDADTEMATICAID                AS "utId",
               c.CRONOPROYECTO                   AS "proyectoId",
-              TRIM(cv.CRONOGRAMAVIRTUALNOMBRE)  AS "nombreActividad",
+              btrim((cv.CRONOGRAMAVIRTUALNOMBRE)::text)  AS "nombreActividad",
               cv.CRONOGRAMAVIRTUALNUMSESION    AS "numSesion",
               cv.CRONOGRAMAVIRTUALFECHAINICIO  AS "fechaInicio",
               cv.CRONOGRAMAVIRTUALFECHAFINAL   AS "fechaFin",
               cv.CRONOGRAMAVIRTUALNUMHORAS     AS "horas",
-              TRIM(cv.CRONOGRAMAVIRTUALPROVEEDOR)   AS "plataforma",
-              TRIM(cv.CRONOGRAMAVIRTUALURL)         AS "url",
-              TRIM(cv.CRONOGRAMAVIRTUALUSUARIOSENA) AS "usuarioSena",
-              TRIM(cv.CRONOGRAMAVIRTUALCLAVESENA)   AS "claveSena",
-              TRIM(cv.CRONOGRAMAVIRESTADORADICADO)  AS "estadoRadicado",
+              btrim((cv.CRONOGRAMAVIRTUALPROVEEDOR)::text)   AS "plataforma",
+              btrim((cv.CRONOGRAMAVIRTUALURL)::text)         AS "url",
+              btrim((cv.CRONOGRAMAVIRTUALUSUARIOSENA)::text) AS "usuarioSena",
+              btrim((cv.CRONOGRAMAVIRTUALCLAVESENA)::text)   AS "claveSena",
+              btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text)  AS "estadoRadicado",
               cv.CRONOGRAMAVIRCAPACITADORVIRTUA     AS "capacitadorId",
               cv.CRONOGRAMAVIRCAPACITADORLSUPUN     AS "capSup1Id",
               cv.CRONOGRAMAVIRCAPACITADORSUPDOS     AS "capSup2Id",
@@ -1632,7 +1638,7 @@ export class CronogramaService {
               cv.CRONOGRAMAVIRTUALPERFILUTSUPCU     AS "perfilSup4Id"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cv.CRONOGRAMAID
-        WHERE cv.CRONOGRAMAVIRTUALID = :1`,
+        WHERE cv.CRONOGRAMAVIRTUALID = $1`,
       [actividadId],
     )
     if (!rows.length) throw new NotFoundException('Actividad virtual no encontrada.')
@@ -1643,12 +1649,12 @@ export class CronogramaService {
     await this.assertConvenioActivoPorSesionPresencial(sesionId)
     const sesRows: any[] = await this.ds.query(
       `SELECT cp.CRONOGRAMAID AS "cronogramaId",
-              TRIM(cp.CRONOGRAMAESTADORADICADO) AS "estadoRadicado",
+              btrim((cp.CRONOGRAMAESTADORADICADO)::text) AS "estadoRadicado",
               c.CRONOGRAMAFECHAINICIO AS "fechaInicio",
               c.CRONOGRAMAFECHAFIN    AS "fechaFin"
          FROM CRONOGRAMAPRESENCIAL cp
          JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cp.CRONOGRAMAID
-        WHERE cp.CRONOGRAMAPRESENCIALID = :1`,
+        WHERE cp.CRONOGRAMAPRESENCIALID = $1`,
       [sesionId],
     )
     if (!sesRows.length) throw new NotFoundException('Sesión no encontrada.')
@@ -1708,7 +1714,7 @@ export class CronogramaService {
 
     params.push(sesionId)
     await this.ds.query(
-      `UPDATE CRONOGRAMAPRESENCIAL SET ${sets.join(', ')} WHERE CRONOGRAMAPRESENCIALID = :${params.length}`,
+      `UPDATE CRONOGRAMAPRESENCIAL SET ${sets.join(', ')} WHERE CRONOGRAMAPRESENCIALID = $${params.length}`,
       params,
     )
     return { ok: true, changed: sets.length }
@@ -1718,12 +1724,12 @@ export class CronogramaService {
     await this.assertConvenioActivoPorSesionVirtual(actividadId)
     const sesRows: any[] = await this.ds.query(
       `SELECT cv.CRONOGRAMAID AS "cronogramaId",
-              TRIM(cv.CRONOGRAMAVIRESTADORADICADO) AS "estadoRadicado",
+              btrim((cv.CRONOGRAMAVIRESTADORADICADO)::text) AS "estadoRadicado",
               c.CRONOGRAMAFECHAINICIO AS "fechaInicio",
               c.CRONOGRAMAFECHAFIN    AS "fechaFin"
          FROM CRONOGRAMAVIRTUAL cv
          JOIN CRONOGRAMA c ON c.CRONOGRAMAID = cv.CRONOGRAMAID
-        WHERE cv.CRONOGRAMAVIRTUALID = :1`,
+        WHERE cv.CRONOGRAMAVIRTUALID = $1`,
       [actividadId],
     )
     if (!sesRows.length) throw new NotFoundException('Actividad no encontrada.')
@@ -1770,7 +1776,7 @@ export class CronogramaService {
 
     params.push(actividadId)
     await this.ds.query(
-      `UPDATE CRONOGRAMAVIRTUAL SET ${sets.join(', ')} WHERE CRONOGRAMAVIRTUALID = :${params.length}`,
+      `UPDATE CRONOGRAMAVIRTUAL SET ${sets.join(', ')} WHERE CRONOGRAMAVIRTUALID = $${params.length}`,
       params,
     )
     return { ok: true, changed: sets.length }
@@ -1784,9 +1790,9 @@ export class CronogramaService {
     try {
       const rows: any[] = await qr.query(
         `SELECT CRONOGRAMAID AS "cronogramaId",
-                TRIM(CRONOGRAMAVIRESTADORADICADO) AS "estadoRadicado"
+                btrim((CRONOGRAMAVIRESTADORADICADO)::text) AS "estadoRadicado"
            FROM CRONOGRAMAVIRTUAL
-          WHERE CRONOGRAMAVIRTUALID = :1`,
+          WHERE CRONOGRAMAVIRTUALID = $1`,
         [actividadId],
       )
       if (!rows.length) throw new NotFoundException('Actividad virtual no encontrada.')
@@ -1796,12 +1802,12 @@ export class CronogramaService {
       const cronogramaId = Number(rows[0].cronogramaId)
 
       await qr.query(
-        `DELETE FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAVIRTUALID = :1`, [actividadId],
+        `DELETE FROM CRONOGRAMAVIRTUAL WHERE CRONOGRAMAVIRTUALID = $1`, [actividadId],
       )
       await qr.query(
         `UPDATE CRONOGRAMA
-            SET CRONONUMTOTALACT = GREATEST(NVL(CRONONUMTOTALACT, 0) - 1, 0)
-          WHERE CRONOGRAMAID = :1`,
+            SET CRONONUMTOTALACT = GREATEST(COALESCE(CRONONUMTOTALACT, 0) - 1, 0)
+          WHERE CRONOGRAMAID = $1`,
         [cronogramaId],
       )
 

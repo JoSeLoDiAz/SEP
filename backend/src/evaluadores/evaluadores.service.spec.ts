@@ -84,7 +84,7 @@ describe('EvaluadoresService.crear — ids de PERSONA y USUARIO', () => {
     expect(r.acceso.usuarioId).toBe(ID_USUARIO)
   })
 
-  it('las fechas del alta van en UTC: ninguna sentencia usa SYSDATE', async () => {
+  it('las fechas del alta van en UTC: ninguna sentencia usa (now() AT TIME ZONE \'UTC\')', async () => {
     reiniciarTriggersDeId(new Map([['PERSONA', 'PERSONAID'], ['USUARIO', 'USUARIOID']]))
     const { ds, llamadas } = dataSourceFalso()
     await new EvaluadoresService(ds as never, {} as never).crear(DTO)

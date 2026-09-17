@@ -123,12 +123,12 @@ function baseFalsa(cambios: Partial<Base> = {}) {
       else if (s.includes('FROM RUBRO WHERE RUBROID IN')) r = duenos(b.rubro, params)
       else if (s.includes('FROM NECESIDADFORMACION nf')) r = duenos(b.necesidad, params)
       else if (s.includes('FROM AFCOMPONENTE')) r = params.filter((id) => b.componente.includes(Number(id))).map((id) => ({ id, dueno: id }))
-      else if (s.includes('TRIM(r.RUBROCODIGO) = :1')) {
+      else if (s.includes('btrim((r.RUBROCODIGO)::text) = $1')) {
         const id = b.fijos[`${String(params[0])}@${String(params[1])}`]
         r = id ? [{ rubroId: id, paquete: 'PAQ' }] : []
       } else if (s.includes('FROM TIPODOCUMENTOIDENTIDAD')) r = [{ id: 1 }]
       else if (s.startsWith('SELECT ACCIONFORMACIONID AS "id" FROM ACCIONFORMACION WHERE PROYECTOID')) r = b.afsVivas.map((id) => ({ id }))
-      else if (s.startsWith('SELECT NVL(MAX(')) r = [{ id: 41 }]
+      else if (s.startsWith('SELECT COALESCE(MAX(')) r = [{ id: 41 }]
       else if (s.startsWith('INSERT INTO')) r = [[/VALUES \(NULL/.test(s) ? ++secuencia : params[0]]]
       return Promise.resolve(r)
     },
@@ -226,7 +226,7 @@ describe('restaurarContenido', () => {
     const primerBorrado = llamadas.findIndex((l) => /^\s*DELETE/.test(l.sql))
     const ultimaGuarda = llamadas.map((l) => l.sql).lastIndexOf(llamadas.filter((l) => l.sql.includes('ROWNUM = 1')).pop()?.sql ?? '')
     expect(primerBorrado).toBeGreaterThan(ultimaGuarda)
-    expect(llamadas.some((l) => l.sql.includes('SYSDATE'))).toBe(false)
+    expect(llamadas.some((l) => l.sql.includes('(now() AT TIME ZONE \'UTC\')'))).toBe(false)
     expect(inserts('ACCIONFORMACION')[0].columnas.ACCIONFORMACIONFECHAREGISTRO).toBe(AHORA_UTC)
     expect(inserts('UNIDADTEMATICA')[0].columnas.UNIDADTEMATICAFECHAREGISTRO).toBe(AHORA_UTC)
     expect(inserts('PERFILUT')[0].columnas.PERFILUTFECHAREGISTRO).toBe(AHORA_UTC)
@@ -237,7 +237,7 @@ describe('restaurarContenido', () => {
     reiniciarTriggersDeId(exadata())
     const { ej, llamadas } = baseFalsa()
     await restaurarContenido(ej, 3050, snapshotDePrueba())
-    const fijos = llamadas.filter((l) => l.sql.includes('TRIM(r.RUBROCODIGO) = :1'))
+    const fijos = llamadas.filter((l) => l.sql.includes('btrim((r.RUBROCODIGO)::text) = $1'))
     expect(fijos.map((l) => l.params)).toEqual([['R09', 10], ['R015', 10]])
     for (const l of fijos) expect(l.sql).toContain('CONVOCATORIAIDRUBRO = :2')
   })

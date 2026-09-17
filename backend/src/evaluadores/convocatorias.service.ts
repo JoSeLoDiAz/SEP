@@ -92,11 +92,11 @@ export class ConvocatoriasService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT c.CONVOCATORIAID       AS "id",
               c.ANIO                 AS "anio",
-              TRIM(c.PERIODO)        AS "periodo",
-              TRIM(c.NOMBRE)         AS "nombre",
+              btrim((c.PERIODO)::text)        AS "periodo",
+              btrim((c.NOMBRE)::text)         AS "nombre",
               c.MODALIDADPARTID      AS "modalidadPartId",
-              TRIM(mo.CODIGO)        AS "modalidadPart",
-              TRIM(mo.NOMBRE)        AS "modalidadNombre",
+              btrim((mo.CODIGO)::text)        AS "modalidadPart",
+              btrim((mo.NOMBRE)::text)        AS "modalidadNombre",
               c.FECHAINICIO          AS "fechaInicio",
               c.FECHAFIN             AS "fechaFin",
               c.ACTIVO               AS "activo",
@@ -132,41 +132,41 @@ export class ConvocatoriasService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT c.CONVOCATORIAID       AS "id",
               c.ANIO                 AS "anio",
-              TRIM(c.PERIODO)        AS "periodo",
-              TRIM(c.NOMBRE)         AS "nombre",
+              btrim((c.PERIODO)::text)        AS "periodo",
+              btrim((c.NOMBRE)::text)         AS "nombre",
               c.MODALIDADPARTID      AS "modalidadPartId",
-              TRIM(mo.CODIGO)        AS "modalidadPart",
-              TRIM(mo.NOMBRE)        AS "modalidadNombre",
+              btrim((mo.CODIGO)::text)        AS "modalidadPart",
+              btrim((mo.NOMBRE)::text)        AS "modalidadNombre",
               c.FECHAINICIO          AS "fechaInicio",
               c.FECHAFIN             AS "fechaFin",
-              TRIM(c.OBSERVACIONES)  AS "observaciones",
+              btrim((c.OBSERVACIONES)::text)  AS "observaciones",
               c.ACTIVO               AS "activo",
               c.PUNTAJEMINIMOPRUEBA  AS "puntajeMinimoPrueba",
               c.CALIFICACIONMINIMACURSO AS "calificacionMinimaCurso",
               c.CERTIFICADOTEXTO     AS "certificadoTexto",
               c.CERTIFICADOFIRMAID   AS "certificadoFirmaId",
-              NVL(c.CERTIFICADOHABILITADO, 0) AS "certificadoHabilitado",
+              COALESCE(c.CERTIFICADOHABILITADO, 0) AS "certificadoHabilitado",
               c.CONVOCATORIASEPID    AS "convocatoriaSepId",
-              TRIM(cs.CONVOCATORIANOMBRE) AS "convocatoriaSepNombre",
+              btrim((cs.CONVOCATORIANOMBRE)::text) AS "convocatoriaSepNombre",
               cs.CONVOCATORIAANIO    AS "convocatoriaSepAnio",
               c.FECHACREACION        AS "fechaCreacion"
          FROM EVALUADORCONVOCATORIA c
          LEFT JOIN MODALIDADPART mo ON mo.MODALIDADPARTID = c.MODALIDADPARTID
          LEFT JOIN CONVOCATORIA  cs ON cs.CONVOCATORIAID  = c.CONVOCATORIASEPID
-        WHERE c.CONVOCATORIAID = :1`,
+        WHERE c.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     if (!rows[0]) throw new NotFoundException('Convocatoria no encontrada')
 
     // Incluye los tipos con cero documentos: el front los pinta igual.
     const porTipo: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT TRIM(t.CODIGO) AS "tipoCodigo",
-              TRIM(t.NOMBRE) AS "tipoNombre",
+      `SELECT btrim((t.CODIGO)::text) AS "tipoCodigo",
+              btrim((t.NOMBRE)::text) AS "tipoNombre",
               COUNT(d.DOCUMENTOID) AS "count"
          FROM TIPODOCUMENTOCONV t
          LEFT JOIN CONVOCATORIADOCUMENTO d
            ON d.TIPODOCUMENTOCONVID = t.TIPODOCUMENTOCONVID
-          AND d.CONVOCATORIAID      = :1
+          AND d.CONVOCATORIAID      = $1
         WHERE t.ACTIVO = 1
         GROUP BY t.CODIGO, t.NOMBRE, t.ORDEN
         ORDER BY t.ORDEN ASC, t.NOMBRE ASC`,
@@ -209,7 +209,7 @@ export class ConvocatoriasService {
 
     // ID por MAX+1: no hay secuencia para esta tabla.
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
-      `SELECT NVL(MAX(CONVOCATORIAID), 0) + 1 AS "NUEVO" FROM EVALUADORCONVOCATORIA`,
+      `SELECT COALESCE(MAX(CONVOCATORIAID), 0) + 1 AS "NUEVO" FROM EVALUADORCONVOCATORIA`,
     )
     const convocatoriaId = Number(seq[0].NUEVO)
 
@@ -221,7 +221,7 @@ export class ConvocatoriasService {
         `INSERT INTO EVALUADORCONVOCATORIA
            (CONVOCATORIAID, ANIO, PERIODO, NOMBRE, MODALIDADPARTID, FECHAINICIO, FECHAFIN,
             OBSERVACIONES, CONVOCATORIASEPID, ACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 1, ${AHORA_UTC})`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, ${AHORA_UTC})`,
         [
           convocatoriaId,
           Number(dto.anio),
@@ -242,7 +242,7 @@ export class ConvocatoriasService {
 
   async actualizar(convocatoriaId: number, dto: ConvocatoriaActualizarDto) {
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`, [convocatoriaId],
+      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`, [convocatoriaId],
     )
     if (!ok[0]) throw new NotFoundException('Convocatoria no encontrada')
     if (dto.anio !== undefined) this.validarAnio(dto.anio)
@@ -250,7 +250,7 @@ export class ConvocatoriasService {
     if (dto.convocatoriaSepId !== undefined) {
       // El año a comparar es el que quedará tras el PUT, no el actual.
       const actual: Array<{ anio: number }> = await this.dataSource.query(
-        `SELECT ANIO AS "anio" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`,
+        `SELECT ANIO AS "anio" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`,
         [convocatoriaId],
       )
       await this.validarConvocatoriaSep(
@@ -294,7 +294,7 @@ export class ConvocatoriasService {
     params.push(convocatoriaId)
     try {
       await this.dataSource.query(
-        `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${params.length}`,
+        `UPDATE EVALUADORCONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = $${params.length}`,
         params,
       )
     } catch (e) {
@@ -307,11 +307,11 @@ export class ConvocatoriasService {
   /** Soft-delete: por integridad de documentos nunca borramos la fila. */
   async cambiarEstado(convocatoriaId: number, activo: boolean) {
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`, [convocatoriaId],
+      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`, [convocatoriaId],
     )
     if (!ok[0]) throw new NotFoundException('Convocatoria no encontrada')
     await this.dataSource.query(
-      `UPDATE EVALUADORCONVOCATORIA SET ACTIVO = :1 WHERE CONVOCATORIAID = :2`,
+      `UPDATE EVALUADORCONVOCATORIA SET ACTIVO = $1 WHERE CONVOCATORIAID = $2`,
       [activo ? 1 : 0, convocatoriaId],
     )
     return { message: activo ? 'Convocatoria activada' : 'Convocatoria desactivada', activo }
@@ -322,7 +322,7 @@ export class ConvocatoriasService {
     const c = (codigo ?? '').toString().trim().toUpperCase()
     if (!c) return null
     const rows: Array<{ id: number }> = await this.dataSource.query(
-      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = :1`, [c],
+      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = $1`, [c],
     )
     if (!rows[0]) throw new BadRequestException(`Modalidad '${codigo}' no existe en el catálogo`)
     return Number(rows[0].id)
@@ -354,8 +354,8 @@ export class ConvocatoriasService {
     if (sepId == null) return
 
     const filas: Array<{ anio: number; nombre: string }> = await this.dataSource.query(
-      `SELECT CONVOCATORIAANIO AS "anio", TRIM(CONVOCATORIANOMBRE) AS "nombre"
-         FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAANIO AS "anio", btrim((CONVOCATORIANOMBRE)::text) AS "nombre"
+         FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [sepId],
     )
     if (!filas[0]) {
@@ -382,11 +382,11 @@ export class ConvocatoriasService {
       `SELECT d.DOCUMENTOID          AS "documentoId",
               d.CONVOCATORIAID       AS "convocatoriaId",
               d.TIPODOCUMENTOCONVID  AS "tipoDocumentoConvId",
-              TRIM(t.CODIGO)         AS "tipoCodigo",
-              TRIM(t.NOMBRE)         AS "tipoNombre",
-              TRIM(d.DOCUMENTODESCRIPCION) AS "descripcion",
-              TRIM(d.ARCHIVONOMBRE)  AS "archivoNombre",
-              TRIM(d.ARCHIVOMIME)    AS "mime",
+              btrim((t.CODIGO)::text)         AS "tipoCodigo",
+              btrim((t.NOMBRE)::text)         AS "tipoNombre",
+              btrim((d.DOCUMENTODESCRIPCION)::text) AS "descripcion",
+              btrim((d.ARCHIVONOMBRE)::text)  AS "archivoNombre",
+              btrim((d.ARCHIVOMIME)::text)    AS "mime",
               d.FECHACARGUE          AS "fechaCargue"
          FROM CONVOCATORIADOCUMENTO d
          JOIN TIPODOCUMENTOCONV     t ON t.TIPODOCUMENTOCONVID = d.TIPODOCUMENTOCONVID
@@ -415,15 +415,15 @@ export class ConvocatoriasService {
     }
 
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`, [convocatoriaId],
+      `SELECT 1 FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`, [convocatoriaId],
     )
     if (!ok[0]) throw new NotFoundException('Convocatoria no encontrada')
 
     const tipo: Array<{ extensiones: string; codigo: string }> = await this.dataSource.query(
-      `SELECT TRIM(EXTENSIONESPERMITIDAS) AS "extensiones",
-              TRIM(CODIGO)                AS "codigo"
+      `SELECT btrim((EXTENSIONESPERMITIDAS)::text) AS "extensiones",
+              btrim((CODIGO)::text)                AS "codigo"
          FROM TIPODOCUMENTOCONV
-        WHERE TIPODOCUMENTOCONVID = :1 AND ACTIVO = 1`,
+        WHERE TIPODOCUMENTOCONVID = $1 AND ACTIVO = 1`,
       [tipoId],
     )
     if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
@@ -440,7 +440,7 @@ export class ConvocatoriasService {
 
     // ID por MAX+1: no hay secuencia para esta tabla.
     const seq: Array<{ NUEVO: number }> = await this.dataSource.query(
-      `SELECT NVL(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM CONVOCATORIADOCUMENTO`,
+      `SELECT COALESCE(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM CONVOCATORIADOCUMENTO`,
     )
     const documentoId = Number(seq[0].NUEVO)
 
@@ -449,7 +449,7 @@ export class ConvocatoriasService {
       `INSERT INTO CONVOCATORIADOCUMENTO
          (DOCUMENTOID, CONVOCATORIAID, TIPODOCUMENTOCONVID, DOCUMENTODESCRIPCION,
           ARCHIVOBLOB, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, ${AHORA_UTC})`,
       [
         documentoId,
         convocatoriaId,
@@ -471,12 +471,12 @@ export class ConvocatoriasService {
   }> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT d.CONVOCATORIAID       AS "convocatoriaId",
-              TRIM(t.CODIGO)         AS "tipoCodigo",
-              TRIM(d.ARCHIVONOMBRE)  AS "archivoNombre",
-              TRIM(d.ARCHIVOMIME)    AS "mime"
+              btrim((t.CODIGO)::text)         AS "tipoCodigo",
+              btrim((d.ARCHIVONOMBRE)::text)  AS "archivoNombre",
+              btrim((d.ARCHIVOMIME)::text)    AS "mime"
          FROM CONVOCATORIADOCUMENTO d
          JOIN TIPODOCUMENTOCONV     t ON t.TIPODOCUMENTOCONVID = d.TIPODOCUMENTOCONVID
-        WHERE d.DOCUMENTOID = :1`,
+        WHERE d.DOCUMENTOID = $1`,
       [docId],
     )
     if (!rows[0]) throw new NotFoundException('Documento no encontrado')
@@ -496,9 +496,9 @@ export class ConvocatoriasService {
       nombre: string | null;
     }> = await this.dataSource.query(
       `SELECT ARCHIVOBLOB         AS "blob",
-              TRIM(ARCHIVOMIME)   AS "mime",
-              TRIM(ARCHIVONOMBRE) AS "nombre"
-         FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = :1`,
+              btrim((ARCHIVOMIME)::text)   AS "mime",
+              btrim((ARCHIVONOMBRE)::text) AS "nombre"
+         FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = $1`,
       [docId],
     )
     const r = rows[0]
@@ -512,11 +512,11 @@ export class ConvocatoriasService {
 
   async eliminarDocumento(docId: number): Promise<{ mensaje: string }> {
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = :1`, [docId],
+      `SELECT 1 FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = $1`, [docId],
     )
     if (!ok[0]) throw new NotFoundException('Documento no encontrado')
     await this.dataSource.query(
-      `DELETE FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = :1`, [docId],
+      `DELETE FROM CONVOCATORIADOCUMENTO WHERE DOCUMENTOID = $1`, [docId],
     )
     return { mensaje: 'Documento eliminado' }
   }

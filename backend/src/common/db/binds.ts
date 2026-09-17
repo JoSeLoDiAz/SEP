@@ -1,4 +1,5 @@
-// oracledb cuenta cada aparición del placeholder como un bind distinto, no reutiliza el valor
+// Ni oracledb ni pg reutilizan el valor de un parámetro repetido: cada aparición cuenta como uno distinto, así
+// que `:ev` escrito cinco veces se numera $1..$5 y el valor se repite otras tantas en el array.
 export function bindRepetido(
   plantilla: string,
   token: string,
@@ -6,7 +7,7 @@ export function bindRepetido(
   desde = 0,
 ): { sql: string; params: unknown[] } {
   let n = desde
-  const sql = plantilla.replace(new RegExp(`:${token}\\b`, 'g'), () => `:${++n}`)
+  const sql = plantilla.replace(new RegExp(`:${token}\\b`, 'g'), () => `$${++n}`)
   return { sql, params: Array(n - desde).fill(valor) }
 }
 
@@ -22,7 +23,7 @@ export function bindsRepetidos(
   const patron = new RegExp(`:(${nombres.join('|')})\\b`, 'g')
   const sql = plantilla.replace(patron, (_m, nombre: string) => {
     params.push(valores[nombre])
-    return `:${params.length}`
+    return `$${params.length}`
   })
   return { sql, params }
 }

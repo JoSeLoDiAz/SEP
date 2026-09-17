@@ -12,7 +12,7 @@ export class GruposService {
   // gate suave: la lectura no exige convenio EN EJECUCIÓN
   private async assertProyectoConConvenio(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT 1 AS "x" FROM CONVENIOS WHERE PROYECTOID = :1 FETCH FIRST 1 ROW ONLY`,
+      `SELECT 1 AS "x" FROM CONVENIOS WHERE PROYECTOID = $1 FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     if (!row) throw new BadRequestException('Este proyecto no tiene convenio.')
@@ -23,10 +23,10 @@ export class GruposService {
     return this.ds.query(
       `SELECT ACCIONFORMACIONID                       AS "afId",
               ACCIONFORMACIONNUMERO                   AS "numero",
-              TRIM(ACCIONFORMACIONNOMBRE)             AS "nombre",
-              NVL(ACCIONFORMACIONTRANSFERENCIA, 0)    AS "transferencia"
+              btrim((ACCIONFORMACIONNOMBRE)::text)             AS "nombre",
+              COALESCE(ACCIONFORMACIONTRANSFERENCIA, 0)    AS "transferencia"
          FROM ACCIONFORMACION
-        WHERE PROYECTOID = :1
+        WHERE PROYECTOID = $1
         ORDER BY ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -36,7 +36,7 @@ export class GruposService {
     await this.assertProyectoConConvenio(proyectoId)
     const [af] = await this.ds.query(
       `SELECT ACCIONFORMACIONID AS "afId" FROM ACCIONFORMACION
-        WHERE ACCIONFORMACIONID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE ACCIONFORMACIONID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [afId, proyectoId],
     )
     if (!af) throw new BadRequestException('La AF no pertenece al proyecto.')
@@ -51,21 +51,21 @@ export class GruposService {
     }> = await this.ds.query(
       `SELECT g.AFGRUPOID                                     AS "afGrupoId",
               g.AFGRUPONUMERO                                  AS "grupoNumero",
-              NVL((SELECT SUM(c.AFGRUPOCOBERTURABENEF)
+              COALESCE((SELECT SUM(c.AFGRUPOCOBERTURABENEF)
                      FROM AFGRUPOCOBERTURA c
                     WHERE c.AFGRUPOID = g.AFGRUPOID), 0)        AS "cupos",
-              NVL((SELECT COUNT(agb.AFGRUPOBENEFICIARIOID)
+              COALESCE((SELECT COUNT(agb.AFGRUPOBENEFICIARIOID)
                      FROM AFGRUPOBENEFICIARIO agb
                     WHERE agb.AFGRUPOID = g.AFGRUPOID
-                      AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'), 0) AS "registrados",
-              NVL((SELECT COUNT(agb.AFGRUPOBENEFICIARIOID)
+                      AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'), 0) AS "registrados",
+              COALESCE((SELECT COUNT(agb.AFGRUPOBENEFICIARIOID)
                      FROM AFGRUPOBENEFICIARIO agb
                     WHERE agb.AFGRUPOID = g.AFGRUPOID
-                      AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
-                      AND TRIM(agb.CERTIFICA) = 'SI'), 0)        AS "certificados",
-              TRIM(g.AFGRUPOVALIDACIONINTERVENTOR)              AS "validacionInterventor"
+                      AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
+                      AND btrim((agb.CERTIFICA)::text) = 'SI'), 0)        AS "certificados",
+              btrim((g.AFGRUPOVALIDACIONINTERVENTOR)::text)              AS "validacionInterventor"
          FROM AFGRUPO g
-        WHERE g.ACCIONFORMACIONID = :1
+        WHERE g.ACCIONFORMACIONID = $1
         ORDER BY g.AFGRUPONUMERO`,
       [afId],
     )
@@ -83,7 +83,7 @@ export class GruposService {
       `SELECT g.AFGRUPOID AS "id"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE g.AFGRUPOID = :1 AND af.PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE g.AFGRUPOID = $1 AND af.PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, proyectoId],
     )
     if (!g) throw new BadRequestException('El grupo no pertenece al proyecto.')
@@ -104,18 +104,18 @@ export class GruposService {
       `SELECT agb.AFGRUPOBENEFICIARIOID            AS "afGrupoBeneficiarioId",
               p.PERSONAID                           AS "personaId",
               p.TIPODOCUMENTOIDENTIDADID            AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE)  AS "tipoDocumento",
-              TRIM(p.PERSONAIDENTIFICACION)         AS "identificacion",
-              TRIM(p.PERSONANOMBRES)                AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)         AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)        AS "segundoApellido",
-              TRIM(agb.AFGRUPOBENEESTADO)           AS "estado",
-              TRIM(agb.CERTIFICA)                   AS "certifica",
-              TRIM(agb.VALIDACIONINTERVENTOR)       AS "validacionInterventor"
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text)  AS "tipoDocumento",
+              btrim((p.PERSONAIDENTIFICACION)::text)         AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text)                AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)         AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)        AS "segundoApellido",
+              btrim((agb.AFGRUPOBENEESTADO)::text)           AS "estado",
+              btrim((agb.CERTIFICA)::text)                   AS "certifica",
+              btrim((agb.VALIDACIONINTERVENTOR)::text)       AS "validacionInterventor"
          FROM AFGRUPOBENEFICIARIO agb
          JOIN PERSONA p                       ON p.PERSONAID = agb.PERSONAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td  ON td.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
-        WHERE agb.AFGRUPOID = :1
+        WHERE agb.AFGRUPOID = $1
         ORDER BY p.PERSONAID`,
       [afGrupoId],
     )
@@ -132,10 +132,10 @@ export class GruposService {
       `SELECT g.AFGRUPOID  AS "id",
               g.AFGRUPONUMERO AS "numero",
               af.ACCIONFORMACIONNUMERO AS "afNumero",
-              TRIM(af.ACCIONFORMACIONNOMBRE) AS "afNombre"
+              btrim((af.ACCIONFORMACIONNOMBRE)::text) AS "afNombre"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE g.AFGRUPOID = :1 AND af.PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE g.AFGRUPOID = $1 AND af.PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, proyectoId],
     )
     if (!g) throw new BadRequestException('El grupo no pertenece al proyecto.')
@@ -143,16 +143,16 @@ export class GruposService {
     const coberturas = await this.ds.query(
       `SELECT c.AFGRUPOCOBERTURAID                AS "id",
               c.DEPARTAMENTOGRUPOID               AS "departamentoId",
-              TRIM(d.DEPARTAMENTONOMBRE)          AS "departamento",
+              btrim((d.DEPARTAMENTONOMBRE)::text)          AS "departamento",
               c.CIUDADGRUPOID                     AS "ciudadId",
-              TRIM(ci.CIUDADNOMBRE)               AS "ciudad",
+              btrim((ci.CIUDADNOMBRE)::text)               AS "ciudad",
               c.AFGRUPOCOBERTURABENEF             AS "cupos",
               c.AFGRUPOCOBERTURAJUSTIFICACION     AS "justificacion",
-              NVL(c.AFGRUPOCOBERTURARURAL, 0)     AS "rural"
+              COALESCE(c.AFGRUPOCOBERTURARURAL, 0)     AS "rural"
          FROM AFGRUPOCOBERTURA c
          LEFT JOIN DEPARTAMENTO d ON d.DEPARTAMENTOID = c.DEPARTAMENTOGRUPOID
          LEFT JOIN CIUDAD ci      ON ci.CIUDADID      = c.CIUDADGRUPOID
-        WHERE c.AFGRUPOID = :1
+        WHERE c.AFGRUPOID = $1
         ORDER BY d.DEPARTAMENTONOMBRE, ci.CIUDADNOMBRE`,
       [afGrupoId],
     )
@@ -174,7 +174,7 @@ export class GruposService {
       `SELECT g.AFGRUPOID AS "afGrupoId"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE af.PROYECTOID = :1`,
+        WHERE af.PROYECTOID = $1`,
       [proyectoId],
     )
     if (grupos.length === 0) return { eliminadas: 0 }
@@ -197,17 +197,17 @@ export class GruposService {
     for (const d of dups) {
       const filas: Array<{ id: number; estado: string | null }> = await this.ds.query(
         `SELECT AFGRUPOBENEFICIARIOID AS "id",
-                TRIM(AFGRUPOBENEESTADO) AS "estado"
+                btrim((AFGRUPOBENEESTADO)::text) AS "estado"
            FROM AFGRUPOBENEFICIARIO
-          WHERE PERSONAID = :1 AND AFGRUPOID = :2
-          ORDER BY CASE WHEN TRIM(AFGRUPOBENEESTADO) = 'ACTIVO' THEN 0 ELSE 1 END,
+          WHERE PERSONAID = $1 AND AFGRUPOID = $2
+          ORDER BY CASE WHEN btrim((AFGRUPOBENEESTADO)::text) = 'ACTIVO' THEN 0 ELSE 1 END,
                    AFGRUPOBENEFICIARIOID DESC`,
         [Number(d.personaId), Number(d.afGrupoId)],
       )
       const aEliminar = filas.slice(1).map(f => Number(f.id))
       for (const id of aEliminar) {
         await this.ds.query(
-          `DELETE FROM AFGRUPOBENEFICIARIO WHERE AFGRUPOBENEFICIARIOID = :1`,
+          `DELETE FROM AFGRUPOBENEFICIARIO WHERE AFGRUPOBENEFICIARIOID = $1`,
           [id],
         )
         eliminadas++
@@ -233,20 +233,20 @@ export class GruposService {
               af.PROYECTOID                        AS "proyectoId",
               af.ACCIONFORMACIONNUMERO             AS "afNumero",
               g.AFGRUPONUMERO                      AS "grupoNumero",
-              TRIM(agb.AFGRUPOBENEESTADO)          AS "estadoActual"
+              btrim((agb.AFGRUPOBENEESTADO)::text)          AS "estadoActual"
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g          ON g.AFGRUPOID = agb.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE agb.AFGRUPOBENEFICIARIOID = :1
-          AND af.PROYECTOID = :2
+        WHERE agb.AFGRUPOBENEFICIARIOID = $1
+          AND af.PROYECTOID = $2
         FETCH FIRST 1 ROW ONLY`,
       [afGrupoBeneficiarioId, proyectoId],
     )
     if (!row) throw new NotFoundException('Asociación no encontrada en este proyecto.')
 
     const [conv] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     if (Number(conv?.estado) !== 1) {
@@ -265,10 +265,10 @@ export class GruposService {
                 g2.AFGRUPONUMERO          AS "grupoNumero"
            FROM AFGRUPOBENEFICIARIO agb
            JOIN AFGRUPO g2 ON g2.AFGRUPOID = agb.AFGRUPOID
-          WHERE g2.ACCIONFORMACIONID = :1
-            AND agb.PERSONAID = :2
-            AND agb.AFGRUPOBENEFICIARIOID <> :3
-            AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+          WHERE g2.ACCIONFORMACIONID = $1
+            AND agb.PERSONAID = $2
+            AND agb.AFGRUPOBENEFICIARIOID <> $3
+            AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
           FETCH FIRST 1 ROW ONLY`,
         [Number(row.afId), Number(row.personaId), afGrupoBeneficiarioId],
       )
@@ -285,8 +285,8 @@ export class GruposService {
            FROM AFGRUPOBENEFICIARIO agb
            JOIN AFGRUPO g  ON g.AFGRUPOID = agb.AFGRUPOID
            JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-          WHERE af.PROYECTOID = :1
-            AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+          WHERE af.PROYECTOID = $1
+            AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
           GROUP BY agb.PERSONAID`,
         [proyectoId],
       )
@@ -307,8 +307,8 @@ export class GruposService {
     }
 
     await this.ds.query(
-      `UPDATE AFGRUPOBENEFICIARIO SET AFGRUPOBENEESTADO = :1
-        WHERE AFGRUPOBENEFICIARIOID = :2`,
+      `UPDATE AFGRUPOBENEFICIARIO SET AFGRUPOBENEESTADO = $1
+        WHERE AFGRUPOBENEFICIARIOID = $2`,
       [nuevoEstado, afGrupoBeneficiarioId],
     )
     return {
@@ -322,46 +322,46 @@ export class GruposService {
 
     const benefs: Array<Record<string, unknown>> = await this.ds.query(
       `SELECT
-         UPPER(TRIM(e.EMPRESARAZONSOCIAL))                   AS "empresaRazonSocial",
-         TRIM(cv.CONVENIOSNUMERO)                            AS "convenioNumero",
-         UPPER(TRIM(m.MODALIDADNOMBRE))                      AS "modalidadParticipacion",
-         UPPER(TRIM(af.ACCIONFORMACIONNOMBRE))               AS "accionFormacionNombre",
-         UPPER(TRIM(mf.MODALIDADFORMACIONNOMBRE))            AS "modalidadFormacionNombre",
-         UPPER(TRIM(te.TIPOEVENTONOMBRE))                    AS "tipoEventoNombre",
+         UPPER(btrim((e.EMPRESARAZONSOCIAL)::text))                   AS "empresaRazonSocial",
+         btrim((cv.CONVENIOSNUMERO)::text)                            AS "convenioNumero",
+         UPPER(btrim((m.MODALIDADNOMBRE)::text))                      AS "modalidadParticipacion",
+         UPPER(btrim((af.ACCIONFORMACIONNOMBRE)::text))               AS "accionFormacionNombre",
+         UPPER(btrim((mf.MODALIDADFORMACIONNOMBRE)::text))            AS "modalidadFormacionNombre",
+         UPPER(btrim((te.TIPOEVENTONOMBRE)::text))                    AS "tipoEventoNombre",
          g.AFGRUPONUMERO                                     AS "afGrupoNumero",
-         UPPER(TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE))        AS "tipoDocumento",
-         TRIM(p.PERSONAIDENTIFICACION)                       AS "personaIdentificacion",
-         UPPER(TRIM(p.PERSONANOMBRES))                       AS "personaNombres",
-         UPPER(TRIM(p.PERSONAPRIMERAPELLIDO))                AS "personaPrimerApellido",
-         UPPER(TRIM(p.PERSONASEGUNDOAPELLIDO))               AS "personaSegundoApellido",
-         UPPER(TRIM(ge.GENERONOMBRE))                        AS "generoNombre",
+         UPPER(btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text))        AS "tipoDocumento",
+         btrim((p.PERSONAIDENTIFICACION)::text)                       AS "personaIdentificacion",
+         UPPER(btrim((p.PERSONANOMBRES)::text))                       AS "personaNombres",
+         UPPER(btrim((p.PERSONAPRIMERAPELLIDO)::text))                AS "personaPrimerApellido",
+         UPPER(btrim((p.PERSONASEGUNDOAPELLIDO)::text))               AS "personaSegundoApellido",
+         UPPER(btrim((ge.GENERONOMBRE)::text))                        AS "generoNombre",
          p.PERSONAESTRATO                                    AS "personaEstrato",
          TO_CHAR(p.PERSONAFECHANACIMIENTO, 'DD/MM/YYYY')     AS "personaFechaNacimiento",
          CASE WHEN p.PERSONAFECHANACIMIENTO IS NULL THEN NULL
-              ELSE FLOOR(MONTHS_BETWEEN(${AHORA_UTC}, p.PERSONAFECHANACIMIENTO) / 12) END AS "postulacionEdad",
-         UPPER(TRIM(re.RANGOEDADNOMBRE))                     AS "rangoEdadNombre",
-         TRIM(p.PERSONACELULAR)                              AS "personaCelular",
-         TRIM(p.PERSONAEMAIL)                                AS "personaEmail",
-         UPPER(TRIM(depDom.DEPARTAMENTONOMBRE))              AS "departamentoNombre",
-         UPPER(TRIM(ciDom.CIUDADNOMBRE))                     AS "ciudadNombre",
-         UPPER(TRIM(p.PERSONABARRIO))                        AS "personaBarrio",
-         UPPER(TRIM(p.PERSONADIRECCION))                     AS "personaDireccion",
-         UPPER(TRIM(car.CARACTERIZACIONNOMBRE))              AS "caracterizacionNombre",
-         UPPER(TRIM(po.POSTULACIONTRASFERENCIA))             AS "postulacionTrasferencia",
-         UPPER(TRIM(pt.PERFILTRASFERENCIANOMBRE))            AS "perfilTrasferenciaNombre",
-         UPPER(TRIM(be.BENEFICIARIOEMPRESANOMBRE))           AS "beneficiarioEmpresaNombre",
-         UPPER(TRIM(tam.TAMANOEMPRESANOMBRE))                AS "tamanoEmpresaNombre",
-         UPPER(TRIM(nivo.NIVELOCUPACIONALNOMBRE))            AS "nivelOcupacionalNombre",
-         CASE WHEN UPPER(TRIM(po.POSTULACIONANTIGUEDAD)) = 'S' THEN 'SI' ELSE 'NO' END
+              ELSE FLOOR((EXTRACT(YEAR FROM age(${AHORA_UTC}, p.PERSONAFECHANACIMIENTO)) * 12 + EXTRACT(MONTH FROM age(${AHORA_UTC}, p.PERSONAFECHANACIMIENTO)) + EXTRACT(DAY FROM age(${AHORA_UTC}, p.PERSONAFECHANACIMIENTO)) / 31.0) / 12) END AS "postulacionEdad",
+         UPPER(btrim((re.RANGOEDADNOMBRE)::text))                     AS "rangoEdadNombre",
+         btrim((p.PERSONACELULAR)::text)                              AS "personaCelular",
+         btrim((p.PERSONAEMAIL)::text)                                AS "personaEmail",
+         UPPER(btrim((depDom.DEPARTAMENTONOMBRE)::text))              AS "departamentoNombre",
+         UPPER(btrim((ciDom.CIUDADNOMBRE)::text))                     AS "ciudadNombre",
+         UPPER(btrim((p.PERSONABARRIO)::text))                        AS "personaBarrio",
+         UPPER(btrim((p.PERSONADIRECCION)::text))                     AS "personaDireccion",
+         UPPER(btrim((car.CARACTERIZACIONNOMBRE)::text))              AS "caracterizacionNombre",
+         UPPER(btrim((po.POSTULACIONTRASFERENCIA)::text))             AS "postulacionTrasferencia",
+         UPPER(btrim((pt.PERFILTRASFERENCIANOMBRE)::text))            AS "perfilTrasferenciaNombre",
+         UPPER(btrim((be.BENEFICIARIOEMPRESANOMBRE)::text))           AS "beneficiarioEmpresaNombre",
+         UPPER(btrim((tam.TAMANOEMPRESANOMBRE)::text))                AS "tamanoEmpresaNombre",
+         UPPER(btrim((nivo.NIVELOCUPACIONALNOMBRE)::text))            AS "nivelOcupacionalNombre",
+         CASE WHEN UPPER(btrim((po.POSTULACIONANTIGUEDAD)::text)) = 'S' THEN 'SI' ELSE 'NO' END
                                                              AS "postulacionAntiguedad",
-         NVL(agb.PORCENTAJECUMPLIMIENTO, 0)                  AS "porcentajeCumplimiento",
-         UPPER(TRIM(agb.CERTIFICA))                          AS "certifica",
-         NVL(agb.HORASHIBRIDAS, 0)                           AS "horasHibridas",
-         NVL(agb.HORASVIRTUALES, 0)                          AS "horasVirtuales",
-         NVL(agb.HORASPAT, 0)                                AS "horasPAT",
-         NVL(agb.HORASPRESENCIALES, 0)                       AS "horasPresenciales",
-         UPPER(TRIM(agb.AFGRUPOBENEESTADO))                  AS "estadoBeneficiario",
-         UPPER(TRIM(agb.VALIDACIONINTERVENTOR))              AS "validacionInterventor"
+         COALESCE(agb.PORCENTAJECUMPLIMIENTO, 0)                  AS "porcentajeCumplimiento",
+         UPPER(btrim((agb.CERTIFICA)::text))                          AS "certifica",
+         COALESCE(agb.HORASHIBRIDAS, 0)                           AS "horasHibridas",
+         COALESCE(agb.HORASVIRTUALES, 0)                          AS "horasVirtuales",
+         COALESCE(agb.HORASPAT, 0)                                AS "horasPAT",
+         COALESCE(agb.HORASPRESENCIALES, 0)                       AS "horasPresenciales",
+         UPPER(btrim((agb.AFGRUPOBENEESTADO)::text))                  AS "estadoBeneficiario",
+         UPPER(btrim((agb.VALIDACIONINTERVENTOR)::text))              AS "validacionInterventor"
        FROM AFGRUPOBENEFICIARIO agb
        JOIN PERSONA p                       ON p.PERSONAID = agb.PERSONAID
        JOIN AFGRUPO g                       ON g.AFGRUPOID = agb.AFGRUPOID
@@ -384,7 +384,7 @@ export class GruposService {
        LEFT JOIN TAMANOEMPRESA tam          ON tam.TAMANOEMPRESAID = be.TAMANOEMPRESAID
        LEFT JOIN NIVELOCUPACIONAL nivo      ON nivo.NIVELOCUPACIONALID = po.NIVELOCUPACIONALID
        LEFT JOIN RANGOEDAD re               ON re.RANGOEDADID = po.RANGOEDADID
-      WHERE pr.PROYECTOID = :1
+      WHERE pr.PROYECTOID = $1
       ORDER BY af.ACCIONFORMACIONNUMERO, g.AFGRUPONUMERO, p.PERSONAID`,
       [proyectoId],
     )

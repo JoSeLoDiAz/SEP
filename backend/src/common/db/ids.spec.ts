@@ -16,7 +16,7 @@ function falso(respuestas: { max?: number; id?: unknown; triggers?: { tabla: str
     query: (sql: string, params?: unknown[]) => {
       llamadas.push({ sql, params })
       if (sql.includes('ALL_TRIGGERS')) return Promise.resolve(respuestas.triggers ?? [])
-      if (sql.startsWith('SELECT NVL(MAX(')) return Promise.resolve([{ id: respuestas.max ?? 41 }])
+      if (sql.startsWith('SELECT COALESCE(MAX(')) return Promise.resolve([{ id: respuestas.max ?? 41 }])
       return Promise.resolve([[respuestas.id ?? 777]])
     },
   }
@@ -26,7 +26,7 @@ function falso(respuestas: { max?: number; id?: unknown; triggers?: { tabla: str
 describe('columnaAsignada', () => {
   it('saca la columna del cuerpo de un trigger de GeneXus', () => {
     expect(columnaAsignada('BEGIN SELECT RadicadoId.NEXTVAL INTO :new.RadicadoId FROM DUAL; END; \n\n')).toBe('RADICADOID')
-    expect(columnaAsignada('begin select X.nextval into :NEW."PersonaId" from dual; end;')).toBe('PERSONAID')
+    expect(columnaAsignada('begin select X.nextval into :NEW."PersonaId" ; end;')).toBe('PERSONAID')
     expect(columnaAsignada('BEGIN NULL; END;')).toBeNull()
     expect(columnaAsignada(null)).toBeNull()
   })
@@ -45,8 +45,8 @@ describe('insertarConId', () => {
     expect(id).toBe(86602)
     expect(llamadas).toHaveLength(1)
     expect(llamadas[0].sql).toBe(
-      'INSERT INTO USUARIO (USUARIOID, USUARIOEMAIL, USUARIOFECHAREGISTRO) VALUES (NULL, :1, ' +
-        'CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)) RETURNING USUARIOID INTO :2',
+      'INSERT INTO USUARIO (USUARIOID, USUARIOEMAIL, USUARIOFECHAREGISTRO) VALUES (NULL, $1, ' +
+        'CAST((now() AT TIME ZONE \'UTC\') AS timestamp)) RETURNING USUARIOID INTO $2',
     )
     expect(llamadas[0].params?.[0]).toBe('x@y.co')
     expect(llamadas[0].params?.[1]).toMatchObject({ dir: expect.any(Number) })
@@ -57,7 +57,7 @@ describe('insertarConId', () => {
     const { ej, llamadas } = falso({ id: 313096 })
     const id = await insertarConId(ej, 'persona', 'personaid', { secuencia: 'PERSONAID' }, { PERSONAESTADO: 1 })
     expect(id).toBe(313096)
-    expect(llamadas[0].sql).toBe('INSERT INTO PERSONA (PERSONAID, PERSONAESTADO) VALUES (PERSONAID.NEXTVAL, :1) RETURNING PERSONAID INTO :2')
+    expect(llamadas[0].sql).toBe('INSERT INTO PERSONA (PERSONAID, PERSONAESTADO) VALUES (PERSONAID.NEXTVAL, $1) RETURNING PERSONAID INTO $2')
   })
 
   it('sin trigger y sin secuencia hace MAX+1 como antes', async () => {
@@ -65,8 +65,8 @@ describe('insertarConId', () => {
     const { ej, llamadas } = falso({ max: 42, id: 42 })
     const id = await insertarConId(ej, 'CONVOCATORIA', 'CONVOCATORIAID', { maxMasUno: true }, { CONVOCATORIAESTADO: 1 })
     expect(id).toBe(42)
-    expect(llamadas[0].sql).toBe('SELECT NVL(MAX(CONVOCATORIAID), 0) + 1 AS "id" FROM CONVOCATORIA')
-    expect(llamadas[1].sql).toBe('INSERT INTO CONVOCATORIA (CONVOCATORIAID, CONVOCATORIAESTADO) VALUES (:1, :2) RETURNING CONVOCATORIAID INTO :3')
+    expect(llamadas[0].sql).toBe('SELECT COALESCE(MAX(CONVOCATORIAID), 0) + 1 AS "id" FROM CONVOCATORIA')
+    expect(llamadas[1].sql).toBe('INSERT INTO CONVOCATORIA (CONVOCATORIAID, CONVOCATORIAESTADO) VALUES ($1, $2) RETURNING CONVOCATORIAID INTO $3')
     expect(llamadas[1].params?.slice(0, 2)).toEqual([42, 1])
   })
 
@@ -74,7 +74,7 @@ describe('insertarConId', () => {
     reiniciarTriggersDeId(new Map([['USUARIO', 'OTRACOL']]))
     const { ej, llamadas } = falso()
     await insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, { A: 1 })
-    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, :1)')
+    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, $1)')
   })
 
   it('rechaza la llave entre los valores y los identificadores raros', async () => {
@@ -92,7 +92,7 @@ describe('triggersDeId', () => {
   it('carga una sola vez y arma el mapa tabla -> columna', async () => {
     const { ej, llamadas } = falso({
       triggers: [
-        { tabla: 'CRONOGRAMARADICADO', cuerpo: 'BEGIN SELECT RadicadoId.NEXTVAL INTO :new.RadicadoId FROM DUAL; END;' },
+        { tabla: 'CRONOGRAMARADICADO', cuerpo: 'BEGIN SELECT RadicadoId.NEXTVAL INTO :new.RadicadoId ; END;' },
         { tabla: 'RARA', cuerpo: 'BEGIN NULL; END;' },
       ],
     })

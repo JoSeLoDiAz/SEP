@@ -17,6 +17,7 @@ import {
 import { empiezaComoImagen, mimeRealDeImagen } from './firma-imagen'
 import { miniaturaDeFoto } from './miniatura-foto'
 import { traducirValorLargo } from '../common/db/errores'
+import { leerDocumento } from '../common/documentos/documentos-disco'
 import { fechaSolo } from '../common/fecha-solo'
 import { IDENTIFICACION_DINAMIZADOR } from '../retroalimentacion/dinamizador'
 
@@ -252,7 +253,13 @@ export class EvaluadoresService {
   private async columnaDinamizador(): Promise<boolean> {
     if (this.columnaDinamizadorPresente === true) return true
     const filas: Array<{ n: number }> = await this.dataSource.query(
-      `SELECT COUNT(*) AS "n" FROM ALL_TAB_COLUMNS
+      `SELECT COUNT(*) AS "n" FROM (SELECT upper(table_name) AS table_name, upper(column_name) AS column_name,
+         upper(data_type) AS data_type, ordinal_position AS column_id,
+         CASE WHEN is_nullable = 'YES' THEN 'Y' ELSE 'N' END AS nullable
+    FROM information_schema.columns WHERE table_schema = current_schema()) (SELECT upper(table_name) AS table_name, upper(column_name) AS column_name,
+         upper(data_type) AS data_type, ordinal_position AS column_id,
+         CASE WHEN is_nullable = 'YES' THEN 'Y' ELSE 'N' END AS nullable
+    FROM information_schema.columns WHERE table_schema = current_schema()) all_tab_cols
         WHERE TABLE_NAME = 'EVALUADORPARTICIPACION' AND COLUMN_NAME = 'DINAMIZADOR'`,
     )
     this.columnaDinamizadorPresente = Number(filas[0]?.n ?? 0) > 0
@@ -290,21 +297,21 @@ export class EvaluadoresService {
       `SELECT * FROM (
          SELECT p.PERSONAID                    AS "personaId",
                 p.TIPODOCUMENTOIDENTIDADID     AS "tipoDocumentoIdentidadId",
-                TRIM(p.PERSONANOMBRES)         AS "nombres",
-                TRIM(p.PERSONAPRIMERAPELLIDO)  AS "primerApellido",
-                TRIM(p.PERSONASEGUNDOAPELLIDO) AS "segundoApellido",
-                TRIM(p.PERSONAIDENTIFICACION)  AS "identificacion",
-                TRIM(p.PERSONAEMAIL)           AS "email",
-                TRIM(p.PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
-                TRIM(p.PERSONACELULAR)         AS "celular",
+                btrim((p.PERSONANOMBRES)::text)         AS "nombres",
+                btrim((p.PERSONAPRIMERAPELLIDO)::text)  AS "primerApellido",
+                btrim((p.PERSONASEGUNDOAPELLIDO)::text) AS "segundoApellido",
+                btrim((p.PERSONAIDENTIFICACION)::text)  AS "identificacion",
+                btrim((p.PERSONAEMAIL)::text)           AS "email",
+                btrim((p.PERSONAEMAILINSTITUCIONAL)::text) AS "emailInstitucional",
+                btrim((p.PERSONACELULAR)::text)         AS "celular",
                 p.CIUDADID                     AS "ciudadId",
                 e.EVALUADORID                  AS "evaluadorId"
            FROM PERSONA p
            LEFT JOIN EVALUADOR e ON e.PERSONAID = p.PERSONAID
-          WHERE TRIM(p.PERSONAIDENTIFICACION) = :1
-            AND p.TIPODOCUMENTOIDENTIDADID = :2
+          WHERE btrim((p.PERSONAIDENTIFICACION)::text) = $1
+            AND p.TIPODOCUMENTOIDENTIDADID = $2
           ORDER BY p.PERSONAID
-       ) WHERE ROWNUM = 1`,
+       ) LIMIT 1`,
       [id, tipoDocumentoIdentidadId],
     )
     if (!rows[0]) return { encontrado: false }
@@ -432,17 +439,17 @@ export class EvaluadoresService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT e.EVALUADORID                  AS "evaluadorId",
               e.PERSONAID                    AS "personaId",
-              TRIM(p.PERSONAIDENTIFICACION)  AS "identificacion",
-              TRIM(p.PERSONANOMBRES)         AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)  AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO) AS "segundoApellido",
-              TRIM(p.PERSONAEMAIL)           AS "email",
-              TRIM(e.EVALUADORCARGO)         AS "cargo",
-              TRIM(e.EVALUADORPROFESION)     AS "profesion",
+              btrim((p.PERSONAIDENTIFICACION)::text)  AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text)         AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)  AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text) AS "segundoApellido",
+              btrim((p.PERSONAEMAIL)::text)           AS "email",
+              btrim((e.EVALUADORCARGO)::text)         AS "cargo",
+              btrim((e.EVALUADORPROFESION)::text)     AS "profesion",
               e.EVALUADORACTIVO              AS "activo",
-              TRIM(r.REGIONALNOMBRE)         AS "regionalNombre",
+              btrim((r.REGIONALNOMBRE)::text)         AS "regionalNombre",
               -- Se exigen BYTES: una foto a medias deja un BLOB vacío, no nulo.
-              CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
+              CASE WHEN COALESCE(length(e.EVALUADORFOTO), 0) > 0
                    THEN 1 ELSE 0 END          AS "tieneFoto",
               (SELECT COUNT(*) FROM EVALUADORPARTICIPACION pa
                 WHERE pa.EVALUADORID = e.EVALUADORID)            AS "totalCiclos",
@@ -455,7 +462,7 @@ export class EvaluadoresService {
                  JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = rr.PARTEVALUADOID
                  LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
                 WHERE pa.EVALUADORID = e.EVALUADORID
-                  AND NVL(es.ESNEGATIVO, 0) = 0)                 AS "promedioRetro",
+                  AND COALESCE(es.ESNEGATIVO, 0) = 0)                 AS "promedioRetro",
               CASE WHEN EXISTS (SELECT 1 FROM EVALUADORDOCUMENTO d
                                   JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
                                  WHERE d.EVALUADORID = e.EVALUADORID AND UPPER(t.CODIGO) = 'CEDULA')
@@ -474,8 +481,8 @@ export class EvaluadoresService {
          -- El orden binario pone las MAYÚSCULAS antes: "CORREDOR" salía entre
          -- Barón y Caballero. WEST_EUROPEAN_AI ignora mayúsculas y tildes.
          -- No SPANISH_M_AI: mete la regla del dígrafo Ch y manda Chaux tras Cortes.
-         ORDER BY NLSSORT(TRIM(p.PERSONAPRIMERAPELLIDO), 'NLS_SORT=WEST_EUROPEAN_AI'),
-                  NLSSORT(TRIM(p.PERSONANOMBRES), 'NLS_SORT=WEST_EUROPEAN_AI'),
+         ORDER BY translate(upper(btrim((p.PERSONAPRIMERAPELLIDO)::text)), 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ', 'AAAAAEEEEIIIIOOOOOUUUUNC'),
+                  translate(upper(btrim((p.PERSONANOMBRES)::text)), 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ', 'AAAAAEEEEIIIIOOOOOUUUUNC'),
                   e.EVALUADORID
          OFFSET ${offset} ROWS FETCH NEXT ${tamPag} ROWS ONLY`,
       params,
@@ -516,15 +523,15 @@ export class EvaluadoresService {
           `SELECT * FROM (
              SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
                     pa.PARTICIPACIONID AS "participacionId",
-                    TRIM(es.CODIGO) AS "estadoCodigo", TRIM(es.COLOR) AS "estadoColor",
+                    btrim((es.CODIGO)::text) AS "estadoCodigo", btrim((es.COLOR)::text) AS "estadoColor",
                     -- el chip mostraba el código crudo de la base (NO_APROBO,
                     -- EN_FORMACION) en la interfaz
-                    TRIM(es.NOMBRE) AS "estadoNombre",
-                    NVL(es.ESFINAL, 0) AS "estadoFinal",
+                    btrim((es.NOMBRE)::text) AS "estadoNombre",
+                    COALESCE(es.ESFINAL, 0) AS "estadoFinal",
                     -- filtrar por rol ANALISTA devolvía tarjetas donde no aparecía
                     -- por ningún lado que lo fueran
-                    TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-                    TRIM(ar.NOMBRE) AS "areaNombre",
+                    btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+                    btrim((ar.NOMBRE)::text) AS "areaNombre",
                     ROW_NUMBER() OVER (PARTITION BY pa.EVALUADORID
                                        ORDER BY pa.ANIO DESC, pa.PARTICIPACIONID DESC) AS rn
                FROM EVALUADORPARTICIPACION pa
@@ -563,37 +570,37 @@ export class EvaluadoresService {
               e.PERSONAID                     AS "personaId",
               e.CENTROID                      AS "centroId",
               e.REGIONALID                    AS "regionalId",
-              TRIM(e.EVALUADORCARGO)          AS "cargo",
-              TRIM(e.EVALUADORPROFESION)      AS "profesion",
-              TRIM(e.EVALUADORPOSGRADO)       AS "posgrado",
-              TRIM(e.EVALUADORJEFENOMBRE)     AS "jefeNombre",
-              TRIM(e.EVALUADORJEFEEMAIL)      AS "jefeEmail",
-              TRIM(e.EVALUADORJEFECARGO)      AS "jefeCargo",
+              btrim((e.EVALUADORCARGO)::text)          AS "cargo",
+              btrim((e.EVALUADORPROFESION)::text)      AS "profesion",
+              btrim((e.EVALUADORPOSGRADO)::text)       AS "posgrado",
+              btrim((e.EVALUADORJEFENOMBRE)::text)     AS "jefeNombre",
+              btrim((e.EVALUADORJEFEEMAIL)::text)      AS "jefeEmail",
+              btrim((e.EVALUADORJEFECARGO)::text)      AS "jefeCargo",
               e.EVALUADORMUNICIPIOID          AS "municipioId",
               e.EVALUADORACTIVO               AS "activo",
               -- Sin bytes no hay foto que mostrar.
-              CASE WHEN NVL(DBMS_LOB.GETLENGTH(e.EVALUADORFOTO), 0) > 0
+              CASE WHEN COALESCE(length(e.EVALUADORFOTO), 0) > 0
                    THEN 1 ELSE 0 END           AS "tieneFoto",
-              TRIM(p.PERSONAIDENTIFICACION)   AS "identificacion",
+              btrim((p.PERSONAIDENTIFICACION)::text)   AS "identificacion",
               p.TIPODOCUMENTOIDENTIDADID      AS "tipoDocumentoIdentidadId",
-              TRIM(p.PERSONANOMBRES)          AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)   AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)  AS "segundoApellido",
-              TRIM(p.PERSONAEMAIL)            AS "email",
-              TRIM(p.PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
-              TRIM(p.PERSONACELULAR)          AS "celular",
+              btrim((p.PERSONANOMBRES)::text)          AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)   AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)  AS "segundoApellido",
+              btrim((p.PERSONAEMAIL)::text)            AS "email",
+              btrim((p.PERSONAEMAILINSTITUCIONAL)::text) AS "emailInstitucional",
+              btrim((p.PERSONACELULAR)::text)          AS "celular",
               p.CIUDADID                      AS "ciudadId",
-              TRIM(r.REGIONALNOMBRE)          AS "regionalNombre",
-              TRIM(cf.CENTRONOMBRE)           AS "centroNombre",
-              TRIM(mu.CIUDADNOMBRE)           AS "municipioNombre",
-              TRIM(dmu.DEPARTAMENTONOMBRE)    AS "municipioDeptoNombre"
+              btrim((r.REGIONALNOMBRE)::text)          AS "regionalNombre",
+              btrim((cf.CENTRONOMBRE)::text)           AS "centroNombre",
+              btrim((mu.CIUDADNOMBRE)::text)           AS "municipioNombre",
+              btrim((dmu.DEPARTAMENTONOMBRE)::text)    AS "municipioDeptoNombre"
          FROM EVALUADOR e
          JOIN      PERSONA         p   ON p.PERSONAID   = e.PERSONAID
          LEFT JOIN REGIONAL        r   ON r.REGIONALID  = e.REGIONALID
          LEFT JOIN CENTROFORMACION cf  ON cf.CENTROID   = e.CENTROID
          LEFT JOIN CIUDAD          mu  ON mu.CIUDADID   = e.EVALUADORMUNICIPIOID
          LEFT JOIN DEPARTAMENTO    dmu ON dmu.DEPARTAMENTOID = mu.DEPARTAMENTOID
-        WHERE e.EVALUADORID = :1`,
+        WHERE e.EVALUADORID = $1`,
       [evaluadorId],
     )
     if (!rows[0]) throw new NotFoundException('Evaluador no encontrado')
@@ -634,21 +641,21 @@ export class EvaluadoresService {
       const existente: Array<Record<string, unknown>> = await qr.query(
         `SELECT * FROM (
            SELECT PERSONAID                      AS "id",
-                  TRIM(PERSONANOMBRES)           AS "nombres",
-                  TRIM(PERSONAPRIMERAPELLIDO)    AS "primerApellido",
-                  TRIM(PERSONASEGUNDOAPELLIDO)   AS "segundoApellido",
-                  TRIM(PERSONAEMAIL)             AS "email",
-                  TRIM(PERSONAEMAILINSTITUCIONAL) AS "emailInstitucional",
-                  TRIM(PERSONACELULAR)           AS "celular"
-             FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1
+                  btrim((PERSONANOMBRES)::text)           AS "nombres",
+                  btrim((PERSONAPRIMERAPELLIDO)::text)    AS "primerApellido",
+                  btrim((PERSONASEGUNDOAPELLIDO)::text)   AS "segundoApellido",
+                  btrim((PERSONAEMAIL)::text)             AS "email",
+                  btrim((PERSONAEMAILINSTITUCIONAL)::text) AS "emailInstitucional",
+                  btrim((PERSONACELULAR)::text)           AS "celular"
+             FROM PERSONA WHERE btrim((PERSONAIDENTIFICACION)::text) = $1
             ORDER BY PERSONAID
-         ) WHERE ROWNUM = 1`,
+         ) LIMIT 1`,
         [ident],
       )
       if (existente[0]) {
         personaId = Number(existente[0].id)
         const yaEval: Array<{ id: number }> = await qr.query(
-          `SELECT EVALUADORID AS "id" FROM EVALUADOR WHERE PERSONAID = :1`,
+          `SELECT EVALUADORID AS "id" FROM EVALUADOR WHERE PERSONAID = $1`,
           [personaId],
         )
         if (yaEval[0]) {
@@ -705,7 +712,7 @@ export class EvaluadoresService {
         })
       }
 
-      const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL FROM dual`)
+      const seqE: Array<{ NEXTVAL: number }> = await qr.query(`SELECT EVALUADOR_SEQ.NEXTVAL `)
       const evaluadorId = Number(seqE[0].NEXTVAL)
       // EVALUADORJEFEDIR, EVALUADORQUIENAPRUEBA y EVALUADOROTROSEST se dropearon en la v36.
       await qr.query(
@@ -714,7 +721,7 @@ export class EvaluadoresService {
             EVALUADORPOSGRADO,
             EVALUADORJEFENOMBRE, EVALUADORJEFEEMAIL, EVALUADORJEFECARGO, EVALUADORMUNICIPIOID,
             EVALUADORACTIVO, FECHACREACION)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 1, ${AHORA_UTC})`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, ${AHORA_UTC})`,
         [
           evaluadorId, personaId,
           dto.centroId ?? null, dto.regionalId ?? null,
@@ -782,8 +789,8 @@ export class EvaluadoresService {
     const marcadores = correos.map((_, i) => `:${i + 1}`).join(',')
     // Se trae el correo porque la cuenta vieja puede estar bajo el personal.
     const existentes = (await qr.query(
-      `SELECT USUARIOID AS "id", TRIM(USUARIOEMAIL) AS "email" FROM USUARIO
-        WHERE LOWER(TRIM(USUARIOEMAIL)) IN (${marcadores})
+      `SELECT USUARIOID AS "id", btrim((USUARIOEMAIL)::text) AS "email" FROM USUARIO
+        WHERE LOWER(btrim((USUARIOEMAIL)::text)) IN (${marcadores})
         ORDER BY USUARIOID`,
       correos,
     )) as Array<{ id: number; email: string }>
@@ -793,7 +800,7 @@ export class EvaluadoresService {
       const correoCuenta = (existentes[0].email ?? '').trim()
       const yaTiene = (await qr.query(
         `SELECT USUARIOPERFILID AS "id", ESTADO AS "estado"
-           FROM USUARIOPERFIL WHERE USUARIOID = :1 AND PERFILID = :2`,
+           FROM USUARIOPERFIL WHERE USUARIOID = $1 AND PERFILID = $2`,
         [usuarioId, PERFIL_EVALUADOR],
       )) as Array<{ id: number; estado: number }>
 
@@ -806,7 +813,7 @@ export class EvaluadoresService {
       }
       if (yaTiene[0]) {
         await qr.query(
-          `UPDATE USUARIOPERFIL SET ESTADO = 1 WHERE USUARIOPERFILID = :1`,
+          `UPDATE USUARIOPERFIL SET ESTADO = 1 WHERE USUARIOPERFILID = $1`,
           [Number(yaTiene[0].id)],
         )
         return {
@@ -820,7 +827,7 @@ export class EvaluadoresService {
       await qr.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 0, 1, ${AHORA_UTC})`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, $2, 0, 1, ${AHORA_UTC})`,
         [usuarioId, PERFIL_EVALUADOR],
       )
       return {
@@ -848,7 +855,7 @@ export class EvaluadoresService {
     await qr.query(
       `INSERT INTO USUARIOPERFIL
          (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-       VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, ${AHORA_UTC})`,
+       VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, $2, 1, 1, ${AHORA_UTC})`,
       [usuarioId, PERFIL_EVALUADOR],
     )
 
@@ -861,7 +868,7 @@ export class EvaluadoresService {
 
   async actualizar(evaluadorId: number, dto: EvaluadorActualizarDto) {
     const filas: Array<{ personaId: number }> = await this.dataSource.query(
-      `SELECT PERSONAID AS "personaId" FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId],
+      `SELECT PERSONAID AS "personaId" FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId],
     )
     if (!filas[0]) throw new NotFoundException('Evaluador no encontrado')
     const personaId = Number(filas[0].personaId)
@@ -911,7 +918,7 @@ export class EvaluadoresService {
       if (setsEval.length > 0) {
         paramsEval.push(evaluadorId)
         await qr.query(
-          `UPDATE EVALUADOR SET ${setsEval.join(', ')} WHERE EVALUADORID = :${paramsEval.length}`,
+          `UPDATE EVALUADOR SET ${setsEval.join(', ')} WHERE EVALUADORID = $${paramsEval.length}`,
           paramsEval,
         )
       }
@@ -946,7 +953,7 @@ export class EvaluadoresService {
       if (setsPer.length > 0) {
         paramsPer.push(personaId)
         await qr.query(
-          `UPDATE PERSONA SET ${setsPer.join(', ')} WHERE PERSONAID = :${paramsPer.length}`,
+          `UPDATE PERSONA SET ${setsPer.join(', ')} WHERE PERSONAID = $${paramsPer.length}`,
           paramsPer,
         )
       }
@@ -967,10 +974,10 @@ export class EvaluadoresService {
   }
 
   async cambiarEstado(evaluadorId: number, activo: boolean) {
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
     await this.dataSource.query(
-      `UPDATE EVALUADOR SET EVALUADORACTIVO = :1 WHERE EVALUADORID = :2`,
+      `UPDATE EVALUADOR SET EVALUADORACTIVO = $1 WHERE EVALUADORID = $2`,
       [activo ? 1 : 0, evaluadorId],
     )
     return { message: activo ? 'Evaluador activado' : 'Evaluador desactivado' }
@@ -983,7 +990,7 @@ export class EvaluadoresService {
     if (!file.mimetype.startsWith('image/')) {
       throw new BadRequestException('Solo se permiten imágenes (JPG, PNG)')
     }
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     // Se revisa el contenido, no la extensión ni el mime que anuncia el navegador.
@@ -1008,9 +1015,9 @@ export class EvaluadoresService {
       try {
         await this.dataSource.query(
           `UPDATE EVALUADOR
-              SET EVALUADORFOTO = :1, EVALUADORFOTOMIME = :2,
-                  EVALUADORFOTONOMBRE = :3, EVALUADORFOTOMINI = :4
-            WHERE EVALUADORID = :5`,
+              SET EVALUADORFOTO = $1, EVALUADORFOTOMIME = $2,
+                  EVALUADORFOTONOMBRE = $3, EVALUADORFOTOMINI = $4
+            WHERE EVALUADORID = $5`,
           [file.buffer, mimeReal, nombre, mini, evaluadorId],
         )
         return { message: 'Foto actualizada', size: file.size, mime: mimeReal, nombre }
@@ -1021,8 +1028,8 @@ export class EvaluadoresService {
 
     await this.dataSource.query(
       `UPDATE EVALUADOR
-          SET EVALUADORFOTO = :1, EVALUADORFOTOMIME = :2, EVALUADORFOTONOMBRE = :3
-        WHERE EVALUADORID = :4`,
+          SET EVALUADORFOTO = $1, EVALUADORFOTOMIME = $2, EVALUADORFOTONOMBRE = $3
+        WHERE EVALUADORID = $4`,
       [file.buffer, mimeReal, nombre, evaluadorId],
     )
     return { message: 'Foto actualizada', size: file.size, mime: mimeReal, nombre }
@@ -1035,14 +1042,15 @@ export class EvaluadoresService {
       nombre: string | null;
     }> = await this.dataSource.query(
       `SELECT EVALUADORFOTO           AS "foto",
-              TRIM(EVALUADORFOTOMIME) AS "mime",
+              btrim((EVALUADORFOTOMIME)::text) AS "mime",
               EVALUADORFOTONOMBRE     AS "nombre"
-         FROM EVALUADOR WHERE EVALUADORID = :1`,
+         FROM EVALUADOR WHERE EVALUADORID = $1`,
       [evaluadorId],
     )
     const r = rows[0]
     if (!r || !r.foto) throw new NotFoundException('Foto no encontrada')
-    const buffer = await this.lobToBuffer(r.foto)
+    // el archivo del volumen si está; si no, el BLOB de siempre. La fila sigue decidiendo si hay foto o no.
+    const buffer = leerDocumento('evaluador', 'evaluadorfoto', evaluadorId) ?? await this.lobToBuffer(r.foto)
 
     // Un 200 con cero bytes no se ve ni da error; un 404 con motivo sí.
     if (buffer.length === 0) {
@@ -1073,13 +1081,16 @@ export class EvaluadoresService {
     try {
       rows = await this.dataSource.query(
         `SELECT EVALUADORFOTOMINI AS "mini", EVALUADORFOTONOMBRE AS "nombre"
-           FROM EVALUADOR WHERE EVALUADORID = :1`,
+           FROM EVALUADOR WHERE EVALUADORID = $1`,
         [evaluadorId],
       )
     } catch (e) {
       if (!this.faltaLaColumnaMiniatura(e)) throw e
       return this.getFoto(evaluadorId)
     }
+
+    const enDisco = leerDocumento('evaluador', 'evaluadorfotomini', evaluadorId)
+    if (enDisco) return { buffer: enDisco, mime: 'image/jpeg', nombre: rows[0]?.nombre ?? null }
 
     const mini = rows[0]?.mini
     if (mini && mini.length > 0) {
@@ -1093,7 +1104,7 @@ export class EvaluadoresService {
 
     try {
       await this.dataSource.query(
-        `UPDATE EVALUADOR SET EVALUADORFOTOMINI = :1 WHERE EVALUADORID = :2`,
+        `UPDATE EVALUADOR SET EVALUADORFOTOMINI = $1 WHERE EVALUADORID = $2`,
         [generada, evaluadorId],
       )
     } catch (e) {
@@ -1111,7 +1122,7 @@ export class EvaluadoresService {
           `UPDATE EVALUADOR
               SET EVALUADORFOTO = NULL, EVALUADORFOTOMIME = NULL,
                   EVALUADORFOTONOMBRE = NULL, EVALUADORFOTOMINI = NULL
-            WHERE EVALUADORID = :1`,
+            WHERE EVALUADORID = $1`,
           [evaluadorId],
         )
         return { message: 'Foto eliminada' }
@@ -1123,7 +1134,7 @@ export class EvaluadoresService {
     await this.dataSource.query(
       `UPDATE EVALUADOR
           SET EVALUADORFOTO = NULL, EVALUADORFOTOMIME = NULL, EVALUADORFOTONOMBRE = NULL
-        WHERE EVALUADORID = :1`,
+        WHERE EVALUADORID = $1`,
       [evaluadorId],
     )
     return { message: 'Foto eliminada' }
@@ -1159,24 +1170,24 @@ export class EvaluadoresService {
     return this.dataSource.query(
       `SELECT pa.PARTICIPACIONID         AS "participacionId",
               pa.ANIO                    AS "anio",
-              TRIM(pa.PERIODO)           AS "periodo",
+              btrim((pa.PERIODO)::text)           AS "periodo",
               pa.ROLEVALUADORID          AS "rolEvaluadorId",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
               pa.MODALIDADPARTID         AS "modalidadPartId",
-              TRIM(mo.CODIGO)            AS "modalidadPart",
-              TRIM(mo.NOMBRE)            AS "modalidadNombre",
+              btrim((mo.CODIGO)::text)            AS "modalidadPart",
+              btrim((mo.NOMBRE)::text)            AS "modalidadNombre",
               pa.PROCESOID               AS "procesoId",
-              TRIM(pe.PROCESONOMBRE)     AS "procesoNombre",
+              btrim((pe.PROCESONOMBRE)::text)     AS "procesoNombre",
               pa.ESTADOPARTID            AS "estadoPartId",
-              TRIM(es.CODIGO)            AS "estadoCodigo",
-              TRIM(es.NOMBRE)            AS "estadoNombre",
-              NVL(es.ESNEGATIVO, 0)      AS "estadoNegativo",
-              TRIM(pa.MOTIVONOPARTICIPA) AS "motivoNoParticipa",
+              btrim((es.CODIGO)::text)            AS "estadoCodigo",
+              btrim((es.NOMBRE)::text)            AS "estadoNombre",
+              COALESCE(es.ESNEGATIVO, 0)      AS "estadoNegativo",
+              btrim((pa.MOTIVONOPARTICIPA)::text) AS "motivoNoParticipa",
               -- Los ids hacen falta para preseleccionar al editar.
               pa.CONVOCATORIAID          AS "convocatoriaId",
               pa.AREAID                  AS "areaId",
-              TRIM(pa.MESA)              AS "mesa",
-              TRIM(pa.EQUIPOEVALUADOR)   AS "equipoEvaluador",
+              btrim((pa.MESA)::text)              AS "mesa",
+              btrim((pa.EQUIPOEVALUADOR)::text)   AS "equipoEvaluador",
               pa.DINAMIZADORPERSONAID    AS "dinamizadorPersonaId",
               -- TRIM externo: sin dinamizador la concatenación deja " " (NULLIF con '' daría ORA-12704)
               -- TO_NCHAR: DINAMIZADOR es VARCHAR2 y los nombres NVARCHAR2
@@ -1213,7 +1224,7 @@ export class EvaluadoresService {
     const c = (codigo ?? '').trim().toUpperCase()
     if (!c) return null
     const rows: Array<{ id: number }> = await this.dataSource.query(
-      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = :1`, [c],
+      `SELECT MODALIDADPARTID AS "id" FROM MODALIDADPART WHERE UPPER(CODIGO) = $1`, [c],
     )
     if (!rows[0]) throw new BadRequestException(`Modalidad '${codigo}' no existe en el catálogo`)
     return Number(rows[0].id)
@@ -1222,7 +1233,7 @@ export class EvaluadoresService {
   /** Id de un estado por código, para las escrituras que lo necesitan. */
   private async idEstado(codigo: string): Promise<number | null> {
     const rows: Array<{ id: number }> = await this.dataSource.query(
-      `SELECT ESTADOPARTID AS "id" FROM ESTADOPARTICIPACION WHERE CODIGO = :1`, [codigo],
+      `SELECT ESTADOPARTID AS "id" FROM ESTADOPARTICIPACION WHERE CODIGO = $1`, [codigo],
     )
     return rows[0] ? Number(rows[0].id) : null
   }
@@ -1231,11 +1242,11 @@ export class EvaluadoresService {
     evaluadorId: number, dto: ParticipacionDto,
   ): Promise<{ participacionId: number; message: string }> {
     if (!dto.anio) throw new BadRequestException('Año requerido')
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADORPARTICIPACION_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADORPARTICIPACION_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
 
@@ -1252,7 +1263,7 @@ export class EvaluadoresService {
           PROCESOID, ESTADOPARTID, CONVOCATORIAID, AREAID, ESTRANSVERSAL,
           MESA, EQUIPOEVALUADOR,${conDinamizador ? ' DINAMIZADOR,' : ''}
           DINAMIZADORPERSONAID, RETROALIMENTACION, OBSERVACIONES, USUARIOCREACION, FECHACREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13,${conDinamizador ? ' :14, :15, :16, :17, :18' : ' :14, :15, :16, :17'}, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,${conDinamizador ? ' :14, :15, :16, :17, :18' : ' :14, :15, :16, :17'}, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -1286,7 +1297,7 @@ export class EvaluadoresService {
 
   async actualizarParticipacion(participacionId: number, dto: Partial<ParticipacionDto>) {
     const ok = await this.dataSource.query(
-      `SELECT 1 FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId],
+      `SELECT 1 FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = $1`, [participacionId],
     )
     if (!ok[0]) throw new NotFoundException('Participación no encontrada')
 
@@ -1343,7 +1354,7 @@ export class EvaluadoresService {
     params.push(participacionId)
     try {
       await this.dataSource.query(
-        `UPDATE EVALUADORPARTICIPACION SET ${sets.join(', ')} WHERE PARTICIPACIONID = :${params.length}`,
+        `UPDATE EVALUADORPARTICIPACION SET ${sets.join(', ')} WHERE PARTICIPACIONID = $${params.length}`,
         params,
       )
     } catch (e) {
@@ -1361,8 +1372,8 @@ export class EvaluadoresService {
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
-        WHERE pa.PARTICIPACIONID = :1
-          AND TRIM(p.PERSONAIDENTIFICACION) = :2`,
+        WHERE pa.PARTICIPACIONID = $1
+          AND btrim((p.PERSONAIDENTIFICACION)::text) = $2`,
       [participacionId, IDENTIFICACION_DINAMIZADOR],
     )
     return Number(filas[0]?.n ?? 0) > 0
@@ -1382,7 +1393,7 @@ export class EvaluadoresService {
   ) {
     const cabecera = await this.dataSource.query(
       `SELECT EVALUADORID AS "evaluadorId", ANIO AS "anio"
-         FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
+         FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (!cabecera[0]) throw new NotFoundException('Participación no encontrada')
@@ -1446,39 +1457,39 @@ export class EvaluadoresService {
         await manager.query(
           `DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID IN
              (SELECT RETRORESPUESTAID FROM RETRORESPUESTA
-               WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2)`, par)
+               WHERE PARTEVALUADORID = $1 OR PARTEVALUADOID = $2)`, par)
         await manager.query(
           `UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL
-            WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+            WHERE PARTEVALUADORID = $1 OR PARTEVALUADOID = $2`, par)
         await manager.query(
-          `DELETE FROM RETRORESPUESTA WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+          `DELETE FROM RETRORESPUESTA WHERE PARTEVALUADORID = $1 OR PARTEVALUADOID = $2`, par)
         await manager.query(
-          `DELETE FROM RETROASIGNACION WHERE PARTEVALUADORID = :1 OR PARTEVALUADOID = :2`, par)
+          `DELETE FROM RETROASIGNACION WHERE PARTEVALUADORID = $1 OR PARTEVALUADOID = $2`, par)
         await manager.query(
-          `DELETE FROM RETROSUGERENCIA WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM RETROSUGERENCIA WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM RETROSESION WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM RETROSESION WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORPARTPROYECTO WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORPARTPROYECTO WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORCAPACITACION WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORCAPACITACION WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORAPROBACION WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORAPROBACION WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORPARTGRUPO WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORPARTGRUPO WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORPARTALCANCE WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORPARTALCANCE WHERE PARTICIPACIONID = $1`, [participacionId])
         // Pruebas y documentos son del evaluador, no del ciclo: se desatan.
         await manager.query(
-          `UPDATE EVALUADORPRUEBA SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = :1`, [participacionId])
+          `UPDATE EVALUADORPRUEBA SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `UPDATE EVALUADORDOCUMENTO SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = :1`, [participacionId])
+          `UPDATE EVALUADORDOCUMENTO SET PARTICIPACIONID = NULL WHERE PARTICIPACIONID = $1`, [participacionId])
         await manager.query(
-          `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId])
+          `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = $1`, [participacionId])
       })
     } else {
       await this.dataSource.query(
-        `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`, [participacionId],
+        `DELETE FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = $1`, [participacionId],
       )
     }
 
@@ -1508,7 +1519,7 @@ export class EvaluadoresService {
          (SELECT COUNT(*) FROM EVALUADORCERTIFICADO   WHERE PARTICIPACIONID = :pid) AS "certificados",
          (SELECT COUNT(*) FROM RETROASIGNACION
            WHERE PARTEVALUADORID = :pid OR PARTEVALUADOID = :pid)                   AS "retroalimentaciones"
-       FROM DUAL`,
+       `,
       'pid', participacionId,
     )
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(q.sql, q.params)
@@ -1528,8 +1539,8 @@ export class EvaluadoresService {
     if (!codigo) throw new BadRequestException('Código de estado requerido')
 
     const estados: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT ESTADOPARTID AS "id", TRIM(NOMBRE) AS "nombre", NVL(ESNEGATIVO, 0) AS "negativo"
-         FROM ESTADOPARTICIPACION WHERE CODIGO = :1 AND ACTIVO = 1`,
+      `SELECT ESTADOPARTID AS "id", btrim((NOMBRE)::text) AS "nombre", COALESCE(ESNEGATIVO, 0) AS "negativo"
+         FROM ESTADOPARTICIPACION WHERE CODIGO = $1 AND ACTIVO = 1`,
       [codigo],
     )
     if (!estados[0]) throw new BadRequestException(`Estado '${codigo}' no existe o está inactivo`)
@@ -1544,21 +1555,21 @@ export class EvaluadoresService {
 
     const antes: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.EVALUADORID AS "evaluadorId", pa.ANIO AS "anio",
-              TRIM(es.CODIGO) AS "estadoCodigo", TRIM(pa.MOTIVONOPARTICIPA) AS "motivo"
+              btrim((es.CODIGO)::text) AS "estadoCodigo", btrim((pa.MOTIVONOPARTICIPA)::text) AS "motivo"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (!antes[0]) throw new NotFoundException('Participación no encontrada')
 
     await this.dataSource.query(
       `UPDATE EVALUADORPARTICIPACION
-          SET ESTADOPARTID = :1,
-              MOTIVONOPARTICIPA = :2,
-              USUARIOMODIFICACION = :3,
+          SET ESTADOPARTID = $1,
+              MOTIVONOPARTICIPA = $2,
+              USUARIOMODIFICACION = $3,
               FECHAMODIFICACION = ${AHORA_UTC}
-        WHERE PARTICIPACIONID = :4`,
+        WHERE PARTICIPACIONID = $4`,
       [Number(estados[0].id), motivo, ctx.usuarioEmail, participacionId],
     )
 
@@ -1582,7 +1593,7 @@ export class EvaluadoresService {
   private async getTipoEstudioHV(): Promise<number> {
     const rows: Array<{ id: number }> = await this.dataSource.query(
       `SELECT TIPOESTUDIOID AS "id" FROM TIPOESTUDIO
-        WHERE UPPER(TRIM(TIPOESTUDIONOMBRE)) = 'HV' AND ROWNUM = 1`,
+        WHERE UPPER(btrim((TIPOESTUDIONOMBRE)::text)) = 'HV' LIMIT 1`,
     )
     if (!rows[0]) throw new BadRequestException('El tipo "HV" no existe en el catálogo de tipos de estudio')
     return Number(rows[0].id)
@@ -1593,11 +1604,11 @@ export class EvaluadoresService {
     const rows: Array<{ estudioId: number; archivoNombre: string | null; tieneArchivo: number; fechaCargue: Date }> =
       await this.dataSource.query(
         `SELECT ESTUDIOID                AS "estudioId",
-                TRIM(ARCHIVONOMBRE)      AS "archivoNombre",
+                btrim((ARCHIVONOMBRE)::text)      AS "archivoNombre",
                 CASE WHEN ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
                 FECHACARGUE              AS "fechaCargue"
            FROM EVALUADORESTUDIO
-          WHERE EVALUADORID = :1 AND TIPOESTUDIOID = :2 AND ROWNUM = 1`,
+          WHERE EVALUADORID = $1 AND TIPOESTUDIOID = $2 LIMIT 1`,
         [evaluadorId, tipoHV],
       )
     if (!rows[0]) return null
@@ -1610,34 +1621,34 @@ export class EvaluadoresService {
 
   async guardarHojaVida(evaluadorId: number, file: MulterFile) {
     if (!file?.buffer) throw new BadRequestException('Adjunta el PDF en el campo "archivo"')
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const tipoHV = await this.getTipoEstudioHV()
     const existente: Array<{ id: number }> = await this.dataSource.query(
       `SELECT ESTUDIOID AS "id" FROM EVALUADORESTUDIO
-        WHERE EVALUADORID = :1 AND TIPOESTUDIOID = :2 AND ROWNUM = 1`,
+        WHERE EVALUADORID = $1 AND TIPOESTUDIOID = $2 LIMIT 1`,
       [evaluadorId, tipoHV],
     )
 
     if (existente[0]) {
       await this.dataSource.query(
         `UPDATE EVALUADORESTUDIO
-            SET ARCHIVOPDF = :1, ARCHIVOMIME = :2, ARCHIVONOMBRE = :3, FECHACARGUE = ${AHORA_UTC}
-          WHERE ESTUDIOID = :4`,
+            SET ARCHIVOPDF = $1, ARCHIVOMIME = $2, ARCHIVONOMBRE = $3, FECHACARGUE = ${AHORA_UTC}
+          WHERE ESTUDIOID = $4`,
         [file.buffer, file.mimetype, file.originalname, Number(existente[0].id)],
       )
       return { message: 'Hoja de vida actualizada', estudioId: Number(existente[0].id) }
     }
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADORESTUDIO_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADORESTUDIO_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO EVALUADORESTUDIO
          (ESTUDIOID, EVALUADORID, TIPOESTUDIOID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, ${AHORA_UTC})`,
       [id, evaluadorId, tipoHV, file.buffer, file.mimetype, file.originalname],
     )
     return { message: 'Hoja de vida cargada', estudioId: id }
@@ -1646,7 +1657,7 @@ export class EvaluadoresService {
   async eliminarHojaVida(evaluadorId: number) {
     const tipoHV = await this.getTipoEstudioHV()
     await this.dataSource.query(
-      `DELETE FROM EVALUADORESTUDIO WHERE EVALUADORID = :1 AND TIPOESTUDIOID = :2`,
+      `DELETE FROM EVALUADORESTUDIO WHERE EVALUADORID = $1 AND TIPOESTUDIOID = $2`,
       [evaluadorId, tipoHV],
     )
     return { message: 'Hoja de vida eliminada' }
@@ -1704,7 +1715,7 @@ export class EvaluadoresService {
     const cols = columnas[tabla]
     if (!cols) return null
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT ${cols} FROM ${tabla} WHERE ${pk} = :1`, [id],
+      `SELECT ${cols} FROM ${tabla} WHERE ${pk} = $1`, [id],
     )
     return rows[0] ?? null
   }
@@ -1735,18 +1746,18 @@ export class EvaluadoresService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT s.ESTUDIOID                AS "estudioId",
               s.TIPOESTUDIOID            AS "tipoEstudioId",
-              TRIM(t.TIPOESTUDIONOMBRE)  AS "tipoEstudio",
-              TRIM(s.ESTUDIOTITULO)      AS "titulo",
-              TRIM(s.INSTITUCION)        AS "institucion",
+              btrim((t.TIPOESTUDIONOMBRE)::text)  AS "tipoEstudio",
+              btrim((s.ESTUDIOTITULO)::text)      AS "titulo",
+              btrim((s.INSTITUCION)::text)        AS "institucion",
               s.FECHAGRADO               AS "fechaGrado",
-              TRIM(s.ARCHIVONOMBRE)      AS "archivoNombre",
+              btrim((s.ARCHIVONOMBRE)::text)      AS "archivoNombre",
               CASE WHEN s.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
-              TRIM(s.USUARIOCREACION)    AS "usuarioCreacion",
+              btrim((s.USUARIOCREACION)::text)    AS "usuarioCreacion",
               s.FECHACARGUE              AS "fechaCargue"
          FROM EVALUADORESTUDIO s
          LEFT JOIN TIPOESTUDIO t ON t.TIPOESTUDIOID = s.TIPOESTUDIOID
-        WHERE s.EVALUADORID = :1
-          AND UPPER(TRIM(NVL(t.TIPOESTUDIONOMBRE,''))) <> 'HV'
+        WHERE s.EVALUADORID = $1
+          AND UPPER(btrim((COALESCE(t.TIPOESTUDIONOMBRE,''))::text)) <> 'HV'
         ORDER BY s.FECHACARGUE DESC`,
       [evaluadorId],
     )
@@ -1762,7 +1773,7 @@ export class EvaluadoresService {
     evaluadorId: number, dto: EstudioDto, file?: MulterFile, ctx?: CtxUsuario,
   ) {
     if (!dto.tipoEstudioId) throw new BadRequestException('Tipo de estudio requerido')
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     // Bloquear que se cargue HV desde la sección de estudios — usa el endpoint dedicado.
@@ -1772,14 +1783,14 @@ export class EvaluadoresService {
     }
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADORESTUDIO_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADORESTUDIO_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO EVALUADORESTUDIO
          (ESTUDIOID, EVALUADORID, TIPOESTUDIOID, ESTUDIOTITULO, INSTITUCION, FECHAGRADO,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.tipoEstudioId,
         dto.titulo?.trim() || null,
@@ -1823,7 +1834,7 @@ export class EvaluadoresService {
     ], file)
     params.push(estudioId)
     await this.dataSource.query(
-      `UPDATE EVALUADORESTUDIO SET ${sets.join(', ')} WHERE ESTUDIOID = :${params.length}`, params,
+      `UPDATE EVALUADORESTUDIO SET ${sets.join(', ')} WHERE ESTUDIOID = $${params.length}`, params,
     )
 
     const despues = await this.antesDe('EVALUADORESTUDIO', 'ESTUDIOID', estudioId)
@@ -1835,19 +1846,20 @@ export class EvaluadoresService {
   async getEstudioArchivo(estudioId: number) {
     const rows: Array<{ pdf: NodeJS.ReadableStream | Buffer | null; mime: string | null; nombre: string | null }> =
       await this.dataSource.query(
-        `SELECT ARCHIVOPDF AS "pdf", TRIM(ARCHIVOMIME) AS "mime", TRIM(ARCHIVONOMBRE) AS "nombre"
-           FROM EVALUADORESTUDIO WHERE ESTUDIOID = :1`,
+        `SELECT ARCHIVOPDF AS "pdf", btrim((ARCHIVOMIME)::text) AS "mime", btrim((ARCHIVONOMBRE)::text) AS "nombre"
+           FROM EVALUADORESTUDIO WHERE ESTUDIOID = $1`,
         [estudioId],
       )
     const r = rows[0]
     if (!r?.pdf) throw new NotFoundException('Archivo no encontrado')
-    return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `estudio-${estudioId}.pdf` }
+    const enDisco = leerDocumento('evaluadorestudio', 'archivopdf', estudioId)
+    return { buffer: enDisco ?? await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `estudio-${estudioId}.pdf` }
   }
 
   async eliminarEstudio(estudioId: number, ctx?: CtxUsuario) {
     const antes = await this.antesDe('EVALUADORESTUDIO', 'ESTUDIOID', estudioId)
     if (!antes) throw new NotFoundException('Estudio no encontrado')
-    await this.dataSource.query(`DELETE FROM EVALUADORESTUDIO WHERE ESTUDIOID = :1`, [estudioId])
+    await this.dataSource.query(`DELETE FROM EVALUADORESTUDIO WHERE ESTUDIOID = $1`, [estudioId])
     await this.registrarExpediente(
       'EVALUADORESTUDIO', 'DELETE', estudioId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'Estudio eliminado' }
@@ -1875,10 +1887,10 @@ export class EvaluadoresService {
     const ciclos: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID         AS "participacionId",
               pa.ANIO                    AS "anio",
-              TRIM(pa.PERIODO)           AS "periodo",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(cv.NOMBRE)            AS "convocatoria",
-              TRIM(pe.PROCESONOMBRE)     AS "procesoNombre",
+              btrim((pa.PERIODO)::text)           AS "periodo",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+              btrim((cv.NOMBRE)::text)            AS "convocatoria",
+              btrim((pe.PROCESONOMBRE)::text)     AS "procesoNombre",
               -- emitido por el sistema y vigente
               (SELECT MAX(ce.CERTIFICADOID) FROM EVALUADORCERTIFICADO ce
                 WHERE ce.PARTICIPACIONID = pa.PARTICIPACIONID
@@ -1892,30 +1904,30 @@ export class EvaluadoresService {
                  SELECT dc.DOCUMENTOID
                    FROM EVALUADORDOCUMENTO dc
                    JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
-                  WHERE TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+                  WHERE btrim((td.CODIGO)::text) = 'CERTIFICADO_PARTICIPACION'
                     AND dc.PARTICIPACIONID = pa.PARTICIPACIONID
                   ORDER BY dc.FECHACARGUE DESC, dc.DOCUMENTOID DESC
-               ) dp WHERE ROWNUM = 1)                       AS "documentoId"
+               ) dp LIMIT 1)                       AS "documentoId"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN ROLEVALUADOR          r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
          LEFT JOIN PROCESOEVAL           pe ON pe.PROCESOID     = pa.PROCESOID
          LEFT JOIN ESTADOPARTICIPACION   es ON es.ESTADOPARTID  = pa.ESTADOPARTID
-        WHERE pa.EVALUADORID = :1
+        WHERE pa.EVALUADORID = $1
           -- un ciclo revocado o declinado no es experiencia, aunque tenga papel
-          AND NVL(es.ESNEGATIVO, 0) = 0
-        ORDER BY pa.ANIO DESC, TRIM(pa.PERIODO) DESC NULLS LAST`,
+          AND COALESCE(es.ESNEGATIVO, 0) = 0
+        ORDER BY pa.ANIO DESC, btrim((pa.PERIODO)::text) DESC NULLS LAST`,
       [evaluadorId],
     )
 
     // los hist\xf3ricos: certificados cargados sin decir a qu\xe9 ciclo pertenecen
     const sueltos: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT dc.DOCUMENTOID AS "documentoId", dc.ANIOREFERENCIA AS "anio",
-              TRIM(dc.ARCHIVONOMBRE) AS "archivoNombre"
+              btrim((dc.ARCHIVONOMBRE)::text) AS "archivoNombre"
          FROM EVALUADORDOCUMENTO dc
          JOIN TIPODOCUMENTOEVAL td ON td.TIPODOCUMENTOEVALID = dc.TIPODOCUMENTOEVALID
-        WHERE dc.EVALUADORID = :1
-          AND TRIM(td.CODIGO) = 'CERTIFICADO_PARTICIPACION'
+        WHERE dc.EVALUADORID = $1
+          AND btrim((td.CODIGO)::text) = 'CERTIFICADO_PARTICIPACION'
           AND dc.PARTICIPACIONID IS NULL
           AND dc.ANIOREFERENCIA IS NOT NULL
         ORDER BY dc.FECHACARGUE DESC, dc.DOCUMENTOID DESC`,
@@ -1939,7 +1951,7 @@ export class EvaluadoresService {
     const nombres = new Map<number, string | null>()
     if (idsDoc.length) {
       const filas: Array<Record<string, unknown>> = await this.dataSource.query(
-        `SELECT DOCUMENTOID AS "id", TRIM(ARCHIVONOMBRE) AS "nombre"
+        `SELECT DOCUMENTOID AS "id", btrim((ARCHIVONOMBRE)::text) AS "nombre"
            FROM EVALUADORDOCUMENTO
           WHERE DOCUMENTOID IN (${idsDoc.map((_, i) => `:${i + 1}`).join(', ')})`,
         idsDoc,
@@ -2018,16 +2030,16 @@ export class EvaluadoresService {
   ) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT EXPERIENCIAID         AS "experienciaId",
-              TRIM(CARGOEXP)        AS "cargo",
-              TRIM(ENTIDADEXP)      AS "entidad",
+              btrim((CARGOEXP)::text)        AS "cargo",
+              btrim((ENTIDADEXP)::text)      AS "entidad",
               FECHAINICIO           AS "fechaInicio",
               FECHAFIN              AS "fechaFin",
-              TRIM(ARCHIVONOMBRE)   AS "archivoNombre",
+              btrim((ARCHIVONOMBRE)::text)   AS "archivoNombre",
               CASE WHEN ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
-              TRIM(USUARIOCREACION) AS "usuarioCreacion",
+              btrim((USUARIOCREACION)::text) AS "usuarioCreacion",
               FECHACARGUE           AS "fechaCargue"
          FROM EVALUADOREXPERIENCIA
-        WHERE EVALUADORID = :1
+        WHERE EVALUADORID = $1
         ORDER BY FECHAINICIO DESC NULLS LAST`,
       [evaluadorId],
     )
@@ -2078,18 +2090,18 @@ export class EvaluadoresService {
     if (!dto.cargo?.trim() || !dto.entidad?.trim()) {
       throw new BadRequestException('Cargo y entidad son obligatorios')
     }
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADOREXPERIENCIA_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADOREXPERIENCIA_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO EVALUADOREXPERIENCIA
          (EXPERIENCIAID, EVALUADORID, CARGOEXP, ENTIDADEXP, FECHAINICIO, FECHAFIN,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, ${AHORA_UTC})`,
       [
         id, evaluadorId,
         dto.cargo.trim(), dto.entidad.trim(),
@@ -2129,7 +2141,7 @@ export class EvaluadoresService {
     ], file)
     params.push(experienciaId)
     await this.dataSource.query(
-      `UPDATE EVALUADOREXPERIENCIA SET ${sets.join(', ')} WHERE EXPERIENCIAID = :${params.length}`, params,
+      `UPDATE EVALUADOREXPERIENCIA SET ${sets.join(', ')} WHERE EXPERIENCIAID = $${params.length}`, params,
     )
 
     const despues = await this.antesDe('EVALUADOREXPERIENCIA', 'EXPERIENCIAID', experienciaId)
@@ -2141,19 +2153,20 @@ export class EvaluadoresService {
   async getExperienciaArchivo(experienciaId: number) {
     const rows: Array<{ pdf: NodeJS.ReadableStream | Buffer | null; mime: string | null; nombre: string | null }> =
       await this.dataSource.query(
-        `SELECT ARCHIVOPDF AS "pdf", TRIM(ARCHIVOMIME) AS "mime", TRIM(ARCHIVONOMBRE) AS "nombre"
-           FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = :1`,
+        `SELECT ARCHIVOPDF AS "pdf", btrim((ARCHIVOMIME)::text) AS "mime", btrim((ARCHIVONOMBRE)::text) AS "nombre"
+           FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = $1`,
         [experienciaId],
       )
     const r = rows[0]
     if (!r?.pdf) throw new NotFoundException('Archivo no encontrado')
-    return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `experiencia-${experienciaId}.pdf` }
+    const enDisco = leerDocumento('evaluadorexperiencia', 'archivopdf', experienciaId)
+    return { buffer: enDisco ?? await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `experiencia-${experienciaId}.pdf` }
   }
 
   async eliminarExperiencia(experienciaId: number, ctx?: CtxUsuario) {
     const antes = await this.antesDe('EVALUADOREXPERIENCIA', 'EXPERIENCIAID', experienciaId)
     if (!antes) throw new NotFoundException('Experiencia no encontrada')
-    await this.dataSource.query(`DELETE FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = :1`, [experienciaId])
+    await this.dataSource.query(`DELETE FROM EVALUADOREXPERIENCIA WHERE EXPERIENCIAID = $1`, [experienciaId])
     await this.registrarExpediente(
       'EVALUADOREXPERIENCIA', 'DELETE', experienciaId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'Experiencia eliminada' }
@@ -2165,17 +2178,17 @@ export class EvaluadoresService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT t.TICID                    AS "ticId",
               t.TIPOEVENTOID             AS "tipoEventoId",
-              TRIM(te.TIPOEVENTONOMBRE)  AS "tipoEvento",
-              TRIM(t.TICNOMBRE)          AS "nombre",
+              btrim((te.TIPOEVENTONOMBRE)::text)  AS "tipoEvento",
+              btrim((t.TICNOMBRE)::text)          AS "nombre",
               t.TICHORAS                 AS "horas",
               t.FECHAFIN                 AS "fechaFin",
-              TRIM(t.ARCHIVONOMBRE)      AS "archivoNombre",
+              btrim((t.ARCHIVONOMBRE)::text)      AS "archivoNombre",
               CASE WHEN t.ARCHIVOPDF IS NULL THEN 0 ELSE 1 END AS "tieneArchivo",
-              TRIM(t.USUARIOCREACION)    AS "usuarioCreacion",
+              btrim((t.USUARIOCREACION)::text)    AS "usuarioCreacion",
               t.FECHACARGUE              AS "fechaCargue"
          FROM EVALUADORTIC t
          LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = t.TIPOEVENTOID
-        WHERE t.EVALUADORID = :1
+        WHERE t.EVALUADORID = $1
         ORDER BY t.FECHAFIN DESC NULLS LAST`,
       [evaluadorId],
     )
@@ -2190,18 +2203,18 @@ export class EvaluadoresService {
 
   async crearTic(evaluadorId: number, dto: TicDto, file?: MulterFile, ctx?: CtxUsuario) {
     if (!dto.nombre?.trim()) throw new BadRequestException('Nombre requerido')
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADORTIC_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADORTIC_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO EVALUADORTIC
          (TICID, EVALUADORID, TIPOEVENTOID, TICNOMBRE, TICHORAS, FECHAFIN,
           ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, USUARIOCREACION, FECHACARGUE)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, ${AHORA_UTC})`,
       [
         id, evaluadorId,
         dto.tipoEventoId ?? null,
@@ -2241,7 +2254,7 @@ export class EvaluadoresService {
     ], file)
     params.push(ticId)
     await this.dataSource.query(
-      `UPDATE EVALUADORTIC SET ${sets.join(', ')} WHERE TICID = :${params.length}`, params,
+      `UPDATE EVALUADORTIC SET ${sets.join(', ')} WHERE TICID = $${params.length}`, params,
     )
 
     const despues = await this.antesDe('EVALUADORTIC', 'TICID', ticId)
@@ -2253,19 +2266,20 @@ export class EvaluadoresService {
   async getTicArchivo(ticId: number) {
     const rows: Array<{ pdf: NodeJS.ReadableStream | Buffer | null; mime: string | null; nombre: string | null }> =
       await this.dataSource.query(
-        `SELECT ARCHIVOPDF AS "pdf", TRIM(ARCHIVOMIME) AS "mime", TRIM(ARCHIVONOMBRE) AS "nombre"
-           FROM EVALUADORTIC WHERE TICID = :1`,
+        `SELECT ARCHIVOPDF AS "pdf", btrim((ARCHIVOMIME)::text) AS "mime", btrim((ARCHIVONOMBRE)::text) AS "nombre"
+           FROM EVALUADORTIC WHERE TICID = $1`,
         [ticId],
       )
     const r = rows[0]
     if (!r?.pdf) throw new NotFoundException('Archivo no encontrado')
-    return { buffer: await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `tic-${ticId}.pdf` }
+    const enDisco = leerDocumento('evaluadortic', 'archivopdf', ticId)
+    return { buffer: enDisco ?? await this.lobToBuffer(r.pdf), mime: r.mime || 'application/pdf', nombre: r.nombre || `tic-${ticId}.pdf` }
   }
 
   async eliminarTic(ticId: number, ctx?: CtxUsuario) {
     const antes = await this.antesDe('EVALUADORTIC', 'TICID', ticId)
     if (!antes) throw new NotFoundException('Certificación TIC no encontrada')
-    await this.dataSource.query(`DELETE FROM EVALUADORTIC WHERE TICID = :1`, [ticId])
+    await this.dataSource.query(`DELETE FROM EVALUADORTIC WHERE TICID = $1`, [ticId])
     await this.registrarExpediente(
       'EVALUADORTIC', 'DELETE', ticId, Number(antes.evaluadorId), ctx, { antes })
     return { message: 'TIC eliminado' }
@@ -2279,19 +2293,19 @@ export class EvaluadoresService {
               -- Hace falta para corregir una prueba sin desatarla del ciclo.
               PARTICIPACIONID     AS "participacionId",
               ANIO                AS "anio",
-              TRIM(PERIODO)       AS "periodo",
+              btrim((PERIODO)::text)       AS "periodo",
               FECHAPRESENTACION   AS "fechaPresentacion",
-              TRIM(HORARIO)       AS "horario",
+              btrim((HORARIO)::text)       AS "horario",
               INTENTOS            AS "intentos",
               PUNTAJEMAYOR        AS "puntajeMayor",
               PRUEBANUMERO        AS "pruebaNumero",
               EFECTIVIDAD         AS "efectividad",
               CORRECTAS           AS "correctas",
               INCORRECTAS         AS "incorrectas",
-              TRIM(TOTALTIEMPO)   AS "totalTiempo",
-              TRIM(OBSERVACION)   AS "observacion"
+              btrim((TOTALTIEMPO)::text)   AS "totalTiempo",
+              btrim((OBSERVACION)::text)   AS "observacion"
          FROM EVALUADORPRUEBA
-        WHERE EVALUADORID = :1
+        WHERE EVALUADORID = $1
         ORDER BY ANIO DESC, PRUEBAID DESC`,
       [evaluadorId],
     )
@@ -2340,7 +2354,7 @@ export class EvaluadoresService {
   async crearPrueba(evaluadorId: number, dto: PruebaDto) {
     if (!dto.anio) throw new BadRequestException('Año requerido')
     this.validarPuntajes(dto)
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const ciclo = await this.resolverCicloDePrueba(evaluadorId, dto)
@@ -2348,7 +2362,7 @@ export class EvaluadoresService {
     const aprobada = this.derivarAprobada(dto.efectividad, minimo)
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT EVALUADORPRUEBA_SEQ.NEXTVAL FROM dual`,
+      `SELECT EVALUADORPRUEBA_SEQ.NEXTVAL `,
     )
     const id = Number(seq[0].NEXTVAL)
     // FECHACREACION va explícita en UTC: su DEFAULT SYSDATE da la hora de Colombia en el Exadata
@@ -2357,7 +2371,7 @@ export class EvaluadoresService {
          (PRUEBAID, EVALUADORID, ANIO, PERIODO, FECHAPRESENTACION, HORARIO, INTENTOS,
           PUNTAJEMAYOR, PRUEBANUMERO, EFECTIVIDAD, CORRECTAS, INCORRECTAS, TOTALTIEMPO,
           OBSERVACION, PARTICIPACIONID, PUNTAJEMINIMO, APROBADA, FECHACREACION)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, ${AHORA_UTC})`,
       [
         id, evaluadorId, dto.anio,
         dto.periodo?.trim() || null,
@@ -2399,7 +2413,7 @@ export class EvaluadoresService {
         `SELECT cv.PUNTAJEMINIMOPRUEBA AS "minimo"
            FROM EVALUADORPARTICIPACION pa
            LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-          WHERE pa.PARTICIPACIONID = :1 AND pa.EVALUADORID = :2`,
+          WHERE pa.PARTICIPACIONID = $1 AND pa.EVALUADORID = $2`,
         [dto.participacionId, evaluadorId],
       )
       if (!filas[0]) throw new BadRequestException('Esa participación no es de este evaluador')
@@ -2413,7 +2427,7 @@ export class EvaluadoresService {
       `SELECT pa.PARTICIPACIONID AS "id", cv.PUNTAJEMINIMOPRUEBA AS "minimo"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-        WHERE pa.EVALUADORID = :1 AND pa.ANIO = :2`,
+        WHERE pa.EVALUADORID = $1 AND pa.ANIO = $2`,
       [evaluadorId, dto.anio],
     )
     if (candidatos.length === 1) {
@@ -2437,7 +2451,7 @@ export class EvaluadoresService {
     const cabecera: Array<{ evaluadorId: number; participacionId: number | null }> =
       await this.dataSource.query(
         `SELECT EVALUADORID AS "evaluadorId", PARTICIPACIONID AS "participacionId"
-           FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
+           FROM EVALUADORPRUEBA WHERE PRUEBAID = $1`, [pruebaId])
     if (!cabecera[0]) throw new NotFoundException('Prueba no encontrada')
 
     // Mover la prueba de ciclo no hacía nada: PARTICIPACIONID no estaba en el
@@ -2453,7 +2467,7 @@ export class EvaluadoresService {
           `SELECT cv.PUNTAJEMINIMOPRUEBA AS "minimo"
              FROM EVALUADORPARTICIPACION pa
              LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-            WHERE pa.PARTICIPACIONID = :1 AND pa.EVALUADORID = :2`,
+            WHERE pa.PARTICIPACIONID = $1 AND pa.EVALUADORID = $2`,
           [dto.participacionId, Number(cabecera[0].evaluadorId)],
         )
         if (!suyo[0]) throw new BadRequestException('Esa participación no es de este evaluador')
@@ -2490,7 +2504,7 @@ export class EvaluadoresService {
     const actual: Array<{ efectividad: number | null; minimo: number | null }> =
       await this.dataSource.query(
         `SELECT EFECTIVIDAD AS "efectividad", PUNTAJEMINIMO AS "minimo"
-           FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
+           FROM EVALUADORPRUEBA WHERE PRUEBAID = $1`, [pruebaId])
     const efectividad = dto.efectividad !== undefined ? dto.efectividad : actual[0]?.efectividad
     // al cambiar de ciclo manda el corte de SU convocatoria, salvo que lo pidan a mano
     const minimo = dto.puntajeMinimo !== undefined
@@ -2506,7 +2520,7 @@ export class EvaluadoresService {
 
     params.push(pruebaId)
     await this.dataSource.query(
-      `UPDATE EVALUADORPRUEBA SET ${sets.join(', ')} WHERE PRUEBAID = :${params.length}`,
+      `UPDATE EVALUADORPRUEBA SET ${sets.join(', ')} WHERE PRUEBAID = $${params.length}`,
       params,
     )
     return {
@@ -2518,7 +2532,7 @@ export class EvaluadoresService {
   }
 
   async eliminarPrueba(pruebaId: number) {
-    await this.dataSource.query(`DELETE FROM EVALUADORPRUEBA WHERE PRUEBAID = :1`, [pruebaId])
+    await this.dataSource.query(`DELETE FROM EVALUADORPRUEBA WHERE PRUEBAID = $1`, [pruebaId])
     return { message: 'Prueba eliminada' }
   }
 
@@ -2534,7 +2548,7 @@ export class EvaluadoresService {
     const rows: Array<{ id: number }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOEVALID AS "id"
          FROM TIPODOCUMENTOEVAL
-        WHERE UPPER(TRIM(CODIGO)) = :1 AND ROWNUM = 1`,
+        WHERE UPPER(btrim((CODIGO)::text)) = $1 LIMIT 1`,
       [cod],
     )
     if (!rows[0]) {
@@ -2565,12 +2579,12 @@ export class EvaluadoresService {
       `SELECT d.DOCUMENTOID           AS "documentoId",
               d.EVALUADORID           AS "evaluadorId",
               d.TIPODOCUMENTOEVALID   AS "tipoDocumentoEvalId",
-              TRIM(t.CODIGO)          AS "tipoCodigo",
-              TRIM(t.NOMBRE)          AS "tipoNombre",
-              TRIM(d.DOCUMENTODESCRIPCION) AS "descripcion",
+              btrim((t.CODIGO)::text)          AS "tipoCodigo",
+              btrim((t.NOMBRE)::text)          AS "tipoNombre",
+              btrim((d.DOCUMENTODESCRIPCION)::text) AS "descripcion",
               d.ANIOREFERENCIA        AS "anioReferencia",
-              TRIM(d.ARCHIVONOMBRE)   AS "archivoNombre",
-              TRIM(d.ARCHIVOMIME)     AS "mime",
+              btrim((d.ARCHIVONOMBRE)::text)   AS "archivoNombre",
+              btrim((d.ARCHIVOMIME)::text)     AS "mime",
               d.FECHACARGUE           AS "fechaCargue"
          FROM EVALUADORDOCUMENTO d
          JOIN TIPODOCUMENTOEVAL  t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
@@ -2600,16 +2614,16 @@ export class EvaluadoresService {
     if (!file?.buffer) throw new BadRequestException('Adjunta el archivo en el campo "archivo"')
     if (!tipoId) throw new BadRequestException('tipoDocumentoEvalId es obligatorio')
 
-    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = :1`, [evaluadorId])
+    const ok = await this.dataSource.query(`SELECT 1 FROM EVALUADOR WHERE EVALUADORID = $1`, [evaluadorId])
     if (!ok[0]) throw new NotFoundException('Evaluador no encontrado')
 
     const tipo: Array<{ admiteMultiple: number; nombre: string; codigo: string }> =
       await this.dataSource.query(
         `SELECT ADMITEMULTIPLE AS "admiteMultiple",
-                TRIM(NOMBRE)   AS "nombre",
-                TRIM(CODIGO)   AS "codigo"
+                btrim((NOMBRE)::text)   AS "nombre",
+                btrim((CODIGO)::text)   AS "codigo"
            FROM TIPODOCUMENTOEVAL
-          WHERE TIPODOCUMENTOEVALID = :1 AND ACTIVO = 1`,
+          WHERE TIPODOCUMENTOEVALID = $1 AND ACTIVO = 1`,
         [tipoId],
       )
     if (!tipo[0]) throw new BadRequestException('Tipo de documento no existe o está inactivo')
@@ -2642,22 +2656,22 @@ export class EvaluadoresService {
       let reemplazados: Array<Record<string, unknown>> = []
       if (!admiteMultiple) {
         reemplazados = await qr.query(
-          `SELECT DOCUMENTOID AS "documentoId", TRIM(ARCHIVONOMBRE) AS "archivoNombre",
-                  TRIM(DOCUMENTODESCRIPCION) AS "descripcion", FECHACARGUE AS "fechaCargue"
+          `SELECT DOCUMENTOID AS "documentoId", btrim((ARCHIVONOMBRE)::text) AS "archivoNombre",
+                  btrim((DOCUMENTODESCRIPCION)::text) AS "descripcion", FECHACARGUE AS "fechaCargue"
              FROM EVALUADORDOCUMENTO
-            WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2`,
+            WHERE EVALUADORID = $1 AND TIPODOCUMENTOEVALID = $2`,
           [evaluadorId, tipoId],
         )
         await qr.query(
           `DELETE FROM EVALUADORDOCUMENTO
-            WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2`,
+            WHERE EVALUADORID = $1 AND TIPODOCUMENTOEVALID = $2`,
           [evaluadorId, tipoId],
         )
       }
 
       // ID por MAX+1: no hay secuencia dedicada para esta tabla.
       const seq: Array<{ NUEVO: number }> = await qr.query(
-        `SELECT NVL(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM EVALUADORDOCUMENTO`,
+        `SELECT COALESCE(MAX(DOCUMENTOID), 0) + 1 AS "NUEVO" FROM EVALUADORDOCUMENTO`,
       )
       const documentoId = Number(seq[0].NUEVO)
 
@@ -2667,7 +2681,7 @@ export class EvaluadoresService {
         `INSERT INTO EVALUADORDOCUMENTO
            (DOCUMENTOID, EVALUADORID, TIPODOCUMENTOEVALID, DOCUMENTODESCRIPCION,
             ANIOREFERENCIA, PARTICIPACIONID, ARCHIVOPDF, ARCHIVOMIME, ARCHIVONOMBRE, FECHACARGUE)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${AHORA_UTC})`,
         [
           documentoId,
           evaluadorId,
@@ -2714,12 +2728,12 @@ export class EvaluadoresService {
   }> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT d.EVALUADORID          AS "evaluadorId",
-              TRIM(t.CODIGO)         AS "tipoCodigo",
-              TRIM(d.ARCHIVONOMBRE)  AS "archivoNombre",
-              TRIM(d.ARCHIVOMIME)    AS "mime"
+              btrim((t.CODIGO)::text)         AS "tipoCodigo",
+              btrim((d.ARCHIVONOMBRE)::text)  AS "archivoNombre",
+              btrim((d.ARCHIVOMIME)::text)    AS "mime"
          FROM EVALUADORDOCUMENTO d
          JOIN TIPODOCUMENTOEVAL  t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
-        WHERE d.DOCUMENTOID = :1`,
+        WHERE d.DOCUMENTOID = $1`,
       [docId],
     )
     if (!rows[0]) throw new NotFoundException('Documento no encontrado')
@@ -2739,15 +2753,16 @@ export class EvaluadoresService {
       nombre: string | null;
     }> = await this.dataSource.query(
       `SELECT ARCHIVOPDF          AS "pdf",
-              TRIM(ARCHIVOMIME)   AS "mime",
-              TRIM(ARCHIVONOMBRE) AS "nombre"
-         FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`,
+              btrim((ARCHIVOMIME)::text)   AS "mime",
+              btrim((ARCHIVONOMBRE)::text) AS "nombre"
+         FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = $1`,
       [docId],
     )
     const r = rows[0]
     if (!r?.pdf) throw new NotFoundException('Archivo no encontrado')
+    const enDisco = leerDocumento('evaluadordocumento', 'archivopdf', docId)
     return {
-      buffer: await this.lobToBuffer(r.pdf),
+      buffer: enDisco ?? await this.lobToBuffer(r.pdf),
       mime: r.mime || 'application/pdf',
       nombre: r.nombre || `documento-${docId}.pdf`,
     }
@@ -2756,7 +2771,7 @@ export class EvaluadoresService {
   async eliminarDocumento(docId: number, ctx?: CtxUsuario): Promise<{ mensaje: string }> {
     const antes = await this.antesDe('EVALUADORDOCUMENTO', 'DOCUMENTOID', docId)
     if (!antes) throw new NotFoundException('Documento no encontrado')
-    await this.dataSource.query(`DELETE FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = :1`, [docId])
+    await this.dataSource.query(`DELETE FROM EVALUADORDOCUMENTO WHERE DOCUMENTOID = $1`, [docId])
     await this.registrarExpediente(
       'EVALUADORDOCUMENTO', 'DELETE', docId, Number(antes.evaluadorId), ctx, { antes })
     return { mensaje: 'Documento eliminado' }
@@ -2773,12 +2788,12 @@ export class EvaluadoresService {
     const rows: Array<{ id: number; nombre: string | null; fecha: Date }> = await this.dataSource.query(
       `SELECT * FROM (
          SELECT DOCUMENTOID          AS "id",
-                TRIM(ARCHIVONOMBRE)  AS "nombre",
+                btrim((ARCHIVONOMBRE)::text)  AS "nombre",
                 FECHACARGUE          AS "fecha"
            FROM EVALUADORDOCUMENTO
-          WHERE EVALUADORID = :1 AND TIPODOCUMENTOEVALID = :2
+          WHERE EVALUADORID = $1 AND TIPODOCUMENTOEVALID = $2
           ORDER BY DOCUMENTOID DESC
-       ) WHERE ROWNUM = 1`,
+       ) LIMIT 1`,
       [evaluadorId, tipoId],
     )
     if (!rows[0]) return null

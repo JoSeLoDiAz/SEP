@@ -55,8 +55,8 @@ export class RetroalimentacionService {
     }
 
     const conv: Array<{ anio: number; nombre: string }> = await this.dataSource.query(
-      `SELECT ANIO AS "anio", TRIM(NOMBRE) AS "nombre"
-         FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`, [convocatoriaId],
+      `SELECT ANIO AS "anio", btrim((NOMBRE)::text) AS "nombre"
+         FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`, [convocatoriaId],
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
 
@@ -81,7 +81,7 @@ export class RetroalimentacionService {
   ) {
     await this.dataSource.transaction(async m => {
       const seq: Array<{ NEXTVAL: number }> = await m.query(
-        `SELECT RETROFORMULARIO_SEQ.NEXTVAL FROM dual`)
+        `SELECT RETROFORMULARIO_SEQ.NEXTVAL `)
       const nuevoId = Number(seq[0].NEXTVAL)
 
       await m.query(
@@ -90,10 +90,10 @@ export class RetroalimentacionService {
            (RETROFORMULARIOID, CONVOCATORIAID, NOMBRE, VERSION, ANIO, ESCALAMIN, ESCALAMAX,
             DURACIONMINUTOS, RESULTADOANONIMO, ACTIVO, ABIERTO, REGLASMATRIZ,
             ESCALAETIQUETAS, USUARIOCREACION, FECHACREACION)
-         SELECT :1, :2, N'Retroalimentación ' || :3, 1, :4,
+         SELECT $1, $2, N'Retroalimentación ' || $3, 1, $4,
                 ESCALAMIN, ESCALAMAX, DURACIONMINUTOS, RESULTADOANONIMO, 1, 0,
                 REGLASMATRIZ, ESCALAETIQUETAS, 'clon-plantilla', ${AHORA_UTC}
-           FROM RETROFORMULARIO WHERE RETROFORMULARIOID = :5`,
+           FROM RETROFORMULARIO WHERE RETROFORMULARIOID = $5`,
         [nuevoId, convocatoriaId, conv.nombre, conv.anio, plantillaId],
       )
 
@@ -101,8 +101,8 @@ export class RetroalimentacionService {
       await m.query(
         `INSERT INTO RETROPREGUNTA
            (RETROPREGUNTAID, RETROFORMULARIOID, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN)
-         SELECT RETROPREGUNTA_SEQ.NEXTVAL, :1, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN
-           FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :2 AND ACTIVO = 1`,
+         SELECT RETROPREGUNTA_SEQ.NEXTVAL, $1, NUMERO, TEXTO, CRITERIOS, TIPO, PESO, REQUERIDA, ORDEN
+           FROM RETROPREGUNTA WHERE RETROFORMULARIOID = $2 AND ACTIVO = 1`,
         [nuevoId, plantillaId],
       )
     })
@@ -113,7 +113,7 @@ export class RetroalimentacionService {
 
     if (abierto) {
       const pendientes: Array<{ T: number }> = await this.dataSource.query(
-        `SELECT COUNT(*) AS "T" FROM RETROASIGNACION WHERE RETROFORMULARIOID = :1`,
+        `SELECT COUNT(*) AS "T" FROM RETROASIGNACION WHERE RETROFORMULARIOID = $1`,
         [form.retroFormularioId],
       )
       if (Number(pendientes[0]?.T ?? 0) === 0) {
@@ -125,9 +125,9 @@ export class RetroalimentacionService {
 
     await this.dataSource.query(
       `UPDATE RETROFORMULARIO
-          SET ABIERTO = :1, ${abierto ? 'FECHAAPERTURA' : 'FECHACIERRE'} = ${AHORA_UTC},
-              USUARIOMODIFICACION = :2, FECHAMODIFICACION = ${AHORA_UTC}
-        WHERE RETROFORMULARIOID = :3`,
+          SET ABIERTO = $1, ${abierto ? 'FECHAAPERTURA' : 'FECHACIERRE'} = ${AHORA_UTC},
+              USUARIOMODIFICACION = $2, FECHAMODIFICACION = ${AHORA_UTC}
+        WHERE RETROFORMULARIOID = $3`,
       [abierto ? 1 : 0, ctx.usuarioEmail, form.retroFormularioId],
     )
 
@@ -144,7 +144,7 @@ export class RetroalimentacionService {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT f.RETROFORMULARIOID AS "retroFormularioId",
               f.CONVOCATORIAID    AS "convocatoriaId",
-              TRIM(f.NOMBRE)      AS "nombre",
+              btrim((f.NOMBRE)::text)      AS "nombre",
               f.VERSION           AS "version",
               f.ANIO              AS "anio",
               f.ESCALAMIN         AS "escalaMin",
@@ -155,7 +155,7 @@ export class RetroalimentacionService {
               f.REGLASMATRIZ      AS "reglasMatriz",
               f.ESCALAETIQUETAS   AS "escalaEtiquetas"
          FROM RETROFORMULARIO f
-        WHERE f.CONVOCATORIAID = :1 AND f.ACTIVO = 1`,
+        WHERE f.CONVOCATORIAID = $1 AND f.ACTIVO = 1`,
       [convocatoriaId],
     )
     if (!rows[0]) return null
@@ -192,10 +192,10 @@ export class RetroalimentacionService {
   private async cargarPreguntas(retroFormularioId: number) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT RETROPREGUNTAID AS "preguntaId", NUMERO AS "numero", TEXTO AS "texto",
-              TRIM(CRITERIOS) AS "criterios", TRIM(TIPO) AS "tipo",
+              btrim((CRITERIOS)::text) AS "criterios", btrim((TIPO)::text) AS "tipo",
               PESO AS "peso", REQUERIDA AS "requerida"
          FROM RETROPREGUNTA
-        WHERE RETROFORMULARIOID = :1 AND ACTIVO = 1
+        WHERE RETROFORMULARIOID = $1 AND ACTIVO = 1
         ORDER BY ORDEN, NUMERO`,
       [retroFormularioId],
     )
@@ -222,10 +222,10 @@ export class RetroalimentacionService {
     // decía "Ya hay 21 asignaciones guardadas" al lado del KPI "Asignaciones 12".
     const yaExisten: Array<{ T: number }> = await this.dataSource.query(
       `SELECT COUNT(*) AS "T" FROM RETROASIGNACION a
-        WHERE a.RETROFORMULARIOID = :1
+        WHERE a.RETROFORMULARIOID = $1
           AND EXISTS (SELECT 1 FROM EVALUADORPARTICIPACION pav
                        WHERE pav.PARTICIPACIONID = a.PARTEVALUADORID
-                         AND pav.CONVOCATORIAID = :2)`,
+                         AND pav.CONVOCATORIAID = $2)`,
       [form.retroFormularioId, convocatoriaId],
     )
 
@@ -268,7 +268,7 @@ export class RetroalimentacionService {
 
     const existentes: Array<{ clave: string }> = await this.dataSource.query(
       `SELECT PARTEVALUADORID || '::' || PARTEVALUADOID AS "clave"
-         FROM RETROASIGNACION WHERE RETROFORMULARIOID = :1`,
+         FROM RETROASIGNACION WHERE RETROFORMULARIOID = $1`,
       [form.retroFormularioId],
     )
     const yaHay = new Set(existentes.map(e => e.clave))
@@ -280,12 +280,12 @@ export class RetroalimentacionService {
       await this.dataSource.transaction(async m => {
         for (const p of nuevos) {
           const seq: Array<{ NEXTVAL: number }> = await m.query(
-            `SELECT RETROASIGNACION_SEQ.NEXTVAL FROM dual`)
+            `SELECT RETROASIGNACION_SEQ.NEXTVAL `)
           await m.query(
             `INSERT INTO RETROASIGNACION
                (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
                 ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
-             VALUES (:1, :2, :3, :4, N'PENDIENTE', N'AUTOMATICA', :5, :6, ${AHORA_UTC})`,
+             VALUES ($1, $2, $3, $4, N'PENDIENTE', N'AUTOMATICA', $5, $6, ${AHORA_UTC})`,
             [
               Number(seq[0].NEXTVAL), form.retroFormularioId,
               p.evaluadorParticipacionId, p.evaluadoParticipacionId,
@@ -322,19 +322,19 @@ export class RetroalimentacionService {
 
     const dup: Array<{ id: number }> = await this.dataSource.query(
       `SELECT RETROASIGNACIONID AS "id" FROM RETROASIGNACION
-        WHERE RETROFORMULARIOID = :1 AND PARTEVALUADORID = :2 AND PARTEVALUADOID = :3`,
+        WHERE RETROFORMULARIOID = $1 AND PARTEVALUADORID = $2 AND PARTEVALUADOID = $3`,
       [form.retroFormularioId, dto.evaluadorParticipacionId, dto.evaluadoParticipacionId],
     )
     if (dup[0]) throw new ConflictException('Ese par ya está asignado')
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT RETROASIGNACION_SEQ.NEXTVAL FROM dual`)
+      `SELECT RETROASIGNACION_SEQ.NEXTVAL `)
     const id = Number(seq[0].NEXTVAL)
     await this.dataSource.query(
       `INSERT INTO RETROASIGNACION
          (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
           ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
-       VALUES (:1, :2, :3, :4, N'PENDIENTE', N'MANUAL', N'agregado a mano', :5, ${AHORA_UTC})`,
+       VALUES ($1, $2, $3, $4, N'PENDIENTE', N'MANUAL', N'agregado a mano', $5, ${AHORA_UTC})`,
       [id, form.retroFormularioId, dto.evaluadorParticipacionId, dto.evaluadoParticipacionId, ctx.usuarioEmail],
     )
 
@@ -351,7 +351,7 @@ export class RetroalimentacionService {
   async anularAsignacion(asignacionId: number, motivo: string, ctx: CtxUsuario) {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT ESTADO AS "estado", PARTEVALUADORID AS "evaluador", PARTEVALUADOID AS "evaluado"
-         FROM RETROASIGNACION WHERE RETROASIGNACIONID = :1`, [asignacionId],
+         FROM RETROASIGNACION WHERE RETROASIGNACIONID = $1`, [asignacionId],
     )
     if (!rows[0]) throw new NotFoundException('Asignación no encontrada')
     if ((rows[0].estado as string)?.trim() === 'ENVIADA') {
@@ -361,8 +361,8 @@ export class RetroalimentacionService {
     }
 
     await this.dataSource.query(
-      `UPDATE RETROASIGNACION SET ESTADO = N'ANULADA', MOTIVOREGLA = :1
-        WHERE RETROASIGNACIONID = :2`,
+      `UPDATE RETROASIGNACION SET ESTADO = N'ANULADA', MOTIVOREGLA = $1
+        WHERE RETROASIGNACIONID = $2`,
       [(motivo ?? 'anulada').slice(0, 200), asignacionId],
     )
     await this.controlCambios.registrar({
@@ -382,12 +382,12 @@ export class RetroalimentacionService {
       `SELECT pa.PARTICIPACIONID   AS "participacionId",
               pa.ANIO              AS "anio",
               pa.CONVOCATORIAID    AS "convocatoriaId",
-              TRIM(cv.NOMBRE)      AS "convocatoriaNombre",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(ar.NOMBRE)      AS "areaNombre",
+              btrim((cv.NOMBRE)::text)      AS "convocatoriaNombre",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+              btrim((ar.NOMBRE)::text)      AS "areaNombre",
               f.RETROFORMULARIOID  AS "retroFormularioId",
               f.DURACIONMINUTOS    AS "duracionMinutos",
-              TRIM(p.PERSONANOMBRES) AS "nombres"
+              btrim((p.PERSONANOMBRES)::text) AS "nombres"
          FROM PERSONA p
          JOIN EVALUADOR e ON e.PERSONAID = p.PERSONAID
          JOIN EVALUADORPARTICIPACION pa ON pa.EVALUADORID = e.EVALUADORID
@@ -396,8 +396,8 @@ export class RetroalimentacionService {
          LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE LOWER(TRIM(p.PERSONAEMAIL)) = :1
-           OR LOWER(TRIM(p.PERSONAEMAILINSTITUCIONAL)) = :2
+        WHERE LOWER(btrim((p.PERSONAEMAIL)::text)) = $1
+           OR LOWER(btrim((p.PERSONAEMAILINSTITUCIONAL)::text)) = $2
         ORDER BY pa.ANIO DESC
         FETCH FIRST 1 ROWS ONLY`,
       [email.trim().toLowerCase(), email.trim().toLowerCase()],
@@ -422,20 +422,20 @@ export class RetroalimentacionService {
       `SELECT a.RETROASIGNACIONID AS "asignacionId",
               a.ESTADO            AS "estado",
               a.PARTEVALUADOID    AS "evaluadoParticipacionId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(r.ROLEVALUADORCODIGO) AS "rolCodigo",
-              NVL(r.ROLEVALUADORORDEN, 99) AS "rolOrden",
-              TRIM(ar.NOMBRE)     AS "areaNombre"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+              btrim((r.ROLEVALUADORCODIGO)::text) AS "rolCodigo",
+              COALESCE(r.ROLEVALUADORORDEN, 99) AS "rolOrden",
+              btrim((ar.NOMBRE)::text)     AS "areaNombre"
          FROM RETROASIGNACION a
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = a.PARTEVALUADOID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE a.PARTEVALUADORID = :1
+        WHERE a.PARTEVALUADORID = $1
           AND a.ESTADO <> N'ANULADA'
-        ORDER BY NVL(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
+        ORDER BY COALESCE(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
       [participacionId],
     )
 
@@ -470,7 +470,7 @@ export class RetroalimentacionService {
   async iniciarSesion(participacionId: number, ctx: CtxUsuario & { ip?: string }) {
     const pendientes: Array<{ T: number }> = await this.dataSource.query(
       `SELECT COUNT(*) AS "T" FROM RETROASIGNACION
-        WHERE PARTEVALUADORID = :1 AND ESTADO = N'PENDIENTE'`,
+        WHERE PARTEVALUADORID = $1 AND ESTADO = N'PENDIENTE'`,
       [participacionId],
     )
     if (Number(pendientes[0]?.T ?? 0) === 0) {
@@ -481,7 +481,7 @@ export class RetroalimentacionService {
       `SELECT f.RETROFORMULARIOID AS "id", f.DURACIONMINUTOS AS "duracion", f.ABIERTO AS "abierto"
          FROM RETROFORMULARIO f
          JOIN EVALUADORPARTICIPACION pa ON pa.CONVOCATORIAID = f.CONVOCATORIAID
-        WHERE pa.PARTICIPACIONID = :1 AND f.ACTIVO = 1`,
+        WHERE pa.PARTICIPACIONID = $1 AND f.ACTIVO = 1`,
       [participacionId],
     )
     if (!form[0]) throw new NotFoundException('El ciclo no tiene instrumento activo')
@@ -490,7 +490,7 @@ export class RetroalimentacionService {
     }
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT RETROSESION_SEQ.NEXTVAL FROM dual`)
+      `SELECT RETROSESION_SEQ.NEXTVAL `)
     const id = Number(seq[0].NEXTVAL)
 
     // FECHAINICIO en UTC, igual que el reloj con que minutosDesdeInicio la resta
@@ -498,7 +498,7 @@ export class RetroalimentacionService {
       `INSERT INTO RETROSESION
          (RETROSESIONID, RETROFORMULARIOID, PARTICIPACIONID, FECHAINICIO,
           DURACIONMINUTOS, IPORIGEN, USUARIOEMAIL)
-       VALUES (:1, :2, :3, ${AHORA_UTC}, :4, :5, :6)`,
+       VALUES ($1, $2, $3, ${AHORA_UTC}, $4, $5, $6)`,
       [id, Number(form[0].id), participacionId, Number(form[0].duracion), ctx.ip ?? null, ctx.usuarioEmail],
     )
 
@@ -515,7 +515,7 @@ export class RetroalimentacionService {
               FECHAINICIO AS "fechaInicio", FECHAENVIO AS "fechaEnvio",
               DURACIONMINUTOS AS "duracionMinutos", MINUTOSTRANSCURRIDOS AS "minutosTranscurridos",
               SEEXCEDIO AS "seExcedio"
-         FROM RETROSESION WHERE RETROSESIONID = :1`,
+         FROM RETROSESION WHERE RETROSESIONID = $1`,
       [sesionId],
     )
     if (!rows[0]) throw new NotFoundException('Sesión no encontrada')
@@ -552,7 +552,7 @@ export class RetroalimentacionService {
     const ids = respuestas.map(r => Number(r.asignacionId))
     const q = bindRepetido(
       `SELECT a.RETROASIGNACIONID AS "id", a.PARTEVALUADOID AS "evaluado",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre"
          FROM RETROASIGNACION a
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = a.PARTEVALUADOID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
@@ -603,14 +603,14 @@ export class RetroalimentacionService {
         const promedio = contadas > 0 ? Math.round((suma / contadas) * 100) / 100 : null
 
         const seqR: Array<{ NEXTVAL: number }> = await m.query(
-          `SELECT RETRORESPUESTA_SEQ.NEXTVAL FROM dual`)
+          `SELECT RETRORESPUESTA_SEQ.NEXTVAL `)
         const respuestaId = Number(seqR[0].NEXTVAL)
 
         await m.query(
           `INSERT INTO RETRORESPUESTA
              (RETRORESPUESTAID, RETROSESIONID, RETROASIGNACIONID, RETROFORMULARIOID,
               PARTEVALUADORID, PARTEVALUADOID, PUNTAJEESCALA, PUNTAJEMAXIMO, PROMEDIO, FECHAENVIO)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${AHORA_UTC})`,
           [respuestaId, sesionId, asignacionId, form.retroFormularioId,
            participacionId, evaluadoId, suma, maximo, promedio],
         )
@@ -619,11 +619,11 @@ export class RetroalimentacionService {
           const val = Number(r.escalas?.[String(preg.numero)])
           if (!Number.isFinite(val)) continue
           const seqI: Array<{ NEXTVAL: number }> = await m.query(
-            `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+            `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL `)
           await m.query(
             `INSERT INTO RETRORESPUESTAITEM
                (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, CALIFICACION)
-             VALUES (:1, :2, :3, :4, :5)`,
+             VALUES ($1, $2, $3, $4, $5)`,
             [Number(seqI[0].NEXTVAL), respuestaId, preg.preguntaId, preg.numero, val],
           )
         }
@@ -631,18 +631,18 @@ export class RetroalimentacionService {
         const comentario = (r.comentario ?? '').trim()
         if (comentario && porPersona) {
           const seqI: Array<{ NEXTVAL: number }> = await m.query(
-            `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+            `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL `)
           await m.query(
             `INSERT INTO RETRORESPUESTAITEM
                (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, COMENTARIO)
-             VALUES (:1, :2, :3, :4, :5)`,
+             VALUES ($1, $2, $3, $4, $5)`,
             [Number(seqI[0].NEXTVAL), respuestaId, porPersona.preguntaId, porPersona.numero, comentario],
           )
         }
 
         await m.query(
-          `UPDATE RETROASIGNACION SET ESTADO = N'ENVIADA', RETRORESPUESTAID = :1
-            WHERE RETROASIGNACIONID = :2`,
+          `UPDATE RETROASIGNACION SET ESTADO = N'ENVIADA', RETRORESPUESTAID = $1
+            WHERE RETROASIGNACIONID = $2`,
           [respuestaId, asignacionId],
         )
       }
@@ -650,19 +650,19 @@ export class RetroalimentacionService {
       const sugerencia = (body.sugerenciaGeneral ?? '').trim()
       if (sugerencia && general) {
         const seqS: Array<{ NEXTVAL: number }> = await m.query(
-          `SELECT RETROSUGERENCIA_SEQ.NEXTVAL FROM dual`)
+          `SELECT RETROSUGERENCIA_SEQ.NEXTVAL `)
         await m.query(
           `INSERT INTO RETROSUGERENCIA
              (RETROSUGERENCIAID, RETROSESIONID, RETROPREGUNTAID, PARTICIPACIONID, TEXTO, FECHAENVIO)
-           VALUES (:1, :2, :3, :4, :5, ${AHORA_UTC})`,
+           VALUES ($1, $2, $3, $4, $5, ${AHORA_UTC})`,
           [Number(seqS[0].NEXTVAL), sesionId, general.preguntaId, participacionId, sugerencia],
         )
       }
 
       await m.query(
         `UPDATE RETROSESION
-            SET FECHAENVIO = ${AHORA_UTC}, MINUTOSTRANSCURRIDOS = :1, SEEXCEDIO = :2
-          WHERE RETROSESIONID = :3`,
+            SET FECHAENVIO = ${AHORA_UTC}, MINUTOSTRANSCURRIDOS = $1, SEEXCEDIO = $2
+          WHERE RETROSESIONID = $3`,
         [minutos, seExcedio ? 1 : 0, sesionId],
       )
     })
@@ -679,7 +679,7 @@ export class RetroalimentacionService {
     // se calcula en BD para no depender del reloj ni la zona horaria de Node; en UTC, como se grabó FECHAINICIO
     const rows: Array<{ minutos: number }> = await this.dataSource.query(
       `SELECT ROUND((${AHORA_UTC} - FECHAINICIO) * 24 * 60) AS "minutos"
-         FROM RETROSESION WHERE RETROSESIONID = :1`, [sesionId],
+         FROM RETROSESION WHERE RETROSESIONID = $1`, [sesionId],
     )
     return Math.max(0, Number(rows[0]?.minutos ?? 0))
   }
@@ -688,7 +688,7 @@ export class RetroalimentacionService {
     const rows: Array<{ convocatoriaId: number }> = await this.dataSource.query(
       `SELECT f.CONVOCATORIAID AS "convocatoriaId"
          FROM RETROSESION s JOIN RETROFORMULARIO f ON f.RETROFORMULARIOID = s.RETROFORMULARIOID
-        WHERE s.RETROSESIONID = :1`, [sesionId],
+        WHERE s.RETROSESIONID = $1`, [sesionId],
     )
     if (!rows[0]) throw new NotFoundException('Sesión sin instrumento asociado')
     return this.getFormulario(Number(rows[0].convocatoriaId))
@@ -703,7 +703,7 @@ export class RetroalimentacionService {
               f.ESCALAMAX AS "escalaMax", pa.ANIO AS "anio", pa.EVALUADORID AS "evaluadorId"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN RETROFORMULARIO f ON f.CONVOCATORIAID = pa.CONVOCATORIAID AND f.ACTIVO = 1
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (!meta[0]) throw new NotFoundException('Participación no encontrada')
@@ -715,13 +715,13 @@ export class RetroalimentacionService {
     const porCriterio: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT i.PREGUNTANUMERO AS "numero",
               MAX(q.TEXTO)     AS "texto",
-              MAX(TRIM(q.CRITERIOS)) AS "criterios",
+              MAX(btrim((q.CRITERIOS)::text)) AS "criterios",
               ROUND(AVG(i.CALIFICACION), 2) AS "promedio",
               COUNT(*)         AS "respuestas"
          FROM RETRORESPUESTAITEM i
          JOIN RETRORESPUESTA r ON r.RETRORESPUESTAID = i.RETRORESPUESTAID
          JOIN RETROPREGUNTA  q ON q.RETROPREGUNTAID  = i.RETROPREGUNTAID
-        WHERE r.PARTEVALUADOID = :1 AND i.CALIFICACION IS NOT NULL
+        WHERE r.PARTEVALUADOID = $1 AND i.CALIFICACION IS NOT NULL
         GROUP BY i.PREGUNTANUMERO
         ORDER BY i.PREGUNTANUMERO`,
       [participacionId],
@@ -731,20 +731,20 @@ export class RetroalimentacionService {
       `SELECT r.RETRORESPUESTAID AS "respuestaId",
               r.PROMEDIO         AS "promedio",
               r.FECHAENVIO       AS "fecha",
-              TRIM(rol.ROLEVALUADORNOMBRE) AS "rolCalificador",
-              TRIM(ar.NOMBRE)    AS "areaCalificador",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombreCalificador",
+              btrim((rol.ROLEVALUADORNOMBRE)::text) AS "rolCalificador",
+              btrim((ar.NOMBRE)::text)    AS "areaCalificador",
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombreCalificador",
               ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
               (SELECT i2.COMENTARIO FROM RETRORESPUESTAITEM i2
                 WHERE i2.RETRORESPUESTAID = r.RETRORESPUESTAID
-                  AND i2.COMENTARIO IS NOT NULL AND ROWNUM = 1) AS "comentario"
+                  AND i2.COMENTARIO IS NOT NULL LIMIT 1) AS "comentario"
          FROM RETRORESPUESTA r
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADORID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   rol ON rol.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar  ON ar.AREAID = pa.AREAID
-        WHERE r.PARTEVALUADOID = :1
+        WHERE r.PARTEVALUADOID = $1
         ORDER BY r.FECHAENVIO`,
       [participacionId],
     )
@@ -802,10 +802,10 @@ export class RetroalimentacionService {
     const form = await this.getFormulario(convocatoriaId)
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "participacionId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(p.PERSONAEMAIL) AS "email",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(ar.NOMBRE)     AS "areaNombre",
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((p.PERSONAEMAIL)::text) AS "email",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+              btrim((ar.NOMBRE)::text)     AS "areaNombre",
               (SELECT COUNT(*) FROM RETROASIGNACION a
                 WHERE a.PARTEVALUADORID = pa.PARTICIPACIONID AND a.ESTADO <> N'ANULADA') AS "asignadas",
               (SELECT COUNT(*) FROM RETROASIGNACION a
@@ -832,8 +832,8 @@ export class RetroalimentacionService {
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE pa.CONVOCATORIAID = :1
-        ORDER BY NVL(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
+        WHERE pa.CONVOCATORIAID = $1
+        ORDER BY COALESCE(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
 
@@ -876,13 +876,13 @@ export class RetroalimentacionService {
       `SELECT s.RETROSUGERENCIAID AS "sugerenciaId",
               s.TEXTO             AS "texto",
               s.FECHAENVIO        AS "fecha",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rolNombre",
-              TRIM(ar.NOMBRE)     AS "areaNombre"
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rolNombre",
+              btrim((ar.NOMBRE)::text)     AS "areaNombre"
          FROM RETROSUGERENCIA s
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = s.PARTICIPACIONID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE pa.CONVOCATORIAID = :1
+        WHERE pa.CONVOCATORIAID = $1
         ORDER BY s.FECHAENVIO DESC`,
       [convocatoriaId],
     )

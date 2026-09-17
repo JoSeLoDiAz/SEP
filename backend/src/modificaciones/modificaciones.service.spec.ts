@@ -9,7 +9,7 @@ function falso(respuestas: { id?: number; max?: number } = {}) {
     query: (sql: string, params?: unknown[]) => {
       llamadas.push({ sql, params })
       if (sql.includes('RETURNING')) return Promise.resolve([[respuestas.id ?? 901]])
-      if (sql.includes('NVL(MAX(')) return Promise.resolve([{ nid: respuestas.max ?? 40 }])
+      if (sql.includes('COALESCE(MAX(')) return Promise.resolve([{ nid: respuestas.max ?? 40 }])
       return Promise.resolve([])
     },
   } as unknown as DataSource
@@ -61,9 +61,9 @@ describe('ModificacionesService.crear', () => {
     const c = columnas(sql)
     expect(c.get('MODIFICACIONESID')).toBe(':1')
     expect(c.get('MODIFICACIONESFECHAENVIO')).toBe("TO_DATE(:4, 'YYYY-MM-DD')")
-    expect(c.get('MODIFICACIONESFECHAREGIS')).toBe('CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)')
-    expect(c.get('MODIFICACIONESFECHAREMI')).toBe('CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)')
-    expect(sql).toContain('RETURNING MODIFICACIONESID INTO :6')
+    expect(c.get('MODIFICACIONESFECHAREGIS')).toBe('CAST((now() AT TIME ZONE \'UTC\') AS timestamp)')
+    expect(c.get('MODIFICACIONESFECHAREMI')).toBe('CAST((now() AT TIME ZONE \'UTC\') AS timestamp)')
+    expect(sql).toContain('RETURNING MODIFICACIONESID INTO $6')
     expect(params?.slice(0, 5)).toEqual([null, 7, 3, '2026-09-01', 'Cambio de sede'])
     expect(params?.[5]).toMatchObject({ dir: expect.any(Number) })
     expect(horaLocal.test(sql)).toBe(false)
@@ -76,7 +76,7 @@ describe('ModificacionesService.crear', () => {
     const r = await servicio.crear(7, dto, 1, 1)
 
     expect(r.id).toBe(41)
-    expect(llamadas[0].sql).toContain('SELECT NVL(MAX(MODIFICACIONESID), 0) + 1')
+    expect(llamadas[0].sql).toContain('SELECT COALESCE(MAX(MODIFICACIONESID), 0) + 1')
     expect(llamadas[1].params?.[0]).toBe(41)
   })
 })

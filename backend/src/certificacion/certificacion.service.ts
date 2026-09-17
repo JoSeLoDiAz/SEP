@@ -27,8 +27,8 @@ export class CertificacionService {
 
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     if (!row) throw new BadRequestException('Este proyecto no tiene convenio.')
@@ -45,15 +45,15 @@ export class CertificacionService {
               g.AFGRUPONUMERO                          AS "grupoNumero",
               af.ACCIONFORMACIONID                     AS "afId",
               af.ACCIONFORMACIONNUMERO                 AS "afNumero",
-              TRIM(af.ACCIONFORMACIONNOMBRE)           AS "afNombre",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)           AS "afNombre",
               af.MODALIDADFORMACIONID                  AS "modalidadId",
-              UPPER(TRIM(mf.MODALIDADFORMACIONNOMBRE)) AS "modalidad",
-              UPPER(TRIM(te.TIPOEVENTONOMBRE))         AS "tipoEvento"
+              UPPER(btrim((mf.MODALIDADFORMACIONNOMBRE)::text)) AS "modalidad",
+              UPPER(btrim((te.TIPOEVENTONOMBRE)::text))         AS "tipoEvento"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
          LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = af.TIPOEVENTOID
-        WHERE g.AFGRUPOID = :1 AND af.PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE g.AFGRUPOID = $1 AND af.PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, proyectoId],
     )
     if (!row) throw new NotFoundException('Grupo no encontrado en este proyecto.')
@@ -64,16 +64,16 @@ export class CertificacionService {
     let totalHoras = 0
     if (colP && colT) {
       const [tot] = await this.ds.query(
-        `SELECT NVL(SUM(NVL(${colP}, 0) + NVL(${colT}, 0)), 0) AS "h"
-           FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+        `SELECT COALESCE(SUM(COALESCE(${colP}, 0) + COALESCE(${colT}, 0)), 0) AS "h"
+           FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
         [Number(row.afId)],
       )
       totalHoras = Number(tot?.h) || 0
     }
 
     const [conv] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     return {
@@ -113,10 +113,10 @@ export class CertificacionService {
     }> = await this.ds.query(
       `SELECT ut.UNIDADTEMATICAID                     AS "utId",
               ut.UNIDADTEMATICANUMERO                 AS "numero",
-              TRIM(ut.UNIDADTEMATICANOMBRE)           AS "nombre",
-              NVL(ut.${colP}, 0) + NVL(ut.${colT}, 0) AS "horas",
+              btrim((ut.UNIDADTEMATICANOMBRE)::text)           AS "nombre",
+              COALESCE(ut.${colP}, 0) + COALESCE(ut.${colT}, 0) AS "horas",
               (SELECT COUNT(*) FROM CRONOGRAMA cr
-                WHERE cr.AFGRUPOID = :1
+                WHERE cr.AFGRUPOID = $1
                   AND cr.UNIDADTEMATICAID = ut.UNIDADTEMATICAID
                   AND EXISTS (
                     ${modalidadId === 4
@@ -141,7 +141,7 @@ export class CertificacionService {
     const modalidadId = Number(cab.modalidadId) as Modalidad
     const [cr] = await this.ds.query(
       `SELECT CRONOGRAMAID AS "cronogramaId"
-         FROM CRONOGRAMA WHERE AFGRUPOID = :1 AND UNIDADTEMATICAID = :2
+         FROM CRONOGRAMA WHERE AFGRUPOID = $1 AND UNIDADTEMATICAID = $2
         FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, utId],
     )
@@ -152,7 +152,7 @@ export class CertificacionService {
         `SELECT cv.CRONOGRAMAVIRTUALID         AS "sesionId",
                 cv.CRONOGRAMAVIRTUALNUMSESION  AS "numero",
                 cv.CRONOGRAMAVIRTUALNUMHORAS   AS "maxHoras"
-           FROM CRONOGRAMAVIRTUAL cv WHERE cv.CRONOGRAMAID = :1
+           FROM CRONOGRAMAVIRTUAL cv WHERE cv.CRONOGRAMAID = $1
           ORDER BY cv.CRONOGRAMAVIRTUALNUMSESION`,
         [cronogramaId],
       )
@@ -162,7 +162,7 @@ export class CertificacionService {
       `SELECT cp.CRONOGRAMAPRESENCIALID         AS "sesionId",
               cp.CRONOGRAMAPRESENCIALNUMSESION  AS "numero",
               cp.CRONOGRAMAPRESENCIALNUMHORAS   AS "maxHoras"
-         FROM CRONOGRAMAPRESENCIAL cp WHERE cp.CRONOGRAMAID = :1
+         FROM CRONOGRAMAPRESENCIAL cp WHERE cp.CRONOGRAMAID = $1
         ORDER BY cp.CRONOGRAMAPRESENCIALNUMSESION`,
       [cronogramaId],
     )
@@ -174,7 +174,7 @@ export class CertificacionService {
       `SELECT g.AFGRUPOID AS "id"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE g.AFGRUPOID = :1 AND af.PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE g.AFGRUPOID = $1 AND af.PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, proyectoId],
     )
     if (!g) throw new BadRequestException('El grupo no pertenece al proyecto.')
@@ -184,26 +184,26 @@ export class CertificacionService {
     const rows: Array<Record<string, unknown>> = await this.ds.query(
       `SELECT agb.AFGRUPOBENEFICIARIOID            AS "afGrupoBeneficiarioId",
               p.PERSONAID                          AS "personaId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
-              TRIM(p.PERSONAIDENTIFICACION)        AS "identificacion",
-              UPPER(TRIM(p.PERSONANOMBRES))        AS "nombres",
-              UPPER(TRIM(p.PERSONAPRIMERAPELLIDO)) AS "primerApellido",
-              UPPER(TRIM(p.PERSONASEGUNDOAPELLIDO)) AS "segundoApellido",
-              TRIM(agb.AFGRUPOBENEESTADO)          AS "estado",
-              TRIM(agb.CERTIFICA)                  AS "certifica",
-              TRIM(agb.VALIDACIONINTERVENTOR)      AS "validacionInterventor",
-              NVL(agb.PORCENTAJECUMPLIMIENTO, 0)   AS "porcentajeCumplimiento",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
+              btrim((p.PERSONAIDENTIFICACION)::text)        AS "identificacion",
+              UPPER(btrim((p.PERSONANOMBRES)::text))        AS "nombres",
+              UPPER(btrim((p.PERSONAPRIMERAPELLIDO)::text)) AS "primerApellido",
+              UPPER(btrim((p.PERSONASEGUNDOAPELLIDO)::text)) AS "segundoApellido",
+              btrim((agb.AFGRUPOBENEESTADO)::text)          AS "estado",
+              btrim((agb.CERTIFICA)::text)                  AS "certifica",
+              btrim((agb.VALIDACIONINTERVENTOR)::text)      AS "validacionInterventor",
+              COALESCE(agb.PORCENTAJECUMPLIMIENTO, 0)   AS "porcentajeCumplimiento",
               u.UTHORASID                          AS "uthorasId",
-              NVL(u.UTHORASTOTAL, 0)               AS "totalHoras",
+              COALESCE(u.UTHORASTOTAL, 0)               AS "totalHoras",
               ${cols}
          FROM AFGRUPOBENEFICIARIO agb
          JOIN PERSONA p                       ON p.PERSONAID = agb.PERSONAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td   ON td.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
          LEFT JOIN UTHORAS u                   ON u.AFGRUPOID = agb.AFGRUPOID
                                               AND u.PERSONAID = agb.PERSONAID
-                                              AND u.UNIDADTEMATICAID = :1
-        WHERE agb.AFGRUPOID = :2
-          AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+                                              AND u.UNIDADTEMATICAID = $1
+        WHERE agb.AFGRUPOID = $2
+          AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES`,
       [utId, afGrupoId],
     )
@@ -244,8 +244,8 @@ export class CertificacionService {
 
     const [agb] = await this.ds.query(
       `SELECT AFGRUPOBENEFICIARIOID AS "id" FROM AFGRUPOBENEFICIARIO
-        WHERE AFGRUPOID = :1 AND PERSONAID = :2
-          AND TRIM(AFGRUPOBENEESTADO) = 'ACTIVO'
+        WHERE AFGRUPOID = $1 AND PERSONAID = $2
+          AND btrim((AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, personaId],
     )
@@ -275,7 +275,7 @@ export class CertificacionService {
     let maxUtHoras = 0
     if (colP && colT) {
       const [u] = await this.ds.query(
-        `SELECT NVL(${colP}, 0) + NVL(${colT}, 0) AS "h" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`,
+        `SELECT COALESCE(${colP}, 0) + COALESCE(${colT}, 0) AS "h" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = $1`,
         [utId],
       )
       maxUtHoras = Number(u?.h) || 0
@@ -289,7 +289,7 @@ export class CertificacionService {
 
     const [exist] = await this.ds.query(
       `SELECT UTHORASID AS "id" FROM UTHORAS
-        WHERE AFGRUPOID = :1 AND PERSONAID = :2 AND UNIDADTEMATICAID = :3
+        WHERE AFGRUPOID = $1 AND PERSONAID = $2 AND UNIDADTEMATICAID = $3
         FETCH FIRST 1 ROW ONLY`,
       [afGrupoId, personaId, utId],
     )
@@ -298,8 +298,8 @@ export class CertificacionService {
       uthorasId = Number(exist.id)
       const setCols = Array.from({ length: MAX_SESIONES }, (_, i) => `UTHORAS${i + 1} = :${i + 1}`).join(', ')
       await this.ds.query(
-        `UPDATE UTHORAS SET ${setCols}, UTHORASTOTAL = :${MAX_SESIONES + 1}, UTHORASFECHAREGISTRO = ${AHORA_UTC}
-          WHERE UTHORASID = :${MAX_SESIONES + 2}`,
+        `UPDATE UTHORAS SET ${setCols}, UTHORASTOTAL = $${MAX_SESIONES + 1}, UTHORASFECHAREGISTRO = ${AHORA_UTC}
+          WHERE UTHORASID = $${MAX_SESIONES + 2}`,
         [...limpias, total, uthorasId],
       )
     } else {
@@ -308,12 +308,12 @@ export class CertificacionService {
     }
 
     const [agg] = await this.ds.query(
-      `SELECT NVL(SUM(u.UTHORASTOTAL), 0) AS "horas"
+      `SELECT COALESCE(SUM(u.UTHORASTOTAL), 0) AS "horas"
          FROM UTHORAS u
          JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = u.UNIDADTEMATICAID
-        WHERE u.AFGRUPOID = :1
-          AND u.PERSONAID = :2
-          AND ut.ACCIONFORMACIONID = :3`,
+        WHERE u.AFGRUPOID = $1
+          AND u.PERSONAID = $2
+          AND ut.ACCIONFORMACIONID = $3`,
       [afGrupoId, personaId, Number(cab.afId)],
     )
     const horasPersonaAF = Number(agg?.horas) || 0
@@ -334,10 +334,10 @@ export class CertificacionService {
     if (horasCol) {
       await this.ds.query(
         `UPDATE AFGRUPOBENEFICIARIO
-            SET ${horasCol}           = :1,
-                PORCENTAJECUMPLIMIENTO = :2,
-                CERTIFICA              = :3
-          WHERE AFGRUPOID = :4 AND PERSONAID = :5`,
+            SET ${horasCol}           = $1,
+                PORCENTAJECUMPLIMIENTO = $2,
+                CERTIFICA              = $3
+          WHERE AFGRUPOID = $4 AND PERSONAID = $5`,
         [horasPersonaAF, pct, certifica, afGrupoId, personaId],
       )
     }
@@ -377,7 +377,7 @@ export class CertificacionService {
     let maxUtHoras = 0
     if (colP && colT) {
       const [u] = await this.ds.query(
-        `SELECT NVL(${colP}, 0) + NVL(${colT}, 0) AS "h" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`,
+        `SELECT COALESCE(${colP}, 0) + COALESCE(${colT}, 0) AS "h" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = $1`,
         [utId],
       )
       maxUtHoras = Number(u?.h) || 0
@@ -386,7 +386,7 @@ export class CertificacionService {
 
     const benefs: Array<{ personaId: number }> = await this.ds.query(
       `SELECT PERSONAID AS "personaId" FROM AFGRUPOBENEFICIARIO
-        WHERE AFGRUPOID = :1 AND TRIM(AFGRUPOBENEESTADO) = 'ACTIVO'
+        WHERE AFGRUPOID = $1 AND btrim((AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         ORDER BY PERSONAID`,
       [afGrupoId],
     )
@@ -404,9 +404,9 @@ export class CertificacionService {
 
     for (const b of benefs) {
       const [exist] = await this.ds.query(
-        `SELECT UTHORASID AS "id", NVL(UTHORASTOTAL, 0) AS "total"
+        `SELECT UTHORASID AS "id", COALESCE(UTHORASTOTAL, 0) AS "total"
            FROM UTHORAS
-          WHERE AFGRUPOID = :1 AND PERSONAID = :2 AND UNIDADTEMATICAID = :3
+          WHERE AFGRUPOID = $1 AND PERSONAID = $2 AND UNIDADTEMATICAID = $3
           FETCH FIRST 1 ROW ONLY`,
         [afGrupoId, b.personaId, utId],
       )
@@ -418,9 +418,9 @@ export class CertificacionService {
       if (exist) {
         await this.ds.query(
           `UPDATE UTHORAS SET ${setCols},
-                              UTHORASTOTAL = :${MAX_SESIONES + 1},
+                              UTHORASTOTAL = $${MAX_SESIONES + 1},
                               UTHORASFECHAREGISTRO = ${AHORA_UTC}
-            WHERE UTHORASID = :${MAX_SESIONES + 2}`,
+            WHERE UTHORASID = $${MAX_SESIONES + 2}`,
           [...maxHoras, totalAplicar, Number(exist.id)],
         )
       } else {
@@ -429,10 +429,10 @@ export class CertificacionService {
       }
 
       const [agg] = await this.ds.query(
-        `SELECT NVL(SUM(u.UTHORASTOTAL), 0) AS "horas"
+        `SELECT COALESCE(SUM(u.UTHORASTOTAL), 0) AS "horas"
            FROM UTHORAS u
            JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = u.UNIDADTEMATICAID
-          WHERE u.AFGRUPOID = :1 AND u.PERSONAID = :2 AND ut.ACCIONFORMACIONID = :3`,
+          WHERE u.AFGRUPOID = $1 AND u.PERSONAID = $2 AND ut.ACCIONFORMACIONID = $3`,
         [afGrupoId, b.personaId, Number(cab.afId)],
       )
       const horasPersonaAF = Number(agg?.horas) || 0
@@ -442,10 +442,10 @@ export class CertificacionService {
       if (horasCol) {
         await this.ds.query(
           `UPDATE AFGRUPOBENEFICIARIO
-              SET ${horasCol}           = :1,
-                  PORCENTAJECUMPLIMIENTO = :2,
-                  CERTIFICA              = :3
-            WHERE AFGRUPOID = :4 AND PERSONAID = :5`,
+              SET ${horasCol}           = $1,
+                  PORCENTAJECUMPLIMIENTO = $2,
+                  CERTIFICA              = $3
+            WHERE AFGRUPOID = $4 AND PERSONAID = $5`,
           [horasPersonaAF, pct, certifica, afGrupoId, b.personaId],
         )
       }
@@ -467,17 +467,17 @@ export class CertificacionService {
     const modalidadId = Number(cab.modalidadId) as Modalidad
 
     const [extra] = await this.ds.query(
-      `SELECT TRIM(e.EMPRESARAZONSOCIAL)                 AS "empresaRazonSocial",
-              TRIM(cv.CONVENIOSNUMERO)                   AS "convenioNumero",
-              TRIM(co.CONVOCATORIANOMBRE)                AS "convocatoria",
-              TRIM(pg.PROGRAMANOMBRE)                    AS "programa",
-              TRIM(pg.PROGRAMACOLOR)                     AS "programaColor"
+      `SELECT btrim((e.EMPRESARAZONSOCIAL)::text)                 AS "empresaRazonSocial",
+              btrim((cv.CONVENIOSNUMERO)::text)                   AS "convenioNumero",
+              btrim((co.CONVOCATORIANOMBRE)::text)                AS "convocatoria",
+              btrim((pg.PROGRAMANOMBRE)::text)                    AS "programa",
+              btrim((pg.PROGRAMACOLOR)::text)                     AS "programaColor"
          FROM PROYECTO pr
          LEFT JOIN CONVENIOS cv     ON cv.PROYECTOID = pr.PROYECTOID
          LEFT JOIN EMPRESA e        ON e.EMPRESAID = pr.EMPRESAID
          LEFT JOIN CONVOCATORIA co  ON co.CONVOCATORIAID = pr.CONVOCATORIAID
          LEFT JOIN PROGRAMA pg      ON pg.PROGRAMAID = co.PROGRAMAID
-        WHERE pr.PROYECTOID = :1
+        WHERE pr.PROYECTOID = $1
         FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -485,16 +485,16 @@ export class CertificacionService {
     // literales N'' y TRIM por columna: los nombres son NCHAR y sin eso revienta con ORA-12704
     const [dir] = await this.ds.query(
       `SELECT UPPER(
-                TRIM(p.PERSONANOMBRES) || N' ' ||
-                TRIM(p.PERSONAPRIMERAPELLIDO) ||
-                CASE WHEN TRIM(p.PERSONASEGUNDOAPELLIDO) IS NULL
-                       OR TRIM(p.PERSONASEGUNDOAPELLIDO) = N''
+                btrim((p.PERSONANOMBRES)::text) || N' ' ||
+                btrim((p.PERSONAPRIMERAPELLIDO)::text) ||
+                CASE WHEN btrim((p.PERSONASEGUNDOAPELLIDO)::text) IS NULL
+                       OR btrim((p.PERSONASEGUNDOAPELLIDO)::text) = N''
                      THEN N''
-                     ELSE N' ' || TRIM(p.PERSONASEGUNDOAPELLIDO) END
+                     ELSE N' ' || btrim((p.PERSONASEGUNDOAPELLIDO)::text) END
               ) AS "director"
          FROM DIRECTORES d
          JOIN PERSONA p ON p.PERSONAID = d.PERSONAID
-        WHERE d.PROYECTOID = :1 AND TRIM(d.DIREESTADO) = 'ACTIVO'
+        WHERE d.PROYECTOID = $1 AND btrim((d.DIREESTADO)::text) = 'ACTIVO'
         FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -504,13 +504,13 @@ export class CertificacionService {
     let fechaInicio: string | null = null
     if (modalidadId === 4) {
       const [c] = await this.ds.query(
-        `SELECT TRIM(cv.CRONOGRAMAVIRTUALPROVEEDOR)      AS "plataforma",
-                TRIM(cv.CRONOGRAMAVIRTUALURL)            AS "link",
+        `SELECT btrim((cv.CRONOGRAMAVIRTUALPROVEEDOR)::text)      AS "plataforma",
+                btrim((cv.CRONOGRAMAVIRTUALURL)::text)            AS "link",
                 TO_CHAR(MIN(cv.CRONOGRAMAVIRTUALFECHAINICIO), 'DD/MM/YYYY') AS "fechaInicio"
            FROM CRONOGRAMA cr
            JOIN CRONOGRAMAVIRTUAL cv ON cv.CRONOGRAMAID = cr.CRONOGRAMAID
-          WHERE cr.AFGRUPOID = :1
-          GROUP BY TRIM(cv.CRONOGRAMAVIRTUALPROVEEDOR), TRIM(cv.CRONOGRAMAVIRTUALURL)
+          WHERE cr.AFGRUPOID = $1
+          GROUP BY btrim((cv.CRONOGRAMAVIRTUALPROVEEDOR)::text), btrim((cv.CRONOGRAMAVIRTUALURL)::text)
           FETCH FIRST 1 ROW ONLY`,
         [afGrupoId],
       )
@@ -519,13 +519,13 @@ export class CertificacionService {
       fechaInicio = c?.fechaInicio ?? null
     } else {
       const [c] = await this.ds.query(
-        `SELECT TRIM(cp.CRONOGRAMAHERRAMIENTA)            AS "plataforma",
-                TRIM(cp.CRONOGRAMAURL)                    AS "link",
+        `SELECT btrim((cp.CRONOGRAMAHERRAMIENTA)::text)            AS "plataforma",
+                btrim((cp.CRONOGRAMAURL)::text)                    AS "link",
                 TO_CHAR(MIN(cp.CRONOGRAMAPRESENCIALFECHAINICI), 'DD/MM/YYYY') AS "fechaInicio"
            FROM CRONOGRAMA cr
            JOIN CRONOGRAMAPRESENCIAL cp ON cp.CRONOGRAMAID = cr.CRONOGRAMAID
-          WHERE cr.AFGRUPOID = :1
-          GROUP BY TRIM(cp.CRONOGRAMAHERRAMIENTA), TRIM(cp.CRONOGRAMAURL)
+          WHERE cr.AFGRUPOID = $1
+          GROUP BY btrim((cp.CRONOGRAMAHERRAMIENTA)::text), btrim((cp.CRONOGRAMAURL)::text)
           FETCH FIRST 1 ROW ONLY`,
         [afGrupoId],
       )
@@ -537,15 +537,15 @@ export class CertificacionService {
     const utsRaw: Array<{ utId: number; numero: number; nombre: string; numSesiones: number }> = await this.ds.query(
       `SELECT ut.UNIDADTEMATICAID AS "utId",
               ut.UNIDADTEMATICANUMERO AS "numero",
-              UPPER(TRIM(ut.UNIDADTEMATICANOMBRE)) AS "nombre",
-              NVL((SELECT COUNT(*) FROM CRONOGRAMA cr
+              UPPER(btrim((ut.UNIDADTEMATICANOMBRE)::text)) AS "nombre",
+              COALESCE((SELECT COUNT(*) FROM CRONOGRAMA cr
                      ${modalidadId === 4
                        ? 'JOIN CRONOGRAMAVIRTUAL cv ON cv.CRONOGRAMAID = cr.CRONOGRAMAID'
                        : 'JOIN CRONOGRAMAPRESENCIAL cp ON cp.CRONOGRAMAID = cr.CRONOGRAMAID'}
-                    WHERE cr.AFGRUPOID = :1
+                    WHERE cr.AFGRUPOID = $1
                       AND cr.UNIDADTEMATICAID = ut.UNIDADTEMATICAID), 0) AS "numSesiones"
          FROM UNIDADTEMATICA ut
-        WHERE ut.ACCIONFORMACIONID = :2
+        WHERE ut.ACCIONFORMACIONID = $2
         ORDER BY ut.UNIDADTEMATICANUMERO`,
       [afGrupoId, Number(cab.afId)],
     )
@@ -560,20 +560,20 @@ export class CertificacionService {
     type Row = Record<string, unknown>
     const rows: Row[] = await this.ds.query(
       `SELECT p.PERSONAID                          AS "personaId",
-              UPPER(TRIM(p.PERSONANOMBRES))        AS "nombres",
-              UPPER(TRIM(p.PERSONAPRIMERAPELLIDO)) AS "primerApellido",
-              UPPER(TRIM(p.PERSONASEGUNDOAPELLIDO)) AS "segundoApellido",
-              UPPER(TRIM(td.TIPODOCUMENTOIDENTIDADSIGLA)) AS "tipoDocSigla",
-              TRIM(p.PERSONAIDENTIFICACION)        AS "identificacion",
-              TRIM(p.PERSONAEMAIL)                 AS "email",
-              TRIM(p.PERSONACELULAR)               AS "celular",
-              UPPER(TRIM(d.DEPARTAMENTONOMBRE))    AS "departamento",
-              UPPER(TRIM(ci.CIUDADNOMBRE))         AS "ciudad",
-              UPPER(TRIM(po.POSTULACIONTRASFERENCIA)) AS "transferencia",
-              UPPER(TRIM(pt.PERFILTRASFERENCIANOMBRE)) AS "perfilTransferencia",
-              UPPER(TRIM(agb.CERTIFICA))           AS "certifica",
+              UPPER(btrim((p.PERSONANOMBRES)::text))        AS "nombres",
+              UPPER(btrim((p.PERSONAPRIMERAPELLIDO)::text)) AS "primerApellido",
+              UPPER(btrim((p.PERSONASEGUNDOAPELLIDO)::text)) AS "segundoApellido",
+              UPPER(btrim((td.TIPODOCUMENTOIDENTIDADSIGLA)::text)) AS "tipoDocSigla",
+              btrim((p.PERSONAIDENTIFICACION)::text)        AS "identificacion",
+              btrim((p.PERSONAEMAIL)::text)                 AS "email",
+              btrim((p.PERSONACELULAR)::text)               AS "celular",
+              UPPER(btrim((d.DEPARTAMENTONOMBRE)::text))    AS "departamento",
+              UPPER(btrim((ci.CIUDADNOMBRE)::text))         AS "ciudad",
+              UPPER(btrim((po.POSTULACIONTRASFERENCIA)::text)) AS "transferencia",
+              UPPER(btrim((pt.PERFILTRASFERENCIANOMBRE)::text)) AS "perfilTransferencia",
+              UPPER(btrim((agb.CERTIFICA)::text))           AS "certifica",
               u.UNIDADTEMATICAID                   AS "utId",
-              NVL(u.UTHORASTOTAL, 0)               AS "utTotal",
+              COALESCE(u.UTHORASTOTAL, 0)               AS "utTotal",
               ${cols}
          FROM AFGRUPOBENEFICIARIO agb
          JOIN PERSONA p ON p.PERSONAID = agb.PERSONAID
@@ -585,8 +585,8 @@ export class CertificacionService {
          LEFT JOIN PERFILTRASFERENCIA pt     ON pt.PERFILTRASFERENCIAID = po.PERFILTRASFERENCIAID
          LEFT JOIN UTHORAS u                 ON u.AFGRUPOID = agb.AFGRUPOID
                                             AND u.PERSONAID = agb.PERSONAID
-        WHERE agb.AFGRUPOID = :1
-          AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+        WHERE agb.AFGRUPOID = $1
+          AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES, u.UNIDADTEMATICAID`,
       [afGrupoId],
     )

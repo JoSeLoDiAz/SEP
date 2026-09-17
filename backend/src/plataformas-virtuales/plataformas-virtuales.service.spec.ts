@@ -9,7 +9,7 @@ function falso(respuestas: { id?: number; max?: number } = {}) {
     query: (sql: string, params?: unknown[]) => {
       llamadas.push({ sql, params })
       if (sql.includes('RETURNING')) return Promise.resolve([[respuestas.id ?? 24]])
-      if (sql.includes('NVL(MAX(')) return Promise.resolve([{ nid: respuestas.max ?? 24 }])
+      if (sql.includes('COALESCE(MAX(')) return Promise.resolve([{ nid: respuestas.max ?? 24 }])
       return Promise.resolve([])
     },
   } as unknown as DataSource
@@ -56,7 +56,7 @@ const TODAS = [
   `${P}USUREGISTR`, `${P}OBSERVACIO`, `${P}USUSENA`, `${P}OBSSENA`, `${P}VALSENA`, `${P}FECHACON`, ...CRITERIOS,
 ]
 
-const AHORA = 'CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)'
+const AHORA = 'CAST((now() AT TIME ZONE \'UTC\') AS timestamp)'
 const horaLocal = /SYSDATE|(?<!SYS_EXTRACT_UTC\()SYSTIMESTAMP/
 const dto = { fechaRemi: '2026-09-01', link: ' https://aula.prueba.co ', usuario: 'interventor', clave: 'x1' }
 
@@ -81,7 +81,7 @@ describe('PlataformasVirtualesService.crear', () => {
     expect(c.get(`${P}FECRADRES`)).toBe(AHORA)
     expect(c.get(`${P}FECRADSENA`)).toBe(AHORA)
     for (const k of CRITERIOS) expect(c.get(k)).toBe('0')
-    expect(sql).toContain(`RETURNING ${P}ID INTO :7`)
+    expect(sql).toContain(`RETURNING ${P}ID INTO $7`)
     expect(params?.slice(0, 6)).toEqual([null, 3050, '2026-09-01', 'https://aula.prueba.co', 'interventor', 'x1'])
     expect(params?.[6]).toMatchObject({ dir: expect.any(Number) })
     expect(horaLocal.test(sql)).toBe(false)
@@ -94,7 +94,7 @@ describe('PlataformasVirtualesService.crear', () => {
     const r = await servicio.crear(3050, dto)
 
     expect(r.id).toBe(1)
-    expect(llamadas[0].sql).toContain(`SELECT NVL(MAX(${P}ID), 0) + 1`)
+    expect(llamadas[0].sql).toContain(`SELECT COALESCE(MAX(${P}ID), 0) + 1`)
     expect(llamadas[1].params?.[0]).toBe(1)
   })
 })

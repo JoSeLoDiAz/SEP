@@ -382,10 +382,10 @@ export class ImportarProyectoService {
     // convocatoria
     const conv = await this.dataSource.query(
       `SELECT CONVOCATORIAID            AS "id",
-              TRIM(CONVOCATORIANOMBRE)  AS "nombre",
+              btrim((CONVOCATORIANOMBRE)::text)  AS "nombre",
               CONVOCATORIAESTADO        AS "estado",
               CONVOCATORIAANIO          AS "anio"
-         FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+         FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
@@ -404,7 +404,7 @@ export class ImportarProyectoService {
     const nombreProyecto = `${sigla}-FCE-${anioConv}`.slice(0, 100)
 
     const mods: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
+      `SELECT MODALIDADID AS "id", btrim((UPPER(MODALIDADNOMBRE))::text) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
     const modTexto = (data.basicos.modalidadParticipacion ?? '').trim().toUpperCase()
@@ -418,14 +418,14 @@ export class ImportarProyectoService {
 
     // validaciones contra catalogos: tipo de evento, modalidad de formacion y rubros
     const tiposEvento: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT TIPOEVENTOID AS "id", TRIM(UPPER(TIPOEVENTONOMBRE)) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`,
+      `SELECT TIPOEVENTOID AS "id", btrim((UPPER(TIPOEVENTONOMBRE))::text) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`,
     )
     const modsForm: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADFORMACIONID AS "id", TRIM(UPPER(MODALIDADFORMACIONNOMBRE)) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`,
+      `SELECT MODALIDADFORMACIONID AS "id", btrim((UPPER(MODALIDADFORMACIONNOMBRE))::text) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`,
     )
     const rubrosConv: Array<{ codigo: string; nombre: string }> = await this.dataSource.query(
-      `SELECT TRIM(UPPER(RUBROCODIGO)) AS "codigo", TRIM(UPPER(RUBRONOMBRE)) AS "nombre"
-         FROM RUBRO WHERE CONVOCATORIAIDRUBRO = :1`,
+      `SELECT btrim((UPPER(RUBROCODIGO))::text) AS "codigo", btrim((UPPER(RUBRONOMBRE))::text) AS "nombre"
+         FROM RUBRO WHERE CONVOCATORIAIDRUBRO = $1`,
       [convocatoriaId],
     )
     const rubrosCodigos = new Set(rubrosConv.map(r => r.codigo))
@@ -508,17 +508,17 @@ export class ImportarProyectoService {
       ambientesCat, materialesCat, recursosCat, gestionCat,
       utActCat, departamentosCat,
     ] = await Promise.all([
-      cargarCat(`SELECT TRIM(AREAFUNCIONALNOMBRE) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
-      cargarCat(`SELECT TRIM(NIVELOCUPACIONALNOMBRE) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
-      cargarCat(`SELECT TRIM(OCUPACIONCUOCNOMBRE) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
-      cargarCat(`SELECT TRIM(SECTORDESCRIPCION) AS "nombre" FROM SECTOR`),
-      cargarCat(`SELECT TRIM(SUBSECTORNOMBRE) AS "nombre" FROM SUBSECTOR`),
-      cargarCat(`SELECT TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE`),
-      cargarCat(`SELECT TRIM(MATERIALFORMACIONNOMBRE) AS "nombre" FROM MATERIALFORMACION`),
-      cargarCat(`SELECT TRIM(RECURSOSDIDACTICOSNOMBRE) AS "nombre" FROM RECURSOSDIDACTICOS`),
-      cargarCat(`SELECT TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO`),
-      cargarCat(`SELECT TRIM(UTACTIVIDADESNOMBRE) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
-      cargarCat(`SELECT TRIM(DEPARTAMENTONOMBRE) AS "nombre" FROM DEPARTAMENTO`),
+      cargarCat(`SELECT btrim((AREAFUNCIONALNOMBRE)::text) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
+      cargarCat(`SELECT btrim((NIVELOCUPACIONALNOMBRE)::text) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
+      cargarCat(`SELECT btrim((OCUPACIONCUOCNOMBRE)::text) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
+      cargarCat(`SELECT btrim((SECTORDESCRIPCION)::text) AS "nombre" FROM SECTOR`),
+      cargarCat(`SELECT btrim((SUBSECTORNOMBRE)::text) AS "nombre" FROM SUBSECTOR`),
+      cargarCat(`SELECT btrim((TIPOAMBIENTENOMBRE)::text) AS "nombre" FROM TIPOAMBIENTE`),
+      cargarCat(`SELECT btrim((MATERIALFORMACIONNOMBRE)::text) AS "nombre" FROM MATERIALFORMACION`),
+      cargarCat(`SELECT btrim((RECURSOSDIDACTICOSNOMBRE)::text) AS "nombre" FROM RECURSOSDIDACTICOS`),
+      cargarCat(`SELECT btrim((GESTIONCONOCIMIENTONOMBRE)::text) AS "nombre" FROM GESTIONCONOCIMIENTO`),
+      cargarCat(`SELECT btrim((UTACTIVIDADESNOMBRE)::text) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
+      cargarCat(`SELECT btrim((DEPARTAMENTONOMBRE)::text) AS "nombre" FROM DEPARTAMENTO`),
     ])
 
     const noResueltos = {
@@ -746,14 +746,14 @@ export class ImportarProyectoService {
     if (nit && Number.isFinite(nitNum) && nitNum > 0) {
       const e = await this.dataSource.query(
         `SELECT EMPRESAID                  AS "id",
-                TRIM(EMPRESARAZONSOCIAL)   AS "rs",
-                TRIM(EMPRESASIGLA)         AS "sigla",
-                TRIM(EMPRESADIRECCION)     AS "dir",
-                TRIM(EMPRESACELULAR)       AS "cel",
-                TRIM(EMPRESAEMAIL)         AS "email"
+                btrim((EMPRESARAZONSOCIAL)::text)   AS "rs",
+                btrim((EMPRESASIGLA)::text)         AS "sigla",
+                btrim((EMPRESADIRECCION)::text)     AS "dir",
+                btrim((EMPRESACELULAR)::text)       AS "cel",
+                btrim((EMPRESAEMAIL)::text)         AS "email"
            FROM EMPRESA
-          WHERE EMPRESAIDENTIFICACION = :1
-            AND ROWNUM = 1`,
+          WHERE EMPRESAIDENTIFICACION = $1
+ LIMIT 1`,
         [nitNum],
       )
       if (e[0]) {
@@ -793,7 +793,7 @@ export class ImportarProyectoService {
     let usuario: PreviewUsuario = { email, estado: 'nuevo' }
     if (email) {
       const u = await this.dataSource.query(
-        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1 AND ROWNUM = 1`,
+        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = $1 LIMIT 1`,
         [email],
       )
       if (u[0]) usuario = { email, estado: 'existente', usuarioIdExistente: Number(u[0].id) }
@@ -922,14 +922,14 @@ export class ImportarProyectoService {
 
     // el año se usa en el nombre del proyecto
     const conv: Array<{ anio: number }> = await this.dataSource.query(
-      `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [dto.convocatoriaId],
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
     const anioConvocatoria = Number(conv[0].anio)
 
     const modsCat: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
+      `SELECT MODALIDADID AS "id", btrim((UPPER(MODALIDADNOMBRE))::text) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
     const modProy = matchModalidad(data.basicos.modalidadParticipacion ?? '', modsCat)
@@ -940,7 +940,7 @@ export class ImportarProyectoService {
     try {
       // 1. empresa
       const empresaExistente: Array<{ id: number }> = await qr.query(
-        `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = :1 AND ROWNUM = 1`,
+        `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = $1 LIMIT 1`,
         [nitNum],
       )
       let empresaId: number
@@ -950,10 +950,10 @@ export class ImportarProyectoService {
           exigirQueQuepanDatosEmpresa()
           await qr.query(
             `UPDATE EMPRESA SET
-                EMPRESARAZONSOCIAL = :1, EMPRESASIGLA = :2, EMPRESADIRECCION = :3,
-                EMPRESACELULAR = :4, EMPRESATELEFONO = :5, EMPRESAWEBSITE = :6,
-                EMPRESAEMAIL = :7
-              WHERE EMPRESAID = :8`,
+                EMPRESARAZONSOCIAL = $1, EMPRESASIGLA = $2, EMPRESADIRECCION = $3,
+                EMPRESACELULAR = $4, EMPRESATELEFONO = $5, EMPRESAWEBSITE = $6,
+                EMPRESAEMAIL = $7
+              WHERE EMPRESAID = $8`,
             [
               data.basicos.razonSocial.trim(),
               (data.basicos.sigla ?? '').trim(),
@@ -989,7 +989,7 @@ export class ImportarProyectoService {
 
       // 2. usuario + USUARIOPERFIL
       const usuarioExistente: Array<{ id: number }> = await qr.query(
-        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1 AND ROWNUM = 1`,
+        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = $1 LIMIT 1`,
         [email],
       )
       let usuarioId: number
@@ -1013,7 +1013,7 @@ export class ImportarProyectoService {
         await qr.query(
           `INSERT INTO USUARIOPERFIL
              (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, ${AHORA_UTC})`,
+           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 7, 1, 1, ${AHORA_UTC})`,
           [usuarioId],
         )
       }
@@ -1047,7 +1047,7 @@ export class ImportarProyectoService {
              (EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
               CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
               TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
-           VALUES (:1, :2, :3, :4, :5, :6, 1, :7)`,
+           VALUES ($1, $2, $3, $4, $5, $6, 1, $7)`,
           [empresaId, c.nombre.trim(), c.cargo, c.email.trim(),
            c.telefono.trim() || null, c.id.trim() || null, proyectoId],
         )
@@ -1062,7 +1062,7 @@ export class ImportarProyectoService {
 
       const fuentesHerr: Array<{ id: number; nombre: string }> = await qr.query(
         `SELECT FUENTEHERRAMIENTAID AS "id",
-                TRIM(UPPER(FUENTEHERRAMIENTANOMBRE)) AS "nombre"
+                btrim((UPPER(FUENTEHERRAMIENTANOMBRE))::text) AS "nombre"
            FROM FUENTEHERRAMIENTA`,
       )
       const findFuente = (nombre: string): number | null => {
@@ -1100,12 +1100,12 @@ export class ImportarProyectoService {
         await qr.query(
           `UPDATE NECESIDAD
               SET NECESIDADPERIODOI = ${isoFecha ? "TO_DATE(:1, 'YYYY-MM-DD')" : 'NULL'},
-                  NECESIDADHERRCREACION = :2,
-                  NECESIDADHERROTRA = :3,
-                  NECESIDADHERRDESCRIP = :4,
-                  NECESIDADHERRRESULTADOS = :5,
-                  NECESIDADPLANCAPA = :6
-            WHERE NECESIDADID = :7`,
+                  NECESIDADHERRCREACION = $2,
+                  NECESIDADHERROTRA = $3,
+                  NECESIDADHERRDESCRIP = $4,
+                  NECESIDADHERRRESULTADOS = $5,
+                  NECESIDADPLANCAPA = $6
+            WHERE NECESIDADID = $7`,
           [
             ...(isoFecha ? [isoFecha] : []),
             esCreacionPropia,
@@ -1179,32 +1179,32 @@ export class ImportarProyectoService {
         departamentosCat, utActCat, articulacionTerrCat, enfoqueCat,
         metodologiaCat, afComponenteCat, tiposEventoMap, modsFormCat,
       ] = await Promise.all([
-        cargarMap(`SELECT AREAFUNCIONALID AS "id", TRIM(UPPER(AREAFUNCIONALNOMBRE)) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
-        cargarMap(`SELECT NIVELOCUPACIONALID AS "id", TRIM(UPPER(NIVELOCUPACIONALNOMBRE)) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
-        cargarMap(`SELECT OCUPACIONCUOCID AS "id", TRIM(UPPER(OCUPACIONCUOCNOMBRE)) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
-        cargarMap(`SELECT SECTORID AS "id", TRIM(UPPER(SECTORDESCRIPCION)) AS "nombre" FROM SECTOR`),
-        cargarMap(`SELECT SUBSECTORID AS "id", TRIM(UPPER(SUBSECTORNOMBRE)) AS "nombre" FROM SUBSECTOR`),
-        cargarMap(`SELECT TIPOAMBIENTEID AS "id", TRIM(UPPER(TIPOAMBIENTENOMBRE)) AS "nombre" FROM TIPOAMBIENTE`),
-        cargarMap(`SELECT MATERIALFORMACIONID AS "id", TRIM(UPPER(MATERIALFORMACIONNOMBRE)) AS "nombre" FROM MATERIALFORMACION`),
-        cargarMap(`SELECT RECURSOSDIDACTICOSID AS "id", TRIM(UPPER(RECURSOSDIDACTICOSNOMBRE)) AS "nombre" FROM RECURSOSDIDACTICOS`),
-        cargarMap(`SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(UPPER(GESTIONCONOCIMIENTONOMBRE)) AS "nombre" FROM GESTIONCONOCIMIENTO`),
-        cargarMap(`SELECT DEPARTAMENTOID AS "id", TRIM(UPPER(DEPARTAMENTONOMBRE)) AS "nombre" FROM DEPARTAMENTO`),
-        cargarMap(`SELECT UTACTIVIDADESID AS "id", TRIM(UPPER(UTACTIVIDADESNOMBRE)) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
-        cargarMap(`SELECT ARTICULACIONTERRITORIALID AS "id", TRIM(UPPER(ARTICULACIONTERRITORIALNOMBRE)) AS "nombre" FROM ARTICULACIONTERRITORIAL WHERE ARTICULACIONTERRITORIALESTADO = 1`),
-        cargarMap(`SELECT AFENFOQUEID AS "id", TRIM(UPPER(AFENFOQUENOMBRE)) AS "nombre" FROM AFENFOQUE WHERE AFENFOQUEESTADO = 1`),
-        cargarMap(`SELECT METODOLOGIAAPRENDIZAJEID AS "id", TRIM(UPPER(METODOLOGIAAPRENDIZAJENOMBRE)) AS "nombre" FROM METODOLOGIAAPRENDIZAJE WHERE METODOLOGIAAPRENDIZAJEESTADO = 1`),
-        cargarMap(`SELECT AFCOMPONENTEID AS "id", TRIM(UPPER(AFCOMPONENTENOMBRE)) AS "nombre" FROM AFCOMPONENTE WHERE AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1`),
-        qr.query(`SELECT TIPOEVENTOID AS "id", TRIM(UPPER(TIPOEVENTONOMBRE)) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`),
-        qr.query(`SELECT MODALIDADFORMACIONID AS "id", TRIM(UPPER(MODALIDADFORMACIONNOMBRE)) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`),
+        cargarMap(`SELECT AREAFUNCIONALID AS "id", btrim((UPPER(AREAFUNCIONALNOMBRE))::text) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
+        cargarMap(`SELECT NIVELOCUPACIONALID AS "id", btrim((UPPER(NIVELOCUPACIONALNOMBRE))::text) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
+        cargarMap(`SELECT OCUPACIONCUOCID AS "id", btrim((UPPER(OCUPACIONCUOCNOMBRE))::text) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
+        cargarMap(`SELECT SECTORID AS "id", btrim((UPPER(SECTORDESCRIPCION))::text) AS "nombre" FROM SECTOR`),
+        cargarMap(`SELECT SUBSECTORID AS "id", btrim((UPPER(SUBSECTORNOMBRE))::text) AS "nombre" FROM SUBSECTOR`),
+        cargarMap(`SELECT TIPOAMBIENTEID AS "id", btrim((UPPER(TIPOAMBIENTENOMBRE))::text) AS "nombre" FROM TIPOAMBIENTE`),
+        cargarMap(`SELECT MATERIALFORMACIONID AS "id", btrim((UPPER(MATERIALFORMACIONNOMBRE))::text) AS "nombre" FROM MATERIALFORMACION`),
+        cargarMap(`SELECT RECURSOSDIDACTICOSID AS "id", btrim((UPPER(RECURSOSDIDACTICOSNOMBRE))::text) AS "nombre" FROM RECURSOSDIDACTICOS`),
+        cargarMap(`SELECT GESTIONCONOCIMIENTOID AS "id", btrim((UPPER(GESTIONCONOCIMIENTONOMBRE))::text) AS "nombre" FROM GESTIONCONOCIMIENTO`),
+        cargarMap(`SELECT DEPARTAMENTOID AS "id", btrim((UPPER(DEPARTAMENTONOMBRE))::text) AS "nombre" FROM DEPARTAMENTO`),
+        cargarMap(`SELECT UTACTIVIDADESID AS "id", btrim((UPPER(UTACTIVIDADESNOMBRE))::text) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
+        cargarMap(`SELECT ARTICULACIONTERRITORIALID AS "id", btrim((UPPER(ARTICULACIONTERRITORIALNOMBRE))::text) AS "nombre" FROM ARTICULACIONTERRITORIAL WHERE ARTICULACIONTERRITORIALESTADO = 1`),
+        cargarMap(`SELECT AFENFOQUEID AS "id", btrim((UPPER(AFENFOQUENOMBRE))::text) AS "nombre" FROM AFENFOQUE WHERE AFENFOQUEESTADO = 1`),
+        cargarMap(`SELECT METODOLOGIAAPRENDIZAJEID AS "id", btrim((UPPER(METODOLOGIAAPRENDIZAJENOMBRE))::text) AS "nombre" FROM METODOLOGIAAPRENDIZAJE WHERE METODOLOGIAAPRENDIZAJEESTADO = 1`),
+        cargarMap(`SELECT AFCOMPONENTEID AS "id", btrim((UPPER(AFCOMPONENTENOMBRE))::text) AS "nombre" FROM AFCOMPONENTE WHERE AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1`),
+        qr.query(`SELECT TIPOEVENTOID AS "id", btrim((UPPER(TIPOEVENTONOMBRE))::text) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`),
+        qr.query(`SELECT MODALIDADFORMACIONID AS "id", btrim((UPPER(MODALIDADFORMACIONNOMBRE))::text) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`),
       ])
       const tiposEvento = tiposEventoMap as Array<{ id: number; nombre: string }>
       const modsForm    = modsFormCat    as Array<{ id: number; nombre: string }>
 
       const rubrosConv: Array<{ id: number; codigo: string; nombre: string }> = await qr.query(
         `SELECT RUBROID AS "id",
-                TRIM(UPPER(RUBROCODIGO)) AS "codigo",
-                TRIM(UPPER(RUBRONOMBRE)) AS "nombre"
-           FROM RUBRO WHERE CONVOCATORIAIDRUBRO = :1`,
+                btrim((UPPER(RUBROCODIGO))::text) AS "codigo",
+                btrim((UPPER(RUBRONOMBRE))::text) AS "nombre"
+           FROM RUBRO WHERE CONVOCATORIAIDRUBRO = $1`,
         [dto.convocatoriaId],
       )
 
@@ -1511,7 +1511,7 @@ export class ImportarProyectoService {
               if (cov.ciudadPresencial) {
                 const ciu: Array<{ id: number }> = await qr.query(
                   `SELECT CIUDADID AS "id" FROM CIUDAD
-                    WHERE DEPARTAMENTOID = :1 AND TRIM(UPPER(CIUDADNOMBRE)) = :2 AND ROWNUM = 1`,
+                    WHERE DEPARTAMENTOID = $1 AND btrim((UPPER(CIUDADNOMBRE))::text) = $2 LIMIT 1`,
                   [did, norm(cov.ciudadPresencial)],
                 )
                 if (ciu[0]) ciudadId = Number(ciu[0].id)

@@ -32,7 +32,7 @@ export class ModificacionesService {
 
   async listarTipos() {
     return this.ds.query(
-      `SELECT TIPOMODIFICACIONID AS "id", TRIM(TIPOMODIFICACIONNOMBRE) AS "nombre"
+      `SELECT TIPOMODIFICACIONID AS "id", btrim((TIPOMODIFICACIONNOMBRE)::text) AS "nombre"
          FROM TIPOMODIFICACION
         WHERE TIPOMODIFICACIONESTADO = 1
         ORDER BY TIPOMODIFICACIONID`,
@@ -44,10 +44,10 @@ export class ModificacionesService {
       `SELECT m.MODIFICACIONESID                        AS "id",
               m.PROYECTOID                              AS "proyectoId",
               m.TIPOMODIFICACIONID                      AS "tipoModificacionId",
-              UPPER(TRIM(tm.TIPOMODIFICACIONNOMBRE))    AS "tipoModificacion",
-              TRIM(cv.CONVENIOSNUMERO)                  AS "convenioNumero",
-              UPPER(TRIM(e.EMPRESASIGLA))               AS "empresaSigla",
-              UPPER(TRIM(e.EMPRESARAZONSOCIAL))         AS "empresaRazonSocial",
+              UPPER(btrim((tm.TIPOMODIFICACIONNOMBRE)::text))    AS "tipoModificacion",
+              btrim((cv.CONVENIOSNUMERO)::text)                  AS "convenioNumero",
+              UPPER(btrim((e.EMPRESASIGLA)::text))               AS "empresaSigla",
+              UPPER(btrim((e.EMPRESARAZONSOCIAL)::text))         AS "empresaRazonSocial",
               m.MODIFICACIONESCONCEPTO                  AS "concepto",
               m.MODIFICACIONESCONCEPTOSENA              AS "conceptoSena",
               m.MODIFICACIONESESTADO                    AS "estado",
@@ -59,14 +59,14 @@ export class ModificacionesService {
          JOIN PROYECTO p          ON p.PROYECTOID = m.PROYECTOID
          LEFT JOIN CONVENIOS cv   ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e      ON e.EMPRESAID = p.EMPRESAID
-        WHERE m.PROYECTOID = :1
+        WHERE m.PROYECTOID = $1
         ORDER BY m.MODIFICACIONESID`,
       [proyectoId],
     )
     // el front usa este estado para gatear la edición
     const [conv] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     return {
@@ -84,7 +84,7 @@ export class ModificacionesService {
     const [row] = await this.ds.query(
       `SELECT m.*
          FROM MODIFICACIONES m
-        WHERE m.MODIFICACIONESID = :1 AND m.PROYECTOID = :2
+        WHERE m.MODIFICACIONESID = $1 AND m.PROYECTOID = $2
         FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
@@ -145,7 +145,7 @@ export class ModificacionesService {
     let idPrevio: number | null = null
     if (!(await tieneTriggerDeId(this.ds, 'MODIFICACIONES', 'MODIFICACIONESID'))) {
       const [{ nid }] = await this.ds.query(
-        `SELECT NVL(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
+        `SELECT COALESCE(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
       )
       idPrevio = Number(nid)
     }
@@ -163,17 +163,17 @@ export class ModificacionesService {
           MODIFICACIONESRADIINTERAPRO, MODIFICACIONESRADIINTERAPROFEC,
           MODIFICACIONESESTADO, MODIFICACIONESUSUARIOSENA, MODIFICACIONESUSUARIOINTER,
           MODIFICACIONESOBSERSENA, MODIFICACIONESVALSENA)
-       VALUES (:1, :2, :3, ${AHORA_UTC},
-               TO_DATE(:4, 'YYYY-MM-DD'),
+       VALUES ($1, $2, $3, ${AHORA_UTC},
+               TO_DATE($4, 'YYYY-MM-DD'),
                ${AHORA_UTC},
-               4, 4, :5, N' ',
+               4, 4, $5, N' ',
                N' ', NULL,
                N' ', NULL,
                0, N' ', NULL,
                N' ', N' ', 1,
                N' ', NULL,
                1, NULL, NULL, N' ', NULL)
-       RETURNING MODIFICACIONESID INTO :6`,
+       RETURNING MODIFICACIONESID INTO $6`,
       [
         idPrevio, proyectoId, Number(dto.tipoModificacionId),
         dto.fechaEnvio,
@@ -191,7 +191,7 @@ export class ModificacionesService {
       `SELECT MODIFICACIONESCONCEPTO       AS "concepto",
               MODIFICACIONESAPROBACIONSENA AS "aprobacionSena"
          FROM MODIFICACIONES
-        WHERE MODIFICACIONESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE MODIFICACIONESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Modificación no encontrada.')
@@ -199,10 +199,10 @@ export class ModificacionesService {
 
     await this.ds.query(
       `UPDATE MODIFICACIONES SET
-          TIPOMODIFICACIONID = :1,
-          MODIFICACIONESFECHAENVIO = TO_DATE(:2, 'YYYY-MM-DD'),
-          MODIFICACIONESOBSERVACIONES = :3
-        WHERE MODIFICACIONESID = :4`,
+          TIPOMODIFICACIONID = $1,
+          MODIFICACIONESFECHAENVIO = TO_DATE($2, 'YYYY-MM-DD'),
+          MODIFICACIONESOBSERVACIONES = $3
+        WHERE MODIFICACIONESID = $4`,
       [
         Number(dto.tipoModificacionId),
         dto.fechaEnvio,
@@ -220,11 +220,11 @@ export class ModificacionesService {
     }
     const [existe] = await this.ds.query(
       `SELECT MODIFICACIONESID AS "id" FROM MODIFICACIONES
-        WHERE MODIFICACIONESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE MODIFICACIONESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Modificación no encontrada.')
-    await this.ds.query(`DELETE FROM MODIFICACIONES WHERE MODIFICACIONESID = :1`, [id])
+    await this.ds.query(`DELETE FROM MODIFICACIONES WHERE MODIFICACIONESID = $1`, [id])
     return { mensaje: 'Modificación eliminada.' }
   }
 
@@ -264,36 +264,36 @@ export class ModificacionesService {
     const rows: Row[] = await this.ds.query(
       `SELECT m.MODIFICACIONESID AS "id",
               ROW_NUMBER() OVER (ORDER BY m.MODIFICACIONESID) AS "consec",
-              TRIM(co.CONVOCATORIANOMBRE) AS "convocatoria",
-              TRIM(cv.CONVENIOSNUMERO)    AS "conveniosNumero",
-              TRIM(e.EMPRESARAZONSOCIAL)  AS "empresa",
-              TRIM(tm.TIPOMODIFICACIONNOMBRE) AS "tipoModificacion",
+              btrim((co.CONVOCATORIANOMBRE)::text) AS "convocatoria",
+              btrim((cv.CONVENIOSNUMERO)::text)    AS "conveniosNumero",
+              btrim((e.EMPRESARAZONSOCIAL)::text)  AS "empresa",
+              btrim((tm.TIPOMODIFICACIONNOMBRE)::text) AS "tipoModificacion",
               m.MODIFICACIONESFECHAENVIO  AS "fechaEnvio",
-              TRIM(m.MODIFICACIONESOBSERVACIONES) AS "observaciones",
+              btrim((m.MODIFICACIONESOBSERVACIONES)::text) AS "observaciones",
               m.MODIFICACIONESFECHAREMI   AS "fechaRemi",
               m.MODIFICACIONESCONCEPTO    AS "concepto",
-              TRIM(m.MODIFICACIONESNISSENA) AS "nisSena",
-              TRIM(m.MODIFICACIONESRADISENA) AS "radiSena",
+              btrim((m.MODIFICACIONESNISSENA)::text) AS "nisSena",
+              btrim((m.MODIFICACIONESRADISENA)::text) AS "radiSena",
               m.MODIFICACIONESRADISENAFECHA AS "radiSenaFecha",
-              TRIM(m.MODIFICACIONESRADIINTER) AS "radiInter",
+              btrim((m.MODIFICACIONESRADIINTER)::text) AS "radiInter",
               m.MODIFICACIONESRADIINTERFECHA AS "radiInterFecha",
-              TRIM(m.MODIFICACIONESOBSERINTER) AS "observInter",
+              btrim((m.MODIFICACIONESOBSERINTER)::text) AS "observInter",
               m.MODIFICACIONESAPROBACIONSENA AS "aprobacionSena",
-              TRIM(m.MODIFICACIONESNISAPROSENA) AS "nisAproSena",
-              TRIM(m.MODIFICACIONESRADISENAAPRO) AS "radiSenaApro",
+              btrim((m.MODIFICACIONESNISAPROSENA)::text) AS "nisAproSena",
+              btrim((m.MODIFICACIONESRADISENAAPRO)::text) AS "radiSenaApro",
               m.MODIFICACIONESRADISENAAPROFECH AS "radiSenaAproFecha",
               m.MODIFICACIONESCONCEPTOSENA AS "conceptoSena",
               m.MODIFICACIONESRESPUESTASENA AS "respuestaSena",
-              TRIM(m.MODIFICACIONESRADIINTERAPRO) AS "radiInterApro",
+              btrim((m.MODIFICACIONESRADIINTERAPRO)::text) AS "radiInterApro",
               m.MODIFICACIONESRADIINTERAPROFEC AS "radiInterAproFecha",
               m.MODIFICACIONESVALSENA AS "valSena",
-              TRIM(m.MODIFICACIONESOBSERSENA) AS "observSena",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              btrim((m.MODIFICACIONESOBSERSENA)::text) AS "observSena",
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us
                  LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = m.MODIFICACIONESUSUARIOSENA
                 FETCH FIRST 1 ROW ONLY) AS "usuarioSenaNombre",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us
                  LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = m.MODIFICACIONESUSUARIOINTER
@@ -305,7 +305,7 @@ export class ModificacionesService {
          LEFT JOIN CONVENIOS cv  ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e     ON e.EMPRESAID = p.EMPRESAID
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE m.PROYECTOID = :1
+        WHERE m.PROYECTOID = $1
         ORDER BY m.MODIFICACIONESID`,
       [proyectoId],
     )

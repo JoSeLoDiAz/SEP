@@ -83,17 +83,17 @@ export class ProyectosService {
          END`
     return this.dataSource.query(
       `SELECT p.PROYECTOID               AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)     AS "nombre",
+              btrim((p.PROYECTONOMBRE)::text)     AS "nombre",
               ${estadoExpr}              AS "estado",
               p.PROYECTOFECHAREGISTRO   AS "fechaRegistro",
               p.PROYECTOFECHARADICACION AS "fechaRadicacion",
-              TRIM(cv.CONVOCATORIANOMBRE) AS "convocatoria",
+              btrim((cv.CONVOCATORIANOMBRE)::text) AS "convocatoria",
               cv.CONVOCATORIAESTADO     AS "convocatoriaEstado",
-              TRIM(m.MODALIDADNOMBRE)    AS "modalidad"
+              btrim((m.MODALIDADNOMBRE)::text)    AS "modalidad"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m      ON m.MODALIDADID    = p.MODALIDADID
-        WHERE p.EMPRESAID = :1
+        WHERE p.EMPRESAID = $1
         ORDER BY p.PROYECTOID ASC`,
       [empresaId],
     )
@@ -104,23 +104,23 @@ export class ProyectosService {
   async getDetalle(proyectoId: number, perfilId?: number) {
     const rows = await this.dataSource.query(
       `SELECT p.PROYECTOID                                       AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)                             AS "nombre",
+              btrim((p.PROYECTONOMBRE)::text)                             AS "nombre",
               p.CONVOCATORIAID                                   AS "convocatoriaId",
               p.MODALIDADID                                      AS "modalidadId",
-              TRIM(cv.CONVOCATORIANOMBRE)                        AS "convocatoria",
-              TRIM(m.MODALIDADNOMBRE)                            AS "modalidad",
+              btrim((cv.CONVOCATORIANOMBRE)::text)                        AS "convocatoria",
+              btrim((m.MODALIDADNOMBRE)::text)                            AS "modalidad",
               p.PROYECTOOBJETIVO                                 AS "objetivo",
               p.PROYECTOESTADO                                   AS "estado",
               p.PROYECTOFECHAREGISTRO                            AS "fechaRegistro",
               p.PROYECTOFECHARADICACION                          AS "fechaRadicacion",
               p.EMPRESAID                                        AS "empresaId",
               cv.CONVOCATORIAESTADO                              AS "convocatoriaEstado",
-              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)        AS "resultadosPublicados",
-              DBMS_LOB.SUBSTR(p.PROYECTOMOTIVORECHAZO, 2000, 1)  AS "motivoRechazo"
+              COALESCE(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)        AS "resultadosPublicados",
+              substr(p.PROYECTOMOTIVORECHAZO, 1, 2000)  AS "motivoRechazo"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m      ON m.MODALIDADID    = p.MODALIDADID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
@@ -151,12 +151,12 @@ export class ProyectosService {
     await this.validarEdicionPermitida(proyectoId)
     await this.dataSource.query(
       `UPDATE PROYECTO
-          SET PROYECTONOMBRE   = :1,
-              CONVOCATORIAID   = :2,
-              MODALIDADID      = :3,
-              PROYECTOOBJETIVO = :4
-        WHERE PROYECTOID = :5
-          AND EMPRESAID  = :6`,
+          SET PROYECTONOMBRE   = $1,
+              CONVOCATORIAID   = $2,
+              MODALIDADID      = $3,
+              PROYECTOOBJETIVO = $4
+        WHERE PROYECTOID = $5
+          AND EMPRESAID  = $6`,
       [dto.nombre.trim(), dto.convocatoriaId, dto.modalidadId, dto.objetivo ?? null, proyectoId, empresaId],
     )
     return { message: 'Proyecto actualizado correctamente' }
@@ -169,7 +169,7 @@ export class ProyectosService {
                 WHERE PROYECTOID = p.PROYECTOID
                   AND VERSIONESFINAL = 1
                   AND VERSIONANULADA = 0) AS "tieneFinal"
-         FROM PROYECTO p WHERE p.PROYECTOID = :1`,
+         FROM PROYECTO p WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (!r) throw new NotFoundException('Proyecto no encontrado.')
@@ -188,7 +188,7 @@ export class ProyectosService {
 
   private async validarEdicionPermitidaPorAf(afId: number): Promise<void> {
     const [r] = await this.dataSource.query(
-      `SELECT PROYECTOID AS "id" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+      `SELECT PROYECTOID AS "id" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!r) throw new NotFoundException('Acción de formación no encontrada.')
@@ -200,7 +200,7 @@ export class ProyectosService {
       `SELECT af.PROYECTOID AS "id"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE g.AFGRUPOID = :1`,
+        WHERE g.AFGRUPOID = $1`,
       [grupoId],
     )
     if (!r) throw new NotFoundException('Grupo no encontrado.')
@@ -209,7 +209,7 @@ export class ProyectosService {
 
   private async validarEdicionPermitidaPorUt(utId: number): Promise<void> {
     const [r] = await this.dataSource.query(
-      `SELECT PROYECTOIDUT AS "id" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`,
+      `SELECT PROYECTOIDUT AS "id" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = $1`,
       [utId],
     )
     if (!r) throw new NotFoundException('Unidad temática no encontrada.')
@@ -241,15 +241,15 @@ export class ProyectosService {
               e.EMPRESAREPCARGO           AS "repCargo",
               e.EMPRESAREPCORREO          AS "repCorreo",
               e.EMPRESAREPTEL             AS "repTel",
-              DBMS_LOB.GETLENGTH(e.EMPRESAOBJETO)       AS "objetoLen",
-              DBMS_LOB.GETLENGTH(e.EMPRESAPRODUCTOS)    AS "productosLen",
-              DBMS_LOB.GETLENGTH(e.EMPRESASITUACION)    AS "situacionLen",
-              DBMS_LOB.GETLENGTH(e.EMPRESAPAPEL)        AS "papelLen",
-              DBMS_LOB.GETLENGTH(e.EMPRESARETOS)        AS "retosLen",
-              DBMS_LOB.GETLENGTH(e.EMPRESAEXPERIENCIA)  AS "experienciaLen"
+              length(e.EMPRESAOBJETO)       AS "objetoLen",
+              length(e.EMPRESAPRODUCTOS)    AS "productosLen",
+              length(e.EMPRESASITUACION)    AS "situacionLen",
+              length(e.EMPRESAPAPEL)        AS "papelLen",
+              length(e.EMPRESARETOS)        AS "retosLen",
+              length(e.EMPRESAEXPERIENCIA)  AS "experienciaLen"
          FROM PROYECTO p
          JOIN EMPRESA e ON e.EMPRESAID = p.EMPRESAID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (!emp) throw new NotFoundException('Proyecto no encontrado')
@@ -280,8 +280,8 @@ export class ProyectosService {
     // 2. Datos del proyecto
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTONOMBRE                       AS "nombre",
-              DBMS_LOB.GETLENGTH(PROYECTOOBJETIVO) AS "objetivoLen"
-         FROM PROYECTO WHERE PROYECTOID = :1`,
+              length(PROYECTOOBJETIVO) AS "objetivoLen"
+         FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy.nombre)              issues.push('Proyecto: falta nombre.')
@@ -293,29 +293,29 @@ export class ProyectosService {
               af.ACCIONFORMACIONNUMERO        AS "numero",
               af.ACCIONFORMACIONNOMBRE        AS "nombre",
               af.TIPOEVENTOID                 AS "tipoEventoId",
-              TRIM(te.TIPOEVENTONOMBRE)       AS "tipoEvento",
+              btrim((te.TIPOEVENTONOMBRE)::text)       AS "tipoEvento",
               af.MODALIDADFORMACIONID         AS "modalidadId",
               af.METODOLOGIAAPRENDIZAJEID     AS "metodologiaId",
-              TRIM(ma.METODOLOGIAAPRENDIZAJENOMBRE) AS "metodologia",
+              btrim((ma.METODOLOGIAAPRENDIZAJENOMBRE)::text) AS "metodologia",
               af.ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
               af.ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
               af.ACCIONFORMACIONNUMBENEF      AS "numBenef",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONJUSTNEC)       AS "justnecLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONCAUSA)         AS "causaLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESULTADOS)    AS "efectosLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONOBJETIVO)      AS "objetivoLen",
+              length(af.ACCIONFORMACIONJUSTNEC)       AS "justnecLen",
+              length(af.ACCIONFORMACIONCAUSA)         AS "causaLen",
+              length(af.ACCIONFORMACIONRESULTADOS)    AS "efectosLen",
+              length(af.ACCIONFORMACIONOBJETIVO)      AS "objetivoLen",
               af.NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
               af.AFENFOQUEID                  AS "enfoqueId",
               af.TIPOAMBIENTEID               AS "tipoAmbienteId",
               af.ACCIONFORMACIONCOMPONENTEID  AS "componenteId",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONCOMPOD)        AS "compodLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONJUSTIFICACION) AS "justAlinLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESDESEM)      AS "resDesemLen",
-              DBMS_LOB.GETLENGTH(af.ACCIONFORMACIONRESFORM)       AS "resFormLen"
+              length(af.ACCIONFORMACIONCOMPOD)        AS "compodLen",
+              length(af.ACCIONFORMACIONJUSTIFICACION) AS "justAlinLen",
+              length(af.ACCIONFORMACIONRESDESEM)      AS "resDesemLen",
+              length(af.ACCIONFORMACIONRESFORM)       AS "resFormLen"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te             ON te.TIPOEVENTOID             = af.TIPOEVENTOID
          LEFT JOIN METODOLOGIAAPRENDIZAJE ma ON ma.METODOLOGIAAPRENDIZAJEID = af.METODOLOGIAAPRENDIZAJEID
-        WHERE af.PROYECTOID = :1
+        WHERE af.PROYECTOID = $1
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -349,31 +349,31 @@ export class ProyectosService {
 
         // Áreas / Niveles / CUOC (perfil)
         const [{ totAreas }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "totAreas" FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF = :1`,
+          `SELECT COUNT(1) AS "totAreas" FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF = $1`,
           [af.afId],
         )
         if (Number(totAreas) === 0) issues.push(`${tag}: no tiene áreas funcionales.`)
         const [{ totNiv }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "totNiv" FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = :1`,
+          `SELECT COUNT(1) AS "totNiv" FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = $1`,
           [af.afId],
         )
         if (Number(totNiv) === 0) issues.push(`${tag}: no tiene niveles ocupacionales.`)
         const [{ totCuoc }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "totCuoc" FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID = :1`,
+          `SELECT COUNT(1) AS "totCuoc" FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID = $1`,
           [af.afId],
         )
         if (Number(totCuoc) === 0) issues.push(`${tag}: no tiene ocupaciones CUOC.`)
 
         // Sectores beneficiarios
         const [{ totSecBen }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "totSecBen" FROM AFPSECTOR WHERE ACCIONFORMACIONID = :1`,
+          `SELECT COUNT(1) AS "totSecBen" FROM AFPSECTOR WHERE ACCIONFORMACIONID = $1`,
           [af.afId],
         )
         if (Number(totSecBen) === 0) issues.push(`${tag}: no tiene sectores beneficiarios.`)
 
         // Grupos vs cobertura
         const [{ gruposCreados }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
+          `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = $1`,
           [af.afId],
         )
         const numGruposAF = Number(af.numGrupos) || 0
@@ -382,7 +382,7 @@ export class ProyectosService {
         }
         const [{ gruposSinCob }] = await this.dataSource.query(
           `SELECT COUNT(1) AS "gruposSinCob" FROM AFGRUPO g
-            WHERE g.ACCIONFORMACIONID = :1
+            WHERE g.ACCIONFORMACIONID = $1
               AND NOT EXISTS (SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID)`,
           [af.afId],
         )
@@ -392,7 +392,7 @@ export class ProyectosService {
 
         // Unidades temáticas
         const [{ totUTs }] = await this.dataSource.query(
-          `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+          `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
           [af.afId],
         )
         if (Number(totUTs) === 0) {
@@ -401,12 +401,12 @@ export class ProyectosService {
           const numHorasGrupo = Number(af.numHorasGrupo) || 0
           if (numHorasGrupo > 0) {
             const [{ horasUTs }] = await this.dataSource.query(
-              `SELECT NVL(SUM(
-                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
-                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
-                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
-                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
-               ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+              `SELECT COALESCE(SUM(
+                 COALESCE(UNIDADTEMATICAHORASPP,0)+COALESCE(UNIDADTEMATICAHORASPV,0)+
+                 COALESCE(UNIDADTEMATICAHORASPPAT,0)+COALESCE(UNIDADTEMATICAHORASPHIB,0)+
+                 COALESCE(UNIDADTEMATICAHORASTP,0)+COALESCE(UNIDADTEMATICAHORASTV,0)+
+                 COALESCE(UNIDADTEMATICAHORASTPAT,0)+COALESCE(UNIDADTEMATICAHORASTHIB,0)
+               ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
               [af.afId],
             )
             if (Number(horasUTs) < numHorasGrupo) {
@@ -434,14 +434,14 @@ export class ProyectosService {
           // QA #2 — UT de articulacion territorial: minimo 5% de horas en CURSO/DIPLOMADO
           if ((tipoEventoUp === 'CURSO' || tipoEventoUp === 'DIPLOMADO') && horasGrupo > 0) {
             const [{ horasArt }] = await this.dataSource.query(
-              `SELECT NVL(SUM(
-                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
-                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
-                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
-                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+              `SELECT COALESCE(SUM(
+                 COALESCE(UNIDADTEMATICAHORASPP,0)+COALESCE(UNIDADTEMATICAHORASPV,0)+
+                 COALESCE(UNIDADTEMATICAHORASPPAT,0)+COALESCE(UNIDADTEMATICAHORASPHIB,0)+
+                 COALESCE(UNIDADTEMATICAHORASTP,0)+COALESCE(UNIDADTEMATICAHORASTV,0)+
+                 COALESCE(UNIDADTEMATICAHORASTPAT,0)+COALESCE(UNIDADTEMATICAHORASTHIB,0)
                ),0) AS "horasArt"
                  FROM UNIDADTEMATICA
-                WHERE ACCIONFORMACIONID = :1
+                WHERE ACCIONFORMACIONID = $1
                   AND ARTICULACIONTERRITORIALID IS NOT NULL`,
               [af.afId],
             )
@@ -459,15 +459,15 @@ export class ProyectosService {
           // QA #4 — TALLER: horas practicas minimo 60% del total de UTs
           if (tipoEventoUp === 'TALLER' && horasGrupo > 0) {
             const [{ horasPrac, horasTeor }] = await this.dataSource.query(
-              `SELECT NVL(SUM(
-                 NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
-                 NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)
+              `SELECT COALESCE(SUM(
+                 COALESCE(UNIDADTEMATICAHORASPP,0)+COALESCE(UNIDADTEMATICAHORASPV,0)+
+                 COALESCE(UNIDADTEMATICAHORASPPAT,0)+COALESCE(UNIDADTEMATICAHORASPHIB,0)
                ),0) AS "horasPrac",
-                     NVL(SUM(
-                 NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
-                 NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+                     COALESCE(SUM(
+                 COALESCE(UNIDADTEMATICAHORASTP,0)+COALESCE(UNIDADTEMATICAHORASTV,0)+
+                 COALESCE(UNIDADTEMATICAHORASTPAT,0)+COALESCE(UNIDADTEMATICAHORASTHIB,0)
                ),0) AS "horasTeor"
-                 FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+                 FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
               [af.afId],
             )
             const totalHoras = Number(horasPrac) + Number(horasTeor)
@@ -486,8 +486,8 @@ export class ProyectosService {
         const [{ totRubros }] = await this.dataSource.query(
           `SELECT COUNT(1) AS "totRubros" FROM AFRUBRO ar
              JOIN RUBRO r ON r.RUBROID = ar.RUBROID
-            WHERE ar.ACCIONFORMACIONID = :1
-              AND TRIM(r.RUBROCODIGO) NOT IN ('R09','R015')`,
+            WHERE ar.ACCIONFORMACIONID = $1
+              AND btrim((r.RUBROCODIGO)::text) NOT IN ('R09','R015')`,
           [af.afId],
         )
         if (Number(totRubros) === 0) issues.push(`${tag}: no tiene rubros registrados en el presupuesto.`)
@@ -568,8 +568,8 @@ export class ProyectosService {
     const snapshotJson = JSON.stringify(snapshot)
 
     const [{ next }] = await this.dataSource.query(
-      `SELECT NVL(MAX(VERSIONNUMERO), 0) + 1 AS "next"
-         FROM PROYECTOVERSION WHERE PROYECTOID = :1`,
+      `SELECT COALESCE(MAX(VERSIONNUMERO), 0) + 1 AS "next"
+         FROM PROYECTOVERSION WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     const versionNumero = Number(next)
@@ -585,7 +585,7 @@ export class ProyectosService {
     const versionCodigo = `PRY-${proyectoId}-V${versionNumero}-${codigoHash}`
 
     const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(PROYECTOVERSIONID), 0) + 1 AS "nid" FROM PROYECTOVERSION`,
+      `SELECT COALESCE(MAX(PROYECTOVERSIONID), 0) + 1 AS "nid" FROM PROYECTOVERSION`,
     )
 
     await this.dataSource.query(
@@ -593,7 +593,7 @@ export class ProyectosService {
          (PROYECTOVERSIONID, PROYECTOID, VERSIONNUMERO, VERSIONCODIGO,
           VERSIONFECHA, VERSIONUSUARIO, VERSIONSNAPSHOT, VERSIONHASH,
           VERSIONESTADOAL, VERSIONCOMENTARIO)
-       VALUES (:1, :2, :3, :4, ${AHORA_UTC}, :5, :6, :7, 1, :8)`,
+       VALUES ($1, $2, $3, $4, ${AHORA_UTC}, $5, $6, $7, 1, $8)`,
       [nid, proyectoId, versionNumero, versionCodigo, email,
        snapshotJson, fullHash, comentario?.trim() || null],
     )
@@ -609,12 +609,12 @@ export class ProyectosService {
               VERSIONCODIGO     AS "codigo",
               VERSIONFECHA      AS "fecha",
               VERSIONUSUARIO    AS "usuario",
-              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO,2000,1) AS "comentario",
+              substr(VERSIONCOMENTARIO, 1, 2000) AS "comentario",
               VERSIONHASH       AS "hash",
               VERSIONESFINAL    AS "esFinal",
               VERSIONANULADA    AS "anulada"
          FROM PROYECTOVERSION
-        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+        WHERE PROYECTOID = $1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
       [proyectoId],
     )
     if (finals.length) return finals[0]
@@ -626,14 +626,14 @@ export class ProyectosService {
                  VERSIONCODIGO     AS "codigo",
                  VERSIONFECHA      AS "fecha",
                  VERSIONUSUARIO    AS "usuario",
-                 DBMS_LOB.SUBSTR(VERSIONCOMENTARIO,2000,1) AS "comentario",
+                 substr(VERSIONCOMENTARIO, 1, 2000) AS "comentario",
                  VERSIONHASH       AS "hash",
                  VERSIONESFINAL    AS "esFinal",
                  VERSIONANULADA    AS "anulada"
             FROM PROYECTOVERSION
-           WHERE PROYECTOID = :1 AND VERSIONANULADA = 0
+           WHERE PROYECTOID = $1 AND VERSIONANULADA = 0
            ORDER BY VERSIONNUMERO DESC
-        ) WHERE ROWNUM = 1`,
+        ) LIMIT 1`,
       [proyectoId],
     )
     return rows[0] ?? null
@@ -675,7 +675,7 @@ export class ProyectosService {
               VERSIONCODIGO      AS "codigo",
               VERSIONFECHA       AS "fecha",
               VERSIONUSUARIO     AS "usuario",
-              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO, 2000, 1) AS "comentario",
+              substr(VERSIONCOMENTARIO, 1, 2000) AS "comentario",
               VERSIONESTADOAL    AS "estadoAl",
               VERSIONHASH        AS "hash",
               VERSIONESFINAL     AS "esFinal",
@@ -685,7 +685,7 @@ export class ProyectosService {
               VERSIONANULADAFECHA AS "anuladaFecha",
               VERSIONANULADAUSUARIO AS "anuladaUsuario"
          FROM PROYECTOVERSION
-        WHERE PROYECTOID = :1
+        WHERE PROYECTOID = $1
         ORDER BY VERSIONNUMERO ASC`,
       [proyectoId],
     )
@@ -695,7 +695,7 @@ export class ProyectosService {
   async marcarVersionFinal(proyectoId: number, versionId: number, email: string) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
-         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     if (!row) throw new NotFoundException('Versión no encontrada')
@@ -711,7 +711,7 @@ export class ProyectosService {
 
     const [proy] = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado", CONVOCATORIAID AS "convocatoriaId", EMPRESAID AS "empresaId"
-         FROM PROYECTO WHERE PROYECTOID = :1`,
+         FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -726,8 +726,8 @@ export class ProyectosService {
     const [{ duplicados }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "duplicados"
          FROM PROYECTO
-        WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2
-          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != :3`,
+        WHERE EMPRESAID = $1 AND CONVOCATORIAID = $2
+          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != $3`,
       [proy.empresaId, proy.convocatoriaId, proyectoId],
     )
     if (Number(duplicados) > 0)
@@ -739,21 +739,21 @@ export class ProyectosService {
           SET VERSIONESFINAL = 0,
               VERSIONFINALFECHA = NULL,
               VERSIONFINALUSUARIO = NULL
-        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1`,
+        WHERE PROYECTOID = $1 AND VERSIONESFINAL = 1`,
       [proyectoId],
     )
     await this.dataSource.query(
       `UPDATE PROYECTOVERSION
           SET VERSIONESFINAL = 1,
               VERSIONFINALFECHA = ${AHORA_UTC},
-              VERSIONFINALUSUARIO = :1
-        WHERE PROYECTOVERSIONID = :2`,
+              VERSIONFINALUSUARIO = $1
+        WHERE PROYECTOVERSIONID = $2`,
       [email, versionId],
     )
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO = 1, PROYECTOFECHARADICACION = ${AHORA_UTC}
-        WHERE PROYECTOID = :1`,
+        WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     return {
@@ -765,7 +765,7 @@ export class ProyectosService {
   // el estado 2 se llama "Subsanacion" en la UI
   async reversarProyectoComoAdmin(proyectoId: number, _adminEmail: string, _comentario?: string | null) {
     const [proy] = await this.dataSource.query(
-      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -784,7 +784,7 @@ export class ProyectosService {
     const [ver] = await this.dataSource.query(
       `SELECT PROYECTOVERSIONID AS "versionId"
          FROM PROYECTOVERSION
-        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+        WHERE PROYECTOID = $1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
       [proyectoId],
     )
     if (!ver) {
@@ -795,13 +795,13 @@ export class ProyectosService {
           SET VERSIONESFINAL = 0,
               VERSIONFINALFECHA = NULL,
               VERSIONFINALUSUARIO = NULL
-        WHERE PROYECTOVERSIONID = :1`,
+        WHERE PROYECTOVERSIONID = $1`,
       [ver.versionId],
     )
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO = 2, PROYECTOFECHARADICACION = NULL
-        WHERE PROYECTOID = :1`,
+        WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     return {
@@ -813,7 +813,7 @@ export class ProyectosService {
   async desmarcarVersionFinal(proyectoId: number, versionId: number) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", PROYECTOID AS "proyectoId"
-         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     if (!row) throw new NotFoundException('Versión no encontrada')
@@ -825,7 +825,7 @@ export class ProyectosService {
     }
 
     const [proy] = await this.dataSource.query(
-      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (proy && Number(proy.estado) === 3) {
@@ -840,13 +840,13 @@ export class ProyectosService {
           SET VERSIONESFINAL = 0,
               VERSIONFINALFECHA = NULL,
               VERSIONFINALUSUARIO = NULL
-        WHERE PROYECTOVERSIONID = :1`,
+        WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO = 2, PROYECTOFECHARADICACION = NULL
-        WHERE PROYECTOID = :1`,
+        WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     return {
@@ -859,7 +859,7 @@ export class ProyectosService {
   async anularVersion(proyectoId: number, versionId: number, email: string) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONESFINAL AS "esFinal", VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
-         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     if (!row) throw new NotFoundException('Versión no encontrada')
@@ -876,8 +876,8 @@ export class ProyectosService {
       `UPDATE PROYECTOVERSION
           SET VERSIONANULADA = 1,
               VERSIONANULADAFECHA = ${AHORA_UTC},
-              VERSIONANULADAUSUARIO = :1
-        WHERE PROYECTOVERSIONID = :2`,
+              VERSIONANULADAUSUARIO = $1
+        WHERE PROYECTOVERSIONID = $2`,
       [email, versionId],
     )
     return { message: 'Versión anulada correctamente.' }
@@ -886,7 +886,7 @@ export class ProyectosService {
   async restaurarVersion(proyectoId: number, versionId: number) {
     const [row] = await this.dataSource.query(
       `SELECT VERSIONANULADA AS "anulada", PROYECTOID AS "proyectoId"
-         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+         FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     if (!row) throw new NotFoundException('Versión no encontrada')
@@ -901,7 +901,7 @@ export class ProyectosService {
           SET VERSIONANULADA = 0,
               VERSIONANULADAFECHA = NULL,
               VERSIONANULADAUSUARIO = NULL
-        WHERE PROYECTOVERSIONID = :1`,
+        WHERE PROYECTOVERSIONID = $1`,
       [versionId],
     )
     return { message: 'Versión restaurada correctamente.' }
@@ -929,7 +929,7 @@ export class ProyectosService {
          JOIN PROYECTO p   ON p.PROYECTOID    = pv.PROYECTOID
          LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
          JOIN EMPRESA e    ON e.EMPRESAID     = p.EMPRESAID
-        WHERE TRIM(pv.VERSIONCODIGO) = :1`,
+        WHERE btrim((pv.VERSIONCODIGO)::text) = $1`,
       [codigo.trim()],
     )
     if (!row) {
@@ -970,7 +970,7 @@ export class ProyectosService {
               VERSIONCODIGO      AS "codigo",
               VERSIONFECHA       AS "fecha",
               VERSIONUSUARIO     AS "usuario",
-              DBMS_LOB.SUBSTR(VERSIONCOMENTARIO, 2000, 1) AS "comentario",
+              substr(VERSIONCOMENTARIO, 1, 2000) AS "comentario",
               VERSIONESTADOAL    AS "estadoAl",
               VERSIONHASH        AS "hash",
               VERSIONSNAPSHOT    AS "snapshotRaw"
@@ -1037,7 +1037,7 @@ export class ProyectosService {
   ) {
     // 1) Verificar que el proyecto está confirmado y tiene FINAL
     const [proy] = await this.dataSource.query(
-      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -1050,7 +1050,7 @@ export class ProyectosService {
               VERSIONCODIGO     AS "codigo",
               VERSIONHASH       AS "hash"
          FROM PROYECTOVERSION
-        WHERE PROYECTOID = :1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
+        WHERE PROYECTOID = $1 AND VERSIONESFINAL = 1 AND VERSIONANULADA = 0`,
       [proyectoId],
     )
     if (!versionFinal) {
@@ -1086,15 +1086,15 @@ export class ProyectosService {
         `UPDATE ACCIONFORMACION
             SET ACCIONFORMACIONESTADOAPROBACION = 1,
                 ACCIONFORMACIONMOTIVORECHAZO   = NULL
-          WHERE PROYECTOID = :1`,
+          WHERE PROYECTOID = $1`,
         [proyectoId],
       )
       const conceptos = (conceptosAprobadas ?? []).filter(c => Number(c.afId) > 0 && (c.concepto ?? '').trim())
       for (const c of traducirAfs(conceptos, afsVivas)) {
         await qr.query(
           `UPDATE ACCIONFORMACION
-              SET ACCIONFORMACIONMOTIVORECHAZO = :1
-            WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+              SET ACCIONFORMACIONMOTIVORECHAZO = $1
+            WHERE ACCIONFORMACIONID = $2 AND PROYECTOID = $3`,
           [c.concepto.trim(), c.afIdVivo, proyectoId],
         )
       }
@@ -1103,21 +1103,21 @@ export class ProyectosService {
         await qr.query(
           `UPDATE ACCIONFORMACION
               SET ACCIONFORMACIONESTADOAPROBACION = 0,
-                  ACCIONFORMACIONMOTIVORECHAZO   = :1
-            WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+                  ACCIONFORMACIONMOTIVORECHAZO   = $1
+            WHERE ACCIONFORMACIONID = $2 AND PROYECTOID = $3`,
           [r.motivo.trim(), r.afIdVivo, proyectoId],
         )
       }
 
       // 4) upsert manual en PROYECTOAPROBADO
       await qr.query(
-        `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = :1`, [proyectoId],
+        `DELETE FROM PROYECTOAPROBADO WHERE PROYECTOID = $1`, [proyectoId],
       )
       await qr.query(
         `INSERT INTO PROYECTOAPROBADO
            (PROYECTOID, PROYECTOVERSIONID, VERSIONCODIGO, VERSIONHASH,
             FECHAAPROBACION, USUARIOAPROBO, COMENTARIOAPROBACION)
-         VALUES (:1, :2, :3, :4, ${AHORA_UTC}, :5, :6)`,
+         VALUES ($1, $2, $3, $4, ${AHORA_UTC}, $5, $6)`,
         [proyectoId, Number(versionFinal.versionId), versionFinal.codigo,
          versionFinal.hash, email, comentario?.trim() || null],
       )
@@ -1127,7 +1127,7 @@ export class ProyectosService {
         `UPDATE PROYECTO
             SET PROYECTOESTADO        = 3,
                 PROYECTOMOTIVORECHAZO = NULL
-          WHERE PROYECTOID = :1`,
+          WHERE PROYECTOID = $1`,
         [proyectoId],
       )
 
@@ -1165,7 +1165,7 @@ export class ProyectosService {
       throw new BadRequestException('El motivo de rechazo del proyecto es obligatorio.')
     }
     const [proy] = await this.dataSource.query(
-      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT PROYECTOESTADO AS "estado" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -1177,8 +1177,8 @@ export class ProyectosService {
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION
           SET ACCIONFORMACIONESTADOAPROBACION = 0,
-              ACCIONFORMACIONMOTIVORECHAZO   = :1
-        WHERE PROYECTOID = :2`,
+              ACCIONFORMACIONMOTIVORECHAZO   = $1
+        WHERE PROYECTOID = $2`,
       [motivoTrim, proyectoId],
     )
 
@@ -1189,8 +1189,8 @@ export class ProyectosService {
       await this.dataSource.query(
         `UPDATE ACCIONFORMACION
             SET ACCIONFORMACIONESTADOAPROBACION = 1,
-                ACCIONFORMACIONMOTIVORECHAZO   = :1
-          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+                ACCIONFORMACIONMOTIVORECHAZO   = $1
+          WHERE ACCIONFORMACIONID = $2 AND PROYECTOID = $3`,
         [concepto, Number(a.afId), proyectoId],
       )
     }
@@ -1201,8 +1201,8 @@ export class ProyectosService {
       await this.dataSource.query(
         `UPDATE ACCIONFORMACION
             SET ACCIONFORMACIONESTADOAPROBACION = 0,
-                ACCIONFORMACIONMOTIVORECHAZO   = :1
-          WHERE ACCIONFORMACIONID = :2 AND PROYECTOID = :3`,
+                ACCIONFORMACIONMOTIVORECHAZO   = $1
+          WHERE ACCIONFORMACIONID = $2 AND PROYECTOID = $3`,
         [r.motivo.trim(), Number(r.afId), proyectoId],
       )
     }
@@ -1211,8 +1211,8 @@ export class ProyectosService {
     await this.dataSource.query(
       `UPDATE PROYECTO
           SET PROYECTOESTADO        = 4,
-              PROYECTOMOTIVORECHAZO = :1
-        WHERE PROYECTOID = :2`,
+              PROYECTOMOTIVORECHAZO = $1
+        WHERE PROYECTOID = $2`,
       [motivoTrim, proyectoId],
     )
     return {
@@ -1226,7 +1226,7 @@ export class ProyectosService {
   // publica o despublica los resultados de TODA la convocatoria, no de este proyecto
   async publicarResultados(proyectoId: number, publicar: boolean) {
     const [proy] = await this.dataSource.query(
-      `SELECT CONVOCATORIAID AS "convocatoriaId" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT CONVOCATORIAID AS "convocatoriaId" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -1238,7 +1238,7 @@ export class ProyectosService {
   async listarConvocatoriasAdmin() {
     return this.dataSource.query(
       `SELECT cv.CONVOCATORIAID                                  AS "id",
-              TRIM(cv.CONVOCATORIANOMBRE)                         AS "nombre",
+              btrim((cv.CONVOCATORIANOMBRE)::text)                         AS "nombre",
               cv.CONVOCATORIAANIO                                 AS "anio",
               cv.CONVOCATORIAFECHAINICIO                          AS "fechaInicio",
               cv.CONVOCATORIAFECHACIERRE                          AS "fechaCierre",
@@ -1246,11 +1246,11 @@ export class ProyectosService {
               cv.CONVOCATORIAPRESUPUESTOTOTAL                     AS "presupuestoTotal",
               cv.CONVOCATORIAPRESUPUESTOMAXIMO                    AS "presupuestoMaximo",
               cv.CONVOCATORIAMESESPROYECTO                        AS "mesesProyecto",
-              TRIM(cv.CONVOCATORIATIPOFINANCIACION)               AS "tipoFinanciacion",
-              TRIM(cv.CONVOCATORIAESTADOCONVOCATORIA)             AS "estadoEtiqueta",
+              btrim((cv.CONVOCATORIATIPOFINANCIACION)::text)               AS "tipoFinanciacion",
+              btrim((cv.CONVOCATORIAESTADOCONVOCATORIA)::text)             AS "estadoEtiqueta",
               cv.CONVOCATORIAESTADO                               AS "estado",
-              NVL(cv.CONVOCATORIAOCULTAR, 0)                      AS "ocultar",
-              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
+              COALESCE(cv.CONVOCATORIAOCULTAR, 0)                      AS "ocultar",
+              COALESCE(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
               cv.PROGRAMAID                                       AS "programaId",
               (SELECT COUNT(p.PROYECTOID) FROM PROYECTO p
                  WHERE p.CONVOCATORIAID = cv.CONVOCATORIAID)      AS "totalProyectos",
@@ -1299,7 +1299,7 @@ export class ProyectosService {
     const programaId = Number(dto.programaId) > 0 ? Number(dto.programaId) : 21
 
     const [{ nid }] = await this.dataSource.query(
-      `SELECT NVL(MAX(CONVOCATORIAID), 0) + 1 AS "nid" FROM CONVOCATORIA`,
+      `SELECT COALESCE(MAX(CONVOCATORIAID), 0) + 1 AS "nid" FROM CONVOCATORIA`,
     )
     await this.dataSource.query(
       `INSERT INTO CONVOCATORIA
@@ -1310,7 +1310,7 @@ export class ProyectosService {
           CONVOCATORIAESTADOCONVOCATORIA, CONVOCATORIAFECHAREGISTRO,
           CONVOCATORIAESTADO, CONVOCATORIAOCULTAR, CONVOCATORIASUBSANACION,
           PROGRAMAID, CONVOCATORIARESULTADOSPUBLICADOS)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, ${AHORA_UTC}, 1, 0, 0, :11, 0)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, ${AHORA_UTC}, 1, 0, 0, $11, 0)`,
       [
         Number(nid), nombre, Number(dto.anio),
         fechaSolo(dto.fechaInicio),
@@ -1334,7 +1334,7 @@ export class ProyectosService {
     fechaCierre?: string | null
   }) {
     const [cv] = await this.dataSource.query(
-      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [id],
     )
     if (!cv) throw new NotFoundException('Convocatoria no encontrada')
@@ -1377,7 +1377,7 @@ export class ProyectosService {
     }
     params.push(id)
     await this.dataSource.query(
-      `UPDATE CONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = :${i}`,
+      `UPDATE CONVOCATORIA SET ${sets.join(', ')} WHERE CONVOCATORIAID = $${i}`,
       params,
     )
     return { message: 'Convocatoria actualizada correctamente.' }
@@ -1386,15 +1386,15 @@ export class ProyectosService {
   // cerrar bloquea que los proponentes creen o editen proyectos
   async toggleEstadoConvocatoria(id: number, abrir: boolean) {
     const [cv] = await this.dataSource.query(
-      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [id],
     )
     if (!cv) throw new NotFoundException('Convocatoria no encontrada')
     await this.dataSource.query(
       `UPDATE CONVOCATORIA
-          SET CONVOCATORIAESTADO = :1,
-              CONVOCATORIAESTADOCONVOCATORIA = :2
-        WHERE CONVOCATORIAID = :3`,
+          SET CONVOCATORIAESTADO = $1,
+              CONVOCATORIAESTADOCONVOCATORIA = $2
+        WHERE CONVOCATORIAID = $3`,
       [abrir ? 1 : 0, abrir ? 'ABIERTA' : 'CERRADA', id],
     )
     return {
@@ -1408,12 +1408,12 @@ export class ProyectosService {
   // ocultar solo la saca del selector al crear un proyecto
   async toggleOcultarConvocatoria(id: number, ocultar: boolean) {
     const [cv] = await this.dataSource.query(
-      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [id],
     )
     if (!cv) throw new NotFoundException('Convocatoria no encontrada')
     await this.dataSource.query(
-      `UPDATE CONVOCATORIA SET CONVOCATORIAOCULTAR = :1 WHERE CONVOCATORIAID = :2`,
+      `UPDATE CONVOCATORIA SET CONVOCATORIAOCULTAR = $1 WHERE CONVOCATORIAID = $2`,
       [ocultar ? 1 : 0, id],
     )
     return {
@@ -1426,18 +1426,18 @@ export class ProyectosService {
 
   async publicarResultadosConvocatoria(convocatoriaId: number, publicar: boolean) {
     const [cv] = await this.dataSource.query(
-      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAID AS "id" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     if (!cv) throw new NotFoundException('Convocatoria no encontrada')
     const flag = publicar ? 1 : 0
     await this.dataSource.query(
-      `UPDATE CONVOCATORIA SET CONVOCATORIARESULTADOSPUBLICADOS = :1 WHERE CONVOCATORIAID = :2`,
+      `UPDATE CONVOCATORIA SET CONVOCATORIARESULTADOSPUBLICADOS = $1 WHERE CONVOCATORIAID = $2`,
       [flag, convocatoriaId],
     )
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total"
-         FROM PROYECTO WHERE CONVOCATORIAID = :1 AND PROYECTOESTADO IN (3, 4)`,
+         FROM PROYECTO WHERE CONVOCATORIAID = $1 AND PROYECTOESTADO IN (3, 4)`,
       [convocatoriaId],
     )
     return {
@@ -1458,7 +1458,7 @@ export class ProyectosService {
 
     const rows = await this.dataSource.query(
       `SELECT PROYECTOESTADO AS "estado", CONVOCATORIAID AS "convocatoriaId"
-         FROM PROYECTO WHERE PROYECTOID = :1 AND EMPRESAID = :2`,
+         FROM PROYECTO WHERE PROYECTOID = $1 AND EMPRESAID = $2`,
       [proyectoId, empresaId],
     )
     if (!rows.length) throw new NotFoundException('Proyecto no encontrado')
@@ -1478,8 +1478,8 @@ export class ProyectosService {
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total"
          FROM PROYECTO
-        WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2
-          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != :3`,
+        WHERE EMPRESAID = $1 AND CONVOCATORIAID = $2
+          AND PROYECTOESTADO IN (1, 3) AND PROYECTOID != $3`,
       [empresaId, convocatoriaId, proyectoId],
     )
     if (Number(total) > 0)
@@ -1506,7 +1506,7 @@ export class ProyectosService {
   async getConvocatorias() {
     return this.dataSource.query(
       `SELECT CONVOCATORIAID   AS "id",
-              TRIM(CONVOCATORIANOMBRE) AS "nombre"
+              btrim((CONVOCATORIANOMBRE)::text) AS "nombre"
          FROM CONVOCATORIA
         WHERE CONVOCATORIAESTADO  = 1
           AND CONVOCATORIAOCULTAR = 0
@@ -1517,7 +1517,7 @@ export class ProyectosService {
   async getModalidades() {
     return this.dataSource.query(
       `SELECT MODALIDADID              AS "id",
-              TRIM(MODALIDADNOMBRE)   AS "nombre"
+              btrim((MODALIDADNOMBRE)::text)   AS "nombre"
          FROM MODALIDAD
         WHERE MODALIDADESTADO = 1
         ORDER BY MODALIDADNOMBRE ASC`,
@@ -1537,7 +1537,7 @@ export class ProyectosService {
 
     const [{ total }] = await this.dataSource.query(
       `SELECT COUNT(PROYECTOID) AS "total" FROM PROYECTO
-        WHERE EMPRESAID = :1 AND CONVOCATORIAID = :2`,
+        WHERE EMPRESAID = $1 AND CONVOCATORIAID = $2`,
       [empresaId, dto.convocatoriaId],
     )
     if (Number(total) > 0)
@@ -1570,7 +1570,7 @@ export class ProyectosService {
               CONTACTOEMPRESADOCUMENTO    AS "documento",
               TIPOIDENTIFICACIONCONTACTOP AS "tipoIdentificacionId"
          FROM CONTACTOEMPRESA
-        WHERE PROYECTOIDCONTACTOS = :1
+        WHERE PROYECTOIDCONTACTOS = $1
         ORDER BY CONTACTOEMPRESAID ASC`,
       [proyectoId],
     )
@@ -1585,12 +1585,12 @@ export class ProyectosService {
               c.CONTACTOEMPRESACORREO AS "correo",
               CASE WHEN c.PROYECTOIDCONTACTOS = ${PROYECTO_SIN_ASIGNAR} OR c.PROYECTOIDCONTACTOS IS NULL
                    THEN NULL
-                   ELSE TRIM(p.PROYECTONOMBRE)
+                   ELSE btrim((p.PROYECTONOMBRE)::text)
               END AS "proyectoActual"
          FROM CONTACTOEMPRESA c
          LEFT JOIN PROYECTO p ON p.PROYECTOID = c.PROYECTOIDCONTACTOS
-        WHERE c.EMPRESAIDCONTACTO = :1
-          AND (c.PROYECTOIDCONTACTOS != :2 OR c.PROYECTOIDCONTACTOS IS NULL)
+        WHERE c.EMPRESAIDCONTACTO = $1
+          AND (c.PROYECTOIDCONTACTOS != $2 OR c.PROYECTOIDCONTACTOS IS NULL)
         ORDER BY c.CONTACTOEMPRESAID ASC`,
       [empresaId, proyectoId],
     )
@@ -1598,7 +1598,7 @@ export class ProyectosService {
 
   async asignarContacto(proyectoId: number, contactoId: number) {
     await this.dataSource.query(
-      `UPDATE CONTACTOEMPRESA SET PROYECTOIDCONTACTOS = :1 WHERE CONTACTOEMPRESAID = :2`,
+      `UPDATE CONTACTOEMPRESA SET PROYECTOIDCONTACTOS = $1 WHERE CONTACTOEMPRESAID = $2`,
       [proyectoId, contactoId],
     )
     return { message: 'Contacto asignado al proyecto' }
@@ -1606,7 +1606,7 @@ export class ProyectosService {
 
   async desasignarContacto(contactoId: number) {
     await this.dataSource.query(
-      `UPDATE CONTACTOEMPRESA SET PROYECTOIDCONTACTOS = ${PROYECTO_SIN_ASIGNAR} WHERE CONTACTOEMPRESAID = :1`,
+      `UPDATE CONTACTOEMPRESA SET PROYECTOIDCONTACTOS = ${PROYECTO_SIN_ASIGNAR} WHERE CONTACTOEMPRESAID = $1`,
       [contactoId],
     )
     return { message: 'Contacto removido del proyecto' }
@@ -1619,7 +1619,7 @@ export class ProyectosService {
          (EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
           CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
           TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [empresaId, dto.nombre, dto.cargo, dto.correo,
        dto.telefono ?? null, dto.documento ?? null,
        dto.tipoIdentificacionId ?? null, proyectoId],
@@ -1633,25 +1633,25 @@ export class ProyectosService {
     const afs = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID                          AS "afId",
               af.ACCIONFORMACIONNUMERO                      AS "numero",
-              TRIM(af.ACCIONFORMACIONNOMBRE)                AS "nombre",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)                AS "nombre",
               af.ACCIONFORMACIONNUMBENEF                    AS "numBenef",
-              TRIM(te.TIPOEVENTONOMBRE)                     AS "tipoEvento",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE)             AS "modalidad",
+              btrim((te.TIPOEVENTONOMBRE)::text)                     AS "tipoEvento",
+              btrim((mf.MODALIDADFORMACIONNOMBRE)::text)             AS "modalidad",
               af.ACCIONFORMACIONESTADOAPROBACION            AS "estadoAprobacion",
-              DBMS_LOB.SUBSTR(af.ACCIONFORMACIONMOTIVORECHAZO, 2000, 1) AS "motivoRechazo"
+              substr(af.ACCIONFORMACIONMOTIVORECHAZO, 1, 2000) AS "motivoRechazo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te         ON te.TIPOEVENTOID         = af.TIPOEVENTOID
          LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
-        WHERE af.PROYECTOID = :1
+        WHERE af.PROYECTOID = $1
         ORDER BY af.ACCIONFORMACIONNUMERO ASC`,
       [proyectoId],
     )
     const [proy] = await this.dataSource.query(
       `SELECT p.PROYECTOESTADO                                AS "estado",
-              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
+              COALESCE(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (proy && this.debeOcultarResultados(perfilId, Number(proy.estado), Number(proy.publicados))) {
@@ -1666,7 +1666,7 @@ export class ProyectosService {
   async getTiposEvento() {
     return this.dataSource.query(
       `SELECT TIPOEVENTOID           AS "id",
-              TRIM(TIPOEVENTONOMBRE) AS "nombre"
+              btrim((TIPOEVENTONOMBRE)::text) AS "nombre"
          FROM TIPOEVENTO
         WHERE TIPOEVENTOACTIVO = 1
         ORDER BY TIPOEVENTONOMBRE ASC`,
@@ -1676,7 +1676,7 @@ export class ProyectosService {
   async getModalidadesFormacion() {
     return this.dataSource.query(
       `SELECT MODALIDADFORMACIONID              AS "id",
-              TRIM(MODALIDADFORMACIONNOMBRE)   AS "nombre"
+              btrim((MODALIDADFORMACIONNOMBRE)::text)   AS "nombre"
          FROM MODALIDADFORMACION
         WHERE MODALIDADFORMACIONACTIVO = 1
         ORDER BY MODALIDADFORMACIONNOMBRE ASC`,
@@ -1687,7 +1687,7 @@ export class ProyectosService {
     await this.validarEdicionPermitida(proyectoId)
     // el número va aparte: Oracle no acepta una subconsulta en un INSERT ... VALUES con RETURNING (ORA-22816)
     const [{ nextNum }] = await this.dataSource.query(
-      `SELECT NVL(MAX(ACCIONFORMACIONNUMERO), 0) + 1 AS "nextNum" FROM ACCIONFORMACION WHERE PROYECTOID = :1`,
+      `SELECT COALESCE(MAX(ACCIONFORMACIONNUMERO), 0) + 1 AS "nextNum" FROM ACCIONFORMACION WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     await insertarConId(this.dataSource, 'ACCIONFORMACION', 'ACCIONFORMACIONID', { secuencia: 'ACCIONFORMACIONID' }, {
@@ -1706,7 +1706,7 @@ export class ProyectosService {
     const rows = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID            AS "afId",
               af.ACCIONFORMACIONNUMERO        AS "numero",
-              TRIM(af.ACCIONFORMACIONNOMBRE)  AS "nombre",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)  AS "nombre",
               af.NECESIDADFORMACIONIDAF       AS "necesidadFormacionId",
               nf.NECESIDADFORMACIONNOMBRE     AS "problemaDetectado",
               af.ACCIONFORMACIONJUSTNEC       AS "justnec",
@@ -1714,13 +1714,13 @@ export class ProyectosService {
               af.ACCIONFORMACIONRESULTADOS    AS "efectos",
               af.ACCIONFORMACIONOBJETIVO      AS "objetivo",
               af.TIPOEVENTOID                 AS "tipoEventoId",
-              TRIM(te.TIPOEVENTONOMBRE)       AS "tipoEvento",
+              btrim((te.TIPOEVENTONOMBRE)::text)       AS "tipoEvento",
               af.MODALIDADFORMACIONID         AS "modalidadFormacionId",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE) AS "modalidadFormacion",
+              btrim((mf.MODALIDADFORMACIONNOMBRE)::text) AS "modalidadFormacion",
               af.METODOLOGIAAPRENDIZAJEID     AS "metodologiaAprendizajeId",
-              TRIM(ma.METODOLOGIAAPRENDIZAJENOMBRE) AS "metodologiaAprendizaje",
+              btrim((ma.METODOLOGIAAPRENDIZAJENOMBRE)::text) AS "metodologiaAprendizaje",
               af.MODELOAPRENDIZAJEID          AS "modeloAprendizajeId",
-              TRIM(mo.MODELOAPRENDIZAJENOMBRE) AS "modeloAprendizaje",
+              btrim((mo.MODELOAPRENDIZAJENOMBRE)::text) AS "modeloAprendizaje",
               af.ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
               af.ACCIONFORMACIONNUMGRUPOS     AS "numGrupos",
               af.ACCIONFORMACIONBENEFGRUPO    AS "benefGrupo",
@@ -1736,7 +1736,7 @@ export class ProyectosService {
          LEFT JOIN MODELOAPRENDIZAJE mo    ON mo.MODELOAPRENDIZAJEID    = af.MODELOAPRENDIZAJEID
          LEFT JOIN NECESIDADFORMACION nf   ON nf.NECESIDADFORMACIONID   = af.NECESIDADFORMACIONIDAF
          LEFT JOIN PROYECTO p              ON p.PROYECTOID              = af.PROYECTOID
-        WHERE af.ACCIONFORMACIONID = :1`,
+        WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!rows.length) throw new NotFoundException('Acción de formación no encontrada')
@@ -1748,7 +1748,7 @@ export class ProyectosService {
     const [actual] = await this.dataSource.query(
       `SELECT TIPOEVENTOID AS "tipoEventoId", MODALIDADFORMACIONID AS "modalidadFormacionId",
               ACCIONFORMACIONNUMGRUPOS AS "numGrupos", PROYECTOID AS "proyectoId"
-         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!actual) throw new NotFoundException('Acción de formación no encontrada')
@@ -1759,7 +1759,7 @@ export class ProyectosService {
 
     if (eventoChanged || modalidadChanged || gruposChanged) {
       const [{ totalRubros }] = await this.dataSource.query(
-        `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
+        `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = $1`,
         [afId],
       )
       if (Number(totalRubros) > 0)
@@ -1773,7 +1773,7 @@ export class ProyectosService {
       const maxPermitido = 2
       const [{ cnt }] = await this.dataSource.query(
         `SELECT COUNT(1) AS "cnt" FROM ACCIONFORMACION
-          WHERE PROYECTOID = :1 AND TIPOEVENTOID = :2 AND ACCIONFORMACIONID != :3`,
+          WHERE PROYECTOID = $1 AND TIPOEVENTOID = $2 AND ACCIONFORMACIONID != $3`,
         [actual.proyectoId, dto.tipoEventoId, afId],
       )
       if (Number(cnt) >= maxPermitido) {
@@ -1788,7 +1788,7 @@ export class ProyectosService {
     if (eventoChanged && (dto.tipoEventoId === 8 || dto.tipoEventoId === 9)) {
       const [{ cnt }] = await this.dataSource.query(
         `SELECT COUNT(1) AS "cnt" FROM ACCIONFORMACION
-          WHERE PROYECTOID = :1 AND TIPOEVENTOID = :2 AND ACCIONFORMACIONID != :3`,
+          WHERE PROYECTOID = $1 AND TIPOEVENTOID = $2 AND ACCIONFORMACIONID != $3`,
         [actual.proyectoId, dto.tipoEventoId, afId],
       )
       if (Number(cnt) >= 1) {
@@ -1801,23 +1801,23 @@ export class ProyectosService {
 
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION
-          SET NECESIDADFORMACIONIDAF       = :1,
-              ACCIONFORMACIONNOMBRE        = :2,
-              ACCIONFORMACIONJUSTNEC       = :3,
-              ACCIONFORMACIONCAUSA         = :4,
-              ACCIONFORMACIONRESULTADOS    = :5,
-              ACCIONFORMACIONOBJETIVO      = :6,
-              TIPOEVENTOID                 = :7,
-              MODALIDADFORMACIONID         = :8,
-              METODOLOGIAAPRENDIZAJEID     = :9,
-              MODELOAPRENDIZAJEID          = :10,
-              ACCIONFORMACIONNUMHORAGRUPO  = :11,
-              ACCIONFORMACIONNUMGRUPOS     = :12,
-              ACCIONFORMACIONBENEFGRUPO    = :13,
-              ACCIONFORMACIONBENEFVIGRUPO  = :14,
-              ACCIONFORMACIONNUMTOTHORASGRUP = :15,
-              ACCIONFORMACIONNUMBENEF      = :16
-        WHERE ACCIONFORMACIONID = :17`,
+          SET NECESIDADFORMACIONIDAF       = $1,
+              ACCIONFORMACIONNOMBRE        = $2,
+              ACCIONFORMACIONJUSTNEC       = $3,
+              ACCIONFORMACIONCAUSA         = $4,
+              ACCIONFORMACIONRESULTADOS    = $5,
+              ACCIONFORMACIONOBJETIVO      = $6,
+              TIPOEVENTOID                 = $7,
+              MODALIDADFORMACIONID         = $8,
+              METODOLOGIAAPRENDIZAJEID     = $9,
+              MODELOAPRENDIZAJEID          = $10,
+              ACCIONFORMACIONNUMHORAGRUPO  = $11,
+              ACCIONFORMACIONNUMGRUPOS     = $12,
+              ACCIONFORMACIONBENEFGRUPO    = $13,
+              ACCIONFORMACIONBENEFVIGRUPO  = $14,
+              ACCIONFORMACIONNUMTOTHORASGRUP = $15,
+              ACCIONFORMACIONNUMBENEF      = $16
+        WHERE ACCIONFORMACIONID = $17`,
       [
         dto.necesidadFormacionId ?? null,
         dto.nombre.trim(),
@@ -1844,7 +1844,7 @@ export class ProyectosService {
   async getMetodologias() {
     return this.dataSource.query(
       `SELECT METODOLOGIAAPRENDIZAJEID        AS "id",
-              TRIM(METODOLOGIAAPRENDIZAJENOMBRE) AS "nombre"
+              btrim((METODOLOGIAAPRENDIZAJENOMBRE)::text) AS "nombre"
          FROM METODOLOGIAAPRENDIZAJE
         WHERE METODOLOGIAAPRENDIZAJEESTADO = 1
         ORDER BY METODOLOGIAAPRENDIZAJENOMBRE ASC`,
@@ -1854,7 +1854,7 @@ export class ProyectosService {
   async getModelosAprendizaje() {
     return this.dataSource.query(
       `SELECT MODELOAPRENDIZAJEID              AS "id",
-              TRIM(MODELOAPRENDIZAJENOMBRE)   AS "nombre"
+              btrim((MODELOAPRENDIZAJENOMBRE)::text)   AS "nombre"
          FROM MODELOAPRENDIZAJE
         ORDER BY MODELOAPRENDIZAJENOMBRE ASC`,
     )
@@ -1868,7 +1868,7 @@ export class ProyectosService {
               nf.NECESIDADFORMACIONNUMERO   AS "numero"
          FROM NECESIDADFORMACION nf
          JOIN NECESIDAD n ON n.NECESIDADID = nf.NECESIDADID
-        WHERE n.EMPRESANECESIDADID = :1
+        WHERE n.EMPRESANECESIDADID = $1
         ORDER BY nf.NECESIDADFORMACIONNUMERO ASC`,
       [empresaId],
     )
@@ -1879,7 +1879,7 @@ export class ProyectosService {
   async getAreasFuncionales() {
     return this.dataSource.query(
       `SELECT AREAFUNCIONALID               AS "id",
-              TRIM(AREAFUNCIONALNOMBRE)     AS "nombre"
+              btrim((AREAFUNCIONALNOMBRE)::text)     AS "nombre"
          FROM AREAFUNCIONAL
         WHERE AREAFUNCIONALESTADO = 1
         ORDER BY AREAFUNCIONALID ASC`,
@@ -1889,7 +1889,7 @@ export class ProyectosService {
   async getNivelesOcupacionales() {
     return this.dataSource.query(
       `SELECT NIVELOCUPACIONALID               AS "id",
-              TRIM(NIVELOCUPACIONALNOMBRE)     AS "nombre"
+              btrim((NIVELOCUPACIONALNOMBRE)::text)     AS "nombre"
          FROM NIVELOCUPACIONAL
         WHERE NIVELOCUPACIONALESTADO = 1
         ORDER BY NIVELOCUPACIONALID ASC`,
@@ -1899,7 +1899,7 @@ export class ProyectosService {
   async getOcupacionesCuoc() {
     return this.dataSource.query(
       `SELECT OCUPACIONCUOCID               AS "id",
-              TRIM(OCUPACIONCUOCNOMBRE)     AS "nombre"
+              btrim((OCUPACIONCUOCNOMBRE)::text)     AS "nombre"
          FROM OCUPACIONCUOC
         WHERE OCUPACIONCUOCESTADO = 1
         ORDER BY OCUPACIONCUOCNOMBRE ASC`,
@@ -1909,7 +1909,7 @@ export class ProyectosService {
   async getEnfoques() {
     return this.dataSource.query(
       `SELECT AFENFOQUEID                  AS "id",
-              TRIM(AFENFOQUENOMBRE)        AS "nombre"
+              btrim((AFENFOQUENOMBRE)::text)        AS "nombre"
          FROM AFENFOQUE
         WHERE AFENFOQUEESTADO = 1
         ORDER BY AFENFOQUEID ASC`,
@@ -1922,7 +1922,7 @@ export class ProyectosService {
     const rows = await this.dataSource.query(
       `SELECT af.ACCIONFORMACIONID             AS "afId",
               af.AFENFOQUEID                   AS "afEnfoqueId",
-              TRIM(e.AFENFOQUENOMBRE)          AS "enfoque",
+              btrim((e.AFENFOQUENOMBRE)::text)          AS "enfoque",
               af.ACCIONFORMACIONAREAFUN        AS "justAreas",
               af.ACCIONFORMACIONNIVELOCUPD     AS "justNivelesOcu",
               af.ACCIONFORMACIONMUJER          AS "mujer",
@@ -1940,7 +1940,7 @@ export class ProyectosService {
               af.ACCIONFORMACIONCADENAPRODD    AS "cadenaProdD"
          FROM ACCIONFORMACION af
          LEFT JOIN AFENFOQUE e ON e.AFENFOQUEID = af.AFENFOQUEID
-        WHERE af.ACCIONFORMACIONID = :1`,
+        WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!rows.length) throw new NotFoundException('Acción de formación no encontrada')
@@ -1948,11 +1948,11 @@ export class ProyectosService {
     const areas = await this.dataSource.query(
       `SELECT aa.AFAREAFUNCIONALID         AS "aafId",
               aa.AREAFUNCIONALIDAF         AS "areaId",
-              TRIM(a.AREAFUNCIONALNOMBRE)  AS "nombre",
+              btrim((a.AREAFUNCIONALNOMBRE)::text)  AS "nombre",
               aa.AFAREAFUNCIONALOTRO       AS "otro"
          FROM AFAREAFUNCIONAL aa
          JOIN AREAFUNCIONAL a ON a.AREAFUNCIONALID = aa.AREAFUNCIONALIDAF
-        WHERE aa.ACCIONFORMACIONIDAF = :1
+        WHERE aa.ACCIONFORMACIONIDAF = $1
         ORDER BY aa.AFAREAFUNCIONALID ASC`,
       [afId],
     )
@@ -1960,10 +1960,10 @@ export class ProyectosService {
     const niveles = await this.dataSource.query(
       `SELECT an.AFNIVELOCUPACIONALID         AS "anId",
               an.NIVELOCUPACIONALIDAF         AS "nivelId",
-              TRIM(n.NIVELOCUPACIONALNOMBRE)  AS "nombre"
+              btrim((n.NIVELOCUPACIONALNOMBRE)::text)  AS "nombre"
          FROM AFNIVELOCUPACIONAL an
          JOIN NIVELOCUPACIONAL n ON n.NIVELOCUPACIONALID = an.NIVELOCUPACIONALIDAF
-        WHERE an.ACCIONFORMACIONID = :1
+        WHERE an.ACCIONFORMACIONID = $1
         ORDER BY an.AFNIVELOCUPACIONALID ASC`,
       [afId],
     )
@@ -1971,10 +1971,10 @@ export class ProyectosService {
     const cuoc = await this.dataSource.query(
       `SELECT oa.OCUPACIONCOUCAFID             AS "ocAfId",
               oa.OCUPACIONCUOCID               AS "cuocId",
-              TRIM(c.OCUPACIONCUOCNOMBRE)      AS "nombre"
+              btrim((c.OCUPACIONCUOCNOMBRE)::text)      AS "nombre"
          FROM OCUPACIONCOUCAF oa
          JOIN OCUPACIONCUOC c ON c.OCUPACIONCUOCID = oa.OCUPACIONCUOCID
-        WHERE oa.ACCIONFORMACIONID = :1
+        WHERE oa.ACCIONFORMACIONID = $1
         ORDER BY oa.OCUPACIONCOUCAFID ASC`,
       [afId],
     )
@@ -2005,23 +2005,23 @@ export class ProyectosService {
   ) {
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION
-          SET AFENFOQUEID                  = :1,
-              ACCIONFORMACIONAREAFUN       = :2,
-              ACCIONFORMACIONNIVELOCUPD    = :3,
-              ACCIONFORMACIONMUJER         = :4,
-              ACCIONFORMACIONNUMCAMPESINO  = :5,
-              ACCIONFORMACIONJUSTCAMPESINO = :6,
-              ACCIONFORMACIONNUMPOPULAR    = :7,
-              ACCIONFORMACIONJUSTPOPULAR   = :8,
-              ACCIONFORMACIONTRABDISCAPAC  = :9,
-              ACCIONFORMACIONTRABAJADORBIC = :10,
-              ACCIONFORMACIONMIPYMES       = :11,
-              ACCIONFORMACIONTRABMIPYMES   = :12,
-              ACCIONFORMACIONMIPYMESD      = :13,
-              ACCIONFORMACIONCADENAPROD    = :14,
-              ACCIONFORMACIONTRABCADPROD   = :15,
-              ACCIONFORMACIONCADENAPRODD   = :16
-        WHERE ACCIONFORMACIONID = :17`,
+          SET AFENFOQUEID                  = $1,
+              ACCIONFORMACIONAREAFUN       = $2,
+              ACCIONFORMACIONNIVELOCUPD    = $3,
+              ACCIONFORMACIONMUJER         = $4,
+              ACCIONFORMACIONNUMCAMPESINO  = $5,
+              ACCIONFORMACIONJUSTCAMPESINO = $6,
+              ACCIONFORMACIONNUMPOPULAR    = $7,
+              ACCIONFORMACIONJUSTPOPULAR   = $8,
+              ACCIONFORMACIONTRABDISCAPAC  = $9,
+              ACCIONFORMACIONTRABAJADORBIC = $10,
+              ACCIONFORMACIONMIPYMES       = $11,
+              ACCIONFORMACIONTRABMIPYMES   = $12,
+              ACCIONFORMACIONMIPYMESD      = $13,
+              ACCIONFORMACIONCADENAPROD    = $14,
+              ACCIONFORMACIONTRABCADPROD   = $15,
+              ACCIONFORMACIONCADENAPRODD   = $16
+        WHERE ACCIONFORMACIONID = $17`,
       [
         dto.afEnfoqueId ?? null,
         dto.justAreas ?? null,
@@ -2047,7 +2047,7 @@ export class ProyectosService {
 
   async agregarArea(afId: number, dto: { areaId: number; otro?: string | null }) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF = :1`,
+      `SELECT COUNT(1) AS "cnt" FROM AFAREAFUNCIONAL WHERE ACCIONFORMACIONIDAF = $1`,
       [afId],
     )
     if (Number(cnt) >= 5)
@@ -2055,7 +2055,7 @@ export class ProyectosService {
 
     const [{ dup }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "dup" FROM AFAREAFUNCIONAL
-        WHERE ACCIONFORMACIONIDAF = :1 AND AREAFUNCIONALIDAF = :2`,
+        WHERE ACCIONFORMACIONIDAF = $1 AND AREAFUNCIONALIDAF = $2`,
       [afId, dto.areaId],
     )
     if (Number(dup) > 0)
@@ -2071,7 +2071,7 @@ export class ProyectosService {
 
   async eliminarArea(aafId: number) {
     await this.dataSource.query(
-      `DELETE FROM AFAREAFUNCIONAL WHERE AFAREAFUNCIONALID = :1`,
+      `DELETE FROM AFAREAFUNCIONAL WHERE AFAREAFUNCIONALID = $1`,
       [aafId],
     )
     return { message: 'Área funcional eliminada' }
@@ -2079,7 +2079,7 @@ export class ProyectosService {
 
   async agregarNivel(afId: number, nivelId: number) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "cnt" FROM AFNIVELOCUPACIONAL WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(cnt) >= 3)
@@ -2087,7 +2087,7 @@ export class ProyectosService {
 
     const [{ dup }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "dup" FROM AFNIVELOCUPACIONAL
-        WHERE ACCIONFORMACIONID = :1 AND NIVELOCUPACIONALIDAF = :2`,
+        WHERE ACCIONFORMACIONID = $1 AND NIVELOCUPACIONALIDAF = $2`,
       [afId, nivelId],
     )
     if (Number(dup) > 0)
@@ -2102,7 +2102,7 @@ export class ProyectosService {
 
   async eliminarNivel(anId: number) {
     await this.dataSource.query(
-      `DELETE FROM AFNIVELOCUPACIONAL WHERE AFNIVELOCUPACIONALID = :1`,
+      `DELETE FROM AFNIVELOCUPACIONAL WHERE AFNIVELOCUPACIONALID = $1`,
       [anId],
     )
     return { message: 'Nivel ocupacional eliminado' }
@@ -2110,7 +2110,7 @@ export class ProyectosService {
 
   async agregarCuoc(afId: number, cuocId: number) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "cnt" FROM OCUPACIONCOUCAF WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(cnt) >= 20)
@@ -2118,7 +2118,7 @@ export class ProyectosService {
 
     const [{ dup }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "dup" FROM OCUPACIONCOUCAF
-        WHERE ACCIONFORMACIONID = :1 AND OCUPACIONCUOCID = :2`,
+        WHERE ACCIONFORMACIONID = $1 AND OCUPACIONCUOCID = $2`,
       [afId, cuocId],
     )
     if (Number(dup) > 0)
@@ -2133,7 +2133,7 @@ export class ProyectosService {
 
   async eliminarCuoc(ocAfId: number) {
     await this.dataSource.query(
-      `DELETE FROM OCUPACIONCOUCAF WHERE OCUPACIONCOUCAFID = :1`,
+      `DELETE FROM OCUPACIONCOUCAF WHERE OCUPACIONCOUCAFID = $1`,
       [ocAfId],
     )
     return { message: 'Ocupación CUOC eliminada' }
@@ -2143,14 +2143,14 @@ export class ProyectosService {
 
   async getSectoresAfCat() {
     return this.dataSource.query(
-      `SELECT SECTORAFID AS "id", TRIM(SECTORAFNOMBRE) AS "nombre"
+      `SELECT SECTORAFID AS "id", btrim((SECTORAFNOMBRE)::text) AS "nombre"
          FROM SECTORAF WHERE SECTORAFESTADO = 1 ORDER BY SECTORAFID ASC`,
     )
   }
 
   async getSubSectoresAfCat() {
     return this.dataSource.query(
-      `SELECT SUBSECTORAFID AS "id", TRIM(SUBSECTORAFNOMBRE) AS "nombre"
+      `SELECT SUBSECTORAFID AS "id", btrim((SUBSECTORAFNOMBRE)::text) AS "nombre"
          FROM SUBSECTORAF WHERE SUBSECTORAFESTADO = 1 ORDER BY SUBSECTORAFID ASC`,
     )
   }
@@ -2159,34 +2159,34 @@ export class ProyectosService {
 
   async getSectoresYSubsectores(afId: number) {
     const rows = await this.dataSource.query(
-      `SELECT ACCIONFORMACIONSECSUBD AS "justificacion" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+      `SELECT ACCIONFORMACIONSECSUBD AS "justificacion" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!rows.length) throw new NotFoundException('Acción de formación no encontrada')
 
     const [sectoresBenef, subsectoresBenef, sectoresAf, subsectoresAf] = await Promise.all([
       this.dataSource.query(
-        `SELECT ps.AFPSECTORID AS "psId", ps.SECTORAFID AS "sectorId", TRIM(s.SECTORAFNOMBRE) AS "nombre"
+        `SELECT ps.AFPSECTORID AS "psId", ps.SECTORAFID AS "sectorId", btrim((s.SECTORAFNOMBRE)::text) AS "nombre"
            FROM AFPSECTOR ps JOIN SECTORAF s ON s.SECTORAFID = ps.SECTORAFID
-          WHERE ps.ACCIONFORMACIONID = :1 ORDER BY ps.AFPSECTORID ASC`,
+          WHERE ps.ACCIONFORMACIONID = $1 ORDER BY ps.AFPSECTORID ASC`,
         [afId],
       ),
       this.dataSource.query(
-        `SELECT ps.AFPSUBSECTORID AS "pssId", ps.SUBSECTORAFID AS "subsectorId", TRIM(s.SUBSECTORAFNOMBRE) AS "nombre"
+        `SELECT ps.AFPSUBSECTORID AS "pssId", ps.SUBSECTORAFID AS "subsectorId", btrim((s.SUBSECTORAFNOMBRE)::text) AS "nombre"
            FROM AFPSUBSECTOR ps JOIN SUBSECTORAF s ON s.SUBSECTORAFID = ps.SUBSECTORAFID
-          WHERE ps.ACCIONFORMACIONID = :1 ORDER BY ps.AFPSUBSECTORID ASC`,
+          WHERE ps.ACCIONFORMACIONID = $1 ORDER BY ps.AFPSUBSECTORID ASC`,
         [afId],
       ),
       this.dataSource.query(
-        `SELECT a.AFSECTORID AS "saId", a.SECTORAFID AS "sectorId", TRIM(s.SECTORAFNOMBRE) AS "nombre"
+        `SELECT a.AFSECTORID AS "saId", a.SECTORAFID AS "sectorId", btrim((s.SECTORAFNOMBRE)::text) AS "nombre"
            FROM AFSECTOR a JOIN SECTORAF s ON s.SECTORAFID = a.SECTORAFID
-          WHERE a.ACCIONFORMACIONID = :1 ORDER BY a.AFSECTORID ASC`,
+          WHERE a.ACCIONFORMACIONID = $1 ORDER BY a.AFSECTORID ASC`,
         [afId],
       ),
       this.dataSource.query(
-        `SELECT a.AFSUBSECTORID AS "ssaId", a.SUBSECTORAFID AS "subsectorId", TRIM(s.SUBSECTORAFNOMBRE) AS "nombre"
+        `SELECT a.AFSUBSECTORID AS "ssaId", a.SUBSECTORAFID AS "subsectorId", btrim((s.SUBSECTORAFNOMBRE)::text) AS "nombre"
            FROM AFSUBSECTOR a JOIN SUBSECTORAF s ON s.SUBSECTORAFID = a.SUBSECTORAFID
-          WHERE a.ACCIONFORMACIONID = :1 ORDER BY a.AFSUBSECTORID ASC`,
+          WHERE a.ACCIONFORMACIONID = $1 ORDER BY a.AFSUBSECTORID ASC`,
         [afId],
       ),
     ])
@@ -2196,7 +2196,7 @@ export class ProyectosService {
 
   async actualizarJustificacionSec(afId: number, justificacion: string | null) {
     await this.dataSource.query(
-      `UPDATE ACCIONFORMACION SET ACCIONFORMACIONSECSUBD = :1 WHERE ACCIONFORMACIONID = :2`,
+      `UPDATE ACCIONFORMACION SET ACCIONFORMACIONSECSUBD = $1 WHERE ACCIONFORMACIONID = $2`,
       [justificacion ?? null, afId],
     )
     return { message: 'Justificación de sectores actualizada' }
@@ -2204,7 +2204,7 @@ export class ProyectosService {
 
   async agregarSectorBenef(afId: number, sectorId: number) {
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM AFPSECTOR WHERE ACCIONFORMACIONID = :1 AND SECTORAFID = :2`, [afId, sectorId],
+      `SELECT COUNT(1) AS "dup" FROM AFPSECTOR WHERE ACCIONFORMACIONID = $1 AND SECTORAFID = $2`, [afId, sectorId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El sector ya está registrado en esta acción de formación')
 
@@ -2217,13 +2217,13 @@ export class ProyectosService {
   }
 
   async eliminarSectorBenef(psId: number) {
-    await this.dataSource.query(`DELETE FROM AFPSECTOR WHERE AFPSECTORID = :1`, [psId])
+    await this.dataSource.query(`DELETE FROM AFPSECTOR WHERE AFPSECTORID = $1`, [psId])
     return { message: 'Sector beneficiario eliminado' }
   }
 
   async agregarSubSectorBenef(afId: number, subsectorId: number) {
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM AFPSUBSECTOR WHERE ACCIONFORMACIONID = :1 AND SUBSECTORAFID = :2`, [afId, subsectorId],
+      `SELECT COUNT(1) AS "dup" FROM AFPSUBSECTOR WHERE ACCIONFORMACIONID = $1 AND SUBSECTORAFID = $2`, [afId, subsectorId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El sub-sector ya está registrado en esta acción de formación')
 
@@ -2236,18 +2236,18 @@ export class ProyectosService {
   }
 
   async eliminarSubSectorBenef(pssId: number) {
-    await this.dataSource.query(`DELETE FROM AFPSUBSECTOR WHERE AFPSUBSECTORID = :1`, [pssId])
+    await this.dataSource.query(`DELETE FROM AFPSUBSECTOR WHERE AFPSUBSECTORID = $1`, [pssId])
     return { message: 'Sub-sector beneficiario eliminado' }
   }
 
   async agregarSectorAf(afId: number, sectorId: number) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM AFSECTOR WHERE ACCIONFORMACIONID = :1`, [afId],
+      `SELECT COUNT(1) AS "cnt" FROM AFSECTOR WHERE ACCIONFORMACIONID = $1`, [afId],
     )
     if (Number(cnt) >= 1) throw new BadRequestException('Solo se permite 1 sector de clasificación AF')
 
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM AFSECTOR WHERE ACCIONFORMACIONID = :1 AND SECTORAFID = :2`, [afId, sectorId],
+      `SELECT COUNT(1) AS "dup" FROM AFSECTOR WHERE ACCIONFORMACIONID = $1 AND SECTORAFID = $2`, [afId, sectorId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El sector AF ya está registrado')
 
@@ -2259,18 +2259,18 @@ export class ProyectosService {
   }
 
   async eliminarSectorAf(saId: number) {
-    await this.dataSource.query(`DELETE FROM AFSECTOR WHERE AFSECTORID = :1`, [saId])
+    await this.dataSource.query(`DELETE FROM AFSECTOR WHERE AFSECTORID = $1`, [saId])
     return { message: 'Sector AF eliminado' }
   }
 
   async agregarSubSectorAf(afId: number, subsectorId: number) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM AFSUBSECTOR WHERE ACCIONFORMACIONID = :1`, [afId],
+      `SELECT COUNT(1) AS "cnt" FROM AFSUBSECTOR WHERE ACCIONFORMACIONID = $1`, [afId],
     )
     if (Number(cnt) >= 1) throw new BadRequestException('Solo se permite 1 sub-sector de clasificación AF')
 
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM AFSUBSECTOR WHERE ACCIONFORMACIONID = :1 AND SUBSECTORAFID = :2`, [afId, subsectorId],
+      `SELECT COUNT(1) AS "dup" FROM AFSUBSECTOR WHERE ACCIONFORMACIONID = $1 AND SUBSECTORAFID = $2`, [afId, subsectorId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El sub-sector AF ya está registrado')
 
@@ -2282,14 +2282,14 @@ export class ProyectosService {
   }
 
   async eliminarSubSectorAf(ssaId: number) {
-    await this.dataSource.query(`DELETE FROM AFSUBSECTOR WHERE AFSUBSECTORID = :1`, [ssaId])
+    await this.dataSource.query(`DELETE FROM AFSUBSECTOR WHERE AFSUBSECTORID = $1`, [ssaId])
     return { message: 'Sub-sector AF eliminado' }
   }
 
   async eliminarAF(afId: number) {
     await this.validarEdicionPermitidaPorAf(afId)
     const [{ totalRubros }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "totalRubros" FROM AFRUBRO WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(totalRubros) > 0)
@@ -2299,36 +2299,36 @@ export class ProyectosService {
 
     // Cascada: hijos de UNIDADTEMATICA
     await this.dataSource.query(
-      `DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1)`,
+      `DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1)`,
       [afId],
     )
     await this.dataSource.query(
-      `DELETE FROM PERFILUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1)`,
+      `DELETE FROM PERFILUT WHERE UNIDADTEMATICAID IN (SELECT UNIDADTEMATICAID FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1)`,
       [afId],
     )
-    await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`, [afId])
 
     // Cascada: hijos de AFGRUPO
     await this.dataSource.query(
-      `DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID IN (SELECT AFGRUPOID FROM AFGRUPO WHERE ACCIONFORMACIONID = :1)`,
+      `DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID IN (SELECT AFGRUPOID FROM AFGRUPO WHERE ACCIONFORMACIONID = $1)`,
       [afId],
     )
-    await this.dataSource.query(`DELETE FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFGRUPO WHERE ACCIONFORMACIONID = $1`, [afId])
 
     // Resto de tablas relacionadas
-    await this.dataSource.query(`DELETE FROM AFNIVELOCUPACIONAL   WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFAREAFUNCIONAL      WHERE ACCIONFORMACIONIDAF  = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM OCUPACIONCOUCAF      WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFPSECTOR            WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFPSUBSECTOR         WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFSECTOR             WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFSUBSECTOR          WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID   = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF  WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID    = :1`, [afId])
-    await this.dataSource.query(`DELETE FROM AFHABILIDAD          WHERE ACCIONFORMACIONID    = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFNIVELOCUPACIONAL   WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFAREAFUNCIONAL      WHERE ACCIONFORMACIONIDAF  = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM OCUPACIONCOUCAF      WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFPSECTOR            WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFPSUBSECTOR         WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFSECTOR             WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFSUBSECTOR          WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID   = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF  WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID    = $1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFHABILIDAD          WHERE ACCIONFORMACIONID    = $1`, [afId])
 
-    await this.dataSource.query(`DELETE FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`, [afId])
     return { message: 'Acción de formación eliminada correctamente' }
   }
 
@@ -2336,7 +2336,7 @@ export class ProyectosService {
 
   async getActividadesUT() {
     return this.dataSource.query(
-      `SELECT UTACTIVIDADESID AS "id", TRIM(UTACTIVIDADESNOMBRE) AS "nombre"
+      `SELECT UTACTIVIDADESID AS "id", btrim((UTACTIVIDADESNOMBRE)::text) AS "nombre"
          FROM UTACTIVIDADES
         WHERE UTACTIVIDADESESTADO = 1 AND UTACTIVIDADESID NOT IN (1, 81)
         ORDER BY UTACTIVIDADESNOMBRE ASC`,
@@ -2345,11 +2345,11 @@ export class ProyectosService {
 
   async getRubrosPerfilUT(proyectoId: number) {
     return this.dataSource.query(
-      `SELECT r.RUBROID AS "id", TRIM(r.RUBRONOMBRE) AS "nombre"
+      `SELECT r.RUBROID AS "id", btrim((r.RUBRONOMBRE)::text) AS "nombre"
          FROM RUBRO r
          JOIN PROYECTO p ON p.CONVOCATORIAID = r.CONVOCATORIAIDRUBRO
         WHERE r.RUBROPERFILUT = 1 AND r.RUBROACTIVO = 1
-          AND p.PROYECTOID = :1
+          AND p.PROYECTOID = $1
         ORDER BY r.RUBROID ASC`,
       [proyectoId]
     )
@@ -2357,9 +2357,9 @@ export class ProyectosService {
 
   async getHabilidadesUT(afId: number) {
     const rows = await this.dataSource.query(
-      `SELECT AFHABILIDADID AS "id", TRIM(AFHABILIDADNOMBRE) AS "nombre"
+      `SELECT AFHABILIDADID AS "id", btrim((AFHABILIDADNOMBRE)::text) AS "nombre"
          FROM AFHABILIDAD
-        WHERE ACCIONFORMACIONID = :1 AND TRIM(AFHABILIDADNOMBRE) IS NOT NULL AND LENGTH(TRIM(AFHABILIDADNOMBRE)) > 2
+        WHERE ACCIONFORMACIONID = $1 AND btrim((AFHABILIDADNOMBRE)::text) IS NOT NULL AND LENGTH(btrim((AFHABILIDADNOMBRE)::text)) > 2
         ORDER BY AFHABILIDADNOMBRE ASC`,
       [afId],
     )
@@ -2379,7 +2379,7 @@ export class ProyectosService {
 
   private async getModalidadAF(afId: number): Promise<number> {
     const [row] = await this.dataSource.query(
-      `SELECT MODALIDADFORMACIONID AS "m" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+      `SELECT MODALIDADFORMACIONID AS "m" FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     return Number(row?.m ?? 1)
@@ -2400,14 +2400,14 @@ export class ProyectosService {
       `SELECT ut.UNIDADTEMATICAID  AS "utId",
               ut.UNIDADTEMATICANUMERO AS "numero",
               ut.UNIDADTEMATICANOMBRE AS "nombre",
-              NVL(ut.UNIDADTEMATICAHORASPP,0)+NVL(ut.UNIDADTEMATICAHORASPV,0)+
-              NVL(ut.UNIDADTEMATICAHORASPPAT,0)+NVL(ut.UNIDADTEMATICAHORASPHIB,0) AS "totalPrac",
-              NVL(ut.UNIDADTEMATICAHORASTP,0)+NVL(ut.UNIDADTEMATICAHORASTV,0)+
-              NVL(ut.UNIDADTEMATICAHORASTPAT,0)+NVL(ut.UNIDADTEMATICAHORASTHIB,0) AS "totalTeor",
+              COALESCE(ut.UNIDADTEMATICAHORASPP,0)+COALESCE(ut.UNIDADTEMATICAHORASPV,0)+
+              COALESCE(ut.UNIDADTEMATICAHORASPPAT,0)+COALESCE(ut.UNIDADTEMATICAHORASPHIB,0) AS "totalPrac",
+              COALESCE(ut.UNIDADTEMATICAHORASTP,0)+COALESCE(ut.UNIDADTEMATICAHORASTV,0)+
+              COALESCE(ut.UNIDADTEMATICAHORASTPAT,0)+COALESCE(ut.UNIDADTEMATICAHORASTHIB,0) AS "totalTeor",
               ut.UNIDADTEMATICAESTRANSVERSAL AS "esTransversal",
               ut.UNIDADTEMATICAFECHAREGISTRO AS "fechaRegistro"
          FROM UNIDADTEMATICA ut
-        WHERE ut.ACCIONFORMACIONID = :1
+        WHERE ut.ACCIONFORMACIONID = $1
         ORDER BY ut.UNIDADTEMATICANUMERO ASC`,
       [afId],
     )
@@ -2437,7 +2437,7 @@ export class ProyectosService {
               art.ARTICULACIONTERRITORIALNOMBRE    AS "articulacionTerritorialNombre"
          FROM UNIDADTEMATICA ut
          LEFT JOIN ARTICULACIONTERRITORIAL art ON art.ARTICULACIONTERRITORIALID = ut.ARTICULACIONTERRITORIALID
-        WHERE ut.UNIDADTEMATICAID = :1`,
+        WHERE ut.UNIDADTEMATICAID = $1`,
       [utId],
     )
     if (!rows.length) throw new NotFoundException('Unidad temática no encontrada')
@@ -2446,23 +2446,23 @@ export class ProyectosService {
       this.dataSource.query(
         `SELECT a.ACTIVIDADUTID     AS "actId",
                 a.UTACTIVIDADESID   AS "actividadId",
-                TRIM(c.UTACTIVIDADESNOMBRE) AS "nombre",
+                btrim((c.UTACTIVIDADESNOMBRE)::text) AS "nombre",
                 a.ACTIVIDADUTOTRO   AS "otro"
            FROM ACTIVIDADUT a
            JOIN UTACTIVIDADES c ON c.UTACTIVIDADESID = a.UTACTIVIDADESID
-          WHERE a.UNIDADTEMATICAID = :1
+          WHERE a.UNIDADTEMATICAID = $1
           ORDER BY a.ACTIVIDADUTID ASC`,
         [utId],
       ),
       this.dataSource.query(
         `SELECT p.PERFILUTID     AS "perfilId",
                 p.RUBROIDUT      AS "rubroId",
-                TRIM(r.RUBRONOMBRE) AS "rubroNombre",
+                btrim((r.RUBRONOMBRE)::text) AS "rubroNombre",
                 p.PERFILUTHORASCAP AS "horasCap",
                 p.PERFILUTDIAS    AS "dias"
            FROM PERFILUT p
            JOIN RUBRO r ON r.RUBROID = p.RUBROIDUT
-          WHERE p.UNIDADTEMATICAID = :1
+          WHERE p.UNIDADTEMATICAID = $1
           ORDER BY p.PERFILUTID ASC`,
         [utId],
       ),
@@ -2489,7 +2489,7 @@ export class ProyectosService {
     await this.validarArticulacion5pct(afId, dto.articulacionTerritorialId, dto.horasPrac, dto.horasTeor)
 
     const [{ nextNum }] = await this.dataSource.query(
-      `SELECT NVL(MAX(UNIDADTEMATICANUMERO), 0) + 1 AS "nextNum" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COALESCE(MAX(UNIDADTEMATICANUMERO), 0) + 1 AS "nextNum" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     const esArticulacion = dto.articulacionTerritorialId ? 1 : 0
@@ -2529,11 +2529,11 @@ export class ProyectosService {
   ): Promise<void> {
     if (!articulacionTerritorialId) return
     const [af] = await this.dataSource.query(
-      `SELECT TRIM(te.TIPOEVENTONOMBRE)             AS "tipoEvento",
+      `SELECT btrim((te.TIPOEVENTONOMBRE)::text)             AS "tipoEvento",
               af.ACCIONFORMACIONNUMHORAGRUPO        AS "horasGrupo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = af.TIPOEVENTOID
-        WHERE af.ACCIONFORMACIONID = :1`,
+        WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!af) return
@@ -2554,18 +2554,18 @@ export class ProyectosService {
   private async calcularWarningsUTs(afId: number): Promise<string[]> {
     const warnings: string[] = []
     const [af] = await this.dataSource.query(
-      `SELECT TRIM(te.TIPOEVENTONOMBRE)        AS "tipoEvento",
+      `SELECT btrim((te.TIPOEVENTONOMBRE)::text)        AS "tipoEvento",
               af.ACCIONFORMACIONNUMHORAGRUPO   AS "horasGrupo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te ON te.TIPOEVENTOID = af.TIPOEVENTOID
-        WHERE af.ACCIONFORMACIONID = :1`,
+        WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!af) return warnings
     const tipo = String(af.tipoEvento ?? '').toUpperCase().trim()
     const horasGrupo = Number(af.horasGrupo) || 0
     const [{ totUTs }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "totUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     const totUTsN = Number(totUTs) || 0
@@ -2587,15 +2587,15 @@ export class ProyectosService {
     // #4 — TALLER ≥ 60% horas prácticas
     if (tipo === 'TALLER') {
       const [{ horasPrac, horasTeor }] = await this.dataSource.query(
-        `SELECT NVL(SUM(
-           NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
-           NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)
+        `SELECT COALESCE(SUM(
+           COALESCE(UNIDADTEMATICAHORASPP,0)+COALESCE(UNIDADTEMATICAHORASPV,0)+
+           COALESCE(UNIDADTEMATICAHORASPPAT,0)+COALESCE(UNIDADTEMATICAHORASPHIB,0)
          ),0) AS "horasPrac",
-                NVL(SUM(
-           NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
-           NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
+                COALESCE(SUM(
+           COALESCE(UNIDADTEMATICAHORASTP,0)+COALESCE(UNIDADTEMATICAHORASTV,0)+
+           COALESCE(UNIDADTEMATICAHORASTPAT,0)+COALESCE(UNIDADTEMATICAHORASTHIB,0)
          ),0) AS "horasTeor"
-           FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+           FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
         [afId],
       )
       const total = Number(horasPrac) + Number(horasTeor)
@@ -2623,7 +2623,7 @@ export class ProyectosService {
   }) {
     await this.validarEdicionPermitidaPorUt(utId)
     const [utRow] = await this.dataSource.query(
-      `SELECT ACCIONFORMACIONID AS "afId" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`, [utId],
+      `SELECT ACCIONFORMACIONID AS "afId" FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = $1`, [utId],
     )
     if (!utRow) throw new NotFoundException('Unidad temática no encontrada')
     const afId = Number(utRow.afId)
@@ -2636,22 +2636,22 @@ export class ProyectosService {
 
     await this.dataSource.query(
       `UPDATE UNIDADTEMATICA
-          SET UNIDADTEMATICANOMBRE            = :1,
-              UNIDADTEMATICACOMPETENCIAS      = :2,
-              UNIDADTEMATICACONTENIDO         = :3,
-              UNIDADTEMATICAJUSTACTIVIDAD     = :4,
-              UNIDADTEMATICAHORASPP           = :5,
-              UNIDADTEMATICAHORASPV           = :6,
-              UNIDADTEMATICAHORASPPAT         = :7,
-              UNIDADTEMATICAHORASPHIB         = :8,
-              UNIDADTEMATICAHORASTP           = :9,
-              UNIDADTEMATICAHORASTV           = :10,
-              UNIDADTEMATICAHORASTPAT         = :11,
-              UNIDADTEMATICAHORASTHIB         = :12,
-              UNIDADTEMATICAESTRANSVERSAL     = :13,
-              UNIDADTEMATICAHORASTRANSVERSAL  = :14,
-              ARTICULACIONTERRITORIALID       = :15
-        WHERE UNIDADTEMATICAID = :16`,
+          SET UNIDADTEMATICANOMBRE            = $1,
+              UNIDADTEMATICACOMPETENCIAS      = $2,
+              UNIDADTEMATICACONTENIDO         = $3,
+              UNIDADTEMATICAJUSTACTIVIDAD     = $4,
+              UNIDADTEMATICAHORASPP           = $5,
+              UNIDADTEMATICAHORASPV           = $6,
+              UNIDADTEMATICAHORASPPAT         = $7,
+              UNIDADTEMATICAHORASPHIB         = $8,
+              UNIDADTEMATICAHORASTP           = $9,
+              UNIDADTEMATICAHORASTV           = $10,
+              UNIDADTEMATICAHORASTPAT         = $11,
+              UNIDADTEMATICAHORASTHIB         = $12,
+              UNIDADTEMATICAESTRANSVERSAL     = $13,
+              UNIDADTEMATICAHORASTRANSVERSAL  = $14,
+              ARTICULACIONTERRITORIALID       = $15
+        WHERE UNIDADTEMATICAID = $16`,
       [dto.nombre.trim(), dto.competencias?.trim() ?? null, dto.contenido?.trim() ?? null,
        dto.justActividad?.trim() ?? null,
        h.pp, h.pv, h.ppat, h.phib, h.tp, h.tv, h.tpat, h.thib,
@@ -2665,15 +2665,15 @@ export class ProyectosService {
 
   async eliminarUT(utId: number) {
     await this.validarEdicionPermitidaPorUt(utId)
-    await this.dataSource.query(`DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID = :1`, [utId])
-    await this.dataSource.query(`DELETE FROM PERFILUT WHERE UNIDADTEMATICAID = :1`, [utId])
-    await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = :1`, [utId])
+    await this.dataSource.query(`DELETE FROM ACTIVIDADUT WHERE UNIDADTEMATICAID = $1`, [utId])
+    await this.dataSource.query(`DELETE FROM PERFILUT WHERE UNIDADTEMATICAID = $1`, [utId])
+    await this.dataSource.query(`DELETE FROM UNIDADTEMATICA WHERE UNIDADTEMATICAID = $1`, [utId])
     return { message: 'Unidad temática eliminada' }
   }
 
   async agregarActividadUT(utId: number, dto: { actividadId: number; otro?: string | null }) {
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM ACTIVIDADUT WHERE UNIDADTEMATICAID = :1 AND UTACTIVIDADESID = :2`,
+      `SELECT COUNT(1) AS "dup" FROM ACTIVIDADUT WHERE UNIDADTEMATICAID = $1 AND UTACTIVIDADESID = $2`,
       [utId, dto.actividadId],
     )
     if (Number(dup) > 0) throw new BadRequestException('La actividad ya está registrada en esta UT')
@@ -2687,18 +2687,18 @@ export class ProyectosService {
   }
 
   async eliminarActividadUT(actId: number) {
-    await this.dataSource.query(`DELETE FROM ACTIVIDADUT WHERE ACTIVIDADUTID = :1`, [actId])
+    await this.dataSource.query(`DELETE FROM ACTIVIDADUT WHERE ACTIVIDADUTID = $1`, [actId])
     return { message: 'Actividad eliminada' }
   }
 
   async agregarPerfilUT(utId: number, dto: { rubroId: number; horasCap: number; dias?: number | null }) {
     const [{ cnt }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "cnt" FROM PERFILUT WHERE UNIDADTEMATICAID = :1`, [utId],
+      `SELECT COUNT(1) AS "cnt" FROM PERFILUT WHERE UNIDADTEMATICAID = $1`, [utId],
     )
     if (Number(cnt) >= 5) throw new BadRequestException('Máximo 5 perfiles de capacitador por UT')
 
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM PERFILUT WHERE UNIDADTEMATICAID = :1 AND RUBROIDUT = :2`,
+      `SELECT COUNT(1) AS "dup" FROM PERFILUT WHERE UNIDADTEMATICAID = $1 AND RUBROIDUT = $2`,
       [utId, dto.rubroId],
     )
     if (Number(dup) > 0) throw new BadRequestException('Este perfil ya está registrado en la UT')
@@ -2714,7 +2714,7 @@ export class ProyectosService {
   }
 
   async eliminarPerfilUT(perfilId: number) {
-    await this.dataSource.query(`DELETE FROM PERFILUT WHERE PERFILUTID = :1`, [perfilId])
+    await this.dataSource.query(`DELETE FROM PERFILUT WHERE PERFILUTID = $1`, [perfilId])
     return { message: 'Perfil eliminado' }
   }
 
@@ -2733,7 +2733,7 @@ export class ProyectosService {
     return this.dataSource.query(
       `SELECT AFCOMPONENTEID AS "id", AFCOMPONENTENOMBRE AS "nombre"
          FROM AFCOMPONENTE
-        WHERE RETONACIONALID = :1
+        WHERE RETONACIONALID = $1
           AND (AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1)
         ORDER BY AFCOMPONENTEID`,
       [retoId],
@@ -2755,7 +2755,7 @@ export class ProyectosService {
     return this.dataSource.query(
       `SELECT AFCOMPONENTEID AS "id", AFCOMPONENTENOMBRE AS "nombre"
          FROM AFCOMPONENTE
-        WHERE AFCOMPONENTETIPO = :1
+        WHERE AFCOMPONENTETIPO = $1
           AND (AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1)
         ORDER BY AFCOMPONENTEID`,
       [tipo],
@@ -2773,7 +2773,7 @@ export class ProyectosService {
               c.RETONACIONALID AS "retoNacionalId"
          FROM ACCIONFORMACION a
          LEFT JOIN AFCOMPONENTE c ON c.AFCOMPONENTEID = a.ACCIONFORMACIONCOMPONENTEID
-        WHERE a.ACCIONFORMACIONID = :1`,
+        WHERE a.ACCIONFORMACIONID = $1`,
       [afId],
     )
     return {
@@ -2796,12 +2796,12 @@ export class ProyectosService {
   }) {
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION
-          SET ACCIONFORMACIONCOMPONENTEID = :1,
-              ACCIONFORMACIONCOMPOD = :2,
-              ACCIONFORMACIONJUSTIFICACION = :3,
-              ACCIONFORMACIONRESDESEM = :4,
-              ACCIONFORMACIONRESFORM = :5
-        WHERE ACCIONFORMACIONID = :6`,
+          SET ACCIONFORMACIONCOMPONENTEID = $1,
+              ACCIONFORMACIONCOMPOD = $2,
+              ACCIONFORMACIONJUSTIFICACION = $3,
+              ACCIONFORMACIONRESDESEM = $4,
+              ACCIONFORMACIONRESFORM = $5
+        WHERE ACCIONFORMACIONID = $6`,
       [dto.componenteId ?? null, dto.compod ?? null, dto.justificacion ?? null, dto.resDesem ?? null, dto.resForm ?? null, afId],
     )
     return { message: 'Alineación guardada' }
@@ -2811,15 +2811,15 @@ export class ProyectosService {
 
   async getDepartamentos() {
     return this.dataSource.query(
-      `SELECT DEPARTAMENTOID AS "id", TRIM(DEPARTAMENTONOMBRE) AS "nombre"
+      `SELECT DEPARTAMENTOID AS "id", btrim((DEPARTAMENTONOMBRE)::text) AS "nombre"
          FROM DEPARTAMENTO ORDER BY DEPARTAMENTONOMBRE`,
     )
   }
 
   async getCiudadesByDepto(deptoId: number) {
     return this.dataSource.query(
-      `SELECT CIUDADID AS "id", TRIM(CIUDADNOMBRE) AS "nombre"
-         FROM CIUDAD WHERE DEPARTAMENTOID = :1 ORDER BY CIUDADNOMBRE`,
+      `SELECT CIUDADID AS "id", btrim((CIUDADNOMBRE)::text) AS "nombre"
+         FROM CIUDAD WHERE DEPARTAMENTOID = $1 ORDER BY CIUDADNOMBRE`,
       [deptoId],
     )
   }
@@ -2832,8 +2832,8 @@ export class ProyectosService {
       `SELECT g.AFGRUPOID AS "grupoId",
               g.AFGRUPONUMERO AS "grupoNumero",
               g.AFGRUPOJUSTIFICACION AS "justificacion",
-              NVL(t.totalBenef, 0)    AS "totalBenef",
-              NVL(t.numCoberturas, 0) AS "numCoberturas"
+              COALESCE(t.totalBenef, 0)    AS "totalBenef",
+              COALESCE(t.numCoberturas, 0) AS "numCoberturas"
          FROM AFGRUPO g
          LEFT JOIN (
            SELECT AFGRUPOID,
@@ -2842,7 +2842,7 @@ export class ProyectosService {
              FROM AFGRUPOCOBERTURA
             GROUP BY AFGRUPOID
          ) t ON t.AFGRUPOID = g.AFGRUPOID
-        WHERE g.ACCIONFORMACIONID = :1
+        WHERE g.ACCIONFORMACIONID = $1
         ORDER BY g.AFGRUPONUMERO`,
       [afId],
     )
@@ -2856,7 +2856,7 @@ export class ProyectosService {
   async crearGrupo(afId: number) {
     await this.validarEdicionPermitidaPorAf(afId)
     const [{ nextNum }] = await this.dataSource.query(
-      `SELECT NVL(MAX(AFGRUPONUMERO), 0) + 1 AS "nextNum" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COALESCE(MAX(AFGRUPONUMERO), 0) + 1 AS "nextNum" FROM AFGRUPO WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     const grupoId = await insertarConId(this.dataSource, 'AFGRUPO', 'AFGRUPOID', { maxMasUno: true }, {
@@ -2868,14 +2868,14 @@ export class ProyectosService {
 
   async eliminarGrupo(grupoId: number) {
     await this.validarEdicionPermitidaPorGrupo(grupoId)
-    await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1`, [grupoId])
-    await this.dataSource.query(`DELETE FROM AFGRUPO WHERE AFGRUPOID = :1`, [grupoId])
+    await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = $1`, [grupoId])
+    await this.dataSource.query(`DELETE FROM AFGRUPO WHERE AFGRUPOID = $1`, [grupoId])
     return { message: 'Grupo eliminado' }
   }
 
   async guardarJustificacionGrupo(grupoId: number, justificacion: string | null) {
     await this.dataSource.query(
-      `UPDATE AFGRUPO SET AFGRUPOJUSTIFICACION = :1 WHERE AFGRUPOID = :2`,
+      `UPDATE AFGRUPO SET AFGRUPOJUSTIFICACION = $1 WHERE AFGRUPOID = $2`,
       [justificacion ?? null, grupoId],
     )
     return { message: 'Justificación guardada' }
@@ -2885,16 +2885,16 @@ export class ProyectosService {
     return this.dataSource.query(
       `SELECT c.AFGRUPOCOBERTURAID AS "cobId",
               c.DEPARTAMENTOGRUPOID AS "deptoId",
-              TRIM(d.DEPARTAMENTONOMBRE) AS "deptoNombre",
+              btrim((d.DEPARTAMENTONOMBRE)::text) AS "deptoNombre",
               c.CIUDADGRUPOID AS "ciudadId",
-              TRIM(ci.CIUDADNOMBRE) AS "ciudadNombre",
+              btrim((ci.CIUDADNOMBRE)::text) AS "ciudadNombre",
               c.AFGRUPOCOBERTURABENEF AS "benef",
-              NVL(c.AFGRUPOCOBERTURAMOD, 'P') AS "modal",
-              NVL(c.AFGRUPOCOBERTURARURAL, 0) AS "rural"
+              COALESCE(c.AFGRUPOCOBERTURAMOD, 'P') AS "modal",
+              COALESCE(c.AFGRUPOCOBERTURARURAL, 0) AS "rural"
          FROM AFGRUPOCOBERTURA c
          LEFT JOIN DEPARTAMENTO d ON d.DEPARTAMENTOID = c.DEPARTAMENTOGRUPOID
          LEFT JOIN CIUDAD ci ON ci.CIUDADID = c.CIUDADGRUPOID
-        WHERE c.AFGRUPOID = :1
+        WHERE c.AFGRUPOID = $1
         ORDER BY c.AFGRUPOCOBERTURAID`,
       [grupoId],
     )
@@ -2906,12 +2906,12 @@ export class ProyectosService {
     await this.validarEdicionPermitidaPorAf(afId)
     // QA #5 — la cobertura del grupo debe sumar exacto los beneficiarios esperados
     const [af] = await this.dataSource.query(
-      `SELECT NVL(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
-              NVL(af.ACCIONFORMACIONBENEFVIGRUPO, 0) AS "benefViGrupo",
-              TRIM(mf.MODALIDADFORMACIONNOMBRE)      AS "modalidad"
+      `SELECT COALESCE(af.ACCIONFORMACIONBENEFGRUPO, 0)   AS "benefGrupo",
+              COALESCE(af.ACCIONFORMACIONBENEFVIGRUPO, 0) AS "benefViGrupo",
+              btrim((mf.MODALIDADFORMACIONNOMBRE)::text)      AS "modalidad"
          FROM ACCIONFORMACION af
          LEFT JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
-        WHERE af.ACCIONFORMACIONID = :1`,
+        WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!af) throw new NotFoundException('Acción de formación no encontrada')
@@ -2941,7 +2941,7 @@ export class ProyectosService {
       )
     }
 
-    await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = :1`, [grupoId])
+    await this.dataSource.query(`DELETE FROM AFGRUPOCOBERTURA WHERE AFGRUPOID = $1`, [grupoId])
     for (const cob of coberturas) {
       await insertarConId(this.dataSource, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
         AFGRUPOID: grupoId,
@@ -2961,16 +2961,16 @@ export class ProyectosService {
   async getTiposAmbiente() {
     // los inactivos siguen en BD por integridad referencial
     return this.dataSource.query(
-      `SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre"
+      `SELECT TIPOAMBIENTEID AS "id", btrim((TIPOAMBIENTENOMBRE)::text) AS "nombre"
          FROM TIPOAMBIENTE
-        WHERE NVL(TIPOAMBIENTEACTIVO, 1) = 1
+        WHERE COALESCE(TIPOAMBIENTEACTIVO, 1) = 1
         ORDER BY TIPOAMBIENTEID`,
     )
   }
 
   async getGestionConocimientos() {
     return this.dataSource.query(
-      `SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre"
+      `SELECT GESTIONCONOCIMIENTOID AS "id", btrim((GESTIONCONOCIMIENTONOMBRE)::text) AS "nombre"
          FROM GESTIONCONOCIMIENTO
         WHERE GESTIONCONOCIMIENTOESTADO = 1
         ORDER BY GESTIONCONOCIMIENTOID`,
@@ -2979,7 +2979,7 @@ export class ProyectosService {
 
   async getMaterialFormacionCat() {
     return this.dataSource.query(
-      `SELECT MATERIALFORMACIONID AS "id", TRIM(MATERIALFORMACIONNOMBRE) AS "nombre"
+      `SELECT MATERIALFORMACIONID AS "id", btrim((MATERIALFORMACIONNOMBRE)::text) AS "nombre"
          FROM MATERIALFORMACION
         WHERE MATERIALFORMACIONESTADO = 1
         ORDER BY MATERIALFORMACIONID`,
@@ -2988,7 +2988,7 @@ export class ProyectosService {
 
   async getRecursosDidacticosCat() {
     return this.dataSource.query(
-      `SELECT RECURSOSDIDACTICOSID AS "id", TRIM(RECURSOSDIDACTICOSNOMBRE) AS "nombre"
+      `SELECT RECURSOSDIDACTICOSID AS "id", btrim((RECURSOSDIDACTICOSNOMBRE)::text) AS "nombre"
          FROM RECURSOSDIDACTICOS
         WHERE RECURSOSDIDACTICOSESTADO = 1
         ORDER BY RECURSOSDIDACTICOSID`,
@@ -3002,24 +3002,24 @@ export class ProyectosService {
               ACCIONFORMACIONJUSTMAT  AS "justMat",
               ACCIONFORMACIONINSUMO   AS "insumo",
               ACCIONFORMACIONJUSTINSUMO AS "justInsumo"
-         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     const [gestion] = await this.dataSource.query(
-      `SELECT GESTIONCONOCIMIENTOID AS "gestionConocimientoId" FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID = :1`,
+      `SELECT GESTIONCONOCIMIENTOID AS "gestionConocimientoId" FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID = $1`,
       [afId],
     ).then((r: unknown[]) => r.length ? r : [{}])
     const [material] = await this.dataSource.query(
-      `SELECT MATERIALFORMACIONID AS "materialFormacionId" FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID = :1`,
+      `SELECT MATERIALFORMACIONID AS "materialFormacionId" FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID = $1`,
       [afId],
     ).then((r: unknown[]) => r.length ? r : [{}])
     const recursos = await this.dataSource.query(
       `SELECT r.RECURSOSDIDACTICOSAFID AS "rdafId",
               r.RECURSOSDIDACTICOSID AS "recursoId",
-              TRIM(c.RECURSOSDIDACTICOSNOMBRE) AS "nombre"
+              btrim((c.RECURSOSDIDACTICOSNOMBRE)::text) AS "nombre"
          FROM RECURSOSDIDACTICOSAF r
          JOIN RECURSOSDIDACTICOS c ON c.RECURSOSDIDACTICOSID = r.RECURSOSDIDACTICOSID
-        WHERE r.ACCIONFORMACIONID = :1
+        WHERE r.ACCIONFORMACIONID = $1
         ORDER BY r.RECURSOSDIDACTICOSAFID`,
       [afId],
     )
@@ -3044,21 +3044,21 @@ export class ProyectosService {
   }) {
     await this.dataSource.query(
       `UPDATE ACCIONFORMACION SET
-         TIPOAMBIENTEID = :1,
-         ACCIONFORMACIONJUSTMAT = :2,
-         ACCIONFORMACIONINSUMO = :3,
-         ACCIONFORMACIONJUSTINSUMO = :4
-       WHERE ACCIONFORMACIONID = :5`,
+         TIPOAMBIENTEID = $1,
+         ACCIONFORMACIONJUSTMAT = $2,
+         ACCIONFORMACIONINSUMO = $3,
+         ACCIONFORMACIONJUSTINSUMO = $4
+       WHERE ACCIONFORMACIONID = $5`,
       [dto.tipoAmbienteId ?? null, dto.justMat ?? null, dto.insumo ?? null, dto.justInsumo ?? null, afId],
     )
-    await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM AFGESTIONCONOCIMIENTO WHERE ACCIONFORMACIONID = $1`, [afId])
     if (dto.gestionConocimientoId) {
       await insertarConId(this.dataSource, 'AFGESTIONCONOCIMIENTO', 'AFGESTIONCONOCIMIENTOID', { maxMasUno: true }, {
         ACCIONFORMACIONID: afId,
         GESTIONCONOCIMIENTOID: dto.gestionConocimientoId,
       })
     }
-    await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID = :1`, [afId])
+    await this.dataSource.query(`DELETE FROM MATERIALFORMACIONAF WHERE ACCIONFORMACIONID = $1`, [afId])
     if (dto.materialFormacionId) {
       await insertarConId(this.dataSource, 'MATERIALFORMACIONAF', 'MATERIALFORMACIONAFID', { maxMasUno: true }, {
         ACCIONFORMACIONID: afId,
@@ -3070,7 +3070,7 @@ export class ProyectosService {
 
   async agregarRecursoAF(afId: number, recursoId: number) {
     const [{ dup }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "dup" FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID = :1 AND RECURSOSDIDACTICOSID = :2`,
+      `SELECT COUNT(1) AS "dup" FROM RECURSOSDIDACTICOSAF WHERE ACCIONFORMACIONID = $1 AND RECURSOSDIDACTICOSID = $2`,
       [afId, recursoId],
     )
     if (Number(dup) > 0) throw new BadRequestException('El recurso ya está registrado')
@@ -3082,7 +3082,7 @@ export class ProyectosService {
   }
 
   async eliminarRecursoAF(rdafId: number) {
-    await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE RECURSOSDIDACTICOSAFID = :1`, [rdafId])
+    await this.dataSource.query(`DELETE FROM RECURSOSDIDACTICOSAF WHERE RECURSOSDIDACTICOSAFID = $1`, [rdafId])
     return { message: 'Recurso eliminado' }
   }
 
@@ -3109,7 +3109,7 @@ export class ProyectosService {
          FROM ACCIONFORMACION af
          JOIN MODALIDADFORMACION mf ON mf.MODALIDADFORMACIONID = af.MODALIDADFORMACIONID
          JOIN PROYECTO p ON p.PROYECTOID = af.PROYECTOID
-        WHERE af.ACCIONFORMACIONID = :1`, [afId]
+        WHERE af.ACCIONFORMACIONID = $1`, [afId]
     )
     if (!af) throw new BadRequestException('AF no encontrada')
 
@@ -3133,7 +3133,7 @@ export class ProyectosService {
       `SELECT r.RUBROID       AS "rubroId",
               r.RUBROCODIGO   AS "codigo",
               r.RUBRONOMBRE   AS "nombre",
-              DBMS_LOB.SUBSTR(r.RUBRODESCRIPCION, 2000, 1) AS "descripcion",
+              substr(r.RUBRODESCRIPCION, 1, 2000) AS "descripcion",
               r.RUBROTOPE     AS "tope",
               r.RUBROPAQUETE  AS "paquete",
               r.RUBROCASO     AS "caso",
@@ -3142,7 +3142,7 @@ export class ProyectosService {
               r.RUBROPERFILUT AS "perfilUt",
               r.RUBROMODALIDAD AS "modalidades"
          FROM RUBRO r
-        WHERE r.CONVOCATORIAIDRUBRO = :1
+        WHERE r.CONVOCATORIAIDRUBRO = $1
           AND r.RUBROACTIVO = 1
           AND r.RUBROAF = 1
           AND ${filtroModalidad}
@@ -3152,7 +3152,7 @@ export class ProyectosService {
               SELECT DISTINCT p.RUBROIDUT
                 FROM PERFILUT p
                 JOIN UNIDADTEMATICA ut ON ut.UNIDADTEMATICAID = p.UNIDADTEMATICAID
-               WHERE ut.ACCIONFORMACIONID = :${afIdParamIdx}
+               WHERE ut.ACCIONFORMACIONID = $${afIdParamIdx}
             )
           )
         ORDER BY r.RUBROID`, params,
@@ -3185,8 +3185,8 @@ export class ProyectosService {
               ar.AFRUBROPORCENTAJEDINERO         AS "porcDinero"
          FROM AFRUBRO ar
          JOIN RUBRO r ON r.RUBROID = ar.RUBROID
-        WHERE ar.ACCIONFORMACIONID = :1
-          AND TRIM(r.RUBROCODIGO) NOT IN ('R09', 'R015')
+        WHERE ar.ACCIONFORMACIONID = $1
+          AND btrim((r.RUBROCODIGO)::text) NOT IN ('R09', 'R015')
         ORDER BY ar.AFRUBROID`, [afId]
     )
     return rows
@@ -3199,7 +3199,7 @@ export class ProyectosService {
               af.ACCIONFORMACIONNUMHORAGRUPO    AS "numHorasGrupo",
               af.TIPOEVENTOID                  AS "tipoEventoId",
               af.MODALIDADFORMACIONID          AS "modalidadId"
-         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
+         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!af) return { ok: false, issues: ['AF no encontrada'] }
@@ -3213,31 +3213,31 @@ export class ProyectosService {
       issues.push('Falta definir el número de horas y grupos (guardar la sección "Grupos y Beneficiarios").')
 
     const [{ gruposCreados }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`, [afId])
+      `SELECT COUNT(1) AS "gruposCreados" FROM AFGRUPO WHERE ACCIONFORMACIONID = $1`, [afId])
     if (Number(gruposCreados) < numGruposAF)
       issues.push(`Faltan grupos de cobertura: la AF tiene ${numGruposAF} grupos definidos pero solo ${Number(gruposCreados)} están creados.`)
 
     const [{ gruposSinCob }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "gruposSinCob" FROM AFGRUPO g
-        WHERE g.ACCIONFORMACIONID = :1
+        WHERE g.ACCIONFORMACIONID = $1
           AND NOT EXISTS (SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID)`,
       [afId])
     if (Number(gruposSinCob) > 0)
       issues.push(`${Number(gruposSinCob)} grupo(s) no tienen cobertura registrada. Complete la cobertura de cada grupo.`)
 
     const [{ totalUTs }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`, [afId])
+      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`, [afId])
     if (Number(totalUTs) === 0)
       issues.push('Debe registrar al menos una Unidad Temática.')
 
     if (numHorasGrupo > 0) {
       const [{ horasUTs }] = await this.dataSource.query(
-        `SELECT NVL(SUM(
-           NVL(UNIDADTEMATICAHORASPP,0)+NVL(UNIDADTEMATICAHORASPV,0)+
-           NVL(UNIDADTEMATICAHORASPPAT,0)+NVL(UNIDADTEMATICAHORASPHIB,0)+
-           NVL(UNIDADTEMATICAHORASTP,0)+NVL(UNIDADTEMATICAHORASTV,0)+
-           NVL(UNIDADTEMATICAHORASTPAT,0)+NVL(UNIDADTEMATICAHORASTHIB,0)
-         ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+        `SELECT COALESCE(SUM(
+           COALESCE(UNIDADTEMATICAHORASPP,0)+COALESCE(UNIDADTEMATICAHORASPV,0)+
+           COALESCE(UNIDADTEMATICAHORASPPAT,0)+COALESCE(UNIDADTEMATICAHORASPHIB,0)+
+           COALESCE(UNIDADTEMATICAHORASTP,0)+COALESCE(UNIDADTEMATICAHORASTV,0)+
+           COALESCE(UNIDADTEMATICAHORASTPAT,0)+COALESCE(UNIDADTEMATICAHORASTHIB,0)
+         ),0) AS "horasUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
         [afId])
       if (Number(horasUTs) < numHorasGrupo)
         issues.push(`Las horas de las UTs (${Number(horasUTs)}h) no cubren las horas por grupo de la AF (${numHorasGrupo}h). Las UTs se formulan por grupo y se replican en cada uno. Agregue más horas en las UTs.`)
@@ -3252,7 +3252,7 @@ export class ProyectosService {
               af.ACCIONFORMACIONNUMHORAGRUPO    AS "numHorasGrupo",
               af.TIPOEVENTOID                  AS "tipoEventoId",
               af.MODALIDADFORMACIONID          AS "modalidadId"
-         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = :1`,
+         FROM ACCIONFORMACION af WHERE af.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (!af) throw new BadRequestException('AF no encontrada')
@@ -3270,7 +3270,7 @@ export class ProyectosService {
     const [{ gruposSinCob }] = await this.dataSource.query(
       `SELECT COUNT(1) AS "gruposSinCob"
          FROM AFGRUPO g
-        WHERE g.ACCIONFORMACIONID = :1
+        WHERE g.ACCIONFORMACIONID = $1
           AND NOT EXISTS (
             SELECT 1 FROM AFGRUPOCOBERTURA c WHERE c.AFGRUPOID = g.AFGRUPOID
           )`,
@@ -3281,7 +3281,7 @@ export class ProyectosService {
 
     // 3. El número de grupos con cobertura debe coincidir con numGrupos de la AF
     const [{ gruposConCob }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "gruposConCob" FROM AFGRUPO WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "gruposConCob" FROM AFGRUPO WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(gruposConCob) < numGruposAF)
@@ -3289,7 +3289,7 @@ export class ProyectosService {
 
     // 4. Debe haber al menos una unidad temática
     const [{ totalUTs }] = await this.dataSource.query(
-      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :1`,
+      `SELECT COUNT(1) AS "totalUTs" FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(totalUTs) === 0)
@@ -3297,13 +3297,13 @@ export class ProyectosService {
 
     // 5. Las horas de las UTs deben sumar el total de horas de la AF
     const [{ horasUTs }] = await this.dataSource.query(
-      `SELECT NVL(SUM(
-         NVL(ut.UNIDADTEMATICAHORASPP,0) + NVL(ut.UNIDADTEMATICAHORASPV,0) +
-         NVL(ut.UNIDADTEMATICAHORASPPAT,0) + NVL(ut.UNIDADTEMATICAHORASPHIB,0) +
-         NVL(ut.UNIDADTEMATICAHORASTP,0) + NVL(ut.UNIDADTEMATICAHORASTV,0) +
-         NVL(ut.UNIDADTEMATICAHORASTPAT,0) + NVL(ut.UNIDADTEMATICAHORASTHIB,0)
+      `SELECT COALESCE(SUM(
+         COALESCE(ut.UNIDADTEMATICAHORASPP,0) + COALESCE(ut.UNIDADTEMATICAHORASPV,0) +
+         COALESCE(ut.UNIDADTEMATICAHORASPPAT,0) + COALESCE(ut.UNIDADTEMATICAHORASPHIB,0) +
+         COALESCE(ut.UNIDADTEMATICAHORASTP,0) + COALESCE(ut.UNIDADTEMATICAHORASTV,0) +
+         COALESCE(ut.UNIDADTEMATICAHORASTPAT,0) + COALESCE(ut.UNIDADTEMATICAHORASTHIB,0)
        ), 0) AS "horasUTs"
-         FROM UNIDADTEMATICA ut WHERE ut.ACCIONFORMACIONID = :1`,
+         FROM UNIDADTEMATICA ut WHERE ut.ACCIONFORMACIONID = $1`,
       [afId],
     )
     if (Number(horasUTs) < numHorasGrupo)
@@ -3328,8 +3328,8 @@ export class ProyectosService {
 
     // validaciones del pliego SENA por codigo de rubro
     const [rubroInfo] = await this.dataSource.query(
-      `SELECT TRIM(RUBROCODIGO) AS "codigo", TRIM(RUBRONOMBRE) AS "nombre"
-         FROM RUBRO WHERE RUBROID = :1`,
+      `SELECT btrim((RUBROCODIGO)::text) AS "codigo", btrim((RUBRONOMBRE)::text) AS "nombre"
+         FROM RUBRO WHERE RUBROID = $1`,
       [rubroId],
     )
     const codigo = String(rubroInfo?.codigo ?? '').toUpperCase()
@@ -3337,7 +3337,7 @@ export class ProyectosService {
       `SELECT ACCIONFORMACIONNUMBENEF      AS "numBenef",
               ACCIONFORMACIONNUMHORAGRUPO  AS "numHorasGrupo",
               ACCIONFORMACIONNUMGRUPOS     AS "numGrupos"
-         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = :1`,
+         FROM ACCIONFORMACION WHERE ACCIONFORMACIONID = $1`,
       [afId],
     )
     const numBenefAF      = Number(afInfo?.numBenef) || 0
@@ -3398,31 +3398,31 @@ export class ProyectosService {
     const porcDinero  = totalRubro > 0 ? (contraDinero  / totalRubro) * 100 : 0
 
     const [existing] = await this.dataSource.query(
-      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = $1 AND RUBROID = $2`,
       [afId, rubroId]
     )
 
     if (existing) {
       await this.dataSource.query(
         `UPDATE AFRUBRO SET
-           AFRUBROJUSTIFICACION          = :1,
-           AFRUBRONUMHORAS               = :2,
-           AFRUBROCANTIDAD               = :3,
-           AFRUBROBENEFICIARIOS          = :4,
-           AFRUBRODIAS                   = :5,
-           AFRUBRONUMEROGRUPOS           = :6,
-           AFRUBROVALOR                  = :7,
-           AFRUBROCOFINANCIACION         = :8,
-           AFRUBROESPECIE                = :9,
-           AFRUBRODINERO                 = :10,
-           AFRUBROVALORMAXIMO            = :11,
-           AFRUBROVALORPORBENEFICIARIO   = :12,
-           AFRUBROPAQUETE                = :13,
-           AFRUBROPORCENTAJECOFINANCIACION = :14,
-           AFRUBROPORCENTAJEESPECIE      = :15,
-           AFRUBROPORCENTAJEDINERO       = :16,
+           AFRUBROJUSTIFICACION          = $1,
+           AFRUBRONUMHORAS               = $2,
+           AFRUBROCANTIDAD               = $3,
+           AFRUBROBENEFICIARIOS          = $4,
+           AFRUBRODIAS                   = $5,
+           AFRUBRONUMEROGRUPOS           = $6,
+           AFRUBROVALOR                  = $7,
+           AFRUBROCOFINANCIACION         = $8,
+           AFRUBROESPECIE                = $9,
+           AFRUBRODINERO                 = $10,
+           AFRUBROVALORMAXIMO            = $11,
+           AFRUBROVALORPORBENEFICIARIO   = $12,
+           AFRUBROPAQUETE                = $13,
+           AFRUBROPORCENTAJECOFINANCIACION = $14,
+           AFRUBROPORCENTAJEESPECIE      = $15,
+           AFRUBROPORCENTAJEDINERO       = $16,
            AFRUBROFECHAREGISTRO          = ${AHORA_UTC}
-         WHERE AFRUBROID = :17`,
+         WHERE AFRUBROID = $17`,
         [justificacion, numHoras, cantidad, beneficiarios, dias, numGrupos,
          totalRubro, cofSena, contraEspecie, contraDinero, valorMaximo, valorBenef,
          paquete, porcSena, porcEspecie, porcDinero, existing.id]
@@ -3457,11 +3457,11 @@ export class ProyectosService {
 
   async eliminarRubroAF(afId: number, afrubroid: number) {
     await this.validarEdicionPermitidaPorAf(afId)
-    await this.dataSource.query(`DELETE FROM AFRUBRO WHERE AFRUBROID = :1`, [afrubroid])
+    await this.dataSource.query(`DELETE FROM AFRUBRO WHERE AFRUBROID = $1`, [afrubroid])
     // Limpiar GO y Transferencia al modificar rubros
     await this.dataSource.query(
-      `DELETE FROM AFRUBRO ar WHERE ar.ACCIONFORMACIONID = :1
-         AND EXISTS (SELECT 1 FROM RUBRO r WHERE r.RUBROID = ar.RUBROID AND TRIM(r.RUBROCODIGO) IN ('R09','R015'))`,
+      `DELETE FROM AFRUBRO ar WHERE ar.ACCIONFORMACIONID = $1
+         AND EXISTS (SELECT 1 FROM RUBRO r WHERE r.RUBROID = ar.RUBROID AND btrim((r.RUBROCODIGO)::text) IN ('R09','R015'))`,
       [afId]
     )
     return { message: 'Rubro eliminado' }
@@ -3475,7 +3475,7 @@ export class ProyectosService {
          FROM RUBRO r
          JOIN PROYECTO p ON p.CONVOCATORIAID = r.CONVOCATORIAIDRUBRO
          JOIN ACCIONFORMACION af ON af.PROYECTOID = p.PROYECTOID
-        WHERE af.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = :2`, [afId, codigo]
+        WHERE af.ACCIONFORMACIONID = $1 AND btrim((r.RUBROCODIGO)::text) = $2`, [afId, codigo]
     )
     return row
   }
@@ -3487,7 +3487,7 @@ export class ProyectosService {
               ar.AFRUBROVALOR AS "total"
          FROM AFRUBRO ar
          JOIN RUBRO r ON r.RUBROID = ar.RUBROID
-        WHERE ar.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = 'R09'`, [afId]
+        WHERE ar.ACCIONFORMACIONID = $1 AND btrim((r.RUBROCODIGO)::text) = 'R09'`, [afId]
     )
     return row ?? null
   }
@@ -3502,14 +3502,14 @@ export class ProyectosService {
     const porcEspecie = total > 0 ? (dto.especie  / total) * 100 : 0
     const porcDinero  = total > 0 ? (dto.dinero   / total) * 100 : 0
     const [existing] = await this.dataSource.query(
-      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = $1 AND RUBROID = $2`,
       [afId, rubro.rubroId]
     )
     if (existing) {
       await this.dataSource.query(
-        `UPDATE AFRUBRO SET AFRUBROVALOR=:1, AFRUBROCOFINANCIACION=:2, AFRUBROESPECIE=:3, AFRUBRODINERO=:4,
-           AFRUBROPORCENTAJECOFINANCIACION=:5, AFRUBROPORCENTAJEESPECIE=:6, AFRUBROPORCENTAJEDINERO=:7,
-           AFRUBROCANTIDAD=1, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=:8`,
+        `UPDATE AFRUBRO SET AFRUBROVALOR=$1, AFRUBROCOFINANCIACION=$2, AFRUBROESPECIE=$3, AFRUBRODINERO=$4,
+           AFRUBROPORCENTAJECOFINANCIACION=$5, AFRUBROPORCENTAJEESPECIE=$6, AFRUBROPORCENTAJEDINERO=$7,
+           AFRUBROCANTIDAD=1, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=$8`,
         [total, dto.cofSena, dto.especie, dto.dinero, porcSena, porcEspecie, porcDinero, existing.id]
       )
       return { afrubroid: existing.id }
@@ -3541,7 +3541,7 @@ export class ProyectosService {
               ar.AFRUBROVALOR AS "valor"
          FROM AFRUBRO ar
          JOIN RUBRO r ON r.RUBROID = ar.RUBROID
-        WHERE ar.ACCIONFORMACIONID = :1 AND TRIM(r.RUBROCODIGO) = 'R015'`, [afId]
+        WHERE ar.ACCIONFORMACIONID = $1 AND btrim((r.RUBROCODIGO)::text) = 'R015'`, [afId]
     )
     return row ?? null
   }
@@ -3552,13 +3552,13 @@ export class ProyectosService {
     const rubro = await this.getRubroConvByCode(afId, 'R015')
     if (!rubro) throw new BadRequestException('Rubro Transferencia no encontrado para esta convocatoria')
     const [existing] = await this.dataSource.query(
-      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = :1 AND RUBROID = :2`,
+      `SELECT AFRUBROID AS "id" FROM AFRUBRO WHERE ACCIONFORMACIONID = $1 AND RUBROID = $2`,
       [afId, rubro.rubroId]
     )
     if (existing) {
       await this.dataSource.query(
-        `UPDATE AFRUBRO SET AFRUBROBENEFICIARIOS=:1, AFRUBROVALOR=:2, AFRUBRODINERO=:3,
-           AFRUBROPORCENTAJEDINERO=100, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=:4`,
+        `UPDATE AFRUBRO SET AFRUBROBENEFICIARIOS=$1, AFRUBROVALOR=$2, AFRUBRODINERO=$3,
+           AFRUBROPORCENTAJEDINERO=100, AFRUBROFECHAREGISTRO=${AHORA_UTC} WHERE AFRUBROID=$4`,
         [dto.beneficiarios, dto.valor, dto.valor, existing.id]
       )
       return { afrubroid: existing.id }
@@ -3585,10 +3585,10 @@ export class ProyectosService {
     // las AFs rechazadas dejan de sumar solo cuando los resultados ya son publicos
     const [proyHeader] = await this.dataSource.query(
       `SELECT p.PROYECTOESTADO                                AS "estado",
-              NVL(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
+              COALESCE(cv.CONVOCATORIARESULTADOSPUBLICADOS, 0)     AS "publicados"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA cv ON cv.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     const ocultar = proyHeader && this.debeOcultarResultados(perfilId, Number(proyHeader.estado), Number(proyHeader.publicados))
@@ -3598,7 +3598,7 @@ export class ProyectosService {
       AND NOT (
         EXISTS (SELECT 1 FROM PROYECTO p2 WHERE p2.PROYECTOID = af.PROYECTOID
                   AND p2.PROYECTOESTADO IN (3, 4))
-        AND NVL(af.ACCIONFORMACIONESTADOAPROBACION, 1) = 0
+        AND COALESCE(af.ACCIONFORMACIONESTADOAPROBACION, 1) = 0
       )`
 
     // 1. AFs con sus totales de rubros (excluyendo R09 y R015)
@@ -3606,11 +3606,11 @@ export class ProyectosService {
       `SELECT af.ACCIONFORMACIONID                                            AS "afId",
               af.ACCIONFORMACIONNUMERO                                        AS "numero",
               af.ACCIONFORMACIONNOMBRE                                        AS "nombre",
-              NVL(af.ACCIONFORMACIONNUMBENEF, 0)                              AS "beneficiarios",
-              NVL(t.cofSena, 0)                                               AS "cofSena",
-              NVL(t.contraEspecie, 0)                                         AS "contraEspecie",
-              NVL(t.contraDinero, 0)                                          AS "contraDinero",
-              NVL(t.total, 0)                                                 AS "total"
+              COALESCE(af.ACCIONFORMACIONNUMBENEF, 0)                              AS "beneficiarios",
+              COALESCE(t.cofSena, 0)                                               AS "cofSena",
+              COALESCE(t.contraEspecie, 0)                                         AS "contraEspecie",
+              COALESCE(t.contraDinero, 0)                                          AS "contraDinero",
+              COALESCE(t.total, 0)                                                 AS "total"
          FROM ACCIONFORMACION af
          LEFT JOIN (
               SELECT ar.ACCIONFORMACIONID,
@@ -3620,10 +3620,10 @@ export class ProyectosService {
                      SUM(ar.AFRUBROVALOR)          AS total
                 FROM AFRUBRO ar
                 JOIN RUBRO r ON r.RUBROID = ar.RUBROID
-               WHERE TRIM(r.RUBROCODIGO) NOT IN ('R09','R015')
+               WHERE btrim((r.RUBROCODIGO)::text) NOT IN ('R09','R015')
                GROUP BY ar.ACCIONFORMACIONID
          ) t ON t.ACCIONFORMACIONID = af.ACCIONFORMACIONID
-        WHERE af.PROYECTOID = :1
+        WHERE af.PROYECTOID = $1
         ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
@@ -3634,15 +3634,15 @@ export class ProyectosService {
       `SELECT af.ACCIONFORMACIONID         AS "afId",
               af.ACCIONFORMACIONNUMERO     AS "numero",
               af.ACCIONFORMACIONNOMBRE     AS "nombre",
-              NVL(ar.AFRUBROCOFINANCIACION, 0) AS "cofSena",
-              NVL(ar.AFRUBROESPECIE, 0)        AS "contraEspecie",
-              NVL(ar.AFRUBRODINERO, 0)         AS "contraDinero",
-              NVL(ar.AFRUBROVALOR, 0)          AS "total"
+              COALESCE(ar.AFRUBROCOFINANCIACION, 0) AS "cofSena",
+              COALESCE(ar.AFRUBROESPECIE, 0)        AS "contraEspecie",
+              COALESCE(ar.AFRUBRODINERO, 0)         AS "contraDinero",
+              COALESCE(ar.AFRUBROVALOR, 0)          AS "total"
          FROM ACCIONFORMACION af
          LEFT JOIN AFRUBRO ar
               ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
-             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R09')
-        WHERE af.PROYECTOID = :1
+             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE btrim((RUBROCODIGO)::text) = 'R09')
+        WHERE af.PROYECTOID = $1
         ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
@@ -3653,13 +3653,13 @@ export class ProyectosService {
       `SELECT af.ACCIONFORMACIONID         AS "afId",
               af.ACCIONFORMACIONNUMERO     AS "numero",
               af.ACCIONFORMACIONNOMBRE     AS "nombre",
-              NVL(ar.AFRUBROBENEFICIARIOS, 0) AS "beneficiarios",
-              NVL(ar.AFRUBROVALOR, 0)         AS "valor"
+              COALESCE(ar.AFRUBROBENEFICIARIOS, 0) AS "beneficiarios",
+              COALESCE(ar.AFRUBROVALOR, 0)         AS "valor"
          FROM ACCIONFORMACION af
          LEFT JOIN AFRUBRO ar
               ON ar.ACCIONFORMACIONID = af.ACCIONFORMACIONID
-             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE TRIM(RUBROCODIGO) = 'R015')
-        WHERE af.PROYECTOID = :1
+             AND ar.RUBROID IN (SELECT RUBROID FROM RUBRO WHERE btrim((RUBROCODIGO)::text) = 'R015')
+        WHERE af.PROYECTOID = $1
         ${filtroAfsAprobadas}
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
@@ -3672,7 +3672,7 @@ export class ProyectosService {
               p.PROYECTONOMBRE      AS "nombre"
          FROM PROYECTO p
          LEFT JOIN MODALIDAD m ON m.MODALIDADID = p.MODALIDADID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new BadRequestException('Proyecto no encontrado')
@@ -3680,7 +3680,7 @@ export class ProyectosService {
     // 5. Presupuesto guardado (si existe)
     const [presupuestoExistente] = await this.dataSource.query(
       `SELECT PRESUPUESTOID AS "id", PRESUPUESTOFECHAREGISTRO AS "fechaRegistro"
-         FROM PRESUPUESTO WHERE PROYECTOID = :1`,
+         FROM PRESUPUESTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
 
@@ -3860,7 +3860,7 @@ export class ProyectosService {
 
     // persistir
     const [existing] = await this.dataSource.query(
-      `SELECT PRESUPUESTOID AS "id" FROM PRESUPUESTO WHERE PROYECTOID = :1`,
+      `SELECT PRESUPUESTOID AS "id" FROM PRESUPUESTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
 
@@ -3884,22 +3884,22 @@ export class ProyectosService {
     if (existing) {
       await this.dataSource.query(
         `UPDATE PRESUPUESTO SET
-            PRESUPUESTOTOTALAF              = :1,
-            PRESUPUESTONUMEROBENEFICIARIOS  = :2,
-            PRESUPUESTOGASTOSOPERACION      = :3,
-            PRESUPUESTOGOCOFINANCIACION     = :4,
-            PRESUPUESTOGOESPECIE            = :5,
-            PRESUPUESTOGODINERO             = :6,
-            PRESUPUESTOVALORTRANSFERENCIA   = :7,
-            PRESUPUESTOBENEFICIARIOSTRANSF  = :8,
-            PRESUPUESTOPORCENTAJEGO         = :9,
-            PRESUPUESTOVALORAF              = :10,
-            PRESUPUESTOVALORTOTALPROYECTO   = :11,
-            PRESUPUESTOCOFINANCIACION       = :12,
-            PRESUPUESTOESPECIE              = :13,
-            PRESUPUESTODINERO               = :14,
+            PRESUPUESTOTOTALAF              = $1,
+            PRESUPUESTONUMEROBENEFICIARIOS  = $2,
+            PRESUPUESTOGASTOSOPERACION      = $3,
+            PRESUPUESTOGOCOFINANCIACION     = $4,
+            PRESUPUESTOGOESPECIE            = $5,
+            PRESUPUESTOGODINERO             = $6,
+            PRESUPUESTOVALORTRANSFERENCIA   = $7,
+            PRESUPUESTOBENEFICIARIOSTRANSF  = $8,
+            PRESUPUESTOPORCENTAJEGO         = $9,
+            PRESUPUESTOVALORAF              = $10,
+            PRESUPUESTOVALORTOTALPROYECTO   = $11,
+            PRESUPUESTOCOFINANCIACION       = $12,
+            PRESUPUESTOESPECIE              = $13,
+            PRESUPUESTODINERO               = $14,
             PRESUPUESTOFECHAREGISTRO        = ${AHORA_UTC}
-          WHERE PRESUPUESTOID = :15`,
+          WHERE PRESUPUESTOID = $15`,
         [...params, existing.id],
       )
       return { id: existing.id, message: 'Presupuesto del proyecto actualizado correctamente' }
@@ -3936,15 +3936,15 @@ export class ProyectosService {
               p.PROYECTOESTADO                                   AS "estado",
               p.EMPRESAID                                        AS "empresaId",
               p.CONVOCATORIAID                                   AS "convocatoriaId",
-              NVL(c.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
+              COALESCE(c.CONVOCATORIARESULTADOSPUBLICADOS, 0)         AS "resultadosPublicados",
               c.CONVOCATORIANOMBRE                               AS "convocatoria",
               m.MODALIDADNOMBRE                                  AS "modalidad",
               m.MODALIDADID                                      AS "modalidadId",
-              DBMS_LOB.SUBSTR(p.PROYECTOMOTIVORECHAZO, 2000, 1)  AS "motivoRechazo"
+              substr(p.PROYECTOMOTIVORECHAZO, 1, 2000)  AS "motivoRechazo"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA c ON c.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m    ON m.MODALIDADID    = p.MODALIDADID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -3994,7 +3994,7 @@ export class ProyectosService {
          LEFT JOIN TIPOEMPRESA te           ON te.TIPOEMPRESAID    = e.TIPOEMPRESAID
          LEFT JOIN TAMANOEMPRESA tam        ON tam.TAMANOEMPRESAID = e.TAMANOEMPRESAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = e.TIPOIDENTIFICACIONREP
-        WHERE e.EMPRESAID = :1`,
+        WHERE e.EMPRESAID = $1`,
       [empresaId],
     )
 
@@ -4003,7 +4003,7 @@ export class ProyectosService {
       `SELECT ms.MESASECTORIALNOMBRE AS "nombre"
          FROM EMPRESAMESASECTORIAL me
          JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = me.MESASECTORIALIDEMPRESA
-        WHERE me.EMPRESAIDMESASECTORIAL = :1
+        WHERE me.EMPRESAIDMESASECTORIAL = $1
         ORDER BY ms.MESASECTORIALNOMBRE`,
       [empresaId],
     )
@@ -4012,25 +4012,25 @@ export class ProyectosService {
     const sectoresPertenece = await this.dataSource.query(
       `SELECT s.SECTORDESCRIPCION AS "nombre"
          FROM SECTORPEMPRESA sp JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
-        WHERE sp.EMPRESAIDPSECTOR = :1 ORDER BY s.SECTORDESCRIPCION`,
+        WHERE sp.EMPRESAIDPSECTOR = $1 ORDER BY s.SECTORDESCRIPCION`,
       [empresaId],
     ).catch(() => [])
     const subsectoresPertenece = await this.dataSource.query(
       `SELECT sub.SUBSECTORNOMBRE AS "nombre"
          FROM SUBSECTORPEMPRESA sp JOIN SUBSECTOR sub ON sub.SUBSECTORID = sp.SUBSECTORIDPEMPRESA
-        WHERE sp.EMPRESAIDPSUBSECTOR = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+        WHERE sp.EMPRESAIDPSUBSECTOR = $1 ORDER BY sub.SUBSECTORNOMBRE`,
       [empresaId],
     ).catch(() => [])
     const sectoresRepresenta = await this.dataSource.query(
       `SELECT s.SECTORDESCRIPCION AS "nombre"
          FROM SECTOREMPRESA se JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
-        WHERE se.EMPRESAID = :1 ORDER BY s.SECTORDESCRIPCION`,
+        WHERE se.EMPRESAID = $1 ORDER BY s.SECTORDESCRIPCION`,
       [empresaId],
     ).catch(() => [])
     const subsectoresRepresenta = await this.dataSource.query(
       `SELECT sub.SUBSECTORNOMBRE AS "nombre"
          FROM SUBSECTOREMPRESA se JOIN SUBSECTOR sub ON sub.SUBSECTORID = se.SUBSECTORIDEMPRESA
-        WHERE se.EMPRESAID = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+        WHERE se.EMPRESAID = $1 ORDER BY sub.SUBSECTORNOMBRE`,
       [empresaId],
     ).catch(() => [])
 
@@ -4044,7 +4044,7 @@ export class ProyectosService {
               tdoc.TIPODOCUMENTOIDENTIDADNOMBRE AS "tipoDoc"
          FROM CONTACTOEMPRESA c
          LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc ON tdoc.TIPODOCUMENTOIDENTIDADID = c.TIPOIDENTIFICACIONCONTACTOP
-        WHERE c.PROYECTOIDCONTACTOS = :1
+        WHERE c.PROYECTOIDCONTACTOS = $1
         ORDER BY c.CONTACTOEMPRESAID`,
       [proyectoId],
     ).catch(() => [])
@@ -4076,13 +4076,13 @@ export class ProyectosService {
               nf.NECESIDADFORMACIONNUMERO           AS "necesidadFormacionNumero",
               nf.NECESIDADID                        AS "necesidadId",
               af.ACCIONFORMACIONESTADOAPROBACION    AS "estadoAprobacion",
-              DBMS_LOB.SUBSTR(af.ACCIONFORMACIONMOTIVORECHAZO, 2000, 1) AS "motivoRechazo"
+              substr(af.ACCIONFORMACIONMOTIVORECHAZO, 1, 2000) AS "motivoRechazo"
          FROM ACCIONFORMACION af
          LEFT JOIN TIPOEVENTO te                ON te.TIPOEVENTOID                = af.TIPOEVENTOID
          LEFT JOIN MODALIDADFORMACION mf        ON mf.MODALIDADFORMACIONID        = af.MODALIDADFORMACIONID
          LEFT JOIN METODOLOGIAAPRENDIZAJE ma    ON ma.METODOLOGIAAPRENDIZAJEID    = af.METODOLOGIAAPRENDIZAJEID
          LEFT JOIN NECESIDADFORMACION nf        ON nf.NECESIDADFORMACIONID        = af.NECESIDADFORMACIONIDAF
-        WHERE af.PROYECTOID = :1
+        WHERE af.PROYECTOID = $1
         ORDER BY af.ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )

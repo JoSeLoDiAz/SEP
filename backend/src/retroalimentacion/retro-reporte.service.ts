@@ -26,11 +26,11 @@ export class RetroReporteService {
 
   async generar(convocatoriaId: number): Promise<{ buffer: Buffer; nombre: string }> {
     const cab: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT c.ANIO AS "anio", TRIM(c.NOMBRE) AS "nombre",
+      `SELECT c.ANIO AS "anio", btrim((c.NOMBRE)::text) AS "nombre",
               f.RETROFORMULARIOID AS "formularioId", f.ESCALAMAX AS "escalaMax"
          FROM EVALUADORCONVOCATORIA c
          LEFT JOIN RETROFORMULARIO f ON f.CONVOCATORIAID = c.CONVOCATORIAID AND f.ACTIVO = 1
-        WHERE c.CONVOCATORIAID = :1`,
+        WHERE c.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     if (!cab[0]) throw new NotFoundException('Convocatoria no encontrada')
@@ -342,17 +342,17 @@ export class RetroReporteService {
   private async participantes(convocatoriaId: number): Promise<Participante[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "participacionId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(p.PERSONAEMAIL) AS "email",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(ar.NOMBRE) AS "area"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((p.PERSONAEMAIL)::text) AS "email",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((ar.NOMBRE)::text) AS "area"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE pa.CONVOCATORIAID = :1
-        ORDER BY NVL(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
+        WHERE pa.CONVOCATORIAID = $1
+        ORDER BY COALESCE(r.ROLEVALUADORORDEN, 99), p.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
     return rows.map(r => ({
@@ -366,8 +366,8 @@ export class RetroReporteService {
 
   private async preguntas(formularioId: number): Promise<Pregunta[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT NUMERO AS "numero", TEXTO AS "texto", TRIM(CRITERIOS) AS "criterios", TRIM(TIPO) AS "tipo"
-         FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :1 AND ACTIVO = 1 ORDER BY ORDEN, NUMERO`,
+      `SELECT NUMERO AS "numero", TEXTO AS "texto", btrim((CRITERIOS)::text) AS "criterios", btrim((TIPO)::text) AS "tipo"
+         FROM RETROPREGUNTA WHERE RETROFORMULARIOID = $1 AND ACTIVO = 1 ORDER BY ORDEN, NUMERO`,
       [formularioId],
     )
     return rows.map(r => ({
@@ -381,12 +381,12 @@ export class RetroReporteService {
   private async asignaciones(convocatoriaId: number): Promise<Asignacion[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT a.PARTEVALUADORID AS "evaluadorId", a.PARTEVALUADOID AS "evaluadoId",
-              TRIM(a.ESTADO) AS "estado", TRIM(a.ORIGEN) AS "origen", TRIM(a.MOTIVOREGLA) AS "motivo",
-              TRIM(pev.PERSONANOMBRES) || ' ' || TRIM(pev.PERSONAPRIMERAPELLIDO) AS "evaluadorNombre",
-              TRIM(rev.ROLEVALUADORNOMBRE) AS "evaluadorRol",
-              TRIM(arev.NOMBRE) AS "evaluadorArea",
-              TRIM(pdo.PERSONANOMBRES) || ' ' || TRIM(pdo.PERSONAPRIMERAPELLIDO) AS "evaluadoNombre",
-              TRIM(rdo.ROLEVALUADORNOMBRE) AS "evaluadoRol"
+              btrim((a.ESTADO)::text) AS "estado", btrim((a.ORIGEN)::text) AS "origen", btrim((a.MOTIVOREGLA)::text) AS "motivo",
+              btrim((pev.PERSONANOMBRES)::text) || ' ' || btrim((pev.PERSONAPRIMERAPELLIDO)::text) AS "evaluadorNombre",
+              btrim((rev.ROLEVALUADORNOMBRE)::text) AS "evaluadorRol",
+              btrim((arev.NOMBRE)::text) AS "evaluadorArea",
+              btrim((pdo.PERSONANOMBRES)::text) || ' ' || btrim((pdo.PERSONAPRIMERAPELLIDO)::text) AS "evaluadoNombre",
+              btrim((rdo.ROLEVALUADORNOMBRE)::text) AS "evaluadoRol"
          FROM RETROASIGNACION a
          JOIN EVALUADORPARTICIPACION pav ON pav.PARTICIPACIONID = a.PARTEVALUADORID
          JOIN EVALUADOR eev ON eev.EVALUADORID = pav.EVALUADORID
@@ -399,7 +399,7 @@ export class RetroReporteService {
          LEFT JOIN ROLEVALUADOR   rdo  ON rdo.ROLEVALUADORID = pad.ROLEVALUADORID
         -- el ciclo lo marca QUIEN RECIBE, no quien escribe: el dinamizador GGPC
         -- está fuera de toda convocatoria y anclarlo a él lo dejaría fuera del Excel
-        WHERE pad.CONVOCATORIAID = :1
+        WHERE pad.CONVOCATORIAID = $1
         ORDER BY pev.PERSONAPRIMERAPELLIDO, pdo.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
@@ -423,9 +423,9 @@ export class RetroReporteService {
               rr.PARTEVALUADORID AS "evaluadorId", rr.PARTEVALUADOID AS "evaluadoId",
               rr.PUNTAJEESCALA AS "puntaje", rr.PUNTAJEMAXIMO AS "maximo",
               rr.PROMEDIO AS "promedio", rr.FECHAENVIO AS "fechaEnvio",
-              TRIM(pev.PERSONANOMBRES) || ' ' || TRIM(pev.PERSONAPRIMERAPELLIDO) AS "evaluadorNombre",
-              TRIM(pdo.PERSONANOMBRES) || ' ' || TRIM(pdo.PERSONAPRIMERAPELLIDO) AS "evaluadoNombre",
-              TRIM(rdo.ROLEVALUADORNOMBRE) AS "evaluadoRol"
+              btrim((pev.PERSONANOMBRES)::text) || ' ' || btrim((pev.PERSONAPRIMERAPELLIDO)::text) AS "evaluadorNombre",
+              btrim((pdo.PERSONANOMBRES)::text) || ' ' || btrim((pdo.PERSONAPRIMERAPELLIDO)::text) AS "evaluadoNombre",
+              btrim((rdo.ROLEVALUADORNOMBRE)::text) AS "evaluadoRol"
          FROM RETRORESPUESTA rr
          JOIN EVALUADORPARTICIPACION pav ON pav.PARTICIPACIONID = rr.PARTEVALUADORID
          JOIN EVALUADOR eev ON eev.EVALUADORID = pav.EVALUADORID
@@ -435,7 +435,7 @@ export class RetroReporteService {
          JOIN PERSONA   pdo ON pdo.PERSONAID  = edo.PERSONAID
          LEFT JOIN ROLEVALUADOR rdo ON rdo.ROLEVALUADORID = pad.ROLEVALUADORID
         -- anclado a quien recibe, igual que las asignaciones
-        WHERE pad.CONVOCATORIAID = :1
+        WHERE pad.CONVOCATORIAID = $1
         ORDER BY pev.PERSONAPRIMERAPELLIDO, pdo.PERSONAPRIMERAPELLIDO`,
       [convocatoriaId],
     )
@@ -462,7 +462,7 @@ export class RetroReporteService {
          JOIN RETRORESPUESTA rr ON rr.RETRORESPUESTAID = i.RETRORESPUESTAID
          JOIN EVALUADORPARTICIPACION pad ON pad.PARTICIPACIONID = rr.PARTEVALUADOID
         -- anclado a quien recibe, igual que las asignaciones
-        WHERE pad.CONVOCATORIAID = :1`,
+        WHERE pad.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     return rows.map(r => ({
@@ -477,12 +477,12 @@ export class RetroReporteService {
   private async sugerencias(convocatoriaId: number): Promise<Sugerencia[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT s.TEXTO AS "texto", s.FECHAENVIO AS "fecha",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol", TRIM(ar.NOMBRE) AS "area"
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol", btrim((ar.NOMBRE)::text) AS "area"
          FROM RETROSUGERENCIA s
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = s.PARTICIPACIONID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE pa.CONVOCATORIAID = :1
+        WHERE pa.CONVOCATORIAID = $1
         ORDER BY s.FECHAENVIO`,
       [convocatoriaId],
     )
@@ -500,7 +500,7 @@ export class RetroReporteService {
               MAX(CASE WHEN s.SEEXCEDIO = 1 THEN 1 ELSE 0 END) AS "seExcedio"
          FROM RETROSESION s
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = s.PARTICIPACIONID
-        WHERE pa.CONVOCATORIAID = :1
+        WHERE pa.CONVOCATORIAID = $1
         GROUP BY s.PARTICIPACIONID`,
       [convocatoriaId],
     )

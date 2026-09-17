@@ -32,7 +32,7 @@ export class NecesidadesService {
               COUNT(nf.NECESIDADFORMACIONID) AS "totalNecesidades"
          FROM NECESIDAD n
          LEFT JOIN NECESIDADFORMACION nf ON nf.NECESIDADID = n.NECESIDADID
-        WHERE n.EMPRESANECESIDADID = :1
+        WHERE n.EMPRESANECESIDADID = $1
         GROUP BY n.NECESIDADID, n.NECESIDADFECHAREGISTRO
         ORDER BY n.NECESIDADFECHAREGISTRO ASC NULLS LAST`,
       [empresaId],
@@ -56,7 +56,7 @@ export class NecesidadesService {
       `SELECT COUNT(AF.ACCIONFORMACIONID) AS "total"
          FROM ACCIONFORMACION AF
         WHERE AF.NECESIDADFORMACIONIDAF IN (
-          SELECT NECESIDADFORMACIONID FROM NECESIDADFORMACION WHERE NECESIDADID = :1
+          SELECT NECESIDADFORMACIONID FROM NECESIDADFORMACION WHERE NECESIDADID = $1
         )`,
       [necesidadId],
     )
@@ -65,11 +65,11 @@ export class NecesidadesService {
         `No se puede eliminar este diagnóstico porque está asociado a ${Number(total) === 1 ? 'una accion de formación' : `${Number(total)} acciones de formación`}.`,
       )
     await this.dataSource.query(
-      `DELETE FROM HERRAMIENTANECESIDAD WHERE NECESIDADID = :1`, [necesidadId])
+      `DELETE FROM HERRAMIENTANECESIDAD WHERE NECESIDADID = $1`, [necesidadId])
     await this.dataSource.query(
-      `DELETE FROM NECESIDADFORMACION WHERE NECESIDADID = :1`, [necesidadId])
+      `DELETE FROM NECESIDADFORMACION WHERE NECESIDADID = $1`, [necesidadId])
     await this.dataSource.query(
-      `DELETE FROM NECESIDAD WHERE NECESIDADID = :1`, [necesidadId])
+      `DELETE FROM NECESIDAD WHERE NECESIDADID = $1`, [necesidadId])
     return { message: 'Diagnóstico eliminado' }
   }
 
@@ -84,7 +84,7 @@ export class NecesidadesService {
               n.NECESIDADHERRDESCRIP      AS "herrDescrip",
               n.NECESIDADHERRRESULTADOS   AS "herrResultados"
          FROM NECESIDAD n
-        WHERE n.NECESIDADID = :1`,
+        WHERE n.NECESIDADID = $1`,
       [necesidadId],
     )
     if (!diag) throw new NotFoundException('Diagnóstico no encontrado')
@@ -95,7 +95,7 @@ export class NecesidadesService {
               h.HERRAMIENTANECESIDADPARTICIP AS "muestra"
          FROM HERRAMIENTANECESIDAD h
          JOIN FUENTEHERRAMIENTA f ON f.FUENTEHERRAMIENTAID = h.FUENTEHERRAMIENTAID
-        WHERE h.NECESIDADID = :1
+        WHERE h.NECESIDADID = $1
         ORDER BY h.HERRAMIENTANECESIDADID`,
       [necesidadId],
     )
@@ -106,7 +106,7 @@ export class NecesidadesService {
               NECESIDADFORMACIONNOMBRE AS "nombre",
               NECESIDADFORMACIONBENEF  AS "beneficiarios"
          FROM NECESIDADFORMACION
-        WHERE NECESIDADID = :1
+        WHERE NECESIDADID = $1
         ORDER BY NECESIDADFORMACIONNUMERO`,
       [necesidadId],
     )
@@ -127,12 +127,12 @@ export class NecesidadesService {
     await this.dataSource.query(
       `UPDATE NECESIDAD
           SET NECESIDADPERIODOI       = ${dto.periodoI ? "TO_DATE(:1, 'YYYY-MM-DD')" : 'NULL'},
-              NECESIDADHERROTRA       = :2,
-              NECESIDADHERRCREACION   = :3,
-              NECESIDADPLANCAPA       = :4,
-              NECESIDADHERRDESCRIP    = :5,
-              NECESIDADHERRRESULTADOS = :6
-        WHERE NECESIDADID = :7`,
+              NECESIDADHERROTRA       = $2,
+              NECESIDADHERRCREACION   = $3,
+              NECESIDADPLANCAPA       = $4,
+              NECESIDADHERRDESCRIP    = $5,
+              NECESIDADHERRRESULTADOS = $6
+        WHERE NECESIDADID = $7`,
       [
         ...(dto.periodoI ? [dto.periodoI] : []),
         dto.herrOtra ?? null,
@@ -171,7 +171,7 @@ export class NecesidadesService {
 
   async eliminarHerramienta(id: number) {
     await this.dataSource.query(
-      `DELETE FROM HERRAMIENTANECESIDAD WHERE HERRAMIENTANECESIDADID = :1`,
+      `DELETE FROM HERRAMIENTANECESIDAD WHERE HERRAMIENTANECESIDADID = $1`,
       [id],
     )
     return { message: 'Herramienta eliminada' }
@@ -179,7 +179,7 @@ export class NecesidadesService {
 
   async registrarNecesidadFormacion(necesidadId: number, nombre: string, benef: number, usuarioId: number) {
     const [{ total }] = await this.dataSource.query(
-      `SELECT COUNT(NECESIDADFORMACIONID) AS "total" FROM NECESIDADFORMACION WHERE NECESIDADID = :1`,
+      `SELECT COUNT(NECESIDADFORMACIONID) AS "total" FROM NECESIDADFORMACION WHERE NECESIDADID = $1`,
       [necesidadId],
     )
     const numero = Number(total) + 1
@@ -200,9 +200,9 @@ export class NecesidadesService {
   async editarNecesidadFormacion(id: number, nombre: string, benef: number) {
     await this.dataSource.query(
       `UPDATE NECESIDADFORMACION
-          SET NECESIDADFORMACIONNOMBRE = :1,
-              NECESIDADFORMACIONBENEF  = :2
-        WHERE NECESIDADFORMACIONID = :3`,
+          SET NECESIDADFORMACIONNOMBRE = $1,
+              NECESIDADFORMACIONBENEF  = $2
+        WHERE NECESIDADFORMACIONID = $3`,
       [nombre, benef, id],
     )
     return { message: 'Necesidad actualizada' }
@@ -210,7 +210,7 @@ export class NecesidadesService {
 
   async eliminarNecesidadFormacion(id: number) {
     await this.dataSource.query(
-      `DELETE FROM NECESIDADFORMACION WHERE NECESIDADFORMACIONID = :1`,
+      `DELETE FROM NECESIDADFORMACION WHERE NECESIDADFORMACIONID = $1`,
       [id],
     )
     return { message: 'Necesidad eliminada' }
@@ -257,7 +257,7 @@ export class NecesidadesService {
          LEFT JOIN TAMANOEMPRESA tam ON tam.TAMANOEMPRESAID  = e.TAMANOEMPRESAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD tdoc
                                      ON tdoc.TIPODOCUMENTOIDENTIDADID = e.TIPOIDENTIFICACIONREP
-        WHERE n.NECESIDADID = :1`,
+        WHERE n.NECESIDADID = $1`,
       [necesidadId],
     )
     if (!diag) throw new NotFoundException('Diagnóstico no encontrado')
@@ -272,7 +272,7 @@ export class NecesidadesService {
               EMPRESAESLABONES     AS "eslabones",
               EMPRESAINTERACCIONES AS "interacciones"
          FROM EMPRESA
-        WHERE EMPRESAID = (SELECT EMPRESANECESIDADID FROM NECESIDAD WHERE NECESIDADID = :1)`,
+        WHERE EMPRESAID = (SELECT EMPRESANECESIDADID FROM NECESIDAD WHERE NECESIDADID = $1)`,
       [necesidadId],
     )
 
@@ -281,7 +281,7 @@ export class NecesidadesService {
               h.HERRAMIENTANECESIDADPARTICIP AS "muestra"
          FROM HERRAMIENTANECESIDAD h
          JOIN FUENTEHERRAMIENTA f ON f.FUENTEHERRAMIENTAID = h.FUENTEHERRAMIENTAID
-        WHERE h.NECESIDADID = :1
+        WHERE h.NECESIDADID = $1
         ORDER BY h.HERRAMIENTANECESIDADID`,
       [necesidadId],
     )
@@ -291,7 +291,7 @@ export class NecesidadesService {
               NECESIDADFORMACIONNOMBRE AS "nombre",
               NECESIDADFORMACIONBENEF  AS "beneficiarios"
          FROM NECESIDADFORMACION
-        WHERE NECESIDADID = :1
+        WHERE NECESIDADID = $1
         ORDER BY NECESIDADFORMACIONNUMERO`,
       [necesidadId],
     )
@@ -301,42 +301,42 @@ export class NecesidadesService {
          FROM EMPRESAMESASECTORIAL me
          JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = me.MESASECTORIALIDEMPRESA
         WHERE me.EMPRESAIDMESASECTORIAL = (
-          SELECT EMPRESANECESIDADID FROM NECESIDAD WHERE NECESIDADID = :1
+          SELECT EMPRESANECESIDADID FROM NECESIDAD WHERE NECESIDADID = $1
         )
         ORDER BY ms.MESASECTORIALNOMBRE`,
       [necesidadId],
     )
 
     const empresaId = diag.empresaNombre ? (await this.dataSource.query(
-      `SELECT EMPRESANECESIDADID AS "id" FROM NECESIDAD WHERE NECESIDADID = :1`,
+      `SELECT EMPRESANECESIDADID AS "id" FROM NECESIDAD WHERE NECESIDADID = $1`,
       [necesidadId],
     ))[0]?.id : null
 
     const sectoresPertenece = empresaId ? await this.dataSource.query(
       `SELECT s.SECTORDESCRIPCION AS "nombre"
          FROM SECTOREMPRESA se JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
-        WHERE se.EMPRESAID = :1 ORDER BY s.SECTORDESCRIPCION`,
+        WHERE se.EMPRESAID = $1 ORDER BY s.SECTORDESCRIPCION`,
       [empresaId],
     ) : []
 
     const subsectoresPertenece = empresaId ? await this.dataSource.query(
       `SELECT sub.SUBSECTORNOMBRE AS "nombre"
          FROM SUBSECTOREMPRESA se JOIN SUBSECTOR sub ON sub.SUBSECTORID = se.SUBSECTORIDEMPRESA
-        WHERE se.EMPRESAID = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+        WHERE se.EMPRESAID = $1 ORDER BY sub.SUBSECTORNOMBRE`,
       [empresaId],
     ) : []
 
     const sectoresRepresenta = empresaId ? await this.dataSource.query(
       `SELECT s.SECTORDESCRIPCION AS "nombre"
          FROM SECTORPEMPRESA se JOIN SECTOR s ON s.SECTORID = se.SECTORIDPEMPRESA
-        WHERE se.EMPRESAIDPSECTOR = :1 ORDER BY s.SECTORDESCRIPCION`,
+        WHERE se.EMPRESAIDPSECTOR = $1 ORDER BY s.SECTORDESCRIPCION`,
       [empresaId],
     ) : []
 
     const subsectoresRepresenta = empresaId ? await this.dataSource.query(
       `SELECT sub.SUBSECTORNOMBRE AS "nombre"
          FROM SUBSECTORPEMPRESA se JOIN SUBSECTOR sub ON sub.SUBSECTORID = se.SUBSECTORIDPEMPRESA
-        WHERE se.EMPRESAIDPSUBSECTOR = :1 ORDER BY sub.SUBSECTORNOMBRE`,
+        WHERE se.EMPRESAIDPSUBSECTOR = $1 ORDER BY sub.SUBSECTORNOMBRE`,
       [empresaId],
     ) : []
 

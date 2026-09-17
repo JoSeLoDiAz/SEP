@@ -150,17 +150,17 @@ export class ReportesEvaluadorService {
       }
 
       filas.push(...await this.dataSource.query(
-        `SELECT TRIM(p.PERSONAIDENTIFICACION) AS "identificacion",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "evaluador",
+        `SELECT btrim((p.PERSONAIDENTIFICACION)::text) AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "evaluador",
               pa.ANIO                    AS "anio",
-              TRIM(pa.PERIODO)           AS "periodo",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(ar.NOMBRE)            AS "area",
-              TRIM(pe.PROCESONOMBRE)     AS "proceso",
-              TRIM(mo.NOMBRE)            AS "modalidad",
-              TRIM(pa.MESA)              AS "mesa",
-              TRIM(pa.EQUIPOEVALUADOR)   AS "equipo",
-              TRIM(es.NOMBRE)            AS "estado",
+              btrim((pa.PERIODO)::text)           AS "periodo",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((ar.NOMBRE)::text)            AS "area",
+              btrim((pe.PROCESONOMBRE)::text)     AS "proceso",
+              btrim((mo.NOMBRE)::text)            AS "modalidad",
+              btrim((pa.MESA)::text)              AS "mesa",
+              btrim((pa.EQUIPOEVALUADOR)::text)   AS "equipo",
+              btrim((es.NOMBRE)::text)            AS "estado",
               (SELECT COUNT(*) FROM EVALUADORPARTPROYECTO pp
                 WHERE pp.PARTICIPACIONID = pa.PARTICIPACIONID)     AS "proyectos",
               (SELECT ROUND(AVG(rr.PROMEDIO), 2) FROM RETRORESPUESTA rr

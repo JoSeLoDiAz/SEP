@@ -123,16 +123,16 @@ export class FichaPdfService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pe.ANIO              AS "anio",
               r.PROMEDIO           AS "promedio",
-              NVL(fo.RESULTADOANONIMO, 1) AS "anonimo",
+              COALESCE(fo.RESULTADOANONIMO, 1) AS "anonimo",
               ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(rol.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(ar.NOMBRE)      AS "area",
-              (SELECT LISTAGG(TRIM(i.COMENTARIO), ' | ') WITHIN GROUP (ORDER BY i.PREGUNTANUMERO)
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((rol.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((ar.NOMBRE)::text)      AS "area",
+              (SELECT LISTAGG(btrim((i.COMENTARIO)::text), ' | ') WITHIN GROUP (ORDER BY i.PREGUNTANUMERO)
                  FROM RETRORESPUESTAITEM i
                 WHERE i.RETRORESPUESTAID = r.RETRORESPUESTAID
                   AND i.COMENTARIO IS NOT NULL
-                  AND TRIM(i.COMENTARIO) IS NOT NULL)                AS "comentario"
+                  AND btrim((i.COMENTARIO)::text) IS NOT NULL)                AS "comentario"
          FROM RETRORESPUESTA r
          JOIN EVALUADORPARTICIPACION pe ON pe.PARTICIPACIONID = r.PARTEVALUADOID
          LEFT JOIN RETROFORMULARIO fo ON fo.CONVOCATORIAID = pe.CONVOCATORIAID AND fo.ACTIVO = 1
@@ -141,7 +141,7 @@ export class FichaPdfService {
          LEFT JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   rol ON rol.ROLEVALUADORID = pc.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar  ON ar.AREAID = pc.AREAID
-        WHERE pe.EVALUADORID = :1
+        WHERE pe.EVALUADORID = $1
         ORDER BY pe.ANIO DESC, r.FECHAENVIO`,
       [evaluadorId],
     )
@@ -183,10 +183,10 @@ export class FichaPdfService {
       `SELECT CASE WHEN EXISTS (
                 SELECT 1 FROM EVALUADORDOCUMENTO d
                   JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
-                 WHERE d.EVALUADORID = :1
-                   AND UPPER(TRIM(t.CODIGO)) = 'CEDULA')
+                 WHERE d.EVALUADORID = $1
+                   AND UPPER(btrim((t.CODIGO)::text)) = 'CEDULA')
               THEN 1 ELSE 0 END AS "tiene"
-         FROM DUAL`,
+         `,
       [evaluadorId],
     )
     return Number(filas[0]?.tiene ?? 0) === 1
@@ -197,19 +197,19 @@ export class FichaPdfService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       // las columnas de la pivote solo vienen llenas en los registros historicos
       `SELECT pp.PARTICIPACIONID   AS "participacionId",
-              COALESCE(TO_NCHAR(em.EMPRESAIDENTIFICACION), TRIM(g.NIT),
-                       TRIM(pp.NIT))                 AS "nit",
-              COALESCE(TRIM(em.EMPRESARAZONSOCIAL), TRIM(g.RAZONSOCIAL),
-                       TRIM(pp.RAZONSOCIAL))         AS "razonSocial",
-              COALESCE(TRIM(pr.PROYECTONOMBRE), TRIM(g.NOMBREPROYECTO),
-                       TRIM(pp.NOMBREPROYECTO))      AS "nombreProyecto",
+              COALESCE((em.EMPRESAIDENTIFICACION)::text, btrim((g.NIT)::text),
+                       btrim((pp.NIT)::text))                 AS "nit",
+              COALESCE(btrim((em.EMPRESARAZONSOCIAL)::text), btrim((g.RAZONSOCIAL)::text),
+                       btrim((pp.RAZONSOCIAL)::text))         AS "razonSocial",
+              COALESCE(btrim((pr.PROYECTONOMBRE)::text), btrim((g.NOMBREPROYECTO)::text),
+                       btrim((pp.NOMBREPROYECTO)::text))      AS "nombreProyecto",
               pp.PUNTAJEOTORGADO   AS "puntajeOtorgado"
          FROM EVALUADORPARTPROYECTO pp
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = pp.PARTICIPACIONID
          LEFT JOIN PROYECTO pr ON pr.PROYECTOID = pp.PROYECTOID
          LEFT JOIN EMPRESA  em ON em.EMPRESAID  = pr.EMPRESAID
          LEFT JOIN CONVPROYGUARDADO g ON g.GUARDADOID = pp.GUARDADOID
-        WHERE pa.EVALUADORID = :1
+        WHERE pa.EVALUADORID = $1
         ORDER BY pp.PARTICIPACIONID, pp.PARTPROYECTOID`,
       [evaluadorId],
     )

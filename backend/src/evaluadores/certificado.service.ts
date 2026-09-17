@@ -56,10 +56,10 @@ export class CertificadoService {
     // revocado no se proponía, pero sí se podía certificar entrando a él. Hay 18
     // ciclos negativos, y varios conservan proyectos, prueba y certificados.
     const estado: Array<{ negativo: number; nombre: string }> = await this.dataSource.query(
-      `SELECT NVL(es.ESNEGATIVO, 0) AS "negativo", TRIM(es.NOMBRE) AS "nombre"
+      `SELECT COALESCE(es.ESNEGATIVO, 0) AS "negativo", btrim((es.NOMBRE)::text) AS "nombre"
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (Number(estado[0]?.negativo ?? 0) === 1) {
@@ -71,7 +71,7 @@ export class CertificadoService {
 
     const vigente = await this.dataSource.query(
       `SELECT CERTIFICADOID AS "id" FROM EVALUADORCERTIFICADO
-        WHERE PARTICIPACIONID = :1 AND ANULADO = 0`,
+        WHERE PARTICIPACIONID = $1 AND ANULADO = 0`,
       [participacionId],
     )
     if (vigente[0]) {
@@ -102,17 +102,17 @@ export class CertificadoService {
       // FOR UPDATE del año: sin él dos emisiones leen el mismo MAX
       await m.query(
         `SELECT CERTIFICADOID FROM EVALUADORCERTIFICADO
-          WHERE ANIO = :1 FOR UPDATE`, [snapshot.anio],
+          WHERE ANIO = $1 FOR UPDATE`, [snapshot.anio],
       )
       const max: Array<{ n: number }> = await m.query(
-        `SELECT NVL(MAX(CONSECUTIVO), 0) AS "n" FROM EVALUADORCERTIFICADO WHERE ANIO = :1`,
+        `SELECT COALESCE(MAX(CONSECUTIVO), 0) AS "n" FROM EVALUADORCERTIFICADO WHERE ANIO = $1`,
         [snapshot.anio],
       )
       consecutivo = Number(max[0]?.n ?? 0) + 1
       codigo = this.generarCodigo(snapshot.anio, consecutivo)
 
       const seq: Array<{ NEXTVAL: number }> = await m.query(
-        `SELECT EVALUADORCERTIFICADO_SEQ.NEXTVAL FROM dual`)
+        `SELECT EVALUADORCERTIFICADO_SEQ.NEXTVAL `)
       certificadoId = Number(seq[0].NEXTVAL)
 
       await m.query(
@@ -120,7 +120,7 @@ export class CertificadoService {
            (CERTIFICADOID, PARTICIPACIONID, ANIO, CONSECUTIVO, CODIGOVERIFICACION,
             FECHAEMISION, EMITIDOPOR, FIRMACERTIFICADOSID, HORASCERTIFICADAS,
             DATOSSNAPSHOT, ARCHIVOMIME, ARCHIVONOMBRE)
-         VALUES (:1, :2, :3, :4, :5, ${AHORA_UTC}, :6, :7, :8, :9, 'application/pdf', :10)`,
+         VALUES ($1, $2, $3, $4, $5, ${AHORA_UTC}, $6, $7, $8, $9, 'application/pdf', $10)`,
         [
           certificadoId, participacionId, snapshot.anio, consecutivo, codigo,
           ctx.usuarioEmail, datos.firmaId, snapshot.horas ?? null,
@@ -135,7 +135,7 @@ export class CertificadoService {
       consecutivo, codigo, texto: datos.texto, firma: datos.firma,
     })
     await this.dataSource.query(
-      `UPDATE EVALUADORCERTIFICADO SET ARCHIVOPDF = :1 WHERE CERTIFICADOID = :2`,
+      `UPDATE EVALUADORCERTIFICADO SET ARCHIVOPDF = $1 WHERE CERTIFICADOID = $2`,
       [pdf, certificadoId],
     )
 
@@ -159,20 +159,20 @@ export class CertificadoService {
   ): Promise<Array<{ participacionId: number; nombre: string; rol: string | null }>> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "participacionId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID  = e.PERSONAID
          LEFT JOIN ROLEVALUADOR r ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN ESTADOPARTICIPACION es ON es.ESTADOPARTID = pa.ESTADOPARTID
-        WHERE pa.CONVOCATORIAID = :1
-          AND NVL(es.ESNEGATIVO, 0) = 0
+        WHERE pa.CONVOCATORIAID = $1
+          AND COALESCE(es.ESNEGATIVO, 0) = 0
           AND NOT EXISTS (SELECT 1 FROM EVALUADORCERTIFICADO c
                            WHERE c.PARTICIPACIONID = pa.PARTICIPACIONID AND c.ANULADO = 0)
         -- mismo criterio que el banco: el orden binario pone las MAYÚSCULAS antes
-        ORDER BY NLSSORT(TRIM(p.PERSONAPRIMERAPELLIDO), 'NLS_SORT=WEST_EUROPEAN_AI'),
-                 NLSSORT(TRIM(p.PERSONANOMBRES), 'NLS_SORT=WEST_EUROPEAN_AI')`,
+        ORDER BY translate(upper(btrim((p.PERSONAPRIMERAPELLIDO)::text)), 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ', 'AAAAAEEEEIIIIOOOOOUUUUNC'),
+                 translate(upper(btrim((p.PERSONANOMBRES)::text)), 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ', 'AAAAAEEEEIIIIOOOOOUUUUNC')`,
       [convocatoriaId],
     )
     return filas.map(f => ({
@@ -214,7 +214,7 @@ export class CertificadoService {
               c.CONSECUTIVO AS "consecutivo", c.ANIO AS "anio", pa.EVALUADORID AS "evaluadorId"
          FROM EVALUADORCERTIFICADO c
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = c.PARTICIPACIONID
-        WHERE c.CERTIFICADOID = :1`,
+        WHERE c.CERTIFICADOID = $1`,
       [certificadoId],
     )
     if (!filas[0]) throw new NotFoundException('Certificado no encontrado')
@@ -222,8 +222,8 @@ export class CertificadoService {
 
     await this.dataSource.query(
       `UPDATE EVALUADORCERTIFICADO
-          SET ANULADO = 1, MOTIVOANULACION = :1, FECHAANULACION = ${AHORA_UTC}, ANULADOPOR = :2
-        WHERE CERTIFICADOID = :3`,
+          SET ANULADO = 1, MOTIVOANULACION = $1, FECHAANULACION = ${AHORA_UTC}, ANULADOPOR = $2
+        WHERE CERTIFICADOID = $3`,
       [texto.slice(0, 500), ctx.usuarioEmail, certificadoId],
     )
 
@@ -241,11 +241,11 @@ export class CertificadoService {
 
   async getPdf(certificadoId: number): Promise<{ buffer: Buffer; nombre: string }> {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT ARCHIVOPDF AS "pdf", TRIM(ARCHIVONOMBRE) AS "nombre",
+      `SELECT ARCHIVOPDF AS "pdf", btrim((ARCHIVONOMBRE)::text) AS "nombre",
               DATOSSNAPSHOT AS "snapshot", CONSECUTIVO AS "consecutivo",
-              TRIM(CODIGOVERIFICACION) AS "codigo", ANULADO AS "anulado",
+              btrim((CODIGOVERIFICACION)::text) AS "codigo", ANULADO AS "anulado",
               FIRMACERTIFICADOSID AS "firmaId", PARTICIPACIONID AS "participacionId"
-         FROM EVALUADORCERTIFICADO WHERE CERTIFICADOID = :1`,
+         FROM EVALUADORCERTIFICADO WHERE CERTIFICADOID = $1`,
       [certificadoId],
     )
     if (!filas[0]) throw new NotFoundException('Certificado no encontrado')
@@ -271,7 +271,7 @@ export class CertificadoService {
       ...extras,
     })
     await this.dataSource.query(
-      `UPDATE EVALUADORCERTIFICADO SET ARCHIVOPDF = :1 WHERE CERTIFICADOID = :2`,
+      `UPDATE EVALUADORCERTIFICADO SET ARCHIVOPDF = $1 WHERE CERTIFICADOID = $2`,
       [pdf, certificadoId],
     )
     return { buffer: pdf, nombre: (f.nombre as string) || `certificado-${certificadoId}.pdf` }
@@ -285,8 +285,8 @@ export class CertificadoService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT DATOSSNAPSHOT AS "snapshot", CONSECUTIVO AS "consecutivo", ANIO AS "anio",
               FECHAEMISION AS "fechaEmision", ANULADO AS "anulado",
-              TRIM(MOTIVOANULACION) AS "motivoAnulacion"
-         FROM EVALUADORCERTIFICADO WHERE UPPER(CODIGOVERIFICACION) = :1`,
+              btrim((MOTIVOANULACION)::text) AS "motivoAnulacion"
+         FROM EVALUADORCERTIFICADO WHERE UPPER(CODIGOVERIFICACION) = $1`,
       [limpio],
     )
     if (!filas[0]) return { valido: false, motivo: 'No existe un certificado con ese código.' }
@@ -315,21 +315,21 @@ export class CertificadoService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.EVALUADORID AS "evaluadorId",
               pa.ANIO        AS "anio",
-              TRIM(pa.PERIODO) AS "periodo",
-              TRIM(pa.MESA)  AS "mesa",
-              TRIM(pa.EQUIPOEVALUADOR) AS "equipo",
+              btrim((pa.PERIODO)::text) AS "periodo",
+              btrim((pa.MESA)::text)  AS "mesa",
+              btrim((pa.EQUIPOEVALUADOR)::text) AS "equipo",
               pa.FECHAINICIO AS "fechaInicio",
               pa.FECHAFIN    AS "fechaFin",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) ||
-                NVL2(TRIM(p.PERSONASEGUNDOAPELLIDO), ' ' || TRIM(p.PERSONASEGUNDOAPELLIDO), '') AS "nombre",
-              TRIM(p.PERSONAIDENTIFICACION) AS "identificacion",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(pe.PROCESONOMBRE)     AS "proceso",
-              TRIM(mo.NOMBRE)            AS "modalidad",
-              TRIM(cv.NOMBRE)            AS "convocatoria",
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) ||
+                NVL2(btrim((p.PERSONASEGUNDOAPELLIDO)::text), ' ' || btrim((p.PERSONASEGUNDOAPELLIDO)::text), '') AS "nombre",
+              btrim((p.PERSONAIDENTIFICACION)::text) AS "identificacion",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((pe.PROCESONOMBRE)::text)     AS "proceso",
+              btrim((mo.NOMBRE)::text)            AS "modalidad",
+              btrim((cv.NOMBRE)::text)            AS "convocatoria",
               cv.CERTIFICADOTEXTO        AS "texto",
               cv.CERTIFICADOFIRMAID      AS "firmaId",
-              NVL(cv.CERTIFICADOHABILITADO, 0) AS "habilitado",
+              COALESCE(cv.CERTIFICADOHABILITADO, 0) AS "habilitado",
               (SELECT COUNT(*) FROM EVALUADORPARTPROYECTO pp
                 WHERE pp.PARTICIPACIONID = pa.PARTICIPACIONID) AS "proyectos",
               (SELECT SUM(ca.HORAS) FROM EVALUADORCAPACITACION ca
@@ -341,7 +341,7 @@ export class CertificadoService {
          LEFT JOIN PROCESOEVAL     pe ON pe.PROCESOID     = pa.PROCESOID
          LEFT JOIN MODALIDADPART   mo ON mo.MODALIDADPARTID = pa.MODALIDADPARTID
          LEFT JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     if (!filas[0]) throw new NotFoundException('Participación no encontrada')
@@ -401,7 +401,7 @@ export class CertificadoService {
       `SELECT cv.CERTIFICADOTEXTO AS "texto"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = pa.CONVOCATORIAID
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     return { texto: filas[0]?.texto ?? null, firma }
@@ -412,7 +412,7 @@ export class CertificadoService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT FIRMACERTIFICADOSNOMBRE AS "nombre", FIRMACERTIFICADOSCARGO AS "cargo",
               FIRMACERTIFICADOSFIRMA AS "imagen"
-         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = :1`,
+         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = $1`,
       [firmaId],
     ).catch(() => [])
     if (!filas[0]) return null

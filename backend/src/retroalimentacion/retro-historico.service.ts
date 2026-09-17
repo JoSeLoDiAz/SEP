@@ -67,7 +67,7 @@ export class RetroHistoricoService {
          FROM EVALUADORPARTICIPACION pa
          LEFT JOIN RETROFORMULARIO f
                 ON f.CONVOCATORIAID = pa.CONVOCATORIAID AND f.ACTIVO = 1
-        WHERE pa.PARTICIPACIONID = :1`,
+        WHERE pa.PARTICIPACIONID = $1`,
       [participacionId],
     )
     const f = filas[0]
@@ -104,7 +104,7 @@ export class RetroHistoricoService {
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
         WHERE pa.CONVOCATORIAID IS NULL
-          AND TRIM(p.PERSONAIDENTIFICACION) = :1`,
+          AND btrim((p.PERSONAIDENTIFICACION)::text) = $1`,
       [IDENTIFICACION_DINAMIZADOR],
     )
     if (!filas[0]) return null
@@ -120,8 +120,8 @@ export class RetroHistoricoService {
   private async quienDinamizo(participacionId: number): Promise<string | null> {
     try {
       const filas: Array<{ nombre: string | null }> = await this.dataSource.query(
-        `SELECT TRIM(DINAMIZADOR) AS "nombre" FROM EVALUADORPARTICIPACION
-          WHERE PARTICIPACIONID = :1`,
+        `SELECT btrim((DINAMIZADOR)::text) AS "nombre" FROM EVALUADORPARTICIPACION
+          WHERE PARTICIPACIONID = $1`,
         [participacionId],
       )
       const nombre = filas[0]?.nombre
@@ -138,7 +138,7 @@ export class RetroHistoricoService {
       `SELECT RETROPREGUNTAID AS "preguntaId", NUMERO AS "numero", TEXTO AS "texto",
               TIPO AS "tipo", REQUERIDA AS "requerida"
          FROM RETROPREGUNTA
-        WHERE RETROFORMULARIOID = :1 AND ACTIVO = 1
+        WHERE RETROFORMULARIOID = $1 AND ACTIVO = 1
         ORDER BY NUMERO`,
       [formularioId],
     )
@@ -162,7 +162,7 @@ export class RetroHistoricoService {
     const preguntas = await this.preguntas(ctx.formularioId)
     // las de todo el ciclo, no solo las de esta persona: cambiar la hoja las invalidaría a todas
     const cargadas: Array<{ n: number }> = await this.dataSource.query(
-      `SELECT COUNT(*) AS "n" FROM RETRORESPUESTA WHERE RETROFORMULARIOID = :1`,
+      `SELECT COUNT(*) AS "n" FROM RETRORESPUESTA WHERE RETROFORMULARIOID = $1`,
       [ctx.formularioId],
     )
     return {
@@ -182,7 +182,7 @@ export class RetroHistoricoService {
 
   private async nombreConvocatoria(convocatoriaId: number) {
     const f: Array<{ nombre: string }> = await this.dataSource.query(
-      `SELECT TRIM(NOMBRE) AS "nombre" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT btrim((NOMBRE)::text) AS "nombre" FROM EVALUADORCONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     return f[0]?.nombre ?? null
@@ -193,7 +193,7 @@ export class RetroHistoricoService {
     if (lista.length === 0) return new Map<number, string>()
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "pid",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
@@ -210,12 +210,12 @@ export class RetroHistoricoService {
       `SELECT f.RETROFORMULARIOID AS "formularioId",
               f.CONVOCATORIAID   AS "convocatoriaId",
               cv.ANIO            AS "anio",
-              TRIM(cv.NOMBRE)    AS "convocatoria",
+              btrim((cv.NOMBRE)::text)    AS "convocatoria",
               (SELECT COUNT(*) FROM RETROPREGUNTA q
                 WHERE q.RETROFORMULARIOID = f.RETROFORMULARIOID AND q.ACTIVO = 1) AS "preguntas"
          FROM RETROFORMULARIO f
          JOIN EVALUADORCONVOCATORIA cv ON cv.CONVOCATORIAID = f.CONVOCATORIAID
-        WHERE f.ACTIVO = 1 AND cv.ANIO < :1
+        WHERE f.ACTIVO = 1 AND cv.ANIO < $1
           AND EXISTS (SELECT 1 FROM RETROPREGUNTA q
                        WHERE q.RETROFORMULARIOID = f.RETROFORMULARIOID AND q.ACTIVO = 1)
         ORDER BY cv.ANIO DESC, cv.CONVOCATORIAID`,
@@ -244,7 +244,7 @@ export class RetroHistoricoService {
          FROM EVALUADORCONVOCATORIA cv
          LEFT JOIN RETROFORMULARIO f
                 ON f.CONVOCATORIAID = cv.CONVOCATORIAID AND f.ACTIVO = 1
-        WHERE cv.CONVOCATORIAID = :1`,
+        WHERE cv.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     const f = filas[0]
@@ -297,16 +297,16 @@ export class RetroHistoricoService {
     const formularioId = Number(f.formularioId)
     await this.dataSource.transaction(async m => {
       // sin respuestas se pueden borrar: nada queda huérfano
-      await m.query(`DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :1`, [formularioId])
+      await m.query(`DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = $1`, [formularioId])
       for (let i = 0; i < limpias.length; i++) {
         const numero = i + 1
         const seq: Array<{ NEXTVAL: number }> = await m.query(
-          `SELECT RETROPREGUNTA_SEQ.NEXTVAL FROM dual`)
+          `SELECT RETROPREGUNTA_SEQ.NEXTVAL `)
         await m.query(
           `INSERT INTO RETROPREGUNTA
              (RETROPREGUNTAID, RETROFORMULARIOID, NUMERO, TEXTO, CRITERIOS,
               TIPO, PESO, REQUERIDA, ORDEN, ACTIVO)
-           VALUES (:1, :2, :3, :4, NULL, :5, 1, 1, :6, 1)`,
+           VALUES ($1, $2, $3, $4, NULL, $5, 1, 1, $6, 1)`,
           [Number(seq[0].NEXTVAL), formularioId, numero, limpias[i].texto, limpias[i].tipo, numero * 10],
         )
       }
@@ -336,7 +336,7 @@ export class RetroHistoricoService {
          FROM EVALUADORCONVOCATORIA cv
          LEFT JOIN RETROFORMULARIO f
                 ON f.CONVOCATORIAID = cv.CONVOCATORIAID AND f.ACTIVO = 1
-        WHERE cv.CONVOCATORIAID = :1`,
+        WHERE cv.CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     const f = filas[0]
@@ -357,7 +357,7 @@ export class RetroHistoricoService {
     const formularioId = Number(f.formularioId)
     const antes = await this.preguntas(formularioId)
     await this.dataSource.query(
-      `DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = :1`, [formularioId])
+      `DELETE FROM RETROPREGUNTA WHERE RETROFORMULARIOID = $1`, [formularioId])
 
     await this.controlCambios.registrar({
       tabla: 'RETROPREGUNTA', operacion: 'DELETE', registroId: formularioId,
@@ -381,7 +381,7 @@ export class RetroHistoricoService {
     }
     const origen: Array<{ formularioId: number }> = await this.dataSource.query(
       `SELECT RETROFORMULARIOID AS "formularioId" FROM RETROFORMULARIO
-        WHERE CONVOCATORIAID = :1 AND ACTIVO = 1`,
+        WHERE CONVOCATORIAID = $1 AND ACTIVO = 1`,
       [origenId],
     )
     if (!origen[0]) throw new NotFoundException('La convocatoria de la que quiere copiar no tiene instrumento')
@@ -403,16 +403,16 @@ export class RetroHistoricoService {
     const filas: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT pa.PARTICIPACIONID AS "participacionId",
               pa.EVALUADORID     AS "evaluadorId",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "nombre",
-              TRIM(p.PERSONAIDENTIFICACION) AS "identificacion",
-              TRIM(r.ROLEVALUADORNOMBRE) AS "rol",
-              TRIM(ar.NOMBRE)    AS "area"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "nombre",
+              btrim((p.PERSONAIDENTIFICACION)::text) AS "identificacion",
+              btrim((r.ROLEVALUADORNOMBRE)::text) AS "rol",
+              btrim((ar.NOMBRE)::text)    AS "area"
          FROM EVALUADORPARTICIPACION pa
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
          LEFT JOIN ROLEVALUADOR   r  ON r.ROLEVALUADORID = pa.ROLEVALUADORID
          LEFT JOIN AREAEVALUACION ar ON ar.AREAID = pa.AREAID
-        WHERE pa.CONVOCATORIAID = :1
+        WHERE pa.CONVOCATORIAID = $1
         ORDER BY p.PERSONAPRIMERAPELLIDO, p.PERSONANOMBRES`,
       [ctx.convocatoriaId],
     )
@@ -451,13 +451,13 @@ export class RetroHistoricoService {
               r.FECHAENVIO       AS "fecha",
               a.MOTIVOREGLA      AS "motivo",
               ${ES_DINAMIZADOR_SQL('p.PERSONAIDENTIFICACION')} AS "esDinamizador",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) AS "autor"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) AS "autor"
          FROM RETRORESPUESTA r
          JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADORID
          JOIN EVALUADOR e ON e.EVALUADORID = pa.EVALUADORID
          JOIN PERSONA   p ON p.PERSONAID   = e.PERSONAID
-        WHERE r.PARTEVALUADOID = :1
+        WHERE r.PARTEVALUADOID = $1
         ORDER BY r.FECHAENVIO DESC`,
       [participacionId],
     )
@@ -528,7 +528,7 @@ export class RetroHistoricoService {
       // los demás sí: si no son del mismo ciclo, la retroalimentación no significa nada
       const otro: Array<{ anio: number; convocatoriaId: number }> = await this.dataSource.query(
         `SELECT ANIO AS "anio", CONVOCATORIAID AS "convocatoriaId"
-           FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = :1`,
+           FROM EVALUADORPARTICIPACION WHERE PARTICIPACIONID = $1`,
         [autor],
       )
       if (!otro[0]) throw new NotFoundException('La participación de quien la hizo no existe')
@@ -542,7 +542,7 @@ export class RetroHistoricoService {
 
     const repetida: Array<{ n: number }> = await this.dataSource.query(
       `SELECT COUNT(*) AS "n" FROM RETRORESPUESTA
-        WHERE PARTEVALUADORID = :1 AND PARTEVALUADOID = :2`,
+        WHERE PARTEVALUADORID = $1 AND PARTEVALUADOID = $2`,
       [autor, destinatario],
     )
     if (Number(repetida[0].n) > 0) {
@@ -575,7 +575,7 @@ export class RetroHistoricoService {
 
     const respuestaId = await this.dataSource.transaction(async m => {
       const siguiente = async (secuencia: string) => {
-        const r: Array<{ NEXTVAL: number }> = await m.query(`SELECT ${secuencia}.NEXTVAL FROM dual`)
+        const r: Array<{ NEXTVAL: number }> = await m.query(`SELECT ${secuencia}.NEXTVAL `)
         return Number(r[0].NEXTVAL)
       }
 
@@ -585,7 +585,7 @@ export class RetroHistoricoService {
         `INSERT INTO RETROSESION
            (RETROSESIONID, RETROFORMULARIOID, PARTICIPACIONID, FECHAINICIO, FECHAENVIO,
             DURACIONMINUTOS, MINUTOSTRANSCURRIDOS, SEEXCEDIO, USUARIOEMAIL)
-         VALUES (:1, :2, :3, ${AHORA_UTC}, ${AHORA_UTC}, :4, 0, 0, :5)`,
+         VALUES ($1, $2, $3, ${AHORA_UTC}, ${AHORA_UTC}, $4, 0, 0, $5)`,
         [sesionId, meta.formularioId, autor, meta.duracion, ctx.usuarioEmail],
       )
 
@@ -594,7 +594,7 @@ export class RetroHistoricoService {
         `INSERT INTO RETROASIGNACION
            (RETROASIGNACIONID, RETROFORMULARIOID, PARTEVALUADORID, PARTEVALUADOID,
             ESTADO, ORIGEN, MOTIVOREGLA, USUARIOCREACION, FECHACREACION)
-         VALUES (:1, :2, :3, :4, N'ENVIADA', N'MANUAL', :5, :6, ${AHORA_UTC})`,
+         VALUES ($1, $2, $3, $4, N'ENVIADA', N'MANUAL', $5, $6, ${AHORA_UTC})`,
         [asignacionId, meta.formularioId, autor, destinatario,
           esDelDinamizador ? MOTIVO_DINAMIZADOR : MOTIVO_HISTORICO, ctx.usuarioEmail],
       )
@@ -604,11 +604,11 @@ export class RetroHistoricoService {
         `INSERT INTO RETRORESPUESTA
            (RETRORESPUESTAID, RETROSESIONID, RETROASIGNACIONID, RETROFORMULARIOID,
             PARTEVALUADORID, PARTEVALUADOID, PUNTAJEESCALA, PUNTAJEMAXIMO, PROMEDIO, FECHAENVIO)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, ${AHORA_UTC})`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${AHORA_UTC})`,
         [id, sesionId, asignacionId, meta.formularioId, autor, destinatario, suma, maximo, promedio],
       )
       await m.query(
-        `UPDATE RETROASIGNACION SET RETRORESPUESTAID = :1 WHERE RETROASIGNACIONID = :2`,
+        `UPDATE RETROASIGNACION SET RETRORESPUESTAID = $1 WHERE RETROASIGNACIONID = $2`,
         [id, asignacionId],
       )
 
@@ -617,7 +617,7 @@ export class RetroHistoricoService {
         await m.query(
           `INSERT INTO RETRORESPUESTAITEM
              (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, CALIFICACION)
-           VALUES (:1, :2, :3, :4, :5)`,
+           VALUES ($1, $2, $3, $4, $5)`,
           [itemId, id, p.preguntaId, p.numero, Number(dto.escalas[String(p.numero)])],
         )
       }
@@ -630,7 +630,7 @@ export class RetroHistoricoService {
         await m.query(
           `INSERT INTO RETRORESPUESTAITEM
              (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, COMENTARIO)
-           VALUES (:1, :2, :3, :4, :5)`,
+           VALUES ($1, $2, $3, $4, $5)`,
           [itemId, id, p.preguntaId, p.numero, texto.slice(0, 2000)],
         )
       }
@@ -682,7 +682,7 @@ export class RetroHistoricoService {
          JOIN RETROASIGNACION a ON a.RETROASIGNACIONID = r.RETROASIGNACIONID
          JOIN RETROFORMULARIO f ON f.RETROFORMULARIOID = r.RETROFORMULARIOID
          JOIN EVALUADORPARTICIPACION pa ON pa.PARTICIPACIONID = r.PARTEVALUADOID
-        WHERE r.RETRORESPUESTAID = :1`,
+        WHERE r.RETRORESPUESTAID = $1`,
       [respuestaId],
     )
     const f = filas[0]
@@ -731,15 +731,15 @@ export class RetroHistoricoService {
     const promedio = Math.round((suma / escalas.length) * 100) / 100
 
     await this.dataSource.transaction(async m => {
-      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = :1`, [respuestaId])
+      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = $1`, [respuestaId])
 
       for (const p of escalas) {
         const seq: Array<{ NEXTVAL: number }> = await m.query(
-          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL `)
         await m.query(
           `INSERT INTO RETRORESPUESTAITEM
              (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, CALIFICACION)
-           VALUES (:1, :2, :3, :4, :5)`,
+           VALUES ($1, $2, $3, $4, $5)`,
           [Number(seq[0].NEXTVAL), respuestaId, p.preguntaId, p.numero,
            Number(dto.escalas[String(p.numero)])],
         )
@@ -749,18 +749,18 @@ export class RetroHistoricoService {
         const texto = (dto.textos?.[String(p.numero)] ?? '').trim()
         if (!texto) continue
         const seq: Array<{ NEXTVAL: number }> = await m.query(
-          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL FROM dual`)
+          `SELECT RETRORESPUESTAITEM_SEQ.NEXTVAL `)
         await m.query(
           `INSERT INTO RETRORESPUESTAITEM
              (RETROITEMID, RETRORESPUESTAID, RETROPREGUNTAID, PREGUNTANUMERO, COMENTARIO)
-           VALUES (:1, :2, :3, :4, :5)`,
+           VALUES ($1, $2, $3, $4, $5)`,
           [Number(seq[0].NEXTVAL), respuestaId, p.preguntaId, p.numero, texto.slice(0, 2000)],
         )
       }
 
       await m.query(
-        `UPDATE RETRORESPUESTA SET PUNTAJEESCALA = :1, PUNTAJEMAXIMO = :2, PROMEDIO = :3
-          WHERE RETRORESPUESTAID = :4`,
+        `UPDATE RETRORESPUESTA SET PUNTAJEESCALA = $1, PUNTAJEMAXIMO = $2, PROMEDIO = $3
+          WHERE RETRORESPUESTAID = $4`,
         [suma, maximo, promedio, respuestaId],
       )
     })
@@ -786,15 +786,15 @@ export class RetroHistoricoService {
     const detalle = `${nombres.get(carga.autor) ?? carga.autor} a ${nombres.get(carga.destinatario) ?? carga.destinatario}`
 
     await this.dataSource.transaction(async m => {
-      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = :1`, [respuestaId])
+      await m.query(`DELETE FROM RETRORESPUESTAITEM WHERE RETRORESPUESTAID = $1`, [respuestaId])
       // primero se suelta la referencia: la asignación apunta a la respuesta
       await m.query(
-        `UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL WHERE RETROASIGNACIONID = :1`,
+        `UPDATE RETROASIGNACION SET RETRORESPUESTAID = NULL WHERE RETROASIGNACIONID = $1`,
         [carga.asignacionId],
       )
-      await m.query(`DELETE FROM RETRORESPUESTA WHERE RETRORESPUESTAID = :1`, [respuestaId])
-      await m.query(`DELETE FROM RETROASIGNACION WHERE RETROASIGNACIONID = :1`, [carga.asignacionId])
-      await m.query(`DELETE FROM RETROSESION WHERE RETROSESIONID = :1`, [carga.sesionId])
+      await m.query(`DELETE FROM RETRORESPUESTA WHERE RETRORESPUESTAID = $1`, [respuestaId])
+      await m.query(`DELETE FROM RETROASIGNACION WHERE RETROASIGNACIONID = $1`, [carga.asignacionId])
+      await m.query(`DELETE FROM RETROSESION WHERE RETROSESIONID = $1`, [carga.sesionId])
     })
 
     await this.controlCambios.registrar({

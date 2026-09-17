@@ -30,7 +30,7 @@ describe('CapacitadoresService', () => {
   it('toggleEstado busca el proyecto en CAPACITADORES (la tabla CAPACITADOR no existe) y fecha en UTC', async () => {
     const { servicio, llamadas } = falso((sql) => {
       if (sql.includes('SELECT PROYECTOID AS "proyectoId" FROM CAPACITADORES')) return [{ proyectoId: 77 }]
-      if (sql.includes('NVL(CONVENIOSESTADO, 0)')) return [{ estado: 1 }]
+      if (sql.includes('COALESCE(CONVENIOSESTADO, 0)')) return [{ estado: 1 }]
       if (sql.includes('AS "inter"')) return [{ inter: 'PENDIENTE DE APROBACION', trans: null }]
       return []
     })
@@ -38,7 +38,7 @@ describe('CapacitadoresService', () => {
     await expect(servicio.toggleEstado(6358, 'INACTIVO')).resolves.toEqual({ ok: true })
     expect(llamadas.some((l) => /\bFROM CAPACITADOR\b/.test(l.sql))).toBe(false)
     const upd = llamadas.find((l) => l.sql.startsWith('UPDATE CAPACITADORES'))
-    expect(upd?.sql).toContain('CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)')
+    expect(upd?.sql).toContain('CAST((now() AT TIME ZONE \'UTC\') AS timestamp)')
     expect(upd?.params).toEqual(['INACTIVO', 6358])
   })
 

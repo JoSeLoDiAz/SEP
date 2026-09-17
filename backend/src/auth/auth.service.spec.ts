@@ -92,8 +92,8 @@ describe('AuthService: registro', () => {
     expect(llamadas).toHaveLength(3)
     expect(llamadas[0].sql).toBe(
       'INSERT INTO USUARIO (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO, USUARIOTIPO, ' +
-        'USUARIOEMAIL, USUARIOLLAVEENCRIPTACION) VALUES (NULL, :1, :2, TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)), ' +
-        ':3, :4, :5, :6) RETURNING USUARIOID INTO :7',
+        'USUARIOEMAIL, USUARIOLLAVEENCRIPTACION) VALUES (NULL, $1, $2, date_trunc(\'day\', CAST((now() AT TIME ZONE \'UTC\') AS timestamp)), ' +
+        '$3, $4, $5, $6) RETURNING USUARIOID INTO $7',
     )
     const p = llamadas[0].params ?? []
     expect([p[0], p[2], p[3], p[4]]).toEqual([7, 1, 2, 'empresa@ejemplo.com'])
@@ -103,8 +103,8 @@ describe('AuthService: registro', () => {
       'INSERT INTO EMPRESA (EMPRESAID, TIPODOCUMENTOIDENTIDADID, EMPRESAIDENTIFICACION, EMPRESADIGITOVERIFICACION, ' +
         'EMPRESARAZONSOCIAL, EMPRESASIGLA, EMPRESAEMAIL, EMPRESAFECHAREGISTRO, COBERTURAEMPRESAID, ' +
         'DEPARTAMENTOEMPRESAID, CIUDADEMPRESAID, CIIUID, TIPOEMPRESAID, TAMANOEMPRESAID, SECTORID, SUBSECTORID, ' +
-        'TIPOIDENTIFICACIONREP) VALUES (NULL, :1, :2, :3, :4, :5, :6, TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)), ' +
-        ':7, :8, :9, :10, :11, :12, :13, :14, :15) RETURNING EMPRESAID INTO :16',
+        'TIPOIDENTIFICACIONREP) VALUES (NULL, $1, $2, $3, $4, $5, $6, date_trunc(\'day\', CAST((now() AT TIME ZONE \'UTC\') AS timestamp)), ' +
+        '$7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING EMPRESAID INTO $16',
     )
     expect(llamadas[2].params?.slice(0, 6)).toEqual([6, 900123456, 7, 'EMPRESA EJEMPLO S.A.S.', 'EE', 'empresa@ejemplo.com'])
     expect(llamadas.some((l) => /FROM dual/i.test(l.sql))).toBe(false)
@@ -119,9 +119,9 @@ describe('AuthService: registro', () => {
     const r = await servicio.registrarEmpresa(empresa)
 
     expect(r.usuarioId).toBe(91)
-    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, :1,')
+    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, $1,')
     expect(llamadas[1].params).toEqual([91])
-    expect(llamadas[2].sql).toContain('VALUES (EMPRESAID.NEXTVAL, :1,')
+    expect(llamadas[2].sql).toContain('VALUES (EMPRESAID.NEXTVAL, $1,')
   })
 
   it('persona en el Exadata: igual, con perfil 8 y USUARIOTIPO 1', async () => {
@@ -134,13 +134,13 @@ describe('AuthService: registro', () => {
     expect(llamadas).toHaveLength(3)
     const p = llamadas[0].params ?? []
     expect([p[0], p[2], p[3]]).toEqual([8, 1, 1])
-    expect(llamadas[1].sql).toContain(', 8, 1, 1, CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE))')
+    expect(llamadas[1].sql).toContain(', 8, 1, 1, CAST((now() AT TIME ZONE \'UTC\') AS timestamp))')
     expect(llamadas[1].params).toEqual([86603])
     expect(llamadas[2].sql).toBe(
       'INSERT INTO PERSONA (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONAIDENTIFICACION, PERSONANOMBRES, ' +
         'PERSONAPRIMERAPELLIDO, PERSONASEGUNDOAPELLIDO, PERSONAEMAIL, PERSONAFECHAREGISTRO, GENEROID, CIUDADID, ' +
-        'PERSONAHABEASDATA, PERSONAHABEASDATAE) VALUES (NULL, :1, :2, :3, :4, :5, :6, ' +
-        'TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE)), :7, :8, :9, :10) RETURNING PERSONAID INTO :11',
+        'PERSONAHABEASDATA, PERSONAHABEASDATAE) VALUES (NULL, $1, $2, $3, $4, $5, $6, ' +
+        'date_trunc(\'day\', CAST((now() AT TIME ZONE \'UTC\') AS timestamp)), $7, $8, $9, $10) RETURNING PERSONAID INTO $11',
     )
     expect(llamadas[2].params?.slice(0, 10)).toEqual([1, 1234567890, 'Juan', 'Gómez', '', 'juan@ejemplo.com', 3, 1, 'SI', 'NA'])
     expect(llamadas.some((l) => horaLocal.test(l.sql))).toBe(false)
@@ -156,7 +156,7 @@ describe('AuthService: último acceso', () => {
 
     expect(jwt.verify<{ sub: number }>(r.accessToken)).toMatchObject({ sub: 86602, perfilId: 9, scope: 'auth' })
     expect(llamadas[0]).toEqual({
-      sql: 'UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = SYS_EXTRACT_UTC(SYSTIMESTAMP) WHERE USUARIOPERFILID = :1',
+      sql: 'UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = (now() AT TIME ZONE \'UTC\') WHERE USUARIOPERFILID = $1',
       params: [11],
     })
   })

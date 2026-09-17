@@ -22,13 +22,12 @@ import { RegistrarEmpresaDto } from './dto/registrar-empresa.dto'
 import { RegistrarPersonaDto } from './dto/registrar-persona.dto'
 import { MailService } from './mail.service'
 import { insertarConId, sqlCrudo } from '../common/db/ids'
-import { AHORA_UTC, AHORA_UTC_TS } from '../common/db/fecha-utc'
+import { AHORA_UTC, AHORA_UTC_TS, HOY_UTC } from '../common/db/fecha-utc'
 
 interface ResetToken { email: string; expira: Date }
 
 // El registro guardaba con manager.save, y TypeORM escribe las columnas 'date' de la entidad como
 // TO_DATE('YYYY-MM-DD') del día (UTC, el backend corre con TZ=UTC): solo el día, sin hora. Se conserva.
-const HOY_UTC = `TRUNC(${AHORA_UTC})`
 
 // replica GetEncryptionKey() de GeneXus
 function getEncryptionKey(): string {
@@ -101,16 +100,16 @@ export class AuthService {
     try {
       if (perfilId === 7) {
         const rows: Array<{ razon: string }> = await this.dataSource.query(
-          `SELECT TRIM(EMPRESARAZONSOCIAL) AS "razon"
-             FROM EMPRESA WHERE EMPRESAEMAIL = :1 AND ROWNUM = 1`,
+          `SELECT btrim((EMPRESARAZONSOCIAL)::text) AS "razon"
+             FROM EMPRESA WHERE EMPRESAEMAIL = $1 LIMIT 1`,
           [email],
         )
         if (rows[0]?.razon) return rows[0].razon
       } else {
         const rows: Array<{ nombres: string; apellido: string }> = await this.dataSource.query(
-          `SELECT TRIM(PERSONANOMBRES) AS "nombres",
-                  TRIM(PERSONAPRIMERAPELLIDO) AS "apellido"
-             FROM PERSONA WHERE PERSONAEMAIL = :1 AND ROWNUM = 1`,
+          `SELECT btrim((PERSONANOMBRES)::text) AS "nombres",
+                  btrim((PERSONAPRIMERAPELLIDO)::text) AS "apellido"
+             FROM PERSONA WHERE PERSONAEMAIL = $1 LIMIT 1`,
           [email],
         )
         if (rows[0]?.nombres) return `${rows[0].nombres} ${rows[0].apellido}`.trim()
@@ -129,12 +128,12 @@ export class AuthService {
     }> = await this.dataSource.query(
       `SELECT up.USUARIOPERFILID         AS "usuarioPerfilId",
               up.PERFILID                AS "perfilId",
-              TRIM(p.PERFILNOMBRE)       AS "perfilNombre",
+              btrim((p.PERFILNOMBRE)::text)       AS "perfilNombre",
               up.PREDETERMINADO          AS "predeterminado",
               up.FECHAULTIMOACCESO       AS "fechaUltimoAcceso"
          FROM USUARIOPERFIL up
          JOIN PERFIL p ON p.PERFILID = up.PERFILID
-        WHERE up.USUARIOID = :1
+        WHERE up.USUARIOID = $1
           AND up.ESTADO = 1
         ORDER BY up.PREDETERMINADO DESC, up.FECHAULTIMOACCESO DESC NULLS LAST, p.PERFILNOMBRE ASC`,
       [usuarioId],
@@ -147,15 +146,30 @@ export class AuthService {
 
   private async marcarUltimoAcceso(usuarioPerfilId: number) {
     await this.dataSource.query(
-      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = ${AHORA_UTC_TS} WHERE USUARIOPERFILID = :1`,
+      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = ${AHORA_UTC_TS} WHERE USUARIOPERFILID = $1`,
       [usuarioPerfilId],
     )
   }
 
   // si no se llega a Cloudflare se deja pasar (la clave igual se verifica); un rechazo explícito sí bloquea
+  /** Para no repetir el aviso del captcha en cada intento de entrada. */
+  private avisoCaptchaDado = false
+
   private async verifyCaptcha(token?: string): Promise<void> {
-    const secret = process.env.TURNSTILE_SECRET
+    // `.trim()` a propósito: el guion de GitLab sube un espacio cuando la variable está vacía, y un espacio en
+    // JavaScript cuenta como valor. Sin esto, el SEP intentaría validar contra Cloudflare con un secreto en blanco
+    // y cada entrada costaría los 16 s de los dos intentos antes de dejar pasar igual.
+    const secret = process.env.TURNSTILE_SECRET?.trim()
     if (!secret) {
+      // Sin clave no hay nada que comprobar, y así se puede entrar donde no hay salida a Cloudflare. Pero que quede
+      // dicho una vez en el registro: si esto aparece en producción, el login está sin captcha y nadie se enteró.
+      if (!this.avisoCaptchaDado) {
+        this.avisoCaptchaDado = true
+        this.log.warn(
+          'TURNSTILE_SECRET no está definida: el captcha no se comprueba. La contraseña sí. ' +
+          'Correcto en un entorno de pruebas; en producción hay que ponerla.',
+        )
+      }
       return
     }
     if (!token) {
@@ -202,10 +216,10 @@ export class AuthService {
     // TRIM(): la columna es NCHAR y viene rellena de espacios
     const rows: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOIDENTIDADID AS "id",
-              TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) AS "nombre"
+              btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "nombre"
          FROM TIPODOCUMENTOIDENTIDAD
         WHERE ${col} = 1
-        ORDER BY TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) ASC`,
+        ORDER BY btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) ASC`,
     )
     return rows
   }
@@ -415,7 +429,7 @@ export class AuthService {
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, ${AHORA_UTC})`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 7, 1, 1, ${AHORA_UTC})`,
         [usuarioId],
       )
 
@@ -512,7 +526,7 @@ export class AuthService {
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 8, 1, 1, ${AHORA_UTC})`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 8, 1, 1, ${AHORA_UTC})`,
         [usuarioId],
       )
 

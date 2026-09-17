@@ -104,8 +104,8 @@ export class ConveniosService {
   // 403 si el convenio no esta en ejecucion; la usan otros services
   async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.dataSource.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
-         FROM CONVENIOS WHERE PROYECTOID = :1
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado"
+         FROM CONVENIOS WHERE PROYECTOID = $1
         ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -123,7 +123,7 @@ export class ConveniosService {
     const empresaId = await this.getEmpresaId(email)
     return this.dataSource.query(
       `SELECT cv.CONVENIOSID                                AS "convenioId",
-              TRIM(cv.CONVENIOSNUMERO)                      AS "numeroSecop",
+              btrim((cv.CONVENIOSNUMERO)::text)                      AS "numeroSecop",
               cv.CONVENIOSESTADO                            AS "estadoNum",
               CASE
                 WHEN cv.CONVENIOSESTADO = 1 THEN 'EN EJECUCIÓN'
@@ -134,15 +134,15 @@ export class ConveniosService {
               cv.CONVENIOSFECHAINICIO                        AS "fechaInicio",
               cv.CONVENIOSFECHAREGISTRO                      AS "fechaRegistro",
               p.PROYECTOID                                   AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)                         AS "proyectoNombre",
-              TRIM(co.CONVOCATORIANOMBRE)                    AS "convocatoria",
-              TRIM(m.MODALIDADNOMBRE)                        AS "modalidad",
+              btrim((p.PROYECTONOMBRE)::text)                         AS "proyectoNombre",
+              btrim((co.CONVOCATORIANOMBRE)::text)                    AS "convocatoria",
+              btrim((m.MODALIDADNOMBRE)::text)                        AS "modalidad",
               co.CONVOCATORIAID                              AS "convocatoriaId"
          FROM CONVENIOS cv
          JOIN PROYECTO p          ON p.PROYECTOID    = cv.PROYECTOID
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m     ON m.MODALIDADID    = p.MODALIDADID
-        WHERE p.EMPRESAID = :1
+        WHERE p.EMPRESAID = $1
         ORDER BY cv.CONVENIOSFECHAREGISTRO DESC NULLS LAST,
                  cv.CONVENIOSID DESC`,
       [empresaId],
@@ -156,7 +156,7 @@ export class ConveniosService {
       `SELECT COUNT(cv.CONVENIOSID) AS "total"
          FROM CONVENIOS cv
          JOIN PROYECTO p ON p.PROYECTOID = cv.PROYECTOID
-        WHERE p.EMPRESAID = :1`,
+        WHERE p.EMPRESAID = $1`,
       [empresaId],
     )
     return { tieneConvenios: Number(total) > 0, total: Number(total) }
@@ -167,39 +167,39 @@ export class ConveniosService {
     const empresaId = await this.getEmpresaId(email)
     const [row] = await this.dataSource.query(
       `SELECT cv.CONVENIOSID                                AS "convenioId",
-              TRIM(cv.CONVENIOSNUMERO)                      AS "numeroSecop",
+              btrim((cv.CONVENIOSNUMERO)::text)                      AS "numeroSecop",
               cv.CONVENIOSESTADO                            AS "estadoNum",
               cv.CONVENIOSFECHASUSC                          AS "fechaSuscripcion",
               cv.CONVENIOSFECHAINICIO                        AS "fechaInicio",
               cv.CONVENIOSFECHAREGISTRO                      AS "fechaRegistro",
               cv.CONVENIOSFECHARP                            AS "fechaRp",
               cv.CONVENIOSRP                                 AS "rp",
-              TRIM(cv.CONVENIOSBANCO)                        AS "banco",
-              TRIM(cv.CONVENIOSCUENTA)                       AS "cuenta",
+              btrim((cv.CONVENIOSBANCO)::text)                        AS "banco",
+              btrim((cv.CONVENIOSCUENTA)::text)                       AS "cuenta",
               cv.CONVENIOSTIPOCUENTA                         AS "tipoCuenta",
-              TRIM(cv.CONVENIOSPOLIZA)                       AS "poliza",
+              btrim((cv.CONVENIOSPOLIZA)::text)                       AS "poliza",
               cv.CONVENIOSPOLIZAANEXO                        AS "polizaAnexo",
               cv.CONVENIOSFECEXPPOLIZA                       AS "fechaExpPoliza",
               cv.CONVENIOSFECAPROPOLIZA                      AS "fechaAproPoliza",
-              TRIM(cv.CONVENIOSASEGURADORA)                  AS "aseguradora",
+              btrim((cv.CONVENIOSASEGURADORA)::text)                  AS "aseguradora",
               cv.CONVENIOSREVISION                           AS "revision",
               cv.CONVENIOSOTROSI                             AS "otrosi",
               cv.CONVENIOSFECHAOTROSI                        AS "fechaOtrosi",
               cv.CONVENIOSLINKSECOP                          AS "linkSecop",
-              TRIM(cv.CONVENIOSRADIPRESUPUESTO)              AS "radicadoPresupuesto",
+              btrim((cv.CONVENIOSRADIPRESUPUESTO)::text)              AS "radicadoPresupuesto",
               p.PROYECTOID                                   AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)                         AS "proyectoNombre",
-              TRIM(co.CONVOCATORIANOMBRE)                    AS "convocatoria",
+              btrim((p.PROYECTONOMBRE)::text)                         AS "proyectoNombre",
+              btrim((co.CONVOCATORIANOMBRE)::text)                    AS "convocatoria",
               co.CONVOCATORIAID                              AS "convocatoriaId",
-              TRIM(m.MODALIDADNOMBRE)                        AS "modalidad",
+              btrim((m.MODALIDADNOMBRE)::text)                        AS "modalidad",
               p.EMPRESAID                                    AS "empresaId",
-              TRIM(e.EMPRESARAZONSOCIAL)                     AS "empresa"
+              btrim((e.EMPRESARAZONSOCIAL)::text)                     AS "empresa"
          FROM CONVENIOS cv
          JOIN PROYECTO p          ON p.PROYECTOID    = cv.PROYECTOID
          JOIN EMPRESA e            ON e.EMPRESAID     = p.EMPRESAID
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
          LEFT JOIN MODALIDAD m     ON m.MODALIDADID    = p.MODALIDADID
-        WHERE p.PROYECTOID = :1
+        WHERE p.PROYECTOID = $1
         ORDER BY cv.CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -222,10 +222,10 @@ export class ConveniosService {
 
     // "Actualizar datos": admin siempre; la empresa solo con convocatoria abierta
     const [conv] = await this.dataSource.query(
-      `SELECT NVL(co.CONVOCATORIAESTADO, 0) AS "estado"
+      `SELECT COALESCE(co.CONVOCATORIAESTADO, 0) AS "estado"
          FROM PROYECTO p
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE p.PROYECTOID = :1`,
+        WHERE p.PROYECTOID = $1`,
       [proyectoId],
     )
     const ADMIN = 1, EMPRESA = 7
@@ -233,8 +233,8 @@ export class ConveniosService {
     const puedeActualizar = perfilId === ADMIN || (perfilId === EMPRESA && convocatoriaAbierta)
     // bandera para que el front pinte solo lectura
     const [cvEstado] = await this.dataSource.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     const convenioEnEjecucion = Number(cvEstado?.estado) === 1
@@ -256,21 +256,21 @@ export class ConveniosService {
       `SELECT agb.AFGRUPOBENEFICIARIOID            AS "afGrupoBeneficiarioId",
               p.PERSONAID                          AS "personaId",
               p.TIPODOCUMENTOIDENTIDADID           AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
-              TRIM(p.PERSONAIDENTIFICACION)        AS "identificacion",
-              TRIM(p.PERSONANOMBRES)               AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)        AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)       AS "segundoApellido",
-              TRIM(agb.AFGRUPOBENEESTADO)          AS "estado",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
+              btrim((p.PERSONAIDENTIFICACION)::text)        AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text)               AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)        AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)       AS "segundoApellido",
+              btrim((agb.AFGRUPOBENEESTADO)::text)          AS "estado",
               af.ACCIONFORMACIONNUMERO             AS "afNumero",
-              TRIM(af.ACCIONFORMACIONNOMBRE)       AS "afNombre",
+              btrim((af.ACCIONFORMACIONNOMBRE)::text)       AS "afNombre",
               g.AFGRUPONUMERO                      AS "grupoNumero"
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g          ON g.AFGRUPOID = agb.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
          JOIN PERSONA p          ON p.PERSONAID = agb.PERSONAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td ON td.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
-        WHERE af.PROYECTOID = :1
+        WHERE af.PROYECTOID = $1
         ORDER BY p.PERSONAID, af.ACCIONFORMACIONNUMERO, g.AFGRUPONUMERO`,
       [proyectoId],
     )
@@ -405,12 +405,12 @@ export class ConveniosService {
     }> = await this.dataSource.query(
       `SELECT be.BENEFICIARIOEMPRESAID            AS "id",
               be.TIPODOCUMENTOIDENTIDADID         AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
-              TRIM(be.BENEFICIARIOEMPRESANUMERO)  AS "numero",
-              TRIM(be.BENEFICIARIOEMPRESADIGITOVERI) AS "digitoVerificacion",
-              TRIM(be.BENEFICIARIOEMPRESANOMBRE)  AS "nombre",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
+              btrim((be.BENEFICIARIOEMPRESANUMERO)::text)  AS "numero",
+              btrim((be.BENEFICIARIOEMPRESADIGITOVERI)::text) AS "digitoVerificacion",
+              btrim((be.BENEFICIARIOEMPRESANOMBRE)::text)  AS "nombre",
               be.TAMANOEMPRESAID                  AS "tamanoEmpresaId",
-              TRIM(te.TAMANOEMPRESANOMBRE)        AS "tamanoEmpresa",
+              btrim((te.TAMANOEMPRESANOMBRE)::text)        AS "tamanoEmpresa",
               be.BENEFICIARIOEMPRESAFECHA         AS "fecha"
          FROM BENEFICIARIOEMPRESA be
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td ON td.TIPODOCUMENTOIDENTIDADID = be.TIPODOCUMENTOIDENTIDADID
@@ -436,17 +436,17 @@ export class ConveniosService {
     const [row] = await this.dataSource.query(
       `SELECT be.BENEFICIARIOEMPRESAID            AS "id",
               be.TIPODOCUMENTOIDENTIDADID         AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
-              TRIM(be.BENEFICIARIOEMPRESANUMERO)  AS "numero",
-              TRIM(be.BENEFICIARIOEMPRESADIGITOVERI) AS "digitoVerificacion",
-              TRIM(be.BENEFICIARIOEMPRESANOMBRE)  AS "nombre",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
+              btrim((be.BENEFICIARIOEMPRESANUMERO)::text)  AS "numero",
+              btrim((be.BENEFICIARIOEMPRESADIGITOVERI)::text) AS "digitoVerificacion",
+              btrim((be.BENEFICIARIOEMPRESANOMBRE)::text)  AS "nombre",
               be.TAMANOEMPRESAID                  AS "tamanoEmpresaId",
-              TRIM(te.TAMANOEMPRESANOMBRE)        AS "tamanoEmpresa"
+              btrim((te.TAMANOEMPRESANOMBRE)::text)        AS "tamanoEmpresa"
          FROM BENEFICIARIOEMPRESA be
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td ON td.TIPODOCUMENTOIDENTIDADID = be.TIPODOCUMENTOIDENTIDADID
          LEFT JOIN TAMANOEMPRESA te ON te.TAMANOEMPRESAID = be.TAMANOEMPRESAID
-        WHERE be.TIPODOCUMENTOIDENTIDADID = :1
-          AND TRIM(be.BENEFICIARIOEMPRESANUMERO) = :2
+        WHERE be.TIPODOCUMENTOIDENTIDADID = $1
+          AND btrim((be.BENEFICIARIOEMPRESANUMERO)::text) = $2
         ORDER BY be.BENEFICIARIOEMPRESAID ASC
         FETCH FIRST 1 ROW ONLY`,
       [tipoDocumentoId, num],
@@ -466,10 +466,10 @@ export class ConveniosService {
     if (existente) {
       await this.dataSource.query(
         `UPDATE BENEFICIARIOEMPRESA
-            SET BENEFICIARIOEMPRESANOMBRE     = :1,
-                BENEFICIARIOEMPRESADIGITOVERI = :2,
-                TAMANOEMPRESAID               = :3
-          WHERE BENEFICIARIOEMPRESAID = :4`,
+            SET BENEFICIARIOEMPRESANOMBRE     = $1,
+                BENEFICIARIOEMPRESADIGITOVERI = $2,
+                TAMANOEMPRESAID               = $3
+          WHERE BENEFICIARIOEMPRESAID = $4`,
         [dto.nombre.trim().slice(0, 200), (dto.digitoVerificacion ?? '').toString().trim() || null, dto.tamanoEmpresaId, existente.id],
       )
       return { mensaje: 'Empresa beneficiaria actualizada', accion: 'actualizada', empresaId: Number(existente.id) }
@@ -489,33 +489,33 @@ export class ConveniosService {
   async getCatalogosBeneficiario() {
     const [generos, caracterizaciones, niveles, perfilesTransf, rangosEdad, departamentos] = await Promise.all([
       this.dataSource.query(
-        `SELECT GENEROID AS "id", TRIM(GENERONOMBRE) AS "nombre"
+        `SELECT GENEROID AS "id", btrim((GENERONOMBRE)::text) AS "nombre"
            FROM GENERO ORDER BY GENEROID`,
       ),
       this.dataSource.query(
-        `SELECT CARACTERIZACIONID AS "id", TRIM(CARACTERIZACIONNOMBRE) AS "nombre"
-           FROM CARACTERIZACION WHERE CARACTERIZACIONESTADO = 1 OR CARACTERIZACIONESTADO IS NULL
+        `SELECT CARACTERIZACIONID AS "id", btrim((CARACTERIZACIONNOMBRE)::text) AS "nombre"
+           FROM CARACTERIZACION WHERE btrim((CARACTERIZACIONESTADO)::text) = '1' OR CARACTERIZACIONESTADO IS NULL
            ORDER BY CARACTERIZACIONID`,
       ).catch(() => this.dataSource.query(
-        `SELECT CARACTERIZACIONID AS "id", TRIM(CARACTERIZACIONNOMBRE) AS "nombre"
+        `SELECT CARACTERIZACIONID AS "id", btrim((CARACTERIZACIONNOMBRE)::text) AS "nombre"
            FROM CARACTERIZACION ORDER BY CARACTERIZACIONID`,
       )),
       this.dataSource.query(
-        `SELECT NIVELOCUPACIONALID AS "id", TRIM(NIVELOCUPACIONALNOMBRE) AS "nombre"
+        `SELECT NIVELOCUPACIONALID AS "id", btrim((NIVELOCUPACIONALNOMBRE)::text) AS "nombre"
            FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1
            ORDER BY NIVELOCUPACIONALID`,
       ),
       this.dataSource.query(
-        `SELECT PERFILTRASFERENCIAID AS "id", TRIM(PERFILTRASFERENCIANOMBRE) AS "nombre"
+        `SELECT PERFILTRASFERENCIAID AS "id", btrim((PERFILTRASFERENCIANOMBRE)::text) AS "nombre"
            FROM PERFILTRASFERENCIA ORDER BY PERFILTRASFERENCIAID`,
       ).catch(() => []),
       this.dataSource.query(
-        `SELECT RANGOEDADID AS "id", TRIM(RANGOEDADNOMBRE) AS "nombre"
+        `SELECT RANGOEDADID AS "id", btrim((RANGOEDADNOMBRE)::text) AS "nombre"
            FROM RANGOEDAD ORDER BY RANGOEDADID`,
       ),
       this.dataSource.query(
-        `SELECT DEPARTAMENTOID AS "id", TRIM(DEPARTAMENTONOMBRE) AS "nombre"
-           FROM DEPARTAMENTO ORDER BY TRIM(DEPARTAMENTONOMBRE) ASC`,
+        `SELECT DEPARTAMENTOID AS "id", btrim((DEPARTAMENTONOMBRE)::text) AS "nombre"
+           FROM DEPARTAMENTO ORDER BY btrim((DEPARTAMENTONOMBRE)::text) ASC`,
       ),
     ])
     return { generos, caracterizaciones, niveles, perfilesTransf, rangosEdad, departamentos }
@@ -533,10 +533,10 @@ export class ConveniosService {
     }> = await this.dataSource.query(
       `SELECT ACCIONFORMACIONID                       AS "afId",
               ACCIONFORMACIONNUMERO                   AS "numero",
-              TRIM(ACCIONFORMACIONNOMBRE)             AS "nombre",
-              NVL(ACCIONFORMACIONTRANSFERENCIA, 0)    AS "transferencia"
+              btrim((ACCIONFORMACIONNOMBRE)::text)             AS "nombre",
+              COALESCE(ACCIONFORMACIONTRANSFERENCIA, 0)    AS "transferencia"
          FROM ACCIONFORMACION
-        WHERE PROYECTOID = :1
+        WHERE PROYECTOID = $1
         ORDER BY ACCIONFORMACIONNUMERO`,
       [proyectoId],
     )
@@ -564,12 +564,12 @@ export class ConveniosService {
       `SELECT agb.AFGRUPOBENEFICIARIOID  AS "afGrupoBeneficiarioId",
               agb.AFGRUPOID              AS "afGrupoId",
               g.ACCIONFORMACIONID        AS "afId",
-              TRIM(agb.AFGRUPOBENEESTADO) AS "estado",
+              btrim((agb.AFGRUPOBENEESTADO)::text) AS "estado",
               agb.POSTULACIONANO         AS "ano"
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g          ON g.AFGRUPOID = agb.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE af.PROYECTOID = :1 AND agb.PERSONAID = :2`,
+        WHERE af.PROYECTOID = $1 AND agb.PERSONAID = $2`,
       [proyectoId, Number(personaId)],
     )
 
@@ -610,7 +610,7 @@ export class ConveniosService {
               af.ACCIONFORMACIONNUMERO AS "afNumero"
          FROM AFGRUPO g
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE g.AFGRUPOID = :1 AND af.PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE g.AFGRUPOID = $1 AND af.PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [Number(afGrupoId), proyectoId],
     )
     if (!g) throw new BadRequestException('El grupo no pertenece al proyecto.')
@@ -618,7 +618,7 @@ export class ConveniosService {
     // 2) la persona necesita postulacion del año vigente
     const ano = new Date().getFullYear()
     const [postu] = await this.dataSource.query(
-      `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = :1 AND POSTULACIONANO = :2 FETCH FIRST 1 ROW ONLY`,
+      `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = $1 AND POSTULACIONANO = $2 FETCH FIRST 1 ROW ONLY`,
       [Number(personaId), ano],
     )
     if (!postu) throw new BadRequestException('La persona no tiene postulación vigente. Diligénciala antes de asociarla.')
@@ -629,9 +629,9 @@ export class ConveniosService {
               g2.AFGRUPONUMERO          AS "grupoNumero"
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g2 ON g2.AFGRUPOID = agb.AFGRUPOID
-        WHERE g2.ACCIONFORMACIONID = :1
-          AND agb.PERSONAID = :2
-          AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+        WHERE g2.ACCIONFORMACIONID = $1
+          AND agb.PERSONAID = $2
+          AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         FETCH FIRST 1 ROW ONLY`,
       [Number(g.afId), Number(personaId)],
     )
@@ -640,7 +640,7 @@ export class ConveniosService {
       if (Number(yaEnAF.id) && Number(g.id) === Number(afGrupoId)) {
         const [mismo] = await this.dataSource.query(
           `SELECT AFGRUPOBENEFICIARIOID AS "id" FROM AFGRUPOBENEFICIARIO
-            WHERE AFGRUPOID = :1 AND PERSONAID = :2 AND TRIM(AFGRUPOBENEESTADO) = 'ACTIVO'
+            WHERE AFGRUPOID = $1 AND PERSONAID = $2 AND btrim((AFGRUPOBENEESTADO)::text) = 'ACTIVO'
             FETCH FIRST 1 ROW ONLY`,
           [Number(afGrupoId), Number(personaId)],
         )
@@ -659,8 +659,8 @@ export class ConveniosService {
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g  ON g.AFGRUPOID = agb.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE af.PROYECTOID = :1
-          AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'
+        WHERE af.PROYECTOID = $1
+          AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'
         GROUP BY agb.PERSONAID`,
       [proyectoId],
     )
@@ -685,9 +685,9 @@ export class ConveniosService {
     // en el Exadata (RAC, secuencia NOORDER con cache) un id mayor no es una fila mas nueva
     const [existente] = await this.dataSource.query(
       `SELECT AFGRUPOBENEFICIARIOID AS "id",
-              TRIM(AFGRUPOBENEESTADO) AS "estado"
+              btrim((AFGRUPOBENEESTADO)::text) AS "estado"
          FROM AFGRUPOBENEFICIARIO
-        WHERE PERSONAID = :1 AND AFGRUPOID = :2
+        WHERE PERSONAID = $1 AND AFGRUPOID = $2
         ORDER BY AFGRUPOBENEFICIARIOFECHAREGIST DESC, AFGRUPOBENEFICIARIOID DESC FETCH FIRST 1 ROW ONLY`,
       [Number(personaId), Number(afGrupoId)],
     )
@@ -695,9 +695,9 @@ export class ConveniosService {
       await this.dataSource.query(
         `UPDATE AFGRUPOBENEFICIARIO
             SET AFGRUPOBENEESTADO = 'ACTIVO',
-                POSTULACIONANO    = :1,
-                VALIDACIONINTERVENTOR = NVL(VALIDACIONINTERVENTOR, 'PENDIENTE')
-          WHERE AFGRUPOBENEFICIARIOID = :2`,
+                POSTULACIONANO    = $1,
+                VALIDACIONINTERVENTOR = COALESCE(VALIDACIONINTERVENTOR, 'PENDIENTE')
+          WHERE AFGRUPOBENEFICIARIOID = $2`,
         [ano, Number(existente.id)],
       )
       return {
@@ -742,7 +742,7 @@ export class ConveniosService {
          FROM AFGRUPOBENEFICIARIO agb
          JOIN AFGRUPO g          ON g.AFGRUPOID = agb.AFGRUPOID
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-        WHERE agb.AFGRUPOBENEFICIARIOID = :1 AND af.PROYECTOID = :2
+        WHERE agb.AFGRUPOBENEFICIARIOID = $1 AND af.PROYECTOID = $2
         FETCH FIRST 1 ROW ONLY`,
       [Number(afGrupoBeneficiarioId), proyectoId],
     )
@@ -750,7 +750,7 @@ export class ConveniosService {
 
     await this.dataSource.query(
       `UPDATE AFGRUPOBENEFICIARIO SET AFGRUPOBENEESTADO = 'RETIRADO'
-        WHERE AFGRUPOBENEFICIARIOID = :1`,
+        WHERE AFGRUPOBENEFICIARIOID = $1`,
       [Number(afGrupoBeneficiarioId)],
     )
     return { mensaje: 'Asociación retirada.' }
@@ -759,9 +759,9 @@ export class ConveniosService {
   async getCiudadesPorDepartamento(departamentoId: number) {
     if (!departamentoId) return []
     return this.dataSource.query(
-      `SELECT CIUDADID AS "id", TRIM(CIUDADNOMBRE) AS "nombre"
-         FROM CIUDAD WHERE DEPARTAMENTOID = :1
-        ORDER BY TRIM(CIUDADNOMBRE) ASC`,
+      `SELECT CIUDADID AS "id", btrim((CIUDADNOMBRE)::text) AS "nombre"
+         FROM CIUDAD WHERE DEPARTAMENTOID = $1
+        ORDER BY btrim((CIUDADNOMBRE)::text) ASC`,
       [Number(departamentoId)],
     )
   }
@@ -799,26 +799,26 @@ export class ConveniosService {
     const [persona] = await this.dataSource.query(
       `SELECT p.PERSONAID                              AS "personaId",
               p.TIPODOCUMENTOIDENTIDADID               AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE)    AS "tipoDocumento",
-              TRIM(p.PERSONAIDENTIFICACION)            AS "identificacion",
-              TRIM(p.PERSONANOMBRES)                   AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)            AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)           AS "segundoApellido",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text)    AS "tipoDocumento",
+              btrim((p.PERSONAIDENTIFICACION)::text)            AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text)                   AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)            AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)           AS "segundoApellido",
               p.GENEROID                               AS "generoId",
               p.PERSONAESTRATO                         AS "estratoId",
               p.PERSONAFECHANACIMIENTO                 AS "fechaNacimiento",
-              TRIM(p.PERSONACELULAR)                   AS "celular",
+              btrim((p.PERSONACELULAR)::text)                   AS "celular",
               c.DEPARTAMENTOID                         AS "departamentoId",
               p.CIUDADID                               AS "ciudadId",
-              TRIM(p.PERSONAEMAIL)                     AS "email",
-              TRIM(p.PERSONABARRIO)                    AS "barrio",
-              TRIM(p.PERSONADIRECCION)                 AS "direccion",
-              TRIM(p.PERSONAHABEASDATA)                AS "habeasData"
+              btrim((p.PERSONAEMAIL)::text)                     AS "email",
+              btrim((p.PERSONABARRIO)::text)                    AS "barrio",
+              btrim((p.PERSONADIRECCION)::text)                 AS "direccion",
+              btrim((p.PERSONAHABEASDATA)::text)                AS "habeasData"
          FROM PERSONA p
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td ON td.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
          LEFT JOIN CIUDAD c ON c.CIUDADID = p.CIUDADID
-        WHERE p.TIPODOCUMENTOIDENTIDADID = :1
-          AND TRIM(p.PERSONAIDENTIFICACION) = :2
+        WHERE p.TIPODOCUMENTOIDENTIDADID = $1
+          AND btrim((p.PERSONAIDENTIFICACION)::text) = $2
         FETCH FIRST 1 ROW ONLY`,
       [tipoDocumentoId, ident],
     )
@@ -833,25 +833,25 @@ export class ConveniosService {
     const [postu] = await this.dataSource.query(
       `SELECT po.PERSONAID                       AS "personaId",
               po.POSTULACIONANO                   AS "ano",
-              TRIM(po.POSTULACIONANTIGUEDAD)      AS "antiguedad",
+              btrim((po.POSTULACIONANTIGUEDAD)::text)      AS "antiguedad",
               po.BENEFICIARIOEMPRESAID            AS "beneficiarioEmpresaId",
               po.NIVELOCUPACIONALID               AS "nivelOcupacionalId",
               po.CARACTERIZACIONID                AS "caracterizacionId",
               po.PERFILTRASFERENCIAID             AS "perfilTrasferenciaId",
-              TRIM(po.POSTULACIONTRASFERENCIA)    AS "postulacionTrasferencia",
+              btrim((po.POSTULACIONTRASFERENCIA)::text)    AS "postulacionTrasferencia",
               po.RANGOEDADID                      AS "rangoEdadId",
               po.IDEMPRESAP                       AS "empresaProponenteId",
               be.TIPODOCUMENTOIDENTIDADID         AS "empresaTipoDocumentoId",
-              TRIM(tde.TIPODOCUMENTOIDENTIDADNOMBRE) AS "empresaTipoDocumento",
-              TRIM(be.BENEFICIARIOEMPRESANUMERO)  AS "empresaNumero",
-              TRIM(be.BENEFICIARIOEMPRESANOMBRE)  AS "empresaNombre",
+              btrim((tde.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "empresaTipoDocumento",
+              btrim((be.BENEFICIARIOEMPRESANUMERO)::text)  AS "empresaNumero",
+              btrim((be.BENEFICIARIOEMPRESANOMBRE)::text)  AS "empresaNombre",
               be.TAMANOEMPRESAID                  AS "tamanoEmpresaId",
-              TRIM(te.TAMANOEMPRESANOMBRE)        AS "tamanoEmpresaNombre"
+              btrim((te.TAMANOEMPRESANOMBRE)::text)        AS "tamanoEmpresaNombre"
          FROM POSTULACION po
          LEFT JOIN BENEFICIARIOEMPRESA be ON be.BENEFICIARIOEMPRESAID = po.BENEFICIARIOEMPRESAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD tde ON tde.TIPODOCUMENTOIDENTIDADID = be.TIPODOCUMENTOIDENTIDADID
          LEFT JOIN TAMANOEMPRESA te ON te.TAMANOEMPRESAID = be.TAMANOEMPRESAID
-        WHERE po.PERSONAID = :1
+        WHERE po.PERSONAID = $1
         ORDER BY po.POSTULACIONANO DESC
         FETCH FIRST 1 ROW ONLY`,
       [Number(persona.personaId)],
@@ -870,9 +870,9 @@ export class ConveniosService {
            FROM AFGRUPOBENEFICIARIO agb
            JOIN AFGRUPO g          ON g.AFGRUPOID = agb.AFGRUPOID
            JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = g.ACCIONFORMACIONID
-          WHERE af.PROYECTOID = :1
-            AND agb.PERSONAID = :2
-            AND TRIM(agb.AFGRUPOBENEESTADO) = 'ACTIVO'`,
+          WHERE af.PROYECTOID = $1
+            AND agb.PERSONAID = $2
+            AND btrim((agb.AFGRUPOBENEESTADO)::text) = 'ACTIVO'`,
         [proyectoId, Number(persona.personaId)],
       )
       asociacionesActivas = Number(c?.n) || 0
@@ -914,7 +914,7 @@ export class ConveniosService {
     if (!personaId) {
       const [existente] = await this.dataSource.query(
         `SELECT PERSONAID AS "id" FROM PERSONA
-          WHERE TIPODOCUMENTOIDENTIDADID = :1 AND TRIM(PERSONAIDENTIFICACION) = :2
+          WHERE TIPODOCUMENTOIDENTIDADID = $1 AND btrim((PERSONAIDENTIFICACION)::text) = $2
           FETCH FIRST 1 ROW ONLY`,
         [Number(dto.tipoDocumentoId), ident],
       )
@@ -924,22 +924,22 @@ export class ConveniosService {
     if (personaId) {
       await this.dataSource.query(
         `UPDATE PERSONA
-            SET TIPODOCUMENTOIDENTIDADID = :1,
-                PERSONAIDENTIFICACION    = :2,
-                PERSONANOMBRES           = :3,
-                PERSONAPRIMERAPELLIDO    = :4,
-                PERSONASEGUNDOAPELLIDO   = :5,
-                GENEROID                 = :6,
-                PERSONAESTRATO           = :7,
-                PERSONAFECHANACIMIENTO   = CASE WHEN :8 IS NULL THEN NULL
-                                                ELSE TO_DATE(:9, 'YYYY-MM-DD') END,
-                PERSONACELULAR           = :10,
-                CIUDADID                 = :11,
-                PERSONAEMAIL             = :12,
-                PERSONABARRIO            = :13,
-                PERSONADIRECCION         = :14,
-                PERSONAHABEASDATA        = :15
-          WHERE PERSONAID = :16`,
+            SET TIPODOCUMENTOIDENTIDADID = $1,
+                PERSONAIDENTIFICACION    = $2,
+                PERSONANOMBRES           = $3,
+                PERSONAPRIMERAPELLIDO    = $4,
+                PERSONASEGUNDOAPELLIDO   = $5,
+                GENEROID                 = $6,
+                PERSONAESTRATO           = $7,
+                PERSONAFECHANACIMIENTO   = CASE WHEN $8 IS NULL THEN NULL
+                                                ELSE TO_DATE($9, 'YYYY-MM-DD') END,
+                PERSONACELULAR           = $10,
+                CIUDADID                 = $11,
+                PERSONAEMAIL             = $12,
+                PERSONABARRIO            = $13,
+                PERSONADIRECCION         = $14,
+                PERSONAHABEASDATA        = $15
+          WHERE PERSONAID = $16`,
         [
           Number(dto.tipoDocumentoId), ident, nombres, primer, segundo,
           dto.generoId  ? Number(dto.generoId)  : null,
@@ -982,7 +982,7 @@ export class ConveniosService {
     // empresa proponente para IDEMPRESAP
     const empresaId = await this.getEmpresaId(email).catch(() => null)
     const [proy] = await this.dataSource.query(
-      `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = :1`,
+      `SELECT EMPRESAID AS "empresaId" FROM PROYECTO WHERE PROYECTOID = $1`,
       [proyectoId],
     )
     if (!proy) throw new NotFoundException('Proyecto no encontrado')
@@ -1018,7 +1018,7 @@ export class ConveniosService {
 
     // upsert por (personaId, ano)
     const [exist] = await this.dataSource.query(
-      `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = :1 AND POSTULACIONANO = :2`,
+      `SELECT 1 AS "x" FROM POSTULACION WHERE PERSONAID = $1 AND POSTULACIONANO = $2`,
       [Number(dto.personaId), ano],
     )
 
@@ -1032,19 +1032,19 @@ export class ConveniosService {
     if (exist) {
       await this.dataSource.query(
         `UPDATE POSTULACION
-            SET POSTULACIONANTIGUEDAD     = :1,
-                BENEFICIARIOEMPRESAID     = :2,
-                NIVELOCUPACIONALID        = :3,
-                CARACTERIZACIONID         = :4,
-                PERFILTRASFERENCIAID      = :5,
-                POSTULACIONTRASFERENCIA   = :6,
-                RANGOEDADID               = :7,
-                IDEMPRESAP                = :8,
-                POSTULACIONNOMBRECONTACTO = :9,
-                POSTULACIONDEPENDENCIA    = :10,
-                POSTULACIONTELEFONO       = :11,
-                POSTULACIONEMAIL          = :12
-          WHERE PERSONAID = :13 AND POSTULACIONANO = :14`,
+            SET POSTULACIONANTIGUEDAD     = $1,
+                BENEFICIARIOEMPRESAID     = $2,
+                NIVELOCUPACIONALID        = $3,
+                CARACTERIZACIONID         = $4,
+                PERFILTRASFERENCIAID      = $5,
+                POSTULACIONTRASFERENCIA   = $6,
+                RANGOEDADID               = $7,
+                IDEMPRESAP                = $8,
+                POSTULACIONNOMBRECONTACTO = $9,
+                POSTULACIONDEPENDENCIA    = $10,
+                POSTULACIONTELEFONO       = $11,
+                POSTULACIONEMAIL          = $12
+          WHERE PERSONAID = $13 AND POSTULACIONANO = $14`,
         [antig, dto.beneficiarioEmpresaId, dto.nivelOcupacionalId, dto.caracterizacionId,
          dto.perfilTrasferenciaId, transf, rangoEdadId, empresaProponenteId,
          contacto.nombre, contacto.dependencia, contacto.telefono, contacto.email,
@@ -1060,7 +1060,7 @@ export class ConveniosService {
           NIVELOCUPACIONALID, CARACTERIZACIONID, PERFILTRASFERENCIAID, RANGOEDADID,
           POSTULACIONTRASFERENCIA, POSTULACIONHABEASDATA, POSTULACIONESTADO, POSTULACIONHABEASDATAE,
           IDEMPRESAP)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, 'NO', 'ACTIVO', 'NO', :14)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'NO', 'ACTIVO', 'NO', $14)`,
       [Number(dto.personaId), ano, antig, dto.beneficiarioEmpresaId,
        contacto.nombre, contacto.dependencia, contacto.telefono, contacto.email,
        dto.nivelOcupacionalId, dto.caracterizacionId, dto.perfilTrasferenciaId, rangoEdadId,
@@ -1081,41 +1081,41 @@ export class ConveniosService {
               d.PROYECTOID                                  AS "proyectoId",
               d.DIREFECHAREGISTRO                           AS "fechaRegistro",
               d.DIREFECHAACTUALIZACION                      AS "fechaActualizacion",
-              TRIM(d.DIREESTADO)                            AS "estado",
+              btrim((d.DIREESTADO)::text)                            AS "estado",
               d.DIREOBSERVACION                             AS "observacion",
-              TRIM(d.DIREINTERESTADO)                       AS "estadoInterventoria",
+              btrim((d.DIREINTERESTADO)::text)                       AS "estadoInterventoria",
               d.DIREINTERFECHAACTUALIZACION                 AS "fechaInterventoria",
               d.DIRINTERPERSONAID                           AS "interventorPersonaId",
-              TRIM(d.DIRECTORESRADISENA)                    AS "radicadoSena",
+              btrim((d.DIRECTORESRADISENA)::text)                    AS "radicadoSena",
               d.DIRECTORESRADISENAFECHA                     AS "fechaRadicadoSena",
-              TRIM(d.DIRECTORESRADIINTER)                   AS "radicadoInterventoria",
+              btrim((d.DIRECTORESRADIINTER)::text)                   AS "radicadoInterventoria",
               d.DIRECTORESRADIINTERFECHA                    AS "fechaRadicadoInterventoria",
-              TRIM(p.PERSONANOMBRES)                        AS "nombres",
-              TRIM(p.PERSONAPRIMERAPELLIDO)                 AS "primerApellido",
-              TRIM(p.PERSONASEGUNDOAPELLIDO)                AS "segundoApellido",
-              TRIM(p.PERSONAIDENTIFICACION)                 AS "identificacion",
+              btrim((p.PERSONANOMBRES)::text)                        AS "nombres",
+              btrim((p.PERSONAPRIMERAPELLIDO)::text)                 AS "primerApellido",
+              btrim((p.PERSONASEGUNDOAPELLIDO)::text)                AS "segundoApellido",
+              btrim((p.PERSONAIDENTIFICACION)::text)                 AS "identificacion",
               p.TIPODOCUMENTOIDENTIDADID                    AS "tipoDocumentoId",
-              TRIM(td.TIPODOCUMENTOIDENTIDADNOMBRE)         AS "tipoDocumento",
-              TRIM(p.PERSONAEMAIL)                          AS "email",
-              TRIM(p.PERSONACELULAR)                        AS "celular",
-              TRIM(p.PERSONATELEFONO)                       AS "telefono",
+              btrim((td.TIPODOCUMENTOIDENTIDADNOMBRE)::text)         AS "tipoDocumento",
+              btrim((p.PERSONAEMAIL)::text)                          AS "email",
+              btrim((p.PERSONACELULAR)::text)                        AS "celular",
+              btrim((p.PERSONATELEFONO)::text)                       AS "telefono",
               p.CIUDADID                                    AS "ciudadId",
-              TRIM(c.CIUDADNOMBRE)                          AS "ciudad"
+              btrim((c.CIUDADNOMBRE)::text)                          AS "ciudad"
          FROM DIRECTORES d
          JOIN PERSONA p                       ON p.PERSONAID = d.PERSONAID
          LEFT JOIN TIPODOCUMENTOIDENTIDAD td  ON td.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
          LEFT JOIN CIUDAD c                   ON c.CIUDADID = p.CIUDADID
-        WHERE d.PROYECTOID = :1
+        WHERE d.PROYECTOID = $1
         ORDER BY
-          CASE WHEN TRIM(d.DIREESTADO) = 'ACTIVO' THEN 0 ELSE 1 END,
+          CASE WHEN btrim((d.DIREESTADO)::text) = 'ACTIVO' THEN 0 ELSE 1 END,
           d.DIRECTORID DESC`,
       [proyectoId],
     )
     const activo = all.find((d: any) => (d.estado ?? '').trim() === 'ACTIVO') ?? null
     const historial = all.filter((d: any) => (d.estado ?? '').trim() !== 'ACTIVO')
     const [cvEstado] = await this.dataSource.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     const convenioEnEjecucion = Number(cvEstado?.estado) === 1
@@ -1136,8 +1136,8 @@ export class ConveniosService {
       let personaId: number | null = dto.personaId ? Number(dto.personaId) : null
       if (!personaId) {
         const [existente] = await qr.query(
-          `SELECT PERSONAID AS "id" FROM PERSONA WHERE TRIM(PERSONAIDENTIFICACION) = :1
-              AND TIPODOCUMENTOIDENTIDADID = :2 FETCH FIRST 1 ROW ONLY`,
+          `SELECT PERSONAID AS "id" FROM PERSONA WHERE btrim((PERSONAIDENTIFICACION)::text) = $1
+              AND TIPODOCUMENTOIDENTIDADID = $2 FETCH FIRST 1 ROW ONLY`,
           [String(dto.identificacion).trim(), Number(dto.tipoDocumentoId)],
         )
         if (existente) {
@@ -1162,7 +1162,7 @@ export class ConveniosService {
       await qr.query(
         `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
                                 DIREFECHAACTUALIZACION = ${AHORA_UTC}
-          WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
+          WHERE PROYECTOID = $1 AND btrim((DIREESTADO)::text) = 'ACTIVO'`,
         [proyectoId],
       )
 
@@ -1196,14 +1196,14 @@ export class ConveniosService {
     await this.getDetalleConvenio(email, proyectoId)
     await this.assertConvenioEnEjecucion(proyectoId)
     const [pp] = await this.dataSource.query(
-      `SELECT PERSONAID AS "id" FROM PERSONA WHERE PERSONAID = :1`,
+      `SELECT PERSONAID AS "id" FROM PERSONA WHERE PERSONAID = $1`,
       [Number(personaId)],
     )
     if (!pp) throw new NotFoundException('La persona no existe.')
 
     const [ya] = await this.dataSource.query(
       `SELECT DIRECTORID AS "id" FROM DIRECTORES
-        WHERE PROYECTOID = :1 AND PERSONAID = :2 AND TRIM(DIREESTADO) = 'ACTIVO'
+        WHERE PROYECTOID = $1 AND PERSONAID = $2 AND btrim((DIREESTADO)::text) = 'ACTIVO'
         FETCH FIRST 1 ROW ONLY`,
       [proyectoId, Number(personaId)],
     )
@@ -1219,15 +1219,15 @@ export class ConveniosService {
     // regla SENA: no puede ser director APROBADO en otro proyecto de la misma convocatoria
     const [conflicto] = await this.dataSource.query(
       `SELECT d.PROYECTOID                AS "proyectoId",
-              TRIM(p.PROYECTONOMBRE)      AS "proyectoNombre"
+              btrim((p.PROYECTONOMBRE)::text)      AS "proyectoNombre"
          FROM DIRECTORES d
          JOIN PROYECTO p ON p.PROYECTOID = d.PROYECTOID
-        WHERE d.PERSONAID = :1
-          AND TRIM(d.DIREESTADO) = 'ACTIVO'
-          AND TRIM(d.DIREINTERESTADO) = 'APROBADO'
-          AND d.PROYECTOID <> :2
+        WHERE d.PERSONAID = $1
+          AND btrim((d.DIREESTADO)::text) = 'ACTIVO'
+          AND btrim((d.DIREINTERESTADO)::text) = 'APROBADO'
+          AND d.PROYECTOID <> $2
           AND p.CONVOCATORIAID = (
-            SELECT CONVOCATORIAID FROM PROYECTO WHERE PROYECTOID = :3
+            SELECT CONVOCATORIAID FROM PROYECTO WHERE PROYECTOID = $3
           )
         FETCH FIRST 1 ROW ONLY`,
       [Number(personaId), proyectoId, proyectoId],
@@ -1248,7 +1248,7 @@ export class ConveniosService {
       await qr.query(
         `UPDATE DIRECTORES SET DIREESTADO = 'INACTIVO',
                                 DIREFECHAACTUALIZACION = ${AHORA_UTC}
-          WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'`,
+          WHERE PROYECTOID = $1 AND btrim((DIREESTADO)::text) = 'ACTIVO'`,
         [proyectoId],
       )
       const directorId = await insertarConId(qr, 'DIRECTORES', 'DIRECTORID', { maxMasUno: true }, {
@@ -1287,7 +1287,7 @@ export class ConveniosService {
     }
     // sin convenio no aplica el flujo director-interventoria
     const [conv] = await this.dataSource.query(
-      `SELECT CONVENIOSID AS "id" FROM CONVENIOS WHERE PROYECTOID = :1
+      `SELECT CONVENIOSID AS "id" FROM CONVENIOS WHERE PROYECTOID = $1
          FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -1296,7 +1296,7 @@ export class ConveniosService {
     // con cache) un DIRECTORID mayor no es una fila mas nueva
     const [dir] = await this.dataSource.query(
       `SELECT DIRECTORID AS "id" FROM DIRECTORES
-        WHERE PROYECTOID = :1 AND TRIM(DIREESTADO) = 'ACTIVO'
+        WHERE PROYECTOID = $1 AND btrim((DIREESTADO)::text) = 'ACTIVO'
         ORDER BY DIREFECHAREGISTRO DESC, DIRECTORID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -1307,11 +1307,11 @@ export class ConveniosService {
     }
     await this.dataSource.query(
       `UPDATE DIRECTORES
-          SET DIREINTERESTADO = :1,
-              DIREOBSERVACION = :2,
+          SET DIREINTERESTADO = $1,
+              DIREOBSERVACION = $2,
               DIREINTERFECHAACTUALIZACION = ${AHORA_UTC},
-              DIRINTERPERSONAID = :3
-        WHERE DIRECTORID = :4`,
+              DIRINTERPERSONAID = $3
+        WHERE DIRECTORID = $4`,
       [
         aprobar ? 'APROBADO' : 'RECHAZADO',
         obsTrim || null,

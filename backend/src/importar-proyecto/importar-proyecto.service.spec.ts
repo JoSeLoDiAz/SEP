@@ -56,7 +56,7 @@ function falso(extra: [RegExp, unknown[]][] = []) {
       siguiente.set(ins[1], n + 1)
       return Promise.resolve([[n]])
     }
-    if (sql.startsWith('SELECT NVL(MAX(')) return Promise.resolve([{ id: 40 }])
+    if (sql.startsWith('SELECT COALESCE(MAX(')) return Promise.resolve([{ id: 40 }])
     return Promise.resolve(catalogos.find(([re]) => re.test(sql))?.[1] ?? [])
   }
   const qr = {
@@ -264,7 +264,7 @@ describe('ImportarProyectoService.confirmar', () => {
     expect(valor(inserts(llamadas, 'AFRUBRO')[0], 'PROYECTOIDRUBROAF')).toBe(3100)
 
     // el id lo pone el trigger: ni NEXTVAL/CURRVAL aparte ni MAX+1, y todo INSERT de esas tablas manda NULL
-    expect(llamadas.some((l) => /FROM dual/i.test(l.sql) || l.sql.includes('NVL(MAX('))).toBe(false)
+    expect(llamadas.some((l) => /FROM dual/i.test(l.sql) || l.sql.includes('COALESCE(MAX('))).toBe(false)
     for (const t of TABLAS_IMPORTACION.filter((t) => t !== 'CONTACTOEMPRESA')) {
       for (const f of inserts(llamadas, t)) expect(valor(f, `${t}ID`)).toBe('NULL')
     }
@@ -285,13 +285,13 @@ describe('ImportarProyectoService.confirmar', () => {
     }
     // sin trigger en el XE: MAX+1, y la fila hija apunta a ese mismo número
     for (const t of ['AFNIVELOCUPACIONAL', 'AFSECTOR', 'AFSUBSECTOR', 'AFGRUPO', 'AFGRUPOCOBERTURA', 'UNIDADTEMATICA', 'PERFILUT']) {
-      expect(llamadas.some((l) => l.sql === `SELECT NVL(MAX(${t}ID), 0) + 1 AS "id" FROM ${t}`)).toBe(true)
+      expect(llamadas.some((l) => l.sql === `SELECT COALESCE(MAX(${t}ID), 0) + 1 AS "id" FROM ${t}`)).toBe(true)
     }
     for (const f of inserts(llamadas, 'AFGRUPOCOBERTURA')) expect(valor(f, 'AFGRUPOID')).toBe(40)
     expect(valor(inserts(llamadas, 'PERFILUT')[0], 'UNIDADTEMATICAID')).toBe(40)
     // con trigger también en el XE: NULL, sin MAX+1
     expect(valor(inserts(llamadas, 'AFAREAFUNCIONAL')[0], 'AFAREAFUNCIONALID')).toBe('NULL')
-    expect(llamadas.some((l) => l.sql.includes('NVL(MAX(AFAREAFUNCIONALID)'))).toBe(false)
+    expect(llamadas.some((l) => l.sql.includes('COALESCE(MAX(AFAREAFUNCIONALID)'))).toBe(false)
     expect(llamadas.some((l) => horaLocal.test(l.sql))).toBe(false)
   })
 

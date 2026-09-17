@@ -231,7 +231,7 @@ export class ExcelReportService {
               VERSIONNUMERO      AS "numero",
               VERSIONCODIGO      AS "codigo"
          FROM PROYECTOVERSION
-        WHERE PROYECTOID = :1
+        WHERE PROYECTOID = $1
           AND VERSIONESFINAL = 1
           AND VERSIONANULADA = 0`,
       [proyectoId],
@@ -259,7 +259,7 @@ export class ExcelReportService {
     try {
       const conn = (queryRunner as any).databaseConnection
       const result = await conn.execute(
-        `SELECT VERSIONSNAPSHOT FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = :1`,
+        `SELECT VERSIONSNAPSHOT FROM PROYECTOVERSION WHERE PROYECTOVERSIONID = $1`,
         [versionId],
         {
           fetchInfo: { VERSIONSNAPSHOT: { type: oracledb.STRING } },
@@ -285,12 +285,12 @@ export class ExcelReportService {
   // catalogos id→nombre: el snapshot solo guarda los IDs
   private async loadCatalogs() {
     const [ambientes, gestiones, materiales, rubros, retosNac, componentes] = await Promise.all([
-      this.dataSource.query(`SELECT TIPOAMBIENTEID AS "id", TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE`).catch(() => []),
-      this.dataSource.query(`SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO`).catch(() => []),
-      this.dataSource.query(`SELECT MATERIALFORMACIONID AS "id", TRIM(MATERIALFORMACIONNOMBRE) AS "nombre" FROM MATERIALFORMACION`).catch(() => []),
-      this.dataSource.query(`SELECT RUBROID AS "id", DBMS_LOB.SUBSTR(RUBRODESCRIPCION,2000,1) AS "descripcion" FROM RUBRO`).catch(() => []),
-      this.dataSource.query(`SELECT RETONACIONALID AS "id", TRIM(RETONACIONALNOMBRE) AS "nombre" FROM RETONACIONAL`).catch(() => []),
-      this.dataSource.query(`SELECT AFCOMPONENTEID AS "id", TRIM(AFCOMPONENTENOMBRE) AS "nombre", RETONACIONALID AS "retoId" FROM AFCOMPONENTE`).catch(() => []),
+      this.dataSource.query(`SELECT TIPOAMBIENTEID AS "id", btrim((TIPOAMBIENTENOMBRE)::text) AS "nombre" FROM TIPOAMBIENTE`).catch(() => []),
+      this.dataSource.query(`SELECT GESTIONCONOCIMIENTOID AS "id", btrim((GESTIONCONOCIMIENTONOMBRE)::text) AS "nombre" FROM GESTIONCONOCIMIENTO`).catch(() => []),
+      this.dataSource.query(`SELECT MATERIALFORMACIONID AS "id", btrim((MATERIALFORMACIONNOMBRE)::text) AS "nombre" FROM MATERIALFORMACION`).catch(() => []),
+      this.dataSource.query(`SELECT RUBROID AS "id", substr(RUBRODESCRIPCION, 1, 2000) AS "descripcion" FROM RUBRO`).catch(() => []),
+      this.dataSource.query(`SELECT RETONACIONALID AS "id", btrim((RETONACIONALNOMBRE)::text) AS "nombre" FROM RETONACIONAL`).catch(() => []),
+      this.dataSource.query(`SELECT AFCOMPONENTEID AS "id", btrim((AFCOMPONENTENOMBRE)::text) AS "nombre", RETONACIONALID AS "retoId" FROM AFCOMPONENTE`).catch(() => []),
     ])
     const toMap = (rows: any[], key = 'nombre') => {
       const m = new Map<number, string>()
@@ -320,9 +320,9 @@ export class ExcelReportService {
       `SELECT af.ACCIONFORMACIONID                       AS "afId",
               af.ACCIONFORMACIONNUMERO                   AS "afNumero",
               ar.RUBROID                                 AS "rubroId",
-              TRIM(r.RUBROCODIGO)                        AS "codigo",
-              TRIM(r.RUBRONOMBRE)                        AS "nombre",
-              DBMS_LOB.SUBSTR(r.RUBRODESCRIPCION,2000,1) AS "descripcion",
+              btrim((r.RUBROCODIGO)::text)                        AS "codigo",
+              btrim((r.RUBRONOMBRE)::text)                        AS "nombre",
+              substr(r.RUBRODESCRIPCION, 1, 2000) AS "descripcion",
               ar.AFRUBROCOFINANCIACION                   AS "cofSena",
               ar.AFRUBROESPECIE                          AS "especie",
               ar.AFRUBRODINERO                           AS "dinero",
@@ -332,8 +332,8 @@ export class ExcelReportService {
          FROM AFRUBRO ar
          JOIN ACCIONFORMACION af ON af.ACCIONFORMACIONID = ar.ACCIONFORMACIONID
          JOIN RUBRO r            ON r.RUBROID            = ar.RUBROID
-        WHERE af.PROYECTOID = :1
-          AND TRIM(r.RUBROCODIGO) IN ('R09', 'R015')`,
+        WHERE af.PROYECTOID = $1
+          AND btrim((r.RUBROCODIGO)::text) IN ('R09', 'R015')`,
       [proyectoId],
     ).catch(() => [])
     for (const r of rows as any[]) {
@@ -386,7 +386,7 @@ export class ExcelReportService {
                   EMPRESAEXPERTTECN AS "expertTecn",
                   EMPRESAINDICATIVO AS "indicativo"
              FROM EMPRESA
-            WHERE EMPRESAIDENTIFICACION = :1`,
+            WHERE EMPRESAIDENTIFICACION = $1`,
           [Number(e.nit)],
         )
         if (row) {

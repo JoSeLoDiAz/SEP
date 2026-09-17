@@ -1,28 +1,29 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm'
+import { NUMERO, FECHA, nombreEnBase } from '../../common/db/tipos-entidad'
 
-@Entity('USUARIO')
+@Entity(nombreEnBase('USUARIO'))
 export class Usuario {
-  @PrimaryColumn({ name: 'USUARIOID', type: 'number' })
+  @PrimaryColumn({ name: nombreEnBase('USUARIOID'), type: NUMERO })
   usuarioId: number
 
-  @Column({ name: 'USUARIOEMAIL', length: 200 })
+  @Column({ name: nombreEnBase('USUARIOEMAIL'), length: 200 })
   usuarioEmail: string
 
-  @Column({ name: 'USUARIOCLAVE', length: 500 })
+  @Column({ name: nombreEnBase('USUARIOCLAVE'), length: 500 })
   usuarioClave: string
 
-  @Column({ name: 'USUARIOLLAVEENCRIPTACION', length: 200 })
+  @Column({ name: nombreEnBase('USUARIOLLAVEENCRIPTACION'), length: 200 })
   usuarioLlaveEncriptacion: string
 
-  @Column({ name: 'USUARIOESTADO', type: 'number', default: 1 })
+  @Column({ name: nombreEnBase('USUARIOESTADO'), type: NUMERO, default: 1 })
   usuarioEstado: number
 
-  @Column({ name: 'PERFILID', type: 'number' })
+  @Column({ name: nombreEnBase('PERFILID'), type: NUMERO })
   perfilId: number
 
-  @Column({ name: 'USUARIOTIPO', type: 'number', nullable: true })
+  @Column({ name: nombreEnBase('USUARIOTIPO'), type: NUMERO, nullable: true })
   usuarioTipo: number
 
-  @Column({ name: 'USUARIOFECHAREGISTRO', type: 'date', nullable: true })
+  @Column({ name: nombreEnBase('USUARIOFECHAREGISTRO'), type: FECHA, nullable: true })
   usuarioFechaRegistro: Date
 }

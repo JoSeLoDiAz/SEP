@@ -1,16 +1,17 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm'
+import { NUMERO, nombreEnBase } from '../../common/db/tipos-entidad'
 
-@Entity('TIPODOCUMENTOIDENTIDAD')
+@Entity(nombreEnBase('TIPODOCUMENTOIDENTIDAD'))
 export class TipoDocumentoIdentidad {
-  @PrimaryColumn({ name: 'TIPODOCUMENTOIDENTIDADID', type: 'number' })
+  @PrimaryColumn({ name: nombreEnBase('TIPODOCUMENTOIDENTIDADID'), type: NUMERO })
   id: number
 
-  @Column({ name: 'TIPODOCUMENTOIDENTIDADNOMBRE', length: 200 })
+  @Column({ name: nombreEnBase('TIPODOCUMENTOIDENTIDADNOMBRE'), length: 200 })
   nombre: string
 
-  @Column({ name: 'TIPODOCUMENTOIDENTIDADPERSONA', type: 'number', default: 0 })
+  @Column({ name: nombreEnBase('TIPODOCUMENTOIDENTIDADPERSONA'), type: NUMERO, default: 0 })
   persona: number
 
-  @Column({ name: 'TIPODOCUMENTOIDENTIDADEMPRESA', type: 'number', default: 0 })
+  @Column({ name: nombreEnBase('TIPODOCUMENTOIDENTIDADEMPRESA'), type: NUMERO, default: 0 })
   empresa: number
 }

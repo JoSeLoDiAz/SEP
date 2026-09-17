@@ -21,6 +21,9 @@ import { UploadErrorFilter } from './common/filters/upload-error.filter'
 import { OracleErrorFilter } from './common/filters/oracle-error.filter'
 import { enMigracion } from './common/migracion.guard'
 import { triggersDeId } from './common/db/ids'
+import { fijarMotor } from './common/db/motor'
+import { envolverParaPostgres } from './common/db/postgres-runner'
+import { fijarDocumentosEnDisco } from './common/documentos/documentos-disco'
 import { resolverPerfiles } from './common/perfiles'
 
 async function bootstrap() {
@@ -59,6 +62,19 @@ async function bootstrap() {
   // GeneXus) y el id del perfil gestor de evaluadores (15 en el XE, 103 en el Exadata). Si no se puede, no arranca:
   // adivinar sería peor.
   const ds = app.get(DataSource)
+  // El motor se fija antes de la primera consulta: de él dependen el traductor de SQL y quién pone la llave en un
+  // INSERT. Con DB_TIPO en oracle (lo de hoy) no se envuelve nada y el SQL viaja tal cual.
+  const motor = fijarMotor(configService.get<string>('DB_TIPO'))
+  if (motor === 'postgres') envolverParaPostgres(ds)
+
+  // Los documentos pueden leerse del volumen de archivos en vez de como BLOB. Apagado por defecto, y si un archivo
+  // no está, la lectura vuelve al BLOB: encenderlo nunca deja a nadie sin su documento.
+  const raizDocumentos = fijarDocumentosEnDisco(
+    configService.get<string>('DOCUMENTOS_EN_DISCO'),
+    configService.get<string>('DOCUMENTOS_RUTA'),
+  )
+  if (raizDocumentos) console.log(`📁 Documentos desde disco: ${raizDocumentos}`)
+
   const triggers = await triggersDeId(ds)
   const perfiles = await resolverPerfiles(ds, configService.get<string>('PERFIL_GESTOR_EVALUADORES'))
   console.log(

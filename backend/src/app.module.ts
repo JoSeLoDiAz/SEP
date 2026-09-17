@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { ajustarTiposPostgres } from './common/db/postgres-tipos'
 import { EstadoController } from './common/estado.controller'
 import { PerfilesController } from './common/perfiles.controller'
 import { MigracionGuard } from './common/migracion.guard'
@@ -35,6 +36,27 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
+        // DB_TIPO decide a qué base habla. Por defecto Oracle: mientras no se ponga en postgres, nada cambia.
+        const tipo = (config.get<string>('DB_TIPO') ?? 'oracle').trim().toLowerCase()
+        if (tipo === 'postgres') {
+          // Antes de la primera consulta: sin esto los ids llegan como cadena y no como número, igual que en Oracle.
+          ajustarTiposPostgres()
+          // Las tablas viven en el esquema sep, en minúscula y sin comillas, así que el SQL en MAYÚSCULA sigue valiendo.
+          console.log(`🐘 PostgreSQL ${config.get('PG_HOST')}:${config.get('PG_PORT')}/${config.get('PG_DATABASE')}`)
+          return {
+            type: 'postgres' as const,
+            host: config.get<string>('PG_HOST', '127.0.0.1'),
+            port: Number(config.get<string>('PG_PORT', '5435')),
+            username: config.get<string>('PG_USER'),
+            password: config.get<string>('PG_PASSWORD'),
+            database: config.get<string>('PG_DATABASE', 'sep'),
+            schema: config.get<string>('PG_SCHEMA', 'sep'),
+            synchronize: false,
+            logging: config.get<string>('NODE_ENV') === 'development',
+            autoLoadEntities: true,
+            extra: { max: 10, min: 2 },
+          }
+        }
         console.log('🔑 ORACLE_USER:', config.get('ORACLE_USER'))
         console.log('🔑 ORACLE_CS:', config.get('ORACLE_CONNECT_STRING'))
         console.log('🔑 PASSWORD defined:', !!config.get('ORACLE_PASSWORD'))

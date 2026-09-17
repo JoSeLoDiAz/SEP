@@ -1,6 +1,5 @@
 import {
   Ejecutor,
-  columnaAsignada,
   insertarConId,
   leerId,
   reiniciarTriggersDeId,
@@ -9,80 +8,109 @@ import {
 } from './ids'
 import { AHORA_UTC } from './fecha-utc'
 
-// Ejecutor falso: guarda cada SQL con sus parámetros y responde según el texto
-function falso(respuestas: { max?: number; id?: unknown; triggers?: { tabla: string; cuerpo: string }[] } = {}) {
+/**
+ * Antes había dos archivos, uno por motor: este probaba el camino de Oracle —los triggers de GeneXus, el bind de
+ * salida— y `ids-postgres.spec.ts` el otro. Con Oracle fuera queda un solo camino y un solo archivo.
+ */
+
+/** Ejecutor falso: guarda cada SQL con sus parámetros y responde según el texto. */
+function falso(respuestas: { max?: number; id?: unknown; defectos?: { tabla: string; columna: string }[] } = {}) {
   const llamadas: { sql: string; params?: unknown[] }[] = []
   const ej: Ejecutor = {
     query: (sql: string, params?: unknown[]) => {
       llamadas.push({ sql, params })
-      if (sql.includes('ALL_TRIGGERS')) return Promise.resolve(respuestas.triggers ?? [])
+      if (sql.includes('information_schema.columns')) return Promise.resolve(respuestas.defectos ?? [])
       if (sql.startsWith('SELECT COALESCE(MAX(')) return Promise.resolve([{ id: respuestas.max ?? 41 }])
-      return Promise.resolve([[respuestas.id ?? 777]])
+      return Promise.resolve([{ ID: respuestas.id ?? 777 }])
     },
   }
   return { ej, llamadas }
 }
 
-describe('columnaAsignada', () => {
-  it('saca la columna del cuerpo de un trigger de GeneXus', () => {
-    expect(columnaAsignada('BEGIN SELECT RadicadoId.NEXTVAL INTO :new.RadicadoId FROM DUAL; END; \n\n')).toBe('RADICADOID')
-    expect(columnaAsignada('begin select X.nextval into :NEW."PersonaId" ; end;')).toBe('PERSONAID')
-    expect(columnaAsignada('BEGIN NULL; END;')).toBeNull()
-    expect(columnaAsignada(null)).toBeNull()
-  })
-})
-
 describe('insertarConId', () => {
   afterEach(() => reiniciarTriggersDeId())
 
-  it('con trigger de id manda NULL y lee el id del RETURNING, sin pedir NEXTVAL antes', async () => {
+  it('cuando la llave la pone la base, NO la manda: un NULL guardaría un nulo de verdad', async () => {
     reiniciarTriggersDeId(new Map([['USUARIO', 'USUARIOID']]))
     const { ej, llamadas } = falso({ id: 86602 })
+
     const id = await insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
-      USUARIOEMAIL: 'x@y.co',
+      USUARIOEMAIL: 'a@sena.edu.co',
       USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
     })
+
     expect(id).toBe(86602)
-    expect(llamadas).toHaveLength(1)
+    // la llave no aparece ni entre las columnas ni entre los valores
     expect(llamadas[0].sql).toBe(
-      'INSERT INTO USUARIO (USUARIOID, USUARIOEMAIL, USUARIOFECHAREGISTRO) VALUES (NULL, $1, ' +
-        'CAST((now() AT TIME ZONE \'UTC\') AS timestamp)) RETURNING USUARIOID INTO $2',
+      'INSERT INTO USUARIO (USUARIOEMAIL, USUARIOFECHAREGISTRO) ' +
+      `VALUES ($1, ${AHORA_UTC}) RETURNING USUARIOID`,
     )
-    expect(llamadas[0].params?.[0]).toBe('x@y.co')
-    expect(llamadas[0].params?.[1]).toMatchObject({ dir: expect.any(Number) })
+    expect(llamadas[0].params).toEqual(['a@sena.edu.co'])
+    // y no se pide ningún id por adelantado
+    expect(llamadas.some((l) => l.sql.includes('MAX(') || l.sql.includes('nextval'))).toBe(false)
   })
 
-  it('sin trigger usa la secuencia en el VALUES (lo que hacía el código en el XE)', async () => {
+  it('sin llave automática usa nextval de su secuencia', async () => {
     reiniciarTriggersDeId(new Map())
-    const { ej, llamadas } = falso({ id: 313096 })
-    const id = await insertarConId(ej, 'persona', 'personaid', { secuencia: 'PERSONAID' }, { PERSONAESTADO: 1 })
-    expect(id).toBe(313096)
-    expect(llamadas[0].sql).toBe('INSERT INTO PERSONA (PERSONAID, PERSONAESTADO) VALUES (PERSONAID.NEXTVAL, $1) RETURNING PERSONAID INTO $2')
+    const { ej, llamadas } = falso({ id: 91 })
+
+    await insertarConId(ej, 'RADICADO', 'RADICADOID', { secuencia: 'RADICADOID' }, { RADICADOTEXTO: 'x' })
+
+    expect(llamadas[0].sql).toContain("VALUES (nextval('radicadoid'), $1)")
+    expect(llamadas[0].sql).not.toContain('.NEXTVAL')
   })
 
-  it('sin trigger y sin secuencia hace MAX+1 como antes', async () => {
-    reiniciarTriggersDeId(new Map([['OTRA', 'OTRAID']]))
-    const { ej, llamadas } = falso({ max: 42, id: 42 })
-    const id = await insertarConId(ej, 'CONVOCATORIA', 'CONVOCATORIAID', { maxMasUno: true }, { CONVOCATORIAESTADO: 1 })
-    expect(id).toBe(42)
-    expect(llamadas[0].sql).toBe('SELECT COALESCE(MAX(CONVOCATORIAID), 0) + 1 AS "id" FROM CONVOCATORIA')
-    expect(llamadas[1].sql).toBe('INSERT INTO CONVOCATORIA (CONVOCATORIAID, CONVOCATORIAESTADO) VALUES ($1, $2) RETURNING CONVOCATORIAID INTO $3')
-    expect(llamadas[1].params?.slice(0, 2)).toEqual([42, 1])
+  it('con MAX+1 pregunta con COALESCE, que es lo que entiende PostgreSQL', async () => {
+    reiniciarTriggersDeId(new Map())
+    const { ej, llamadas } = falso({ max: 41, id: 41 })
+
+    await insertarConId(ej, 'NOTA', 'NOTAID', { maxMasUno: true }, { NOTATEXTO: 'x' })
+
+    expect(llamadas[0].sql).toBe('SELECT COALESCE(MAX(NOTAID), 0) + 1 AS "id" FROM NOTA')
+    expect(llamadas[0].sql).not.toContain('NVL(')
+    // el id calculado entra como primer parámetro y el resto se corre
+    expect(llamadas[1].sql).toContain('VALUES ($1, $2)')
+    expect(llamadas[1].params).toEqual([41, 'x'])
   })
 
-  it('un trigger que asigna otra columna no cuenta como trigger de la llave', async () => {
+  it('un SqlCrudo va tal cual, sin convertirse en parámetro', async () => {
+    reiniciarTriggersDeId(new Map())
+    const { ej, llamadas } = falso({ id: 5 })
+
+    await insertarConId(ej, 'TRAZA', 'TRAZAID', { secuencia: 'TRAZAID' }, {
+      TRAZAFECHA: sqlCrudo(AHORA_UTC),
+      TRAZATEXTO: 'hola',
+    })
+
+    expect(llamadas[0].sql).toContain(`VALUES (nextval('trazaid'), ${AHORA_UTC}, $1)`)
+    expect(llamadas[0].params).toEqual(['hola'])
+  })
+
+  it('una llave automática de OTRA columna no cuenta como la de esta', async () => {
     reiniciarTriggersDeId(new Map([['USUARIO', 'OTRACOL']]))
     const { ej, llamadas } = falso()
+
     await insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, { A: 1 })
-    expect(llamadas[0].sql).toContain('VALUES (USUARIOID.NEXTVAL, $1)')
+
+    expect(llamadas[0].sql).toContain("VALUES (nextval('usuarioid'), $1)")
   })
 
   it('rechaza la llave entre los valores y los identificadores raros', async () => {
     reiniciarTriggersDeId(new Map())
     const { ej } = falso()
-    await expect(insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, { USUARIOID: 5 })).rejects.toThrow(/lo pone la base/)
-    await expect(insertarConId(ej, 'USUARIO; DROP', 'USUARIOID', { secuencia: 'USUARIOID' }, {})).rejects.toThrow(/tabla inválido/)
-    await expect(insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'X.Y' }, {})).rejects.toThrow(/secuencia inválido/)
+    await expect(insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, { USUARIOID: 5 }))
+      .rejects.toThrow(/lo pone la base/)
+    await expect(insertarConId(ej, 'USUARIO; DROP', 'USUARIOID', { secuencia: 'USUARIOID' }, {}))
+      .rejects.toThrow(/tabla inválido/)
+    await expect(insertarConId(ej, 'USUARIO', 'USUARIOID', { secuencia: 'X.Y' }, {}))
+      .rejects.toThrow(/secuencia inválido/)
+  })
+
+  it('avisa si el RETURNING no trae un id utilizable', async () => {
+    reiniciarTriggersDeId(new Map([['NOTA', 'NOTAID']]))
+    const ej: Ejecutor = { query: () => Promise.resolve([]) }
+    await expect(insertarConId(ej, 'NOTA', 'NOTAID', { maxMasUno: true }, { A: 1 }))
+      .rejects.toThrow(/no devolvió un id válido/)
   })
 })
 
@@ -91,16 +119,19 @@ describe('triggersDeId', () => {
 
   it('carga una sola vez y arma el mapa tabla -> columna', async () => {
     const { ej, llamadas } = falso({
-      triggers: [
-        { tabla: 'CRONOGRAMARADICADO', cuerpo: 'BEGIN SELECT RadicadoId.NEXTVAL INTO :new.RadicadoId ; END;' },
-        { tabla: 'RARA', cuerpo: 'BEGIN NULL; END;' },
+      defectos: [
+        { tabla: 'cronogramaradicado', columna: 'radicadoid' },
+        { tabla: 'nota', columna: 'notaid' },
       ],
     })
+
     const m1 = await triggersDeId(ej)
     const m2 = await triggersDeId(ej)
+
     expect(m1).toBe(m2)
-    expect([...m1]).toEqual([['CRONOGRAMARADICADO', 'RADICADOID']])
-    expect(llamadas.filter((l) => l.sql.includes('ALL_TRIGGERS'))).toHaveLength(1)
+    // el diccionario responde en minúscula y aquí se compara en mayúscula
+    expect([...m1]).toEqual([['CRONOGRAMARADICADO', 'RADICADOID'], ['NOTA', 'NOTAID']])
+    expect(llamadas.filter((l) => l.sql.includes('information_schema.columns'))).toHaveLength(1)
   })
 
   it('si la carga falla, la próxima vez vuelve a intentar', async () => {
@@ -114,11 +145,15 @@ describe('triggersDeId', () => {
 })
 
 describe('leerId', () => {
-  it('lee el id de los outBinds posicionales y rechaza lo que no es un id', () => {
-    expect(leerId([[123]])).toBe(123)
-    expect(leerId([['456']])).toBe(456)
-    expect(() => leerId([[]])).toThrow()
-    expect(() => leerId([[null]])).toThrow()
+  it('lee el id de la fila que devuelve el RETURNING', () => {
+    expect(leerId([{ usuarioid: 123 }])).toBe(123)
+    expect(leerId([{ ID: '456' }])).toBe(456)
+  })
+
+  it('rechaza lo que no es un id', () => {
+    expect(() => leerId([])).toThrow()
+    expect(() => leerId([{ id: null }])).toThrow()
+    expect(() => leerId([{ id: 0 }])).toThrow()
     expect(() => leerId(undefined)).toThrow()
   })
 })

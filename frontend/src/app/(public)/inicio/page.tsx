@@ -9,10 +9,11 @@ const laminas: Lamina[] = [
     id: 'sep',
     acento: 'cerulean',
     lado: 'izquierda',
+    tema: 'oscuro',
     antetitulo: 'SENA · Gestión para la Productividad y la Competitividad',
     titulo: 'Sistema Especializado de Proyectos',
     texto: 'Consulta convocatorias, inscríbete a eventos, descarga tus certificados y verifica proyectos presentados.',
-    imagen: '/images/banner/bannerSena2-DoK8FAyn.webp',
+    imagen: '/images/banner/banner-1-sep.webp',
     acciones: [
       { texto: 'Descargar mi certificado', href: '/certificados', principal: true },
       { texto: 'Ver eventos', href: '/eventos' },
@@ -22,9 +23,11 @@ const laminas: Lamina[] = [
     id: 'registro',
     acento: 'purpura',
     lado: 'derecha',
+    tema: 'claro',
     antetitulo: 'Crea tu cuenta',
     titulo: 'Regístrate en el SEP',
     texto: 'Si vas a presentar un proyecto, entra como proponente. Si solo necesitas certificados o inscribirte a eventos, entra como usuario.',
+    imagen: '/images/banner/banner-2-registro.webp',
     acciones: [
       { texto: 'Registrarme como proponente', href: '/registro/proponente', principal: true },
       { texto: 'Registrarme como usuario', href: '/registro/usuario' },
@@ -34,9 +37,11 @@ const laminas: Lamina[] = [
     id: 'fce',
     acento: 'green',
     lado: 'izquierda',
+    tema: 'oscuro',
     antetitulo: 'Convocatoria abierta',
     titulo: 'Formación Continua Especializada',
     texto: 'El SENA cofinancia la formación que tu empresa o gremio necesita: tú presentas el proyecto y capacitas a tus trabajadores.',
+    imagen: '/images/banner/banner-3-fce.webp',
     acciones: [
       {
         texto: 'Conocer la convocatoria',
@@ -50,9 +55,11 @@ const laminas: Lamina[] = [
     id: 'verificar',
     acento: 'cerulean',
     lado: 'derecha',
+    tema: 'claro',
     antetitulo: 'Transparencia',
     titulo: 'Verifica un certificado o un proyecto',
     texto: 'Comprueba en segundos si un certificado es auténtico o si un proyecto fue presentado ante el SENA.',
+    imagen: '/images/banner/banner-4-verificar.webp',
     acciones: [{ texto: 'Verificar ahora', href: '/verificar', principal: true }],
   },
 ]

@@ -6,34 +6,33 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 interface SeguimientoAF {
-  proyectoId: number
-  empresa: string
-  sigla: string
-  modalidad: string
-  nit: string
-  numSecop: string
+  convocatoriaid: number
+  convocatoria: number
+  proyectoid: string
+  proyecto: string
+  idaf: string
+  af: string
+  benefregistrados: string
+  benefgrupo: string
+  estransferencia: number
+  modalidadformacion: number
+  eventoformacion: number
+  grupoid: number
+  numgrupo: number
+  certificados: number
+  personaid: string
+  beneficiario: string
+  ciudadid: string
+  ciudad: string
+  departamentoid: Date
   departamento: string
-  proSeguimiento: string
-  beneficiarios: number
-  valorProyecto: number
-  valorCofinanciacion: number
-  valorEspecie: number
-  valorDinero: number
-  valorContrapartidas: number
-  Representante: string
-  tipoDocumento: string
-  numDocumento: string
-  estadoSuscripción: string
-  fechaSuscripcion: Date
-  polizaCumplimiento: string
-  anexo: string
-  fechaExpedicion: string
-  fechaAprobacion: string
-  polizaRCE: string
-  anexoRCE: string
-  fechaExpRCE: Date
-  fechaAproRCE: Date
-  aseguradora: string
+  fechainiciocronograma: string
+  fechafincronograma: string
+  estadocronograma: string
+  ambiente: string
+  uts: string
+  enfoque: Date
+  grupossegunaf: Date
 }
 
 

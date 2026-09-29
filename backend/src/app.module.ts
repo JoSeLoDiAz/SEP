@@ -24,7 +24,6 @@ import { ImagenInstitucionalModule } from './dashboards/imageninstitucional/imag
 import { MaterialFormacionModule } from './dashboards/materialformacion/materialformacion.module'
 import { ModificacionesDBModule } from './dashboards/modificaciones/modificaciones.module'
 import { PlataformasVirtualesDBModule } from './dashboards/plataformasvirtuales/plataformasvirtuales.module'
-import { TransferenciaDBModule } from './dashboards/transferencia/transferencia.module'
 import { VisitascampoModule } from './dashboards/visitascampo/visitascampo.module'
 import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
 import { EmpresaModule } from './empresa/empresa.module'
@@ -38,7 +37,8 @@ import { PlataformasVirtualesModule } from './plataformas-virtuales/plataformas-
 import { ProyectosModule } from './proyectos/proyectos.module'
 import { RetroalimentacionModule } from './retroalimentacion/retroalimentacion.module'
 import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
-
+import { SeguimientoAFModule } from './dashboards/seguimientoaf/seguimientoaf.module'
+import { TransferenciaDBModule } from './dashboards/transferencia/transferencia.module'
 
 
 @Module({
@@ -123,7 +123,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     VisitascampoModule,
     VisitassedeModule,
     TransferenciaDBModule,
-
+    SeguimientoAFModule,
   ],
   controllers: [EstadoController, PerfilesController],
   providers: [

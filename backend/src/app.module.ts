@@ -25,6 +25,19 @@ import { PersonasModule } from './personas/personas.module'
 import { PlataformasVirtualesModule } from './plataformas-virtuales/plataformas-virtuales.module'
 import { ProyectosModule } from './proyectos/proyectos.module'
 import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
+import { BeneficiariosModule } from './dashboards/beneficiarios/beneficiarios.module'
+import { CapacitadoresDBModule } from './dashboards/capacitadores/capacitadores.module'
+import { ConveniosDBModule } from './dashboards/convenios/convenios.module'
+import { CronogramaDBModule } from './dashboards/cronograma/cronograma.module'
+import { DesembolsosModule } from './dashboards/desembolsos/desembolsos.module'
+import { DirectoresModule } from './dashboards/directores/directores.module'
+import { ImagenInstitucionalModule } from './dashboards/imageninstitucional/imageninstitucional.module'
+import { MaterialFormacionModule } from './dashboards/materialformacion/materialformacion.module'
+import { ModificacionesDBModule } from './dashboards/modificaciones/modificaciones.module'
+import { PlataformasVirtualesDBModule } from './dashboards/plataformasvirtuales/plataformasvirtuales.module'
+import { VisitascampoModule } from './dashboards/visitascampo/visitascampo.module'
+import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
+
 
 @Module({
   imports: [
@@ -74,6 +87,7 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
           extra: { poolMin: 2, poolMax: 10, poolTimeout: 300, expireTime: 2 },
         }
       },
+
     }),
     AuthModule,
     CertificadosModule,
@@ -94,6 +108,19 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     ImportarProyectoModule,
     ConvocatoriaProyectosModule,
     UsuariosAdminModule,
+    BeneficiariosModule,
+    CapacitadoresDBModule,
+    ConveniosDBModule,
+    CronogramaDBModule,
+    DesembolsosModule,
+    DirectoresModule,
+    ImagenInstitucionalModule,
+    MaterialFormacionModule,
+    ModificacionesDBModule,
+    PlataformasVirtualesDBModule,
+    VisitascampoModule,
+    VisitassedeModule,
+    
   ],
   controllers: [EstadoController, PerfilesController],
   providers: [

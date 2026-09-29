@@ -172,6 +172,7 @@ const ADMIN_CARDS: AdminCard[] = [
     links: [
       { label: 'Aprobación de Proyectos',  href: '/panel/admin/aprobacion/proyectos' },
       { label: 'Reporte de Proyectos',     href: '/panel/admin/reportes/proyectos' },
+      { label: 'Herramienta de Seguimiento',     href: '/panel/dashboards' },
       { label: 'Dashboard histórico',       disabled: true },
       { label: 'Reporte por usuario',       disabled: true },
     ],

@@ -18,6 +18,19 @@ import { PlataformasVirtualesModule } from './plataformas-virtuales/plataformas-
 import { EvaluadoresModule } from './evaluadores/evaluadores.module'
 import { ImportarProyectoModule } from './importar-proyecto/importar-proyecto.module'
 import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
+import { BeneficiariosModule } from './dashboards/beneficiarios/beneficiarios.module'
+import { CapacitadoresDBModule } from './dashboards/capacitadores/capacitadores.module'
+import { ConveniosDBModule } from './dashboards/convenios/convenios.module'
+import { CronogramaDBModule } from './dashboards/cronograma/cronograma.module'
+import { DesembolsosModule } from './dashboards/desembolsos/desembolsos.module'
+import { DirectoresModule } from './dashboards/directores/directores.module'
+import { ImagenInstitucionalModule } from './dashboards/imageninstitucional/imageninstitucional.module'
+import { MaterialFormacionModule } from './dashboards/materialformacion/materialformacion.module'
+import { ModificacionesDBModule } from './dashboards/modificaciones/modificaciones.module'
+import { PlataformasVirtualesDBModule } from './dashboards/plataformasvirtuales/plataformasvirtuales.module'
+import { VisitascampoModule } from './dashboards/visitascampo/visitascampo.module'
+import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
+
 
 @Module({
   imports: [
@@ -28,7 +41,8 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      useFactory: (config: ConfigService) => (
+        {
         type: 'oracle',
         username: config.get<string>('ORACLE_USER'),
         password: config.get<string>('ORACLE_PASSWORD'),
@@ -55,6 +69,19 @@ import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
     EvaluadoresModule,
     ImportarProyectoModule,
     UsuariosAdminModule,
+    BeneficiariosModule,
+    CapacitadoresDBModule,
+    ConveniosDBModule,
+    CronogramaDBModule,
+    DesembolsosModule,
+    DirectoresModule,
+    ImagenInstitucionalModule,
+    MaterialFormacionModule,
+    ModificacionesDBModule,
+    PlataformasVirtualesDBModule,
+    VisitascampoModule,
+    VisitassedeModule,
+    
   ],
 })
 export class AppModule {}

@@ -30,6 +30,7 @@ import { ModificacionesDBModule } from './dashboards/modificaciones/modificacion
 import { PlataformasVirtualesDBModule } from './dashboards/plataformasvirtuales/plataformasvirtuales.module'
 import { VisitascampoModule } from './dashboards/visitascampo/visitascampo.module'
 import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
+import { SeguimientoAFModule } from './dashboards/seguimientoaf/seguimientoaf.module'
 
 
 @Module({
@@ -81,7 +82,7 @@ import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
     PlataformasVirtualesDBModule,
     VisitascampoModule,
     VisitassedeModule,
-    
+    SeguimientoAFModule,
   ],
 })
 export class AppModule {}

@@ -1,20 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import * as crypto from 'crypto'
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { twofish } = require('twofish')
-
-function getEncryptionKey(): string {
-  return crypto.randomBytes(16).toString('hex').toUpperCase()
-}
-function encrypt64(plainText: string, key: string): string {
-  const tf = twofish(new Array(16).fill(0))
-  const keyArr = Array.from(Buffer.from(key, 'hex')) as number[]
-  const padded = Array.from(Buffer.from(plainText, 'utf8')) as number[]
-  while (padded.length < 16) padded.push(0x20)
-  return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
-}
+import { cifrarClave, generarLlaveEncriptacion } from '../common/crypto/usuario-clave'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { AHORA_UTC } from '../common/db/fecha-utc'
 
 export interface CrearUsuarioDto {
   email: string
@@ -52,30 +41,27 @@ export class UsuariosAdminService {
 
     try {
       if (q) {
-        // Búsqueda con texto: 3 queries pequeñas independientes para que cada
-        // una use su propio plan eficiente; luego unión en memoria, dedupe y
-        // paginación. Esto es mucho más estable que un OR/EXISTS gigante
-        // sobre USUARIO ⨝ PERSONA ⨝ EMPRESA en una BD con 78k usuarios.
+        // 3 queries sueltas + unión en memoria: el OR/EXISTS único no escala con 78k usuarios
         const like = `%${q.toUpperCase()}%`
 
         const idsPorEmail: Array<{ id: number }> = await this.dataSource.query(
           `SELECT USUARIOID AS "id"
              FROM USUARIO
-            WHERE UPPER(USUARIOEMAIL) LIKE :1`,
+            WHERE UPPER(USUARIOEMAIL) LIKE $1`,
           [like],
         )
         const idsPorPersona: Array<{ id: number }> = await this.dataSource.query(
           `SELECT u.USUARIOID AS "id"
              FROM USUARIO u
              JOIN PERSONA p ON p.PERSONAEMAIL = u.USUARIOEMAIL
-            WHERE UPPER(NVL(p.PERSONANOMBRES,'') || ' ' || NVL(p.PERSONAPRIMERAPELLIDO,'')) LIKE :1`,
+            WHERE UPPER(COALESCE(p.PERSONANOMBRES,'') || ' ' || COALESCE(p.PERSONAPRIMERAPELLIDO,'')) LIKE $1`,
           [like],
         )
         const idsPorEmpresa: Array<{ id: number }> = await this.dataSource.query(
           `SELECT u.USUARIOID AS "id"
              FROM USUARIO u
              JOIN EMPRESA e ON e.EMPRESAEMAIL = u.USUARIOEMAIL
-            WHERE UPPER(NVL(e.EMPRESARAZONSOCIAL,'')) LIKE :1`,
+            WHERE UPPER(COALESCE(e.EMPRESARAZONSOCIAL,'')) LIKE $1`,
           [like],
         )
 
@@ -92,7 +78,7 @@ export class UsuariosAdminService {
           const placeholders = idsPagina.map((_, i) => `:${i + 1}`).join(',')
           baseRows = await this.dataSource.query(
             `SELECT USUARIOID          AS "usuarioId",
-                    TRIM(USUARIOEMAIL) AS "email",
+                    btrim((USUARIOEMAIL)::text) AS "email",
                     USUARIOESTADO      AS "estado"
                FROM USUARIO
               WHERE USUARIOID IN (${placeholders})
@@ -101,7 +87,6 @@ export class UsuariosAdminService {
           )
         }
       } else {
-        // Sin búsqueda: paginación nativa rápida.
         const totalRows: Array<{ T: number }> = await this.dataSource.query(
           `SELECT COUNT(*) AS "T" FROM USUARIO`,
         )
@@ -109,7 +94,7 @@ export class UsuariosAdminService {
 
         baseRows = await this.dataSource.query(
           `SELECT u.USUARIOID          AS "usuarioId",
-                  TRIM(u.USUARIOEMAIL) AS "email",
+                  btrim((u.USUARIOEMAIL)::text) AS "email",
                   u.USUARIOESTADO      AS "estado"
              FROM USUARIO u
              ORDER BY u.USUARIOID DESC
@@ -126,29 +111,29 @@ export class UsuariosAdminService {
       return { items: [], total, page: pagina, limit: tamPag }
     }
 
-    // Paso 2: enriquecer con nombre y perfiles, una sola query por dato.
+    // nombre y perfiles, una query por dato
     const ids = baseRows.map(r => Number(r.usuarioId))
     const emails = baseRows.map(r => r.email)
     const placeholdersIds    = ids.map((_, i) => `:${i + 1}`).join(',')
     const placeholdersEmails = emails.map((_, i) => `:${i + 1}`).join(',')
 
     const personas: Array<{ email: string; nombre: string }> = await this.dataSource.query(
-      `SELECT TRIM(PERSONAEMAIL) AS "email",
-              TRIM(PERSONANOMBRES) || ' ' || TRIM(PERSONAPRIMERAPELLIDO) AS "nombre"
+      `SELECT btrim((PERSONAEMAIL)::text) AS "email",
+              btrim((PERSONANOMBRES)::text) || ' ' || btrim((PERSONAPRIMERAPELLIDO)::text) AS "nombre"
          FROM PERSONA
         WHERE PERSONAEMAIL IN (${placeholdersEmails})`,
       emails,
     )
     const empresas: Array<{ email: string; nombre: string }> = await this.dataSource.query(
-      `SELECT TRIM(EMPRESAEMAIL) AS "email",
-              TRIM(EMPRESARAZONSOCIAL) AS "nombre"
+      `SELECT btrim((EMPRESAEMAIL)::text) AS "email",
+              btrim((EMPRESARAZONSOCIAL)::text) AS "nombre"
          FROM EMPRESA
         WHERE EMPRESAEMAIL IN (${placeholdersEmails})`,
       emails,
     )
     const perfilesRows: Array<{ usuarioId: number; perfilNombre: string }> = await this.dataSource.query(
       `SELECT up.USUARIOID            AS "usuarioId",
-              TRIM(p.PERFILNOMBRE)    AS "perfilNombre"
+              btrim((p.PERFILNOMBRE)::text)    AS "perfilNombre"
          FROM USUARIOPERFIL up
          JOIN PERFIL p ON p.PERFILID = up.PERFILID
         WHERE up.ESTADO = 1
@@ -185,8 +170,8 @@ export class UsuariosAdminService {
   async listarPerfilesUsuario(usuarioId: number) {
     const usuario: Array<{ usuarioId: number; email: string; estado: number }> =
       await this.dataSource.query(
-        `SELECT USUARIOID AS "usuarioId", TRIM(USUARIOEMAIL) AS "email", USUARIOESTADO AS "estado"
-           FROM USUARIO WHERE USUARIOID = :1`,
+        `SELECT USUARIOID AS "usuarioId", btrim((USUARIOEMAIL)::text) AS "email", USUARIOESTADO AS "estado"
+           FROM USUARIO WHERE USUARIOID = $1`,
         [usuarioId],
       )
     if (!usuario[0]) throw new NotFoundException('Usuario no encontrado')
@@ -202,25 +187,25 @@ export class UsuariosAdminService {
     }> = await this.dataSource.query(
       `SELECT up.USUARIOPERFILID    AS "usuarioPerfilId",
               up.PERFILID            AS "perfilId",
-              TRIM(p.PERFILNOMBRE)   AS "perfilNombre",
+              btrim((p.PERFILNOMBRE)::text)   AS "perfilNombre",
               up.PREDETERMINADO      AS "predeterminado",
               up.ESTADO              AS "estado",
               up.FECHAULTIMOACCESO   AS "fechaUltimoAcceso",
               up.FECHACREACION       AS "fechaCreacion"
          FROM USUARIOPERFIL up
          JOIN PERFIL p ON p.PERFILID = up.PERFILID
-        WHERE up.USUARIOID = :1
+        WHERE up.USUARIOID = $1
           AND up.PERFILID <> ${PERFIL_ADMIN}
         ORDER BY up.ESTADO DESC, up.PREDETERMINADO DESC, p.PERFILNOMBRE ASC`,
       [usuarioId],
     )
 
     const disponibles: Array<{ perfilId: number; perfilNombre: string }> = await this.dataSource.query(
-      `SELECT PERFILID AS "perfilId", TRIM(PERFILNOMBRE) AS "perfilNombre"
+      `SELECT PERFILID AS "perfilId", btrim((PERFILNOMBRE)::text) AS "perfilNombre"
          FROM PERFIL
         WHERE PERFILID <> ${PERFIL_ADMIN}
           AND PERFILID NOT IN (
-            SELECT PERFILID FROM USUARIOPERFIL WHERE USUARIOID = :1 AND ESTADO = 1
+            SELECT PERFILID FROM USUARIOPERFIL WHERE USUARIOID = $1 AND ESTADO = 1
           )
         ORDER BY PERFILNOMBRE`,
       [usuarioId],
@@ -252,15 +237,15 @@ export class UsuariosAdminService {
       throw new ForbiddenException('El perfil de administrador no se asigna desde este panel')
     }
 
-    const usuario = await this.dataSource.query(`SELECT 1 FROM USUARIO WHERE USUARIOID = :1`, [usuarioId])
+    const usuario = await this.dataSource.query(`SELECT 1 FROM USUARIO WHERE USUARIOID = $1`, [usuarioId])
     if (!usuario[0]) throw new NotFoundException('Usuario no encontrado')
 
-    const perfil = await this.dataSource.query(`SELECT 1 FROM PERFIL WHERE PERFILID = :1`, [perfilId])
+    const perfil = await this.dataSource.query(`SELECT 1 FROM PERFIL WHERE PERFILID = $1`, [perfilId])
     if (!perfil[0]) throw new NotFoundException('Perfil no encontrado')
 
     const existente: Array<{ usuarioPerfilId: number; estado: number }> = await this.dataSource.query(
       `SELECT USUARIOPERFILID AS "usuarioPerfilId", ESTADO AS "estado"
-         FROM USUARIOPERFIL WHERE USUARIOID = :1 AND PERFILID = :2`,
+         FROM USUARIOPERFIL WHERE USUARIOID = $1 AND PERFILID = $2`,
       [usuarioId, perfilId],
     )
 
@@ -269,21 +254,21 @@ export class UsuariosAdminService {
         throw new BadRequestException('El usuario ya tiene este perfil activo')
       }
       await this.dataSource.query(
-        `UPDATE USUARIOPERFIL SET ESTADO = 1 WHERE USUARIOPERFILID = :1`,
+        `UPDATE USUARIOPERFIL SET ESTADO = 1 WHERE USUARIOPERFILID = $1`,
         [Number(existente[0].usuarioPerfilId)],
       )
       return { message: 'Perfil reactivado', usuarioPerfilId: Number(existente[0].usuarioPerfilId) }
     }
 
     const seq: Array<{ NEXTVAL: number }> = await this.dataSource.query(
-      `SELECT USUARIOPERFIL_SEQ.NEXTVAL FROM dual`,
+      `SELECT USUARIOPERFIL_SEQ.NEXTVAL `,
     )
     const nuevoId = Number(seq[0].NEXTVAL)
 
     await this.dataSource.query(
       `INSERT INTO USUARIOPERFIL
          (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-       VALUES (:1, :2, :3, 0, 1, SYSDATE)`,
+       VALUES ($1, $2, $3, 0, 1, ${AHORA_UTC})`,
       [nuevoId, usuarioId, perfilId],
     )
 
@@ -300,7 +285,7 @@ export class UsuariosAdminService {
         `SELECT USUARIOPERFILID AS "usuarioPerfilId",
                 USUARIOID       AS "usuarioId",
                 PERFILID        AS "perfilId"
-           FROM USUARIOPERFIL WHERE USUARIOPERFILID = :1`,
+           FROM USUARIOPERFIL WHERE USUARIOPERFILID = $1`,
         [usuarioPerfilId],
       )
     if (!fila[0]) throw new NotFoundException('Asignación no encontrada')
@@ -312,18 +297,18 @@ export class UsuariosAdminService {
     }
 
     if (cambios.predeterminado === true) {
-      // Solo uno puede ser predeterminado: desmarcamos los demás.
+      // solo un perfil puede quedar predeterminado
       await this.dataSource.query(
-        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 0 WHERE USUARIOID = :1`,
+        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 0 WHERE USUARIOID = $1`,
         [usuarioId],
       )
       await this.dataSource.query(
-        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 1, ESTADO = 1 WHERE USUARIOPERFILID = :1`,
+        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 1, ESTADO = 1 WHERE USUARIOPERFILID = $1`,
         [usuarioPerfilId],
       )
     } else if (cambios.predeterminado === false) {
       await this.dataSource.query(
-        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 0 WHERE USUARIOPERFILID = :1`,
+        `UPDATE USUARIOPERFIL SET PREDETERMINADO = 0 WHERE USUARIOPERFILID = $1`,
         [usuarioPerfilId],
       )
     }
@@ -331,7 +316,7 @@ export class UsuariosAdminService {
     if (cambios.estado === true || cambios.estado === false) {
       const nuevoEstado = cambios.estado ? 1 : 0
       await this.dataSource.query(
-        `UPDATE USUARIOPERFIL SET ESTADO = :1
+        `UPDATE USUARIOPERFIL SET ESTADO = $1
           ${nuevoEstado === 0 ? `, PREDETERMINADO = 0` : ``}
           WHERE USUARIOPERFILID = :2`,
         [nuevoEstado, usuarioPerfilId],
@@ -354,59 +339,54 @@ export class UsuariosAdminService {
     }
 
     const yaExiste: Array<{ id: number }> = await this.dataSource.query(
-      `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1`,
+      `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = $1`,
       [email],
     )
     if (yaExiste[0]) throw new ConflictException('El correo ya está registrado')
 
-    const perfilOk = await this.dataSource.query(`SELECT 1 FROM PERFIL WHERE PERFILID = :1`, [perfilId])
+    const perfilOk = await this.dataSource.query(`SELECT 1 FROM PERFIL WHERE PERFILID = $1`, [perfilId])
     if (!perfilOk[0]) throw new NotFoundException('Perfil no encontrado')
 
-    const llave = getEncryptionKey()
-    const claveCifrada = encrypt64(clave, llave)
+    const llave = generarLlaveEncriptacion()
+    const claveCifrada = cifrarClave(clave, llave)
 
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
     await qr.startTransaction()
     try {
-      const seqU: Array<{ NEXTVAL: number }> = await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)
-      const usuarioId = Number(seqU[0].NEXTVAL)
-
-      await qr.query(
-        `INSERT INTO USUARIO
-           (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
-            USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
-         VALUES (:1, :2, :3, SYSDATE, 1, 1, :4, :5)`,
-        [usuarioId, perfilId, claveCifrada, email, llave],
-      )
+      // el id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(qr, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: perfilId,
+        USUARIOCLAVE: claveCifrada,
+        USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 1,
+        USUARIOEMAIL: email,
+        USUARIOLLAVEENCRIPTACION: llave,
+      })
 
       await qr.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, :2, 1, 1, SYSDATE)`,
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, $2, 1, 1, ${AHORA_UTC})`,
         [usuarioId, perfilId],
       )
 
-      // Datos PERSONA opcionales — si vienen los básicos se crea la fila.
+      // PERSONA es opcional
       if (dto.nombres?.trim() && dto.primerApellido?.trim() && dto.identificacion?.trim()) {
-        const seqP: Array<{ NEXTVAL: number }> = await qr.query(`SELECT PERSONAID.NEXTVAL FROM dual`)
-        const personaId = Number(seqP[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO PERSONA
-             (PERSONAID, TIPODOCUMENTOIDENTIDADID, PERSONANOMBRES, PERSONAPRIMERAPELLIDO,
-              PERSONASEGUNDOAPELLIDO, PERSONAIDENTIFICACION, PERSONAEMAIL, PERSONAFECHAREGISTRO,
-              GENEROID, CIUDADID, PERSONAHABEASDATA, PERSONAHABEASDATAE)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, SYSDATE, 3, 1, 'SI', 'NA')`,
-          [
-            personaId,
-            dto.tipoDocumentoIdentidadId ?? 1,
-            dto.nombres.trim(),
-            dto.primerApellido.trim(),
-            (dto.segundoApellido ?? '').trim(),
-            dto.identificacion.trim(),
-            email,
-          ],
-        )
+        await insertarConId(qr, 'PERSONA', 'PERSONAID', { secuencia: 'PERSONAID' }, {
+          TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId ?? 1,
+          PERSONANOMBRES: dto.nombres.trim(),
+          PERSONAPRIMERAPELLIDO: dto.primerApellido.trim(),
+          PERSONASEGUNDOAPELLIDO: (dto.segundoApellido ?? '').trim(),
+          PERSONAIDENTIFICACION: dto.identificacion.trim(),
+          PERSONAEMAIL: email,
+          PERSONAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          GENEROID: 3,
+          CIUDADID: 1,
+          PERSONAHABEASDATA: 'SI',
+          PERSONAHABEASDATAE: 'NA',
+        })
       }
 
       await qr.commitTransaction()
@@ -421,7 +401,7 @@ export class UsuariosAdminService {
 
   async cambiarEstadoUsuario(usuarioId: number, estado: boolean) {
     const filas: Array<{ perfilId: number }> = await this.dataSource.query(
-      `SELECT PERFILID AS "perfilId" FROM USUARIO WHERE USUARIOID = :1`,
+      `SELECT PERFILID AS "perfilId" FROM USUARIO WHERE USUARIOID = $1`,
       [usuarioId],
     )
     if (!filas[0]) throw new NotFoundException('Usuario no encontrado')
@@ -430,7 +410,7 @@ export class UsuariosAdminService {
     }
     const nuevo = estado ? 1 : 0
     await this.dataSource.query(
-      `UPDATE USUARIO SET USUARIOESTADO = :1 WHERE USUARIOID = :2`,
+      `UPDATE USUARIO SET USUARIOESTADO = $1 WHERE USUARIOID = $2`,
       [nuevo, usuarioId],
     )
     return { message: estado ? 'Usuario activado' : 'Usuario desactivado', estado: nuevo }
@@ -446,7 +426,7 @@ export class UsuariosAdminService {
       `SELECT USUARIOID AS "usuarioId",
               USUARIOLLAVEENCRIPTACION AS "llave",
               PERFILID AS "perfilId"
-         FROM USUARIO WHERE USUARIOID = :1`,
+         FROM USUARIO WHERE USUARIOID = $1`,
       [usuarioId],
     )
     const u = filas[0]
@@ -455,9 +435,9 @@ export class UsuariosAdminService {
       throw new ForbiddenException('No se permite resetear la contraseña de un administrador desde este panel')
     }
 
-    const cifrada = encrypt64(clave, u.llave)
+    const cifrada = cifrarClave(clave, u.llave)
     await this.dataSource.query(
-      `UPDATE USUARIO SET USUARIOCLAVE = :1 WHERE USUARIOID = :2`,
+      `UPDATE USUARIO SET USUARIOCLAVE = $1 WHERE USUARIOID = $2`,
       [cifrada, usuarioId],
     )
     return { message: 'Contraseña actualizada' }
@@ -465,7 +445,7 @@ export class UsuariosAdminService {
 
   async catalogoPerfiles() {
     const rows: Array<{ perfilId: number; perfilNombre: string }> = await this.dataSource.query(
-      `SELECT PERFILID AS "perfilId", TRIM(PERFILNOMBRE) AS "perfilNombre"
+      `SELECT PERFILID AS "perfilId", btrim((PERFILNOMBRE)::text) AS "perfilNombre"
          FROM PERFIL
         WHERE PERFILID <> ${PERFIL_ADMIN}
         ORDER BY PERFILNOMBRE`,

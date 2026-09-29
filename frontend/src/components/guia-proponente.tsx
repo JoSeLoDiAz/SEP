@@ -31,9 +31,6 @@ export function GuiaProponente({ open, onClose }: { open: boolean; onClose: () =
   const [seccion, setSeccion] = useState<SeccionId>('formulacion')
   const contenidoRef = useRef<HTMLElement | null>(null)
 
-  // Cada vez que el usuario cambia de sección, el contenido vuelve al inicio
-  // del scroll para que la nueva sección se vea desde su título y no desde
-  // donde quedó la anterior.
   useEffect(() => {
     if (contenidoRef.current) contenidoRef.current.scrollTop = 0
   }, [seccion])
@@ -176,8 +173,6 @@ export function GuiaProponente({ open, onClose }: { open: boolean; onClose: () =
   )
 }
 
-// ── Secciones ──────────────────────────────────────────────────────────────
-
 function H1({ icon: Icon, children, sub }: { icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>; children: React.ReactNode; sub?: string }) {
   return (
     <header className="mb-5 pb-4 border-b border-neutral-200">
@@ -272,8 +267,6 @@ function EstadoCard({ color, icon: Icon, titulo, descripcion, accion }: {
   )
 }
 
-// ── Sección 1: Formulación ─────────────────────────────────────────────────
-
 function SeccionFormulacion() {
   return (
     <article>
@@ -330,8 +323,6 @@ function SeccionFormulacion() {
     </article>
   )
 }
-
-// ── Sección 2: Versiones ───────────────────────────────────────────────────
 
 function SeccionVersiones() {
   return (
@@ -420,8 +411,6 @@ function SeccionVersiones() {
   )
 }
 
-// ── Sección 3: Evaluación ──────────────────────────────────────────────────
-
 function SeccionEvaluacion() {
   return (
     <article>
@@ -482,8 +471,6 @@ function SeccionEvaluacion() {
   )
 }
 
-// ── Sección 4: Aprobado ────────────────────────────────────────────────────
-
 function SeccionAprobado() {
   return (
     <article>
@@ -536,8 +523,6 @@ function SeccionAprobado() {
     </article>
   )
 }
-
-// ── Botón flotante reusable ────────────────────────────────────────────────
 
 export function GuiaProponenteBoton({ className }: { className?: string }) {
   const [open, setOpen] = useState(false)

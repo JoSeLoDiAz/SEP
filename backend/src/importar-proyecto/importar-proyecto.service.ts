@@ -1,8 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { DataSource } from 'typeorm'
 import * as crypto from 'crypto'
+import { DataSource } from 'typeorm'
 import * as XLSX from 'xlsx'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { mensajeHerrOtraLarga } from '../necesidades/herr-otra'
+import { matchModalidad } from './match-modalidad'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { twofish } = require('twofish')
 
@@ -17,16 +21,7 @@ function encrypt64(plainText: string, key: string): string {
   return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ Importador de proyectos formulados desde el formulador VBA (.xlsx).       ║
-// ║                                                                            ║
-// ║ El VBA genera el mismo formato de hojas Datos_* que el backend produce    ║
-// ║ con excel-report.service.ts. Esta clase hace la operación inversa: leer   ║
-// ║ el .xlsx y devolver un preview tipado con validaciones para que el admin  ║
-// ║ confirme antes de crear todo en BD (Sprint 2).                            ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
-
-// ── Tipos del Excel parseado ────────────────────────────────────────────────
+// tipos del excel parseado
 
 export interface ExcelBasicos {
   nit: string
@@ -52,6 +47,28 @@ export interface ExcelBasicos {
   mesa3: string | null
   modalidadParticipacion: string | null
   tipoIdentificacion: string | null
+}
+
+// columnas de texto de EMPRESA que escriben el INSERT y el UPDATE de la importación, con su tope en caracteres: son
+// NCHAR/NVARCHAR2 con CHAR en AL16UTF16, iguales en el XE y el Exadata, así que el tope es de String.length
+const TOPES_EMPRESA: Array<{ campo: string; tope: number; valor: (b: ExcelBasicos) => string | null }> = [
+  { campo: 'RAZÓN SOCIAL',       tope: 200, valor: b => b.razonSocial },
+  { campo: 'SIGLA',              tope: 40,  valor: b => b.sigla },
+  { campo: 'CORREO ELECTRÓNICO', tope: 100, valor: b => b.email?.trim().toLowerCase() ?? null },
+  { campo: 'DIRECCIÓN',          tope: 100, valor: b => b.direccionDomicilio },
+  { campo: 'CELULAR',            tope: 20,  valor: b => b.celular },
+  { campo: 'TELÉFONO',           tope: 20,  valor: b => b.telefono },
+  { campo: 'PÁGINA WEB',         tope: 100, valor: b => b.paginaWeb },
+]
+
+/**
+ * Los datos de la empresa que no caben en su columna. Se revisan antes de escribir para responder con el campo y
+ * cuánto sobra en vez del ORA-12899 a mitad de la importación. No se recorta en silencio.
+ */
+function datosEmpresaQueNoCaben(b: ExcelBasicos): Array<{ campo: string; tope: number; largo: number }> {
+  return TOPES_EMPRESA
+    .map(({ campo, tope, valor }) => ({ campo, tope, largo: (valor(b) ?? '').trim().length }))
+    .filter(d => d.largo > d.tope)
 }
 
 export interface ExcelContacto {
@@ -141,15 +158,10 @@ export interface ExcelAF {
   trabajadoresCampesinos: number | null
   trabajadoresDiscapacidad: number | null
   empresasBic: number | null
-  /** Sectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   sectoresPertenecen: string[]
-  /** Subsectores a los que PERTENECEN las empresas/beneficiarios (hasta 5). */
   subsectoresPertenecen: string[]
-  /** Sector que la AF BENEFICIA (clasificación, normalmente 1). */
   sectoresBeneficia: string[]
-  /** Subsector que la AF BENEFICIA (clasificación, normalmente 1). */
   subsectoresBeneficia: string[]
-  /** Justificación de la elección de sectores y subsectores. */
   justificacionSectores: string | null
   componenteAlineacion: string | null
   descripcionAlineacion: string | null
@@ -186,11 +198,8 @@ export interface ExcelUT {
   actividades: string[]
   descripcionActividad: string | null
   perfiles: Array<{ perfil: string; horas: number | null }>
-  /** Texto de la articulación territorial (la columna se llama
-   *  HABILIDAD TRANSVERSAL en el Excel pero conceptualmente es articulación
-   *  territorial — es una UT especial vinculada a una región). */
+  // en el Excel la columna se llama HABILIDAD TRANSVERSAL
   articulacionTerritorial: string | null
-  /** True cuando la UT es de articulación territorial (col ES TRANSVERSAL = SI). */
   esArticulacionTerritorial: boolean
 }
 
@@ -218,14 +227,11 @@ export interface ExcelRubro {
 export interface ExcelCoberturaFila {
   numeroAF: number
   numeroGrupo: number
-  // Presencial:
   departamentoPresencial: string | null
   ciudadPresencial: string | null
   beneficiariosPresencial: number | null
-  // Virtual / PAT / Híbrida: hasta 25 departamentos.
+  // virtual / PAT / hibrida: hasta 25 departamentos
   departamentos: Array<{ departamento: string; beneficiarios: number }>
-  /** Justificación de la relación de los beneficiarios con los lugares de
-   *  ejecución planteados (col 56 del Excel). */
   justificacion: string | null
 }
 
@@ -242,7 +248,7 @@ export interface ProyectoExcel {
   cobertura: ExcelCoberturaFila[]
 }
 
-// ── Preview enriquecido con BD ──────────────────────────────────────────────
+// preview enriquecido con BD
 
 export interface PreviewEmpresa {
   estado: 'nueva' | 'existente'
@@ -294,38 +300,10 @@ export interface PreviewImportacion {
   validaciones: PreviewValidacion[]
 }
 
-// ── Service ─────────────────────────────────────────────────────────────────
-
 @Injectable()
 export class ImportarProyectoService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /** Match tolerante para nombres de modalidad: el Excel suele decir
-   *  "EMPRESA INDIVIDUAL" pero la BD guarda solo "INDIVIDUAL". Compara
-   *  ignorando prefijos como "EMPRESA " / "EMPRESAS " y espacios duplicados. */
-  private matchModalidad(
-    texto: string,
-    catalogo: Array<{ id: number; nombre: string }>,
-  ): { id: number; nombre: string } | undefined {
-    if (!texto) return undefined
-    const norm = (s: string) => s
-      .trim().toUpperCase()
-      .replace(/\s+/g, ' ')
-      .replace(/^EMPRESAS?\s+/, '')
-    const t = norm(texto)
-    // Match exacto sobre normalizado.
-    const exact = catalogo.find(m => norm(m.nombre) === t)
-    if (exact) return exact
-    // Contención: el texto del Excel contiene el del catálogo (o viceversa).
-    return catalogo.find(m => {
-      const c = norm(m.nombre)
-      return c.length > 2 && (t.includes(c) || c.includes(t))
-    })
-  }
-
-  /** Match tolerante para modalidad de formación con aliases conocidos:
-   *  "PAT" ↔ "PRESENCIAL ASISTIDA POR TECNOLOGÍAS",
-   *  "PRESENCIAL HÍBRIDA" ↔ "HÍBRIDA", etc. */
   private matchModalidadFormacion(
     texto: string,
     catalogo: Array<{ id: number; nombre: string }>,
@@ -344,11 +322,9 @@ export class ImportarProyectoService {
       'PRESENCIAL': ['PRESENCIAL'],
     }
 
-    // Match exacto.
     const exact = catalogo.find(m => norm(m.nombre) === t)
     if (exact) return exact
 
-    // Aliases en ambas direcciones (texto del Excel → catálogo).
     for (const [clave, alias] of Object.entries(aliases)) {
       if (t === norm(clave) || alias.some(a => norm(a) === t)) {
         const candidato = catalogo.find(m => {
@@ -359,15 +335,12 @@ export class ImportarProyectoService {
       }
     }
 
-    // Contención.
     return catalogo.find(m => {
       const c = norm(m.nombre)
       return c.length > 2 && (t.includes(c) || c.includes(t))
     })
   }
 
-  /** Lee el .xlsx y devuelve la estructura tipada del proyecto. Es síncrono y
-   *  no toca BD — ideal para tests rápidos.  */
   parseExcel(buffer: Buffer): ProyectoExcel {
     let wb: XLSX.WorkBook
     try {
@@ -396,21 +369,23 @@ export class ImportarProyectoService {
     return { basicos, contactos, generalidades, diagnosticos, necesidades, presupuesto, afs, uts, rubros, cobertura }
   }
 
-  /** Parsea el .xlsx, valida la convocatoria, busca empresa/usuario por NIT y
-   *  email, y devuelve el preview con validaciones.  */
   async preview(buffer: Buffer, convocatoriaId: number): Promise<PreviewImportacion> {
     if (!convocatoriaId) throw new BadRequestException('Debe indicar la convocatoria')
 
     const data = this.parseExcel(buffer)
     const validaciones: PreviewValidacion[] = []
 
-    // ── Convocatoria ────────────────────────────────────────────────────────
+    data.presupuesto.valorAFs = data.presupuesto.valorTotal
+      - data.presupuesto.gastosOperacion
+      - data.presupuesto.valorTransferencia
+
+    // convocatoria
     const conv = await this.dataSource.query(
       `SELECT CONVOCATORIAID            AS "id",
-              TRIM(CONVOCATORIANOMBRE)  AS "nombre",
+              btrim((CONVOCATORIANOMBRE)::text)  AS "nombre",
               CONVOCATORIAESTADO        AS "estado",
               CONVOCATORIAANIO          AS "anio"
-         FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+         FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [convocatoriaId],
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
@@ -425,18 +400,15 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'warning', mensaje: 'La convocatoria seleccionada no está abierta' })
     }
 
-    // ── Nombre del proyecto autogenerado: SIGLA-FCE-AÑO ────────────────────
     const sigla = (data.basicos.sigla ?? '').trim() || data.basicos.razonSocial.trim().slice(0, 30)
     const nombreProyecto = `${sigla}-FCE-${anioConv}`.slice(0, 100)
 
-    // ── Modalidad del proyecto (de Datos_Basicos.MODALIDAD DE PARTICIPACIÓN).
-    // Match tolerante: "EMPRESA INDIVIDUAL" del Excel ↔ "INDIVIDUAL" del catálogo.
     const mods: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
+      `SELECT MODALIDADID AS "id", btrim((UPPER(MODALIDADNOMBRE))::text) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
     const modTexto = (data.basicos.modalidadParticipacion ?? '').trim().toUpperCase()
-    const modProyecto = this.matchModalidad(modTexto, mods)
+    const modProyecto = matchModalidad(modTexto, mods)
     if (!modProyecto && modTexto) {
       validaciones.push({
         nivel: 'warning',
@@ -444,18 +416,16 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Validaciones contra catálogos: tipos de evento, modalidad de
-    // formación y rubros de la convocatoria. Cualquier desfase queda como
-    // aviso en el preview para que el admin lo revise.
+    // validaciones contra catalogos: tipo de evento, modalidad de formacion y rubros
     const tiposEvento: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT TIPOEVENTOID AS "id", TRIM(UPPER(TIPOEVENTONOMBRE)) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`,
+      `SELECT TIPOEVENTOID AS "id", btrim((UPPER(TIPOEVENTONOMBRE))::text) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`,
     )
     const modsForm: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADFORMACIONID AS "id", TRIM(UPPER(MODALIDADFORMACIONNOMBRE)) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`,
+      `SELECT MODALIDADFORMACIONID AS "id", btrim((UPPER(MODALIDADFORMACIONNOMBRE))::text) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`,
     )
     const rubrosConv: Array<{ codigo: string; nombre: string }> = await this.dataSource.query(
-      `SELECT TRIM(UPPER(RUBROCODIGO)) AS "codigo", TRIM(UPPER(RUBRONOMBRE)) AS "nombre"
-         FROM RUBRO WHERE CONVOCATORIAIDRUBRO = :1`,
+      `SELECT btrim((UPPER(RUBROCODIGO))::text) AS "codigo", btrim((UPPER(RUBRONOMBRE))::text) AS "nombre"
+         FROM RUBRO WHERE CONVOCATORIAIDRUBRO = $1`,
       [convocatoriaId],
     )
     const rubrosCodigos = new Set(rubrosConv.map(r => r.codigo))
@@ -463,7 +433,7 @@ export class ImportarProyectoService {
 
     for (const af of data.afs) {
       const evNombre = (af.eventoFormacion ?? '').trim().toUpperCase()
-      if (evNombre && !this.matchModalidad(evNombre, tiposEvento)) {
+      if (evNombre && !matchModalidad(evNombre, tiposEvento)) {
         validaciones.push({
           nivel: 'warning',
           campo: `AF ${af.consecutivo}`,
@@ -479,8 +449,7 @@ export class ImportarProyectoService {
         })
       }
     }
-    // Validar rubros: matchea por código exacto, o por nombre exacto si el
-    // código no coincide (la convocatoria puede tener códigos distintos).
+    // el rubro matchea por codigo y, si no coincide, por nombre
     const rubrosFaltantes = new Set<string>()
     for (const r of data.rubros) {
       const cod = r.idRubro.trim().toUpperCase()
@@ -496,23 +465,13 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Validaciones de catálogos auxiliares (áreas, niveles, CUOC, sectores,
-    // ambiente, material, recursos, gestión, etc.) — todo lookup por nombre
-    // o código contra los catálogos vivos del SEP. Lo que no resuelva sale
-    // como aviso y NO se importará en esa subtabla.
-    // Normalización tolerante: trim + upper + sin acentos + espacios colapsados.
-    // Cubre las variantes habituales entre Excel/BD (mayúsculas vs minúsculas,
-    // tilde sí/no, espacios extra). Para nombres largos también se admite
-    // substring match (ej. el Excel dice "ARCHIPIÉLAGO DE SAN ANDRÉS,
-    // PROVIDENCIA Y SANTA CATALINA" y la BD solo "SAN ANDRÉS Y PROVIDENCIA").
+    // catalogos auxiliares: lo que no resuelva sale como aviso y no se importa
     const normalizar = (s: string | null | undefined) =>
       (s ?? '')
         .normalize('NFD').replace(/[̀-ͯ]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
         .toUpperCase()
-    // Tokens significativos para matching aproximado (palabras ≥ 4 chars,
-    // ignorando conectores como Y/DE/LA).
     const tokens = (s: string): string[] => s.split(/[^A-Z0-9Ñ]+/i)
       .map(t => t.toUpperCase())
       .filter(t => t.length >= 4 && !['PARA', 'DESDE', 'HASTA'].includes(t))
@@ -521,14 +480,11 @@ export class ImportarProyectoService {
       if (!n) return false
       if (cat.has(n)) return true
       if (n.length < 6) return false
-      // Substring en ambas direcciones (uno contiene al otro).
       for (const k of cat) {
         if (k.length < 6) continue
         if (k.includes(n) || n.includes(k)) return true
       }
-      // Token-overlap: el VBA abrevia palabras (p.ej. "EO" por "Entidades
-      // Oficiales"). Si las palabras significativas del Excel están todas
-      // en la entrada del catálogo (o viceversa), aceptamos como match.
+      // token-overlap: el VBA abrevia palabras ("EO" por "Entidades Oficiales")
       const t1 = tokens(n)
       if (t1.length === 0) return false
       for (const k of cat) {
@@ -552,17 +508,17 @@ export class ImportarProyectoService {
       ambientesCat, materialesCat, recursosCat, gestionCat,
       utActCat, departamentosCat,
     ] = await Promise.all([
-      cargarCat(`SELECT TRIM(AREAFUNCIONALNOMBRE) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
-      cargarCat(`SELECT TRIM(NIVELOCUPACIONALNOMBRE) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
-      cargarCat(`SELECT TRIM(OCUPACIONCUOCNOMBRE) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
-      cargarCat(`SELECT TRIM(SECTORDESCRIPCION) AS "nombre" FROM SECTOR`),
-      cargarCat(`SELECT TRIM(SUBSECTORNOMBRE) AS "nombre" FROM SUBSECTOR`),
-      cargarCat(`SELECT TRIM(TIPOAMBIENTENOMBRE) AS "nombre" FROM TIPOAMBIENTE`),
-      cargarCat(`SELECT TRIM(MATERIALFORMACIONNOMBRE) AS "nombre" FROM MATERIALFORMACION`),
-      cargarCat(`SELECT TRIM(RECURSOSDIDACTICOSNOMBRE) AS "nombre" FROM RECURSOSDIDACTICOS`),
-      cargarCat(`SELECT TRIM(GESTIONCONOCIMIENTONOMBRE) AS "nombre" FROM GESTIONCONOCIMIENTO`),
-      cargarCat(`SELECT TRIM(UTACTIVIDADESNOMBRE) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
-      cargarCat(`SELECT TRIM(DEPARTAMENTONOMBRE) AS "nombre" FROM DEPARTAMENTO`),
+      cargarCat(`SELECT btrim((AREAFUNCIONALNOMBRE)::text) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
+      cargarCat(`SELECT btrim((NIVELOCUPACIONALNOMBRE)::text) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
+      cargarCat(`SELECT btrim((OCUPACIONCUOCNOMBRE)::text) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
+      cargarCat(`SELECT btrim((SECTORDESCRIPCION)::text) AS "nombre" FROM SECTOR`),
+      cargarCat(`SELECT btrim((SUBSECTORNOMBRE)::text) AS "nombre" FROM SUBSECTOR`),
+      cargarCat(`SELECT btrim((TIPOAMBIENTENOMBRE)::text) AS "nombre" FROM TIPOAMBIENTE`),
+      cargarCat(`SELECT btrim((MATERIALFORMACIONNOMBRE)::text) AS "nombre" FROM MATERIALFORMACION`),
+      cargarCat(`SELECT btrim((RECURSOSDIDACTICOSNOMBRE)::text) AS "nombre" FROM RECURSOSDIDACTICOS`),
+      cargarCat(`SELECT btrim((GESTIONCONOCIMIENTONOMBRE)::text) AS "nombre" FROM GESTIONCONOCIMIENTO`),
+      cargarCat(`SELECT btrim((UTACTIVIDADESNOMBRE)::text) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
+      cargarCat(`SELECT btrim((DEPARTAMENTONOMBRE)::text) AS "nombre" FROM DEPARTAMENTO`),
     ])
 
     const noResueltos = {
@@ -590,8 +546,7 @@ export class ImportarProyectoService {
     for (const af of data.afs) {
       checkSet(areasCat,         af.areas,                noResueltos.areas)
       checkSet(nivelesCat,       af.niveles,              noResueltos.niveles)
-      // El Excel suele traer "1234 - Nombre". Probamos primero el nombre
-      // completo y, si no matchea, lo que queda después del guión.
+      // el Excel trae "1234 - Nombre"
       checkSet(cuocCat, af.ocupacionesCuoc.map(c => {
         if (matchCat(cuocCat, c)) return c
         const idxDash = c.indexOf('-')
@@ -636,7 +591,7 @@ export class ImportarProyectoService {
     rep('Actividades de UT',                  noResueltos.utActividades)
     rep('Departamentos (cobertura)',          noResueltos.departamentos)
 
-    // ── Validaciones exhaustivas (datos básicos / generalidades / contactos)
+    // validaciones de basicos, generalidades y contactos
     if (data.basicos.nit && !/^\d+$/.test(data.basicos.nit.replace(/\D/g, '').slice(0, 20))) {
       validaciones.push({ nivel: 'error', campo: 'NIT', mensaje: 'El NIT del Excel no es numérico.' })
     }
@@ -659,8 +614,12 @@ export class ImportarProyectoService {
     if (!data.contactos.representanteLegal.nombre.trim()) {
       validaciones.push({ nivel: 'error', campo: 'REPRESENTANTE LEGAL', mensaje: 'Falta el representante legal.' })
     }
+    for (const d of data.diagnosticos) {
+      const largo = mensajeHerrOtraLarga(d.otraHerramienta?.trim())
+      if (largo) validaciones.push({ nivel: 'error', campo: `Diagnóstico ${d.numero}`, mensaje: largo })
+    }
 
-    // ── Validaciones por AF
+    // validaciones por AF
     for (const af of data.afs) {
       const prefix = `AF ${af.consecutivo}`
       if (!af.nombre?.trim()) validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'Falta el nombre de la AF.' })
@@ -675,7 +634,6 @@ export class ImportarProyectoService {
       if (af.ocupacionesCuoc.length === 0) validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'Sin ocupaciones CUOC definidas.' })
       if (!af.ambiente?.trim()) validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'Falta ambiente de aprendizaje.' })
 
-      // UTs de esta AF
       const utsAf = data.uts.filter(u => u.numeroAF === af.consecutivo)
       if (utsAf.length === 0) {
         validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'La AF no tiene unidades temáticas.' })
@@ -702,7 +660,6 @@ export class ImportarProyectoService {
         }
       }
 
-      // Cobertura
       const covAf = data.cobertura.filter(c => c.numeroAF === af.consecutivo)
       if (covAf.length === 0) {
         validaciones.push({ nivel: 'warning', campo: prefix, mensaje: 'La AF no tiene grupos de cobertura.' })
@@ -714,7 +671,6 @@ export class ImportarProyectoService {
         })
       }
 
-      // Rubros: consistencia interna (cofin + especie + dinero ≈ total)
       const rubrosAf = data.rubros.filter(r => r.numeroAF === af.consecutivo)
       if (rubrosAf.length === 0) {
         validaciones.push({ nivel: 'error', campo: prefix, mensaje: 'La AF no tiene rubros registrados.' })
@@ -733,7 +689,7 @@ export class ImportarProyectoService {
       }
     }
 
-    // ── Validaciones del presupuesto general
+    // validaciones del presupuesto
     const p = data.presupuesto
     const totalCalculado = p.valorAFs + p.gastosOperacion + p.valorTransferencia
     if (Math.abs(totalCalculado - p.valorTotal) > 1) {
@@ -779,24 +735,26 @@ export class ImportarProyectoService {
       }
     }
 
-    // ── Empresa por NIT ─────────────────────────────────────────────────────
+    // empresa por NIT
     const nit = data.basicos.nit?.trim()
     if (!nit) {
       validaciones.push({ nivel: 'error', campo: 'NIT', mensaje: 'El Excel no trae NIT' })
     }
     let empresa: PreviewEmpresa = { estado: 'nueva', nit, razonSocial: data.basicos.razonSocial }
-    if (nit) {
+    // EMPRESAIDENTIFICACION es NUMBER: un NIT con puntos rompe el bind (NJS-105)
+    const nitNum = Number((nit ?? '').replace(/\D/g, ''))
+    if (nit && Number.isFinite(nitNum) && nitNum > 0) {
       const e = await this.dataSource.query(
         `SELECT EMPRESAID                  AS "id",
-                TRIM(EMPRESARAZONSOCIAL)   AS "rs",
-                TRIM(EMPRESASIGLA)         AS "sigla",
-                TRIM(EMPRESADIRECCION)     AS "dir",
-                TRIM(EMPRESACELULAR)       AS "cel",
-                TRIM(EMPRESAEMAIL)         AS "email"
+                btrim((EMPRESARAZONSOCIAL)::text)   AS "rs",
+                btrim((EMPRESASIGLA)::text)         AS "sigla",
+                btrim((EMPRESADIRECCION)::text)     AS "dir",
+                btrim((EMPRESACELULAR)::text)       AS "cel",
+                btrim((EMPRESAEMAIL)::text)         AS "email"
            FROM EMPRESA
-          WHERE EMPRESAIDENTIFICACION = :1
-            AND ROWNUM = 1`,
-        [Number(nit)],
+          WHERE EMPRESAIDENTIFICACION = $1
+ LIMIT 1`,
+        [nitNum],
       )
       if (e[0]) {
         const diffs: PreviewEmpresa['diferenciasDatos'] = []
@@ -819,13 +777,23 @@ export class ImportarProyectoService {
         }
       }
     }
+    // los textos de la empresa van a EMPRESA si es nueva, o si es existente y al confirmar se piden actualizar sus datos
+    for (const d of datosEmpresaQueNoCaben(data.basicos)) {
+      validaciones.push(empresa.estado === 'nueva'
+        ? { nivel: 'error', campo: d.campo, mensaje: `Admite hasta ${d.tope} caracteres y trae ${d.largo}. Acórtelo en el Excel.` }
+        : {
+            nivel: 'warning',
+            campo: d.campo,
+            mensaje: `Admite hasta ${d.tope} caracteres y trae ${d.largo}: si al confirmar se actualizan los datos de la empresa, la importación se rechazará.`,
+          })
+    }
 
-    // ── Usuario por email ───────────────────────────────────────────────────
+    // usuario por email
     const email = data.basicos.email?.trim().toLowerCase() ?? ''
     let usuario: PreviewUsuario = { email, estado: 'nuevo' }
     if (email) {
       const u = await this.dataSource.query(
-        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1 AND ROWNUM = 1`,
+        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = $1 LIMIT 1`,
         [email],
       )
       if (u[0]) usuario = { email, estado: 'existente', usuarioIdExistente: Number(u[0].id) }
@@ -833,7 +801,7 @@ export class ImportarProyectoService {
       validaciones.push({ nivel: 'error', campo: 'CORREO ELECTRÓNICO', mensaje: 'El Excel no trae correo de la empresa' })
     }
 
-    // ── Validaciones cruzadas ──────────────────────────────────────────────
+    // validaciones cruzadas
     if (data.afs.length === 0) {
       validaciones.push({ nivel: 'error', mensaje: 'No hay Acciones de Formación en el Excel' })
     }
@@ -843,12 +811,7 @@ export class ImportarProyectoService {
         mensaje: `Datos_Presupuesto declara ${data.presupuesto.numeroAFs} AFs pero hay ${data.afs.length} en Datos_AF`,
       })
     }
-    // Validación cruzada de cofinanciación SENA.
-    // En el Excel "Datos_Presupuesto.cofinanciacionSena" es el TOTAL del
-    // proyecto (ya incluye GO). Para comparar contra la suma de rubros, hay
-    // que sumar SOLO los rubros NORMALES (excluyendo R09 GO y R015 Transf,
-    // que ya vienen aparte como gastosOpCofinSena y valorTransferencia) más
-    // el GO. La transferencia no aporta cofin SENA (va a contrapartida dinero).
+    // el cofin SENA del Excel ya incluye GO: se excluyen R09 y R015 de la suma
     const isGOCode = (cod: string, nom: string) =>
       /^R0?9(\D|$)/i.test(cod) || /GASTOS\s+DE\s+OPERACI/i.test(nom)
     const isTransCode = (cod: string, nom: string) =>
@@ -865,7 +828,6 @@ export class ImportarProyectoService {
       })
     }
 
-    // ── Agrupar AF con sus UT, rubros y cobertura ──────────────────────────
     const afsConDetalle = data.afs.map(af => ({
       ...af,
       uts: data.uts.filter(u => Number(u.numeroAF) === Number(af.consecutivo)),
@@ -896,10 +858,6 @@ export class ImportarProyectoService {
       validaciones,
     }
   }
-
-  // ╔════════════════════════════════════════════════════════════════════════╗
-  // ║ Confirmación: inserción real en BD                                      ║
-  // ╚════════════════════════════════════════════════════════════════════════╝
 
   async confirmar(
     buffer: Buffer,
@@ -941,42 +899,61 @@ export class ImportarProyectoService {
     const email = data.basicos.email?.trim().toLowerCase()
     if (!nit)   throw new BadRequestException('El Excel no trae NIT')
     if (!email) throw new BadRequestException('El Excel no trae correo')
+    // EMPRESAIDENTIFICACION y EMPRESADIGITOVERIFICACION son NUMBER: solo digitos
+    const nitNum = Number((nit ?? '').replace(/\D/g, ''))
+    if (!Number.isFinite(nitNum) || nitNum <= 0) {
+      throw new BadRequestException(`El NIT "${nit}" no es un número válido`)
+    }
+    const dvNum = Number(String(data.basicos.digitoVerificacion ?? '').replace(/\D/g, '') || '0')
 
-    // Convocatoria — además del id, traemos el año para el nombre del proyecto
+    // NECESIDADHERROTRA mide 40 bytes en el Exadata: mejor un 400 ahora que un ORA-12899 a mitad de la importación
+    for (const d of data.diagnosticos) {
+      const largo = mensajeHerrOtraLarga(d.otraHerramienta?.trim())
+      if (largo) throw new BadRequestException(`Diagnóstico ${d.numero} del Excel: ${largo}`)
+    }
+    // los textos de EMPRESA solo se escriben si la empresa es nueva o si se piden actualizar sus datos: se revisan en el
+    // paso 1, antes de escribir nada, para responder un 400 en vez de un ORA-12899 a mitad de la importación
+    const noCaben = datosEmpresaQueNoCaben(data.basicos)
+    const exigirQueQuepanDatosEmpresa = () => {
+      if (noCaben.length === 0) return
+      const detalle = noCaben.map(d => `${d.campo} admite hasta ${d.tope} caracteres y trae ${d.largo}`).join('; ')
+      throw new BadRequestException(`Datos básicos del Excel que no caben: ${detalle}.`)
+    }
+
+    // el año se usa en el nombre del proyecto
     const conv: Array<{ anio: number }> = await this.dataSource.query(
-      `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = :1`,
+      `SELECT CONVOCATORIAANIO AS "anio" FROM CONVOCATORIA WHERE CONVOCATORIAID = $1`,
       [dto.convocatoriaId],
     )
     if (!conv[0]) throw new NotFoundException('Convocatoria no encontrada')
     const anioConvocatoria = Number(conv[0].anio)
 
-    // Modalidad del proyecto: tomada de Datos_Basicos.modalidadParticipacion.
-    // Match tolerante (ver matchModalidad).
     const modsCat: Array<{ id: number; nombre: string }> = await this.dataSource.query(
-      `SELECT MODALIDADID AS "id", TRIM(UPPER(MODALIDADNOMBRE)) AS "nombre"
+      `SELECT MODALIDADID AS "id", btrim((UPPER(MODALIDADNOMBRE))::text) AS "nombre"
          FROM MODALIDAD WHERE MODALIDADESTADO = 1`,
     )
-    const modProy = this.matchModalidad(data.basicos.modalidadParticipacion ?? '', modsCat)
+    const modProy = matchModalidad(data.basicos.modalidadParticipacion ?? '', modsCat)
 
     const qr = this.dataSource.createQueryRunner()
     await qr.connect()
     await qr.startTransaction()
     try {
-      // ── 1. Empresa ────────────────────────────────────────────────────────
+      // 1. empresa
       const empresaExistente: Array<{ id: number }> = await qr.query(
-        `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = :1 AND ROWNUM = 1`,
-        [Number(nit)],
+        `SELECT EMPRESAID AS "id" FROM EMPRESA WHERE EMPRESAIDENTIFICACION = $1 LIMIT 1`,
+        [nitNum],
       )
       let empresaId: number
       if (empresaExistente[0]) {
         empresaId = Number(empresaExistente[0].id)
         if (dto.actualizarDatosEmpresa) {
+          exigirQueQuepanDatosEmpresa()
           await qr.query(
             `UPDATE EMPRESA SET
-                EMPRESARAZONSOCIAL = :1, EMPRESASIGLA = :2, EMPRESADIRECCION = :3,
-                EMPRESACELULAR = :4, EMPRESATELEFONO = :5, EMPRESAPAGINAWEB = :6,
-                EMPRESAEMAIL = :7
-              WHERE EMPRESAID = :8`,
+                EMPRESARAZONSOCIAL = $1, EMPRESASIGLA = $2, EMPRESADIRECCION = $3,
+                EMPRESACELULAR = $4, EMPRESATELEFONO = $5, EMPRESAWEBSITE = $6,
+                EMPRESAEMAIL = $7
+              WHERE EMPRESAID = $8`,
             [
               data.basicos.razonSocial.trim(),
               (data.basicos.sigla ?? '').trim(),
@@ -990,36 +967,29 @@ export class ImportarProyectoService {
           )
         }
       } else {
-        // Crear empresa nueva con defaults sensatos para campos NOT NULL.
-        const seq = await qr.query(`SELECT EMPRESAID.NEXTVAL FROM dual`)
-        empresaId = Number(seq[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO EMPRESA
-             (EMPRESAID, TIPODOCUMENTOIDENTIDADID, EMPRESAIDENTIFICACION, EMPRESADIGITOVERIFICACION,
-              EMPRESARAZONSOCIAL, EMPRESASIGLA, EMPRESAEMAIL, EMPRESAFECHAREGISTRO,
-              EMPRESADIRECCION, EMPRESACELULAR, EMPRESATELEFONO, EMPRESAPAGINAWEB,
-              COBERTURAEMPRESAID, DEPARTAMENTOEMPRESAID, CIUDADEMPRESAID, CIIUID,
-              TIPOEMPRESAID, TAMANOEMPRESAID, SECTORID, SUBSECTORID, TIPOIDENTIFICACIONREP)
-           VALUES (:1, 1, :2, :3, :4, :5, :6, SYSDATE, :7, :8, :9, :10,
-                   1, 1, 1, 1, 1, 1, 1, 1, 1)`,
-          [
-            empresaId,
-            Number(nit),
-            Number(data.basicos.digitoVerificacion ?? 0),
-            data.basicos.razonSocial.trim(),
-            (data.basicos.sigla ?? '').trim(),
-            email,
-            (data.basicos.direccionDomicilio ?? '').trim(),
-            (data.basicos.celular ?? '').trim(),
-            (data.basicos.telefono ?? '').trim(),
-            (data.basicos.paginaWeb ?? '').trim(),
-          ],
-        )
+        exigirQueQuepanDatosEmpresa()
+        // los ids salen de insertarConId: en el Exadata los pone el trigger de id (pisa el que se mande) y las filas
+        // hijas usan el que quedó en la fila. Los 1 fijos son defaults para columnas NOT NULL
+        empresaId = await insertarConId(qr, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+          TIPODOCUMENTOIDENTIDADID: 1,
+          EMPRESAIDENTIFICACION: nitNum,
+          EMPRESADIGITOVERIFICACION: dvNum,
+          EMPRESARAZONSOCIAL: data.basicos.razonSocial.trim(),
+          EMPRESASIGLA: (data.basicos.sigla ?? '').trim(),
+          EMPRESAEMAIL: email,
+          EMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          EMPRESADIRECCION: (data.basicos.direccionDomicilio ?? '').trim(),
+          EMPRESACELULAR: (data.basicos.celular ?? '').trim(),
+          EMPRESATELEFONO: (data.basicos.telefono ?? '').trim(),
+          EMPRESAWEBSITE: (data.basicos.paginaWeb ?? '').trim(),
+          COBERTURAEMPRESAID: 1, DEPARTAMENTOEMPRESAID: 1, CIUDADEMPRESAID: 1, CIIUID: 1,
+          TIPOEMPRESAID: 1, TAMANOEMPRESAID: 1, SECTORID: 1, SUBSECTORID: 1, TIPOIDENTIFICACIONREP: 1,
+        })
       }
 
-      // ── 2. Usuario + USUARIOPERFIL ────────────────────────────────────────
+      // 2. usuario + USUARIOPERFIL
       const usuarioExistente: Array<{ id: number }> = await qr.query(
-        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = :1 AND ROWNUM = 1`,
+        `SELECT USUARIOID AS "id" FROM USUARIO WHERE LOWER(USUARIOEMAIL) = $1 LIMIT 1`,
         [email],
       )
       let usuarioId: number
@@ -1031,45 +1001,40 @@ export class ImportarProyectoService {
         }
         const llave = getEncryptionKey()
         const claveCifrada = encrypt64(dto.claveUsuario.trim(), llave)
-        const seqU = await qr.query(`SELECT USUARIOID.NEXTVAL FROM dual`)
-        usuarioId = Number(seqU[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO USUARIO
-             (USUARIOID, PERFILID, USUARIOCLAVE, USUARIOFECHAREGISTRO, USUARIOESTADO,
-              USUARIOTIPO, USUARIOEMAIL, USUARIOLLAVEENCRIPTACION)
-           VALUES (:1, 7, :2, SYSDATE, 1, 2, :3, :4)`,
-          [usuarioId, claveCifrada, email, llave],
-        )
+        usuarioId = await insertarConId(qr, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+          PERFILID: 7,
+          USUARIOCLAVE: claveCifrada,
+          USUARIOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          USUARIOESTADO: 1,
+          USUARIOTIPO: 2,
+          USUARIOEMAIL: email,
+          USUARIOLLAVEENCRIPTACION: llave,
+        })
         await qr.query(
           `INSERT INTO USUARIOPERFIL
              (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, SYSDATE)`,
+           VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 7, 1, 1, ${AHORA_UTC})`,
           [usuarioId],
         )
       }
 
-      // ── 3. Proyecto ───────────────────────────────────────────────────────
-      // Nombre autogenerado: SIGLA-FCE-AÑO. La modalidad sale de Datos_Basicos
-      // (resuelta por nombre). Estado 0 (borrador) para que el proponente o el
-      // admin puedan revisar y editar antes de confirmar.
+      // 3. proyecto — entra en estado 0 (borrador)
       const codSeg = crypto.randomBytes(12).toString('hex').toUpperCase()
       const modalidadId = modProy?.id ?? dto.modalidadProyectoId ?? 1
       const sigla = (data.basicos.sigla ?? '').trim() || data.basicos.razonSocial.trim().slice(0, 30)
       const proyectoNombre = `${sigla}-FCE-${anioConvocatoria}`.slice(0, 100)
-      await qr.query(
-        `INSERT INTO PROYECTO
-           (PROYECTOID, EMPRESAID, PROYECTONOMBRE, PROYECTOOBJETIVO,
-            CONVOCATORIAID, MODALIDADID,
-            PROYECTOCODSEGURIDAD, PROYECTOFECHAREGISTRO, PROYECTOESTADO)
-         VALUES (PROYECTOID.NEXTVAL, :1, :2, :3, :4, :5, :6, SYSDATE, 0)`,
-        [empresaId, proyectoNombre,
-         data.generalidades.objetivoProyecto?.trim() ?? null,
-         dto.convocatoriaId, modalidadId, codSeg],
-      )
-      const seqP: Array<{ id: number }> = await qr.query(`SELECT PROYECTOID.CURRVAL AS "id" FROM dual`)
-      const proyectoId = Number(seqP[0].id)
+      const proyectoId = await insertarConId(qr, 'PROYECTO', 'PROYECTOID', { secuencia: 'PROYECTOID' }, {
+        EMPRESAID: empresaId,
+        PROYECTONOMBRE: proyectoNombre,
+        PROYECTOOBJETIVO: data.generalidades.objetivoProyecto?.trim() ?? null,
+        CONVOCATORIAID: dto.convocatoriaId,
+        MODALIDADID: modalidadId,
+        PROYECTOCODSEGURIDAD: codSeg,
+        PROYECTOFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        PROYECTOESTADO: 0,
+      })
 
-      // ── 4. Contactos (3) — cargos según el listado oficial del SEP ───────
+      // 4. contactos: los cargos salen del listado oficial del SEP
       const contactos = [
         { ...data.contactos.representanteLegal, cargo: 'Representante Legal' },
         { ...data.contactos.contacto1,           cargo: 'Talento Humano' },
@@ -1082,26 +1047,22 @@ export class ImportarProyectoService {
              (EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
               CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
               TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
-           VALUES (:1, :2, :3, :4, :5, :6, 1, :7)`,
+           VALUES ($1, $2, $3, $4, $5, $6, 1, $7)`,
           [empresaId, c.nombre.trim(), c.cargo, c.email.trim(),
            c.telefono.trim() || null, c.id.trim() || null, proyectoId],
         )
       }
 
-      // ── 4.5 Diagnósticos (NECESIDAD) y necesidades de formación
-      //         (NECESIDADFORMACION). Indexamos por (codigoDiagnostico,
-      //         codigoNecesidad) para que cada AF pueda referenciar la
-      //         correcta vía NECESIDADFORMACIONIDAF.
+      // 4.5 diagnosticos (NECESIDAD) y necesidades de formacion (NECESIDADFORMACION)
       const necFormIdPor = new Map<string, number>()  // "diag-nec" → necesidadFormacionId
       const necesidadIdPorDiag = new Map<number, number>()
       let necesidadesCreadas = 0
       let necFormCreadas = 0
       let herramientasCreadas = 0
 
-      // Catálogo de fuentes de herramienta (ENCUESTAS, ENTREVISTAS, etc.)
       const fuentesHerr: Array<{ id: number; nombre: string }> = await qr.query(
         `SELECT FUENTEHERRAMIENTAID AS "id",
-                TRIM(UPPER(FUENTEHERRAMIENTANOMBRE)) AS "nombre"
+                btrim((UPPER(FUENTEHERRAMIENTANOMBRE))::text) AS "nombre"
            FROM FUENTEHERRAMIENTA`,
       )
       const findFuente = (nombre: string): number | null => {
@@ -1109,50 +1070,42 @@ export class ImportarProyectoService {
         return fuentesHerr.find(f => f.nombre === n)?.id ?? null
       }
 
-      // Excel trae "DD/MM/YYYY" (string) o un número serial. Lo convertimos a
-      // string ISO YYYY-MM-DD para Oracle TO_DATE.
+      // el Excel trae "DD/MM/YYYY" o un serial; Oracle TO_DATE necesita ISO
       const toIsoDate = (v: string | null): string | null => {
         if (!v) return null
         const s = v.trim()
-        // Excel serial number (días desde 1900).
+        // serial de Excel: dias desde 1900
         if (/^\d{4,6}(\.\d+)?$/.test(s)) {
           const serial = Number(s)
           const d = new Date(Math.round((serial - 25569) * 86400 * 1000))
           if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
         }
-        // DD/MM/YYYY o DD-MM-YYYY
         const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
         if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
         return null
       }
 
       for (const diag of data.diagnosticos) {
-        await qr.query(
-          `INSERT INTO NECESIDAD
-             (NECESIDADID, EMPRESANECESIDADID, NECESIDADFECHAREGISTRO, USUREGISTRONECESIDAD)
-           VALUES (NECESIDADID.NEXTVAL, :1, SYSDATE, :2)`,
-          [empresaId, usuarioId],
-        )
-        const [{ id: necId }]: Array<{ id: number }> = await qr.query(
-          `SELECT NECESIDADID.CURRVAL AS "id" FROM dual`,
-        )
-        necesidadIdPorDiag.set(diag.numero, Number(necId))
+        const necId = await insertarConId(qr, 'NECESIDAD', 'NECESIDADID', { secuencia: 'NECESIDADID' }, {
+          EMPRESANECESIDADID: empresaId,
+          NECESIDADFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          USUREGISTRONECESIDAD: usuarioId,
+        })
+        necesidadIdPorDiag.set(diag.numero, necId)
         necesidadesCreadas++
 
-        // Datos del diagnóstico (fecha, herramienta propia, otra, descripción,
-        // resumen y plan de capacitación).
         const isoFecha = toIsoDate(diag.fecha)
         const esCreacionPropia = (diag.herramientaPropia ?? '').trim().toUpperCase().startsWith('SI') ? 1 : 0
         const tienePlanCapa    = (diag.planCapacitacion  ?? '').trim().toUpperCase().startsWith('SI') ? 1 : 0
         await qr.query(
           `UPDATE NECESIDAD
               SET NECESIDADPERIODOI = ${isoFecha ? "TO_DATE(:1, 'YYYY-MM-DD')" : 'NULL'},
-                  NECESIDADHERRCREACION = :2,
-                  NECESIDADHERROTRA = :3,
-                  NECESIDADHERRDESCRIP = :4,
-                  NECESIDADHERRRESULTADOS = :5,
-                  NECESIDADPLANCAPA = :6
-            WHERE NECESIDADID = :7`,
+                  NECESIDADHERRCREACION = $2,
+                  NECESIDADHERROTRA = $3,
+                  NECESIDADHERRDESCRIP = $4,
+                  NECESIDADHERRRESULTADOS = $5,
+                  NECESIDADPLANCAPA = $6
+            WHERE NECESIDADID = $7`,
           [
             ...(isoFecha ? [isoFecha] : []),
             esCreacionPropia,
@@ -1164,52 +1117,46 @@ export class ImportarProyectoService {
           ],
         )
 
-        // HERRAMIENTANECESIDAD por cada herramienta del diagnóstico (lookup
-        // por nombre; las que no resuelvan quedan en noResueltos.fuentes).
         for (const h of diag.herramientas) {
           const fuenteId = findFuente(h.nombre)
           if (!fuenteId) {
-            // Aún no existe noResueltos en este punto del flujo; lo dejamos
-            // como log para el admin: la herramienta se omite silenciosamente.
+            // noResueltos todavia no existe en este punto: la herramienta se omite
             continue
           }
-          await qr.query(
-            `INSERT INTO HERRAMIENTANECESIDAD
-               (HERRAMIENTANECESIDADID, NECESIDADID, FUENTEHERRAMIENTAID,
-                HERRAMIENTANECESIDADPARTICIP, HERRAMIENTANECESIDADOTRA,
-                USUREGISTROHERRAMIENTA, HERRAMIENTANECESIDADFECHAREG)
-             VALUES (HERRAMIENTANECESIDADID.NEXTVAL, :1, :2, :3, ' ', :4, SYSDATE)`,
-            [Number(necId), fuenteId, Number(h.muestra) || 0, usuarioId],
+          await insertarConId(
+            qr, 'HERRAMIENTANECESIDAD', 'HERRAMIENTANECESIDADID', { secuencia: 'HERRAMIENTANECESIDADID' },
+            {
+              NECESIDADID: necId,
+              FUENTEHERRAMIENTAID: fuenteId,
+              HERRAMIENTANECESIDADPARTICIP: Number(h.muestra) || 0,
+              HERRAMIENTANECESIDADOTRA: ' ',
+              USUREGISTROHERRAMIENTA: usuarioId,
+              HERRAMIENTANECESIDADFECHAREG: sqlCrudo(AHORA_UTC),
+            },
           )
           herramientasCreadas++
         }
       }
 
-      // Insertar las necesidades de formación de cada diagnóstico.
       for (const nec of data.necesidades) {
         const necesidadId = necesidadIdPorDiag.get(nec.numeroDiagnostico)
         if (!necesidadId) continue
-        const seqNF = await qr.query(`SELECT NECESIDADFORMACIONID.NEXTVAL FROM dual`)
-        const necFormId = Number(seqNF[0].NEXTVAL)
-        await qr.query(
-          `INSERT INTO NECESIDADFORMACION
-             (NECESIDADFORMACIONID, NECESIDADID, NECESIDADFORMACIONNUMERO,
-              NECESIDADFORMACIONNOMBRE, NECESIDADFORMACIONBENEF,
-              USUREGISTRONECESIDADFORMACION, NECESIDADFORMACIONFECHAREGISTR)
-           VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-          [necFormId, necesidadId, nec.numeroNecesidad,
-           (nec.necesidad ?? '').trim().slice(0, 4000),
-           nec.numeroBeneficiarios ?? 0, usuarioId],
+        const necFormId = await insertarConId(
+          qr, 'NECESIDADFORMACION', 'NECESIDADFORMACIONID', { secuencia: 'NECESIDADFORMACIONID' },
+          {
+            NECESIDADID: necesidadId,
+            NECESIDADFORMACIONNUMERO: nec.numeroNecesidad,
+            NECESIDADFORMACIONNOMBRE: (nec.necesidad ?? '').trim().slice(0, 4000),
+            NECESIDADFORMACIONBENEF: nec.numeroBeneficiarios ?? 0,
+            USUREGISTRONECESIDADFORMACION: usuarioId,
+            NECESIDADFORMACIONFECHAREGISTR: sqlCrudo(AHORA_UTC),
+          },
         )
         necFormIdPor.set(`${nec.numeroDiagnostico}-${nec.numeroNecesidad}`, necFormId)
         necFormCreadas++
       }
 
-      // ── 5. Catálogos: lookup completo por nombre/código (todos los que el
-      //    Excel del VBA puede traer en texto). Lo que no resuelve queda
-      //    registrado en `noResueltos` y se devuelve al admin para que lo
-      //    complete después en la edición del proyecto vivo.
-      // Normalización tolerante: trim + upper + sin acentos + espacios colapsados.
+      // 5. catalogos: lo que no resuelve queda en noResueltos y lo completa el admin
       const normalizar = (s: string | null | undefined) =>
         (s ?? '')
           .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -1232,33 +1179,32 @@ export class ImportarProyectoService {
         departamentosCat, utActCat, articulacionTerrCat, enfoqueCat,
         metodologiaCat, afComponenteCat, tiposEventoMap, modsFormCat,
       ] = await Promise.all([
-        cargarMap(`SELECT AREAFUNCIONALID AS "id", TRIM(UPPER(AREAFUNCIONALNOMBRE)) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
-        cargarMap(`SELECT NIVELOCUPACIONALID AS "id", TRIM(UPPER(NIVELOCUPACIONALNOMBRE)) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
-        cargarMap(`SELECT OCUPACIONCUOCID AS "id", TRIM(UPPER(OCUPACIONCUOCNOMBRE)) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
-        cargarMap(`SELECT SECTORID AS "id", TRIM(UPPER(SECTORDESCRIPCION)) AS "nombre" FROM SECTOR`),
-        cargarMap(`SELECT SUBSECTORID AS "id", TRIM(UPPER(SUBSECTORNOMBRE)) AS "nombre" FROM SUBSECTOR`),
-        cargarMap(`SELECT TIPOAMBIENTEID AS "id", TRIM(UPPER(TIPOAMBIENTENOMBRE)) AS "nombre" FROM TIPOAMBIENTE`),
-        cargarMap(`SELECT MATERIALFORMACIONID AS "id", TRIM(UPPER(MATERIALFORMACIONNOMBRE)) AS "nombre" FROM MATERIALFORMACION`),
-        cargarMap(`SELECT RECURSOSDIDACTICOSID AS "id", TRIM(UPPER(RECURSOSDIDACTICOSNOMBRE)) AS "nombre" FROM RECURSOSDIDACTICOS`),
-        cargarMap(`SELECT GESTIONCONOCIMIENTOID AS "id", TRIM(UPPER(GESTIONCONOCIMIENTONOMBRE)) AS "nombre" FROM GESTIONCONOCIMIENTO`),
-        cargarMap(`SELECT DEPARTAMENTOID AS "id", TRIM(UPPER(DEPARTAMENTONOMBRE)) AS "nombre" FROM DEPARTAMENTO`),
-        cargarMap(`SELECT UTACTIVIDADESID AS "id", TRIM(UPPER(UTACTIVIDADESNOMBRE)) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
-        cargarMap(`SELECT ARTICULACIONTERRITORIALID AS "id", TRIM(UPPER(ARTICULACIONTERRITORIALNOMBRE)) AS "nombre" FROM ARTICULACIONTERRITORIAL WHERE ARTICULACIONTERRITORIALESTADO = 1`),
-        cargarMap(`SELECT AFENFOQUEID AS "id", TRIM(UPPER(AFENFOQUENOMBRE)) AS "nombre" FROM AFENFOQUE WHERE AFENFOQUEESTADO = 1`),
-        cargarMap(`SELECT METODOLOGIAAPRENDIZAJEID AS "id", TRIM(UPPER(METODOLOGIAAPRENDIZAJENOMBRE)) AS "nombre" FROM METODOLOGIAAPRENDIZAJE WHERE METODOLOGIAAPRENDIZAJEESTADO = 1`),
-        cargarMap(`SELECT AFCOMPONENTEID AS "id", TRIM(UPPER(AFCOMPONENTENOMBRE)) AS "nombre" FROM AFCOMPONENTE WHERE AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1`),
-        qr.query(`SELECT TIPOEVENTOID AS "id", TRIM(UPPER(TIPOEVENTONOMBRE)) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`),
-        qr.query(`SELECT MODALIDADFORMACIONID AS "id", TRIM(UPPER(MODALIDADFORMACIONNOMBRE)) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`),
+        cargarMap(`SELECT AREAFUNCIONALID AS "id", btrim((UPPER(AREAFUNCIONALNOMBRE))::text) AS "nombre" FROM AREAFUNCIONAL WHERE AREAFUNCIONALESTADO = 1`),
+        cargarMap(`SELECT NIVELOCUPACIONALID AS "id", btrim((UPPER(NIVELOCUPACIONALNOMBRE))::text) AS "nombre" FROM NIVELOCUPACIONAL WHERE NIVELOCUPACIONALESTADO = 1`),
+        cargarMap(`SELECT OCUPACIONCUOCID AS "id", btrim((UPPER(OCUPACIONCUOCNOMBRE))::text) AS "nombre" FROM OCUPACIONCUOC WHERE OCUPACIONCUOCESTADO = 1`),
+        cargarMap(`SELECT SECTORID AS "id", btrim((UPPER(SECTORDESCRIPCION))::text) AS "nombre" FROM SECTOR`),
+        cargarMap(`SELECT SUBSECTORID AS "id", btrim((UPPER(SUBSECTORNOMBRE))::text) AS "nombre" FROM SUBSECTOR`),
+        cargarMap(`SELECT TIPOAMBIENTEID AS "id", btrim((UPPER(TIPOAMBIENTENOMBRE))::text) AS "nombre" FROM TIPOAMBIENTE`),
+        cargarMap(`SELECT MATERIALFORMACIONID AS "id", btrim((UPPER(MATERIALFORMACIONNOMBRE))::text) AS "nombre" FROM MATERIALFORMACION`),
+        cargarMap(`SELECT RECURSOSDIDACTICOSID AS "id", btrim((UPPER(RECURSOSDIDACTICOSNOMBRE))::text) AS "nombre" FROM RECURSOSDIDACTICOS`),
+        cargarMap(`SELECT GESTIONCONOCIMIENTOID AS "id", btrim((UPPER(GESTIONCONOCIMIENTONOMBRE))::text) AS "nombre" FROM GESTIONCONOCIMIENTO`),
+        cargarMap(`SELECT DEPARTAMENTOID AS "id", btrim((UPPER(DEPARTAMENTONOMBRE))::text) AS "nombre" FROM DEPARTAMENTO`),
+        cargarMap(`SELECT UTACTIVIDADESID AS "id", btrim((UPPER(UTACTIVIDADESNOMBRE))::text) AS "nombre" FROM UTACTIVIDADES WHERE UTACTIVIDADESESTADO = 1`),
+        cargarMap(`SELECT ARTICULACIONTERRITORIALID AS "id", btrim((UPPER(ARTICULACIONTERRITORIALNOMBRE))::text) AS "nombre" FROM ARTICULACIONTERRITORIAL WHERE ARTICULACIONTERRITORIALESTADO = 1`),
+        cargarMap(`SELECT AFENFOQUEID AS "id", btrim((UPPER(AFENFOQUENOMBRE))::text) AS "nombre" FROM AFENFOQUE WHERE AFENFOQUEESTADO = 1`),
+        cargarMap(`SELECT METODOLOGIAAPRENDIZAJEID AS "id", btrim((UPPER(METODOLOGIAAPRENDIZAJENOMBRE))::text) AS "nombre" FROM METODOLOGIAAPRENDIZAJE WHERE METODOLOGIAAPRENDIZAJEESTADO = 1`),
+        cargarMap(`SELECT AFCOMPONENTEID AS "id", btrim((UPPER(AFCOMPONENTENOMBRE))::text) AS "nombre" FROM AFCOMPONENTE WHERE AFCOMPONENTEESTADO IS NULL OR AFCOMPONENTEESTADO = 1`),
+        qr.query(`SELECT TIPOEVENTOID AS "id", btrim((UPPER(TIPOEVENTONOMBRE))::text) AS "nombre" FROM TIPOEVENTO WHERE TIPOEVENTOACTIVO = 1`),
+        qr.query(`SELECT MODALIDADFORMACIONID AS "id", btrim((UPPER(MODALIDADFORMACIONNOMBRE))::text) AS "nombre" FROM MODALIDADFORMACION WHERE MODALIDADFORMACIONACTIVO = 1`),
       ])
       const tiposEvento = tiposEventoMap as Array<{ id: number; nombre: string }>
       const modsForm    = modsFormCat    as Array<{ id: number; nombre: string }>
 
-      // Rubros de la convocatoria (lookup por código y por nombre).
       const rubrosConv: Array<{ id: number; codigo: string; nombre: string }> = await qr.query(
         `SELECT RUBROID AS "id",
-                TRIM(UPPER(RUBROCODIGO)) AS "codigo",
-                TRIM(UPPER(RUBRONOMBRE)) AS "nombre"
-           FROM RUBRO WHERE CONVOCATORIAIDRUBRO = :1`,
+                btrim((UPPER(RUBROCODIGO))::text) AS "codigo",
+                btrim((UPPER(RUBRONOMBRE))::text) AS "nombre"
+           FROM RUBRO WHERE CONVOCATORIAIDRUBRO = $1`,
         [dto.convocatoriaId],
       )
 
@@ -1272,12 +1218,10 @@ export class ImportarProyectoService {
         const exact = cat.get(k)
         if (exact !== undefined) return exact
         if (k.length < 6) return null
-        // Substring match (uno contiene al otro) para nombres largos.
         for (const [catKey, id] of cat) {
           if (catKey.length < 6) continue
           if (catKey.includes(k) || k.includes(catKey)) return id
         }
-        // Token-overlap (≥60% palabras ≥4 chars compartidas).
         const t1 = tokensConf(k)
         if (t1.length === 0) return null
         for (const [catKey, id] of cat) {
@@ -1292,14 +1236,11 @@ export class ImportarProyectoService {
         return null
       }
       const findTipoEvento = (nombre: string | null) =>
-        nombre ? this.matchModalidad(nombre, tiposEvento)?.id ?? null : null
+        nombre ? matchModalidad(nombre, tiposEvento)?.id ?? null : null
       const findModalidad = (nombre: string | null) =>
         nombre ? this.matchModalidadFormacion(nombre, modsForm)?.id ?? null : null
 
-      // Para AREAFUNCIONAL y UTACTIVIDADES, cuando el valor del Excel no
-      // existe en el catalogo principal, el formulador lo registra como
-      // "Otra"/"Otro" y deja el nombre real en una columna OTRO. Localizamos
-      // el id del registro "Otra"/"Otro" para usarlo como fallback.
+      // id del registro "Otra"/"Otro", el fallback cuando el valor no esta en el catalogo
       const findOtroId = (cat: Map<string, number>, candidatos: string[]): number | null => {
         for (const c of candidatos) {
           const id = cat.get(c)
@@ -1321,7 +1262,6 @@ export class ImportarProyectoService {
         return null
       }
 
-      // Acumuladores de no resueltos por categoría — se devuelven al admin.
       const noResueltos: Record<string, Set<string>> = {
         areas: new Set(), niveles: new Set(), cuoc: new Set(),
         sectoresPert: new Set(), subsectoresPert: new Set(),
@@ -1333,7 +1273,7 @@ export class ImportarProyectoService {
         componente: new Set(),
       }
 
-      // ── 6. AFs + sub-tablas ─────────────────────────────────────────────
+      // 6. AFs + sub-tablas
       const afIdsPorConsecutivo = new Map<number, number>()
       let afsCreadas = 0
       let utsCreadas = 0
@@ -1366,100 +1306,69 @@ export class ImportarProyectoService {
         const benefSinc = af.beneficiariosSincronicos ?? 0
         const numGrupos = af.numeroGrupos ?? 0
         const horasGrupo = af.horasPorGrupo ?? 0
-        // Totales del proyecto: por-grupo × n° grupos.
         const benefTot  = (benefPres + benefSinc) * (numGrupos || 1)
         const totHoras  = horasGrupo * (numGrupos || 1)
 
-        const seqA: Array<{ NEXTVAL: number }> = await qr.query(`SELECT ACCIONFORMACIONID.NEXTVAL FROM dual`)
-        const afId = Number(seqA[0].NEXTVAL)
-
-        // Resultados de impacto (CLOBs en BD): el Excel trae 5 entradas para
-        // cada uno (impacto en desempeño / impacto en productividad). Se
-        // concatenan con saltos de línea para que el editor del proyecto vivo
-        // pueda separarlos posteriormente.
+        // se concatenan con salto de linea para que el editor del proyecto vivo los separe
         const resDesem = af.impactosTrabajador.filter(Boolean).join('\n').trim() || null
         const resForm  = af.impactosProductividad.filter(Boolean).join('\n').trim() || null
 
-        // Componente Estratégico: el Excel trae el nombre del AFCOMPONENTE
-        // en col "ALINEACIÓN DE LA ACCIÓN DE FORMACIÓN" (descripcionAlineacion).
+        // el nombre del AFCOMPONENTE viene en la col "ALINEACIÓN DE LA ACCIÓN DE FORMACIÓN"
         const componenteId = findInMap(afComponenteCat, af.descripcionAlineacion)
         if (af.descripcionAlineacion && !componenteId) {
-          // Sin lookup: dejamos el texto en COMPOD para que el admin lo elija
-          // luego desde el editor.
+          // sin lookup: el texto queda en COMPOD y el admin lo elige despues
         }
 
-        // NECESIDADFORMACIONIDAF: por (codigoDiagnostico, codigoNecesidad).
         const necFormKey = `${af.codigoDiagnostico ?? ''}-${af.codigoNecesidad ?? ''}`
         const necFormIdAf = necFormIdPor.get(necFormKey) ?? null
 
-        await qr.query(
-          `INSERT INTO ACCIONFORMACION
-             (ACCIONFORMACIONID, PROYECTOID, ACCIONFORMACIONNUMERO, ACCIONFORMACIONNOMBRE,
-              NECESIDADFORMACIONIDAF,
-              ACCIONFORMACIONJUSTNEC, ACCIONFORMACIONCAUSA, ACCIONFORMACIONRESULTADOS,
-              ACCIONFORMACIONOBJETIVO,
-              TIPOEVENTOID, MODALIDADFORMACIONID, METODOLOGIAAPRENDIZAJEID,
-              ACCIONFORMACIONNUMHORAGRUPO, ACCIONFORMACIONNUMGRUPOS, ACCIONFORMACIONNUMTOTHORASGRUP,
-              ACCIONFORMACIONBENEFGRUPO, ACCIONFORMACIONBENEFVIGRUPO, ACCIONFORMACIONNUMBENEF,
-              AFENFOQUEID, ACCIONFORMACIONAREAFUN, ACCIONFORMACIONNIVELOCUPD,
-              ACCIONFORMACIONMUJER, ACCIONFORMACIONNUMCAMPESINO, ACCIONFORMACIONJUSTCAMPESINO,
-              ACCIONFORMACIONNUMPOPULAR, ACCIONFORMACIONJUSTPOPULAR,
-              ACCIONFORMACIONTRABDISCAPAC, ACCIONFORMACIONTRABAJADORBIC,
-              ACCIONFORMACIONMIPYMES, ACCIONFORMACIONTRABMIPYMES, ACCIONFORMACIONMIPYMESD,
-              ACCIONFORMACIONCADENAPROD, ACCIONFORMACIONTRABCADPROD, ACCIONFORMACIONCADENAPRODD,
-              ACCIONFORMACIONSECSUBD,
-              ACCIONFORMACIONCOMPONENTEID, ACCIONFORMACIONCOMPOD, ACCIONFORMACIONJUSTIFICACION,
-              ACCIONFORMACIONRESDESEM, ACCIONFORMACIONRESFORM,
-              TIPOAMBIENTEID, ACCIONFORMACIONJUSTMAT,
-              ACCIONFORMACIONINSUMO, ACCIONFORMACIONJUSTINSUMO,
-              ACCIONFORMACIONFECHAREGISTRO)
-           VALUES (:1,:2,:3,:4,
-                   :5,
-                   :6,:7,:8,
-                   :9,
-                   :10,:11,:12,
-                   :13,:14,:15,
-                   :16,:17,:18,
-                   :19,:20,:21,
-                   :22,:23,:24,
-                   :25,:26,
-                   :27,:28,
-                   :29,:30,:31,
-                   :32,:33,:34,
-                   :35,
-                   :36,:37,:38,
-                   :39,:40,
-                   :41,:42,
-                   :43,:44,
-                   SYSDATE)`,
-          [
-            afId, proyectoId, af.consecutivo, (af.nombre ?? '').trim().slice(0, 500),
-            necFormIdAf,
-            af.diagnostico?.trim() ?? null, af.causasEfectos?.trim() ?? null, af.efectos?.trim() ?? null,
-            af.objetivos?.trim() ?? null,
-            tipoEventoId, modFormId, metodologiaId,
-            horasGrupo || null, numGrupos || null, totHoras || null,
-            benefPres || null, benefSinc || null, benefTot || null,
-            enfoqueId, af.justificacionAreas?.trim() ?? null, af.justificacionNiveles?.trim() ?? null,
-            af.trabajadoresMujeres ?? null, af.trabajadoresCampesinos ?? null,
-            af.trabajadoresCampesinosTexto?.trim() ?? null,
-            af.trabajadoresPopular ?? null, af.trabajadoresPopularTexto?.trim() ?? null,
-            af.trabajadoresDiscapacidad ?? null, af.empresasBic ?? null,
-            af.mipymesEmpresas ?? null, af.mipymesTrabajadores ?? null,
-            af.justificacionMipymes?.trim() ?? null,
-            af.cadenaEmpresas ?? null, af.cadenaTrabajadores ?? null,
-            af.justificacionCadena?.trim() ?? null,
-            af.justificacionSectores?.trim() ?? null,
-            // COMPOD = Justificación de la Alineación (BN, r[65]) — el editor del
-            // proyecto vivo lee esta columna para esa textarea. JUSTIFICACION =
-            // Justificación AF Especializada (BO, r[66]). El nombre del
-            // AFCOMPONENTE (descripcionAlineacion) se referencia vía COMPONENTEID.
-            componenteId, af.justificacionAlineacion?.trim() ?? null, af.justificacionEspecializada?.trim() ?? null,
-            resDesem, resForm,
-            ambienteId, af.justificacionSiAplica?.trim() ?? null,
-            af.insumos?.trim() ?? null, af.justificacionInsumo?.trim() ?? null,
-          ],
-        )
+        const afId = await insertarConId(qr, 'ACCIONFORMACION', 'ACCIONFORMACIONID', { secuencia: 'ACCIONFORMACIONID' }, {
+          PROYECTOID: proyectoId,
+          ACCIONFORMACIONNUMERO: af.consecutivo,
+          ACCIONFORMACIONNOMBRE: (af.nombre ?? '').trim().slice(0, 500),
+          NECESIDADFORMACIONIDAF: necFormIdAf,
+          ACCIONFORMACIONJUSTNEC: af.diagnostico?.trim() ?? null,
+          ACCIONFORMACIONCAUSA: af.causasEfectos?.trim() ?? null,
+          ACCIONFORMACIONRESULTADOS: af.efectos?.trim() ?? null,
+          ACCIONFORMACIONOBJETIVO: af.objetivos?.trim() ?? null,
+          TIPOEVENTOID: tipoEventoId,
+          MODALIDADFORMACIONID: modFormId,
+          METODOLOGIAAPRENDIZAJEID: metodologiaId,
+          ACCIONFORMACIONNUMHORAGRUPO: horasGrupo || null,
+          ACCIONFORMACIONNUMGRUPOS: numGrupos || null,
+          ACCIONFORMACIONNUMTOTHORASGRUP: totHoras || null,
+          ACCIONFORMACIONBENEFGRUPO: benefPres || null,
+          ACCIONFORMACIONBENEFVIGRUPO: benefSinc || null,
+          ACCIONFORMACIONNUMBENEF: benefTot || null,
+          AFENFOQUEID: enfoqueId,
+          ACCIONFORMACIONAREAFUN: af.justificacionAreas?.trim() ?? null,
+          ACCIONFORMACIONNIVELOCUPD: af.justificacionNiveles?.trim() ?? null,
+          ACCIONFORMACIONMUJER: af.trabajadoresMujeres ?? null,
+          ACCIONFORMACIONNUMCAMPESINO: af.trabajadoresCampesinos ?? null,
+          ACCIONFORMACIONJUSTCAMPESINO: af.trabajadoresCampesinosTexto?.trim() ?? null,
+          ACCIONFORMACIONNUMPOPULAR: af.trabajadoresPopular ?? null,
+          ACCIONFORMACIONJUSTPOPULAR: af.trabajadoresPopularTexto?.trim() ?? null,
+          ACCIONFORMACIONTRABDISCAPAC: af.trabajadoresDiscapacidad ?? null,
+          ACCIONFORMACIONTRABAJADORBIC: af.empresasBic ?? null,
+          ACCIONFORMACIONMIPYMES: af.mipymesEmpresas ?? null,
+          ACCIONFORMACIONTRABMIPYMES: af.mipymesTrabajadores ?? null,
+          ACCIONFORMACIONMIPYMESD: af.justificacionMipymes?.trim() ?? null,
+          ACCIONFORMACIONCADENAPROD: af.cadenaEmpresas ?? null,
+          ACCIONFORMACIONTRABCADPROD: af.cadenaTrabajadores ?? null,
+          ACCIONFORMACIONCADENAPRODD: af.justificacionCadena?.trim() ?? null,
+          ACCIONFORMACIONSECSUBD: af.justificacionSectores?.trim() ?? null,
+          // COMPOD = justificacion de la alineacion; JUSTIFICACION = AF especializada
+          ACCIONFORMACIONCOMPONENTEID: componenteId,
+          ACCIONFORMACIONCOMPOD: af.justificacionAlineacion?.trim() ?? null,
+          ACCIONFORMACIONJUSTIFICACION: af.justificacionEspecializada?.trim() ?? null,
+          ACCIONFORMACIONRESDESEM: resDesem,
+          ACCIONFORMACIONRESFORM: resForm,
+          TIPOAMBIENTEID: ambienteId,
+          ACCIONFORMACIONJUSTMAT: af.justificacionSiAplica?.trim() ?? null,
+          ACCIONFORMACIONINSUMO: af.insumos?.trim() ?? null,
+          ACCIONFORMACIONJUSTINSUMO: af.justificacionInsumo?.trim() ?? null,
+          ACCIONFORMACIONFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+        })
         if (af.descripcionAlineacion && !componenteId) {
           noResueltos.componente = noResueltos.componente ?? new Set()
           noResueltos.componente.add(af.descripcionAlineacion)
@@ -1467,10 +1376,7 @@ export class ImportarProyectoService {
         afIdsPorConsecutivo.set(af.consecutivo, afId)
         afsCreadas++
 
-        // ── Áreas funcionales ──
-        // Cuando el Excel trae un area que no existe en el catalogo,
-        // se inserta como "Otra" con el nombre original en AFAREAFUNCIONALOTRO,
-        // tal como lo hace el formulador GeneXus.
+        // areas funcionales: si no esta en el catalogo va como "Otra" + AFAREAFUNCIONALOTRO
         for (const a of af.areas) {
           let aid = findInMap(areasCat, a)
           let textoOtro: string | null = null
@@ -1483,34 +1389,23 @@ export class ImportarProyectoService {
               continue
             }
           }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFAREAFUNCIONALID), 0) + 1 AS "nid" FROM AFAREAFUNCIONAL`,
-          )
-          await qr.query(
-            `INSERT INTO AFAREAFUNCIONAL (AFAREAFUNCIONALID, ACCIONFORMACIONIDAF, AREAFUNCIONALIDAF, AFAREAFUNCIONALOTRO)
-             VALUES (:1, :2, :3, :4)`,
-            [Number(nid), afId, aid, textoOtro],
-          )
+          await insertarConId(qr, 'AFAREAFUNCIONAL', 'AFAREAFUNCIONALID', { maxMasUno: true }, {
+            ACCIONFORMACIONIDAF: afId, AREAFUNCIONALIDAF: aid, AFAREAFUNCIONALOTRO: textoOtro,
+          })
           areasCreadas++
         }
 
-        // ── Niveles ocupacionales ──
+        // niveles ocupacionales
         for (const n of af.niveles) {
           const nid2 = findInMap(nivelesCat, n)
           if (!nid2) { noResueltos.niveles.add(n); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFNIVELOCUPACIONALID), 0) + 1 AS "nid" FROM AFNIVELOCUPACIONAL`,
-          )
-          await qr.query(
-            `INSERT INTO AFNIVELOCUPACIONAL (AFNIVELOCUPACIONALID, ACCIONFORMACIONID, NIVELOCUPACIONALIDAF)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, nid2],
-          )
+          await insertarConId(qr, 'AFNIVELOCUPACIONAL', 'AFNIVELOCUPACIONALID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, NIVELOCUPACIONALIDAF: nid2,
+          })
           nivelesCreados++
         }
 
-        // ── Ocupaciones CUOC: el Excel viene "1234 - Nombre"; matcheamos
-        // el nombre completo y si no, lo que queda tras el guión.
+        // CUOC: el Excel viene "1234 - Nombre"
         for (const c of af.ocupacionesCuoc) {
           let cid = findInMap(cuocCat, c)
           if (!cid) {
@@ -1518,203 +1413,136 @@ export class ImportarProyectoService {
             if (idxDash >= 0) cid = findInMap(cuocCat, c.slice(idxDash + 1))
           }
           if (!cid) { noResueltos.cuoc.add(c); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(OCUPACIONCOUCAFID), 0) + 1 AS "nid" FROM OCUPACIONCOUCAF`,
-          )
-          await qr.query(
-            `INSERT INTO OCUPACIONCOUCAF (OCUPACIONCOUCAFID, ACCIONFORMACIONID, OCUPACIONCUOCID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, cid],
-          )
+          await insertarConId(qr, 'OCUPACIONCOUCAF', 'OCUPACIONCOUCAFID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, OCUPACIONCUOCID: cid,
+          })
           cuocCreados++
         }
 
-        // ── Sectores que PERTENECEN los beneficiarios (AFPSECTOR/AFPSUBSECTOR) ──
+        // sectores a los que pertenecen los beneficiarios (AFPSECTOR/AFPSUBSECTOR)
         for (const s of af.sectoresPertenecen) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresPert.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFPSECTORID), 0) + 1 AS "nid" FROM AFPSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFPSECTOR (AFPSECTORID, ACCIONFORMACIONID, SECTORAFID, AFPSECTORESTADO)
-             VALUES (:1, :2, :3, 1)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFPSECTOR', 'AFPSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SECTORAFID: sid, AFPSECTORESTADO: 1,
+          })
           sectoresCreados++
         }
         for (const s of af.subsectoresPertenecen) {
           const sid = findInMap(subsectoresCat, s)
           if (!sid) { noResueltos.subsectoresPert.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFPSUBSECTORID), 0) + 1 AS "nid" FROM AFPSUBSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFPSUBSECTOR (AFPSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID, AFPSUBSECTORESTADO)
-             VALUES (:1, :2, :3, 1)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFPSUBSECTOR', 'AFPSUBSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SUBSECTORAFID: sid, AFPSUBSECTORESTADO: 1,
+          })
           subsectoresCreados++
         }
 
-        // ── Sectores que la AF BENEFICIA (AFSECTOR/AFSUBSECTOR) ──
+        // sectores que la AF beneficia (AFSECTOR/AFSUBSECTOR)
         for (const s of af.sectoresBeneficia) {
           const sid = findInMap(sectoresCat, s)
           if (!sid) { noResueltos.sectoresBenef.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFSECTORID), 0) + 1 AS "nid" FROM AFSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFSECTOR (AFSECTORID, ACCIONFORMACIONID, SECTORAFID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFSECTOR', 'AFSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SECTORAFID: sid,
+          })
           sectoresCreados++
         }
         for (const s of af.subsectoresBeneficia) {
           const sid = findInMap(subsectoresCat, s)
           if (!sid) { noResueltos.subsectoresBenef.add(s); continue }
-          const [{ nid }] = await qr.query(
-            `SELECT NVL(MAX(AFSUBSECTORID), 0) + 1 AS "nid" FROM AFSUBSECTOR`,
-          )
-          await qr.query(
-            `INSERT INTO AFSUBSECTOR (AFSUBSECTORID, ACCIONFORMACIONID, SUBSECTORAFID)
-             VALUES (:1, :2, :3)`,
-            [Number(nid), afId, sid],
-          )
+          await insertarConId(qr, 'AFSUBSECTOR', 'AFSUBSECTORID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, SUBSECTORAFID: sid,
+          })
           subsectoresCreados++
         }
 
-        // ── Gestión del conocimiento (1:N pero el Excel trae solo un valor) ──
+        // gestion del conocimiento: el Excel trae un solo valor
         if (af.gestionConocimiento) {
           const gid = findInMap(gestionCat, af.gestionConocimiento)
           if (gid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(AFGESTIONCONOCIMIENTOID), 0) + 1 AS "nid" FROM AFGESTIONCONOCIMIENTO`,
-            )
-            await qr.query(
-              `INSERT INTO AFGESTIONCONOCIMIENTO (AFGESTIONCONOCIMIENTOID, ACCIONFORMACIONID, GESTIONCONOCIMIENTOID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, gid],
-            )
+            await insertarConId(qr, 'AFGESTIONCONOCIMIENTO', 'AFGESTIONCONOCIMIENTOID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, GESTIONCONOCIMIENTOID: gid,
+            })
           } else {
             noResueltos.gestion.add(af.gestionConocimiento)
           }
         }
 
-        // ── Material de formación ──
+        // material de formacion
         if (af.material) {
           const mid = findInMap(materialesCat, af.material)
           if (mid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(MATERIALFORMACIONAFID), 0) + 1 AS "nid" FROM MATERIALFORMACIONAF`,
-            )
-            await qr.query(
-              `INSERT INTO MATERIALFORMACIONAF (MATERIALFORMACIONAFID, ACCIONFORMACIONID, MATERIALFORMACIONID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, mid],
-            )
+            await insertarConId(qr, 'MATERIALFORMACIONAF', 'MATERIALFORMACIONAFID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, MATERIALFORMACIONID: mid,
+            })
           } else {
             noResueltos.materiales.add(af.material)
           }
         }
 
-        // ── Recursos didácticos (el Excel trae uno solo en col 75) ──
+        // recursos didacticos: el Excel trae uno solo
         if (af.recursosDidacticos) {
           const rid = findInMap(recursosCat, af.recursosDidacticos)
           if (rid) {
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(RECURSOSDIDACTICOSAFID), 0) + 1 AS "nid" FROM RECURSOSDIDACTICOSAF`,
-            )
-            await qr.query(
-              `INSERT INTO RECURSOSDIDACTICOSAF (RECURSOSDIDACTICOSAFID, ACCIONFORMACIONID, RECURSOSDIDACTICOSID)
-               VALUES (:1, :2, :3)`,
-              [Number(nid), afId, rid],
-            )
+            await insertarConId(qr, 'RECURSOSDIDACTICOSAF', 'RECURSOSDIDACTICOSAFID', { maxMasUno: true }, {
+              ACCIONFORMACIONID: afId, RECURSOSDIDACTICOSID: rid,
+            })
             recursosCreados++
           } else {
             noResueltos.recursos.add(af.recursosDidacticos)
           }
         }
 
-        // ── Grupos de cobertura + AFGRUPOCOBERTURA (deptos por nombre) ──
+        // grupos de cobertura + AFGRUPOCOBERTURA
         const covAf = data.cobertura.filter(c => Number(c.numeroAF) === Number(af.consecutivo))
         for (let i = 0; i < covAf.length; i++) {
           const cov = covAf[i]
           const grupoNumero = (cov.numeroGrupo && cov.numeroGrupo > 0) ? cov.numeroGrupo : (i + 1)
-          const [{ nid: grupoId }] = await qr.query(
-            `SELECT NVL(MAX(AFGRUPOID), 0) + 1 AS "nid" FROM AFGRUPO`,
-          )
-          await qr.query(
-            `INSERT INTO AFGRUPO (AFGRUPOID, ACCIONFORMACIONID, AFGRUPONUMERO, AFGRUPOJUSTIFICACION)
-             VALUES (:1, :2, :3, :4)`,
-            [Number(grupoId), afId, grupoNumero, cov.justificacion?.trim() ?? null],
-          )
+          const grupoId = await insertarConId(qr, 'AFGRUPO', 'AFGRUPOID', { maxMasUno: true }, {
+            ACCIONFORMACIONID: afId, AFGRUPONUMERO: grupoNumero, AFGRUPOJUSTIFICACION: cov.justificacion?.trim() ?? null,
+          })
           gruposCreados++
 
-          // Cobertura presencial (un solo registro)
           if (cov.departamentoPresencial) {
             const did = findInMap(departamentosCat, cov.departamentoPresencial)
             if (!did) {
               noResueltos.departamentos.add(cov.departamentoPresencial)
             } else {
-              // Ciudad por nombre dentro del departamento (opcional)
               let ciudadId: number | null = null
               if (cov.ciudadPresencial) {
                 const ciu: Array<{ id: number }> = await qr.query(
                   `SELECT CIUDADID AS "id" FROM CIUDAD
-                    WHERE DEPARTAMENTOID = :1 AND TRIM(UPPER(CIUDADNOMBRE)) = :2 AND ROWNUM = 1`,
+                    WHERE DEPARTAMENTOID = $1 AND btrim((UPPER(CIUDADNOMBRE))::text) = $2 LIMIT 1`,
                   [did, norm(cov.ciudadPresencial)],
                 )
                 if (ciu[0]) ciudadId = Number(ciu[0].id)
               }
-              const [{ nid: cobId }] = await qr.query(
-                `SELECT NVL(MAX(AFGRUPOCOBERTURAID), 0) + 1 AS "nid" FROM AFGRUPOCOBERTURA`,
-              )
-              await qr.query(
-                `INSERT INTO AFGRUPOCOBERTURA
-                   (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-                    AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-                 VALUES (:1, :2, :3, :4, :5, :6, 'P', 0)`,
-                [Number(cobId), Number(grupoId), did, ciudadId,
-                 cov.beneficiariosPresencial ?? 0, afId],
-              )
+              await insertarConId(qr, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
+                AFGRUPOID: grupoId, DEPARTAMENTOGRUPOID: did, CIUDADGRUPOID: ciudadId,
+                AFGRUPOCOBERTURABENEF: cov.beneficiariosPresencial ?? 0, AFGRUPOFILTRO: afId,
+                AFGRUPOCOBERTURAMOD: 'P', AFGRUPOCOBERTURARURAL: 0,
+              })
               coberturasCreadas++
             }
           }
 
-          // Cobertura "secundaria" (lista de departamentos sin ciudad).
-          // Codigo de modalidad por AFGRUPOCOBERTURAMOD:
-          //   - Virtual (modal 4)         -> 'V'
-          //   - PAT (2) y Hibrida (3)     -> 'S' (Sincronicos: dep sin ciudad)
-          //   - Presencial (1)            -> no deberia llegar aqui, pero
-          //                                  caemos a 'S' como fallback seguro.
-          // modFormId es el id resuelto del MODALIDADFORMACION de esta AF.
+          // AFGRUPOCOBERTURAMOD: 'V' si la modalidad es virtual (4), 'S' en el resto
           const modSecundario = modFormId === 4 ? 'V' : 'S'
           for (const d of cov.departamentos) {
             const did = findInMap(departamentosCat, d.departamento)
             if (!did) { noResueltos.departamentos.add(d.departamento); continue }
-            const [{ nid: cobId }] = await qr.query(
-              `SELECT NVL(MAX(AFGRUPOCOBERTURAID), 0) + 1 AS "nid" FROM AFGRUPOCOBERTURA`,
-            )
-            await qr.query(
-              `INSERT INTO AFGRUPOCOBERTURA
-                 (AFGRUPOCOBERTURAID, AFGRUPOID, DEPARTAMENTOGRUPOID, CIUDADGRUPOID,
-                  AFGRUPOCOBERTURABENEF, AFGRUPOFILTRO, AFGRUPOCOBERTURAMOD, AFGRUPOCOBERTURARURAL)
-               VALUES (:1, :2, :3, NULL, :4, :5, :6, 0)`,
-              [Number(cobId), Number(grupoId), did, d.beneficiarios, afId, modSecundario],
-            )
+            await insertarConId(qr, 'AFGRUPOCOBERTURA', 'AFGRUPOCOBERTURAID', { maxMasUno: true }, {
+              AFGRUPOID: grupoId, DEPARTAMENTOGRUPOID: did, CIUDADGRUPOID: null,
+              AFGRUPOCOBERTURABENEF: d.beneficiarios, AFGRUPOFILTRO: afId,
+              AFGRUPOCOBERTURAMOD: modSecundario, AFGRUPOCOBERTURARURAL: 0,
+            })
             coberturasCreadas++
           }
         }
 
-        // ── UTs + actividades + perfiles ──
+        // UTs + actividades + perfiles
         const utsAf = data.uts.filter(u => Number(u.numeroAF) === Number(af.consecutivo))
         for (const ut of utsAf) {
-          const [{ id: utId }] = await qr.query(
-            `SELECT NVL(MAX(UNIDADTEMATICAID), 0) + 1 AS "id" FROM UNIDADTEMATICA`,
-          )
-          // Mapeo de horas según modalidad de la AF (mismo criterio del proyecto vivo).
+          // las horas van a la columna de la modalidad de la AF
           const modUp = norm(af.modalidadFormacion)
           const esPat = modUp === 'PAT' || modUp.includes('ASISTIDA POR TECNOLOG')
           const esVir = modUp === 'VIRTUAL'
@@ -1726,38 +1554,32 @@ export class ImportarProyectoService {
             pp: esPre ? hp : 0, pv: esVir ? hp : 0, ppat: esPat ? hp : 0, phib: esHib ? hp : 0,
             tp: esPre ? ht : 0, tv: esVir ? ht : 0, tpat: esPat ? ht : 0, thib: esHib ? ht : 0,
           }
-          // Articulación territorial — el Excel solo trae el texto, así que
-          // resolvemos por nombre exacto contra el catálogo si la UT está
-          // marcada como articulación territorial.
+          // el Excel solo trae el texto de la articulacion territorial
           let articulacionId: number | null = null
           if (ut.esArticulacionTerritorial && ut.articulacionTerritorial) {
             articulacionId = findInMap(articulacionTerrCat, ut.articulacionTerritorial)
             if (!articulacionId) noResueltos.articulacionTerritorial.add(ut.articulacionTerritorial)
           }
 
-          await qr.query(
-            `INSERT INTO UNIDADTEMATICA (
-               UNIDADTEMATICAID, PROYECTOIDUT, ACCIONFORMACIONID, UNIDADTEMATICANUMERO,
-               UNIDADTEMATICANOMBRE, UNIDADTEMATICACOMPETENCIAS, UNIDADTEMATICACONTENIDO,
-               UNIDADTEMATICAJUSTACTIVIDAD,
-               UNIDADTEMATICAHORASPP, UNIDADTEMATICAHORASPV, UNIDADTEMATICAHORASPPAT, UNIDADTEMATICAHORASPHIB,
-               UNIDADTEMATICAHORASTP, UNIDADTEMATICAHORASTV, UNIDADTEMATICAHORASTPAT, UNIDADTEMATICAHORASTHIB,
-               UNIDADTEMATICAESTRANSVERSAL, ARTICULACIONTERRITORIALID, UNIDADTEMATICAFECHAREGISTRO
-             ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,SYSDATE)`,
-            [Number(utId), proyectoId, afId, ut.numeroUT,
-             (ut.nombre ?? '').trim().slice(0, 500),
-             ut.competencia?.trim() ?? null,
-             ut.contenido?.trim() ?? null,
-             ut.descripcionActividad?.trim() ?? null,
-             horas.pp, horas.pv, horas.ppat, horas.phib,
-             horas.tp, horas.tv, horas.tpat, horas.thib,
-             ut.esArticulacionTerritorial ? 1 : 0, articulacionId],
-          )
+          const utId = await insertarConId(qr, 'UNIDADTEMATICA', 'UNIDADTEMATICAID', { maxMasUno: true }, {
+            PROYECTOIDUT: proyectoId,
+            ACCIONFORMACIONID: afId,
+            UNIDADTEMATICANUMERO: ut.numeroUT,
+            UNIDADTEMATICANOMBRE: (ut.nombre ?? '').trim().slice(0, 500),
+            UNIDADTEMATICACOMPETENCIAS: ut.competencia?.trim() ?? null,
+            UNIDADTEMATICACONTENIDO: ut.contenido?.trim() ?? null,
+            UNIDADTEMATICAJUSTACTIVIDAD: ut.descripcionActividad?.trim() ?? null,
+            UNIDADTEMATICAHORASPP: horas.pp, UNIDADTEMATICAHORASPV: horas.pv,
+            UNIDADTEMATICAHORASPPAT: horas.ppat, UNIDADTEMATICAHORASPHIB: horas.phib,
+            UNIDADTEMATICAHORASTP: horas.tp, UNIDADTEMATICAHORASTV: horas.tv,
+            UNIDADTEMATICAHORASTPAT: horas.tpat, UNIDADTEMATICAHORASTHIB: horas.thib,
+            UNIDADTEMATICAESTRANSVERSAL: ut.esArticulacionTerritorial ? 1 : 0,
+            ARTICULACIONTERRITORIALID: articulacionId,
+            UNIDADTEMATICAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          })
           utsCreadas++
 
-          // Actividades de la UT (lookup por nombre en UTACTIVIDADES). Si la
-          // actividad no existe en el catalogo, se inserta como "Otra" con el
-          // nombre original en ACTIVIDADUTOTRO (mismo patron que en GeneXus).
+          // si la actividad no esta en el catalogo va como "Otra" + ACTIVIDADUTOTRO
           for (const a of ut.actividades) {
             let aid = findInMap(utActCat, a)
             let textoOtro: string | null = null
@@ -1770,18 +1592,13 @@ export class ImportarProyectoService {
                 continue
               }
             }
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(ACTIVIDADUTID), 0) + 1 AS "nid" FROM ACTIVIDADUT`,
-            )
-            await qr.query(
-              `INSERT INTO ACTIVIDADUT (ACTIVIDADUTID, UNIDADTEMATICAID, UTACTIVIDADESID, ACTIVIDADUTOTRO)
-               VALUES (:1, :2, :3, :4)`,
-              [Number(nid), Number(utId), aid, textoOtro],
-            )
+            await insertarConId(qr, 'ACTIVIDADUT', 'ACTIVIDADUTID', { maxMasUno: true }, {
+              UNIDADTEMATICAID: utId, UTACTIVIDADESID: aid, ACTIVIDADUTOTRO: textoOtro,
+            })
             actividadesCreadas++
           }
 
-          // Perfiles del capacitador (el rubro se resuelve por nombre del perfil).
+          // el perfil del capacitador se resuelve como rubro, por nombre
           for (const p of ut.perfiles) {
             if (!p.perfil) continue
             const rubroId = findRubro(p.perfil, p.perfil)
@@ -1789,19 +1606,15 @@ export class ImportarProyectoService {
               rubrosNoEncontrados.add(`${p.perfil} (UT${ut.numeroUT}, AF ${af.consecutivo})`)
               continue
             }
-            const [{ nid }] = await qr.query(
-              `SELECT NVL(MAX(PERFILUTID), 0) + 1 AS "nid" FROM PERFILUT`,
-            )
-            await qr.query(
-              `INSERT INTO PERFILUT (PERFILUTID, UNIDADTEMATICAID, RUBROIDUT, PERFILUTHORASCAP, PERFILUTFECHAREGISTRO)
-               VALUES (:1, :2, :3, :4, SYSDATE)`,
-              [Number(nid), Number(utId), rubroId, p.horas ?? 0],
-            )
+            await insertarConId(qr, 'PERFILUT', 'PERFILUTID', { maxMasUno: true }, {
+              UNIDADTEMATICAID: utId, RUBROIDUT: rubroId, PERFILUTHORASCAP: p.horas ?? 0,
+              PERFILUTFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+            })
             perfilesCreados++
           }
         }
 
-        // ── Rubros de la AF ──
+        // rubros de la AF
         const rubrosAf = data.rubros.filter(r => Number(r.numeroAF) === Number(af.consecutivo))
         for (const r of rubrosAf) {
           const rubroId = findRubro(r.idRubro, r.nombreRubro)
@@ -1809,32 +1622,32 @@ export class ImportarProyectoService {
             rubrosNoEncontrados.add(`${r.idRubro || r.nombreRubro} (AF ${af.consecutivo})`)
             continue
           }
-          const [{ id: afrId }] = await qr.query(
-            `SELECT NVL(MAX(AFRUBROID), 0) + 1 AS "id" FROM AFRUBRO`,
-          )
           const total = r.totalRubro ?? 0
           const cof   = r.cofinanciacionSena ?? 0
           const esp   = r.contrapartidaEspecie ?? 0
           const din   = r.contrapartidaDinero ?? 0
           const pct = (v: number) => total > 0 ? Math.round((v / total) * 100) : 0
-          await qr.query(
-            `INSERT INTO AFRUBRO
-               (AFRUBROID, PROYECTOIDRUBROAF, ACCIONFORMACIONID, RUBROID,
-                AFRUBROJUSTIFICACION, AFRUBRONUMHORAS, AFRUBROCANTIDAD,
-                AFRUBROBENEFICIARIOS, AFRUBRODIAS,
-                AFRUBROVALOR, AFRUBROCOFINANCIACION, AFRUBROESPECIE, AFRUBRODINERO,
-                AFRUBROVALORMAXIMO, AFRUBROVALORPORBENEFICIARIO, AFRUBROPAQUETE,
-                AFRUBROPORCENTAJECOFINANCIACION, AFRUBROPORCENTAJEESPECIE, AFRUBROPORCENTAJEDINERO,
-                AFRUBROFECHAREGISTRO)
-             VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18, :19, SYSDATE)`,
-            [Number(afrId), proyectoId, afId, rubroId,
-             (r.justificacion ?? '').trim().slice(0, 2000),
-             r.numHoras ?? 0, r.numPaginasUnidades ?? 1,
-             r.numBeneficiarios ?? 0, r.numDias ?? 0,
-             total, cof, esp, din,
-             r.valorMaximo ?? 0, r.valorPorBeneficiarios ?? 0, r.paquete ?? null,
-             pct(cof), pct(esp), pct(din)],
-          )
+          await insertarConId(qr, 'AFRUBRO', 'AFRUBROID', { maxMasUno: true }, {
+            PROYECTOIDRUBROAF: proyectoId,
+            ACCIONFORMACIONID: afId,
+            RUBROID: rubroId,
+            AFRUBROJUSTIFICACION: (r.justificacion ?? '').trim().slice(0, 2000),
+            AFRUBRONUMHORAS: r.numHoras ?? 0,
+            AFRUBROCANTIDAD: r.numPaginasUnidades ?? 1,
+            AFRUBROBENEFICIARIOS: r.numBeneficiarios ?? 0,
+            AFRUBRODIAS: r.numDias ?? 0,
+            AFRUBROVALOR: total,
+            AFRUBROCOFINANCIACION: cof,
+            AFRUBROESPECIE: esp,
+            AFRUBRODINERO: din,
+            AFRUBROVALORMAXIMO: r.valorMaximo ?? 0,
+            AFRUBROVALORPORBENEFICIARIO: r.valorPorBeneficiarios ?? 0,
+            AFRUBROPAQUETE: r.paquete ?? null,
+            AFRUBROPORCENTAJECOFINANCIACION: pct(cof),
+            AFRUBROPORCENTAJEESPECIE: pct(esp),
+            AFRUBROPORCENTAJEDINERO: pct(din),
+            AFRUBROFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+          })
           rubrosCreados++
         }
       }
@@ -1877,12 +1690,10 @@ export class ImportarProyectoService {
     }
   }
 
-  // ╔════════════════════════════════════════════════════════════════════════╗
-  // ║ Parsers por hoja                                                        ║
-  // ╚════════════════════════════════════════════════════════════════════════╝
+  // parsers por hoja
 
   private toRows(ws: XLSX.WorkSheet): unknown[][] {
-    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false }) as unknown[][]
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false })
   }
 
   private str(v: unknown): string | null {
@@ -2034,26 +1845,19 @@ export class ImportarProyectoService {
       impactosProductividad:[r[28], r[29], r[30], r[31], r[32]].map(x => this.str(x)).filter((x): x is string => x !== null),
       mipymesEmpresas:      this.num(r[33]),
       mipymesTrabajadores:  this.num(r[34]),
-      // Col 36 (índice 35) — justificación MIPYMES.
       justificacionMipymes: this.str(r[35]),
       cadenaEmpresas:       this.num(r[36]),
       cadenaTrabajadores:   this.num(r[37]),
-      // Col 39 (índice 38) — justificación cadena productiva.
       justificacionCadena:  this.str(r[38]),
       trabajadoresMujeres:  this.num(r[39]),
       trabajadoresCampesinos: this.num(r[40]),
       trabajadoresDiscapacidad: this.num(r[41]),
       empresasBic:          this.num(r[42]),
-      // Cols 44-48 (índices 43-47) = SECTOR1..SECTOR5: sectores a los que
-      // PERTENECEN los beneficiarios (hasta 5).
       sectoresPertenecen:   [r[43], r[44], r[45], r[46], r[47]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Cols 49-53 (índices 48-52) = SUBSECTOR1..SUBSECTOR5.
       subsectoresPertenecen:[r[48], r[49], r[50], r[51], r[52]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Cols 54-58 (índices 53-57) = CLASIFICACION POR SECTOR: el sector que
-      // la AF beneficia (normalmente 1).
+      // en el Excel esta columna se llama CLASIFICACION POR SECTOR
       sectoresBeneficia:    [r[53], r[54], r[55], r[56], r[57]].map(x => this.str(x)).filter((x): x is string => x !== null),
       subsectoresBeneficia: [r[58], r[59], r[60], r[61], r[62]].map(x => this.str(x)).filter((x): x is string => x !== null),
-      // Col 100 (índice 99) = JUSTIFICACIÓN SECTORES Y SUB-SECTORES.
       justificacionSectores: this.str(r[99]),
       componenteAlineacion: this.str(r[63]),
       descripcionAlineacion:this.str(r[64]),
@@ -2079,8 +1883,7 @@ export class ImportarProyectoService {
       efectos:              this.str(r[104]),
     })).filter(a =>
       a.consecutivo > 0
-      // Solo importamos las AFs que el proponente marcó "SI" en
-      // "DESEA INCLUIR ESTA ACCIÓN DE FORMACIÓN EN LA FORMULACIÓN DEL PROYECTO".
+      // solo entran las AFs marcadas "SI" para incluir en la formulacion
       && (a.incluirEnFormulacion ?? '').trim().toUpperCase() === 'SI'
     )
   }
@@ -2104,8 +1907,7 @@ export class ImportarProyectoService {
         { perfil: this.str(r[19]) ?? '', horas: this.num(r[20]) },
         { perfil: this.str(r[21]) ?? '', horas: this.num(r[22]) },
       ].filter(p => p.perfil !== ''),
-      // El Excel etiqueta esta columna como HABILIDAD TRANSVERSAL pero
-      // representa la articulación territorial (UT especial).
+      // en el Excel esta columna se llama HABILIDAD TRANSVERSAL
       articulacionTerritorial:    this.str(r[23]),
       esArticulacionTerritorial:  (this.str(r[24]) ?? '').trim().toUpperCase() === 'SI',
     })).filter(u => u.numeroAF > 0 && u.numeroUT > 0)
@@ -2139,7 +1941,6 @@ export class ImportarProyectoService {
     const rows = this.toRows(ws)
     return rows.slice(1).map(r => {
       const departamentos: Array<{ departamento: string; beneficiarios: number }> = []
-      // Hasta 25 pares de departamento/beneficiarios (col 6 a 55).
       for (let i = 0; i < 25; i++) {
         const d = this.str(r[5 + i * 2])
         const b = this.num(r[6 + i * 2])
@@ -2152,8 +1953,6 @@ export class ImportarProyectoService {
         ciudadPresencial:          this.str(r[3]),
         beneficiariosPresencial:   this.num(r[4]),
         departamentos,
-        // Col 56 (índice 55) — justificación de la relación de los
-        // beneficiarios con los lugares de ejecución planteados.
         justificacion:             this.str(r[55]),
       }
     }).filter(c => c.numeroAF > 0)

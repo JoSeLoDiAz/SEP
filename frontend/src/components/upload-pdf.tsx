@@ -5,7 +5,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { Download, FileText, Loader2, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 
-const MAX_BYTES = 8 * 1024 * 1024 // 8 MB
+const MAX_BYTES = 8 * 1024 * 1024
 
 export interface DocumentoCargado {
   documentoId?: number
@@ -46,7 +46,6 @@ export function UploadPdf({
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Resolver props duales a un único valor
   const doc = docActual ?? documento ?? null
   const ro = soloLectura ?? bloqueado ?? false
   const onSuccess = onUploadSuccess ?? onChange
@@ -59,14 +58,12 @@ export function UploadPdf({
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`
   }
 
-  // Endpoint de upload — modo custom o modo personas
   function uploadEndpoint(): string {
     if (endpoint) return endpoint
     if (personaId) return `/personas/${personaId}/documentos`
     throw new Error('UploadPdf: falta `endpoint` o `personaId`.')
   }
 
-  // Endpoint de download/delete — depende del modo
   function downloadEndpoint(): string {
     if (downloadUrl) return downloadUrl
     if (docId != null) return `/personas/documentos/${docId}/archivo`
@@ -74,8 +71,7 @@ export function UploadPdf({
   }
   function deleteEndpoint(): string {
     if (downloadUrl) {
-      // En modo custom, derivamos el endpoint de delete del download:
-      // /capacitadores/empresa/documentos/123/archivo → /capacitadores/empresa/documentos/123
+      // en modo custom no hay endpoint de delete propio: se deriva del de download
       return downloadUrl.replace(/\/archivo$/, '')
     }
     return `/personas/documentos/${docId}`
@@ -135,7 +131,6 @@ export function UploadPdf({
     }
   }
 
-  // ── UI: ya hay documento cargado ────────────────────────────────────────
   if (doc) {
     async function descargar() {
       try {
@@ -222,7 +217,6 @@ export function UploadPdf({
     )
   }
 
-  // ── UI: sin documento cargado ──────────────────────────────────────────
   if (ro) {
     return (
       <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-[12px] text-neutral-500 italic">

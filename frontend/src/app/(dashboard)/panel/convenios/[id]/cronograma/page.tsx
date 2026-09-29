@@ -12,8 +12,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-// ─────────────────────────────────── tipos ────────────────────────────────────
-
 interface AF {
   afId: number
   numero: number
@@ -139,8 +137,6 @@ interface PerfilUT {
   horasCap: number
 }
 
-// ─────────────────────────────── helpers ─────────────────────────────────────
-
 const TITLE = '#00304D'
 const ACCENT = '#0070C0'
 
@@ -151,9 +147,7 @@ function fmt(d: string | null) {
   } catch { return d }
 }
 
-/** Extrae "HH:MM" de cualquier formato: "HH:MM", "HH:MM:SS", ISO completo
- *  o un Date serializado. El backend de cronograma ahora envia "HH:MM"
- *  directo (via TO_CHAR), pero seguimos tolerando lo antiguo. */
+// el backend envía "HH:MM"; se toleran también "HH:MM:SS", ISO y Date serializado
 function horaToHHMM(d: string | null) {
   if (!d) return ''
   const s = String(d).trim()
@@ -175,14 +169,12 @@ function fmtHora(d: string | null) {
   return hhmm || '—'
 }
 
-/** Una sesión/actividad NO se puede editar si ya fue radicada (cualquier
- *  estado que no sea recién creada / sin radicar / devuelta para corregir). */
+// PENDIENTE = sin radicar y MODIFICAR = devuelta para corregir; lo demás bloquea
 function noEditablePorRadicado(estadoRadicado: string | null | undefined): boolean {
   const e = (estadoRadicado ?? '').trim().toUpperCase()
   return e !== '' && e !== 'PENDIENTE' && e !== 'MODIFICAR'
 }
 
-/** Mensaje según el estado de radicación, para el banner de solo lectura. */
 function mensajeBloqueo(estadoRadicado: string | null | undefined, sustantivo: 'sesión' | 'actividad'): string {
   const e = (estadoRadicado ?? '').trim().toUpperCase()
   if (e === 'APROBADA')   return `Esta ${sustantivo} fue aprobada por interventoría. Solo lectura — no se puede modificar.`
@@ -215,7 +207,7 @@ function modalidadColor(id: number) {
   } as Record<number, string>)[id] ?? 'bg-neutral-100 text-neutral-600 border-neutral-200'
 }
 
-/** Horas P + T efectivas de la UT según la modalidad de la AF (igual que &TotalEventoFor en GX). */
+// equivale a &TotalEventoFor en GeneXus
 function horasUtSegunModalidad(ut: UT, modalidadId: number) {
   switch (modalidadId) {
     case 1: return { prac: Number(ut.horasPP), teor: Number(ut.horasTP), label: 'Presencial' }
@@ -225,8 +217,6 @@ function horasUtSegunModalidad(ut: UT, modalidadId: number) {
     default: return { prac: 0, teor: 0, label: '—' }
   }
 }
-
-// ─────────────────────────────────── page ────────────────────────────────────
 
 export default function CronogramaPage() {
   const { id } = useParams<{ id: string }>()
@@ -252,27 +242,21 @@ export default function CronogramaPage() {
   const [error, setError] = useState<string | null>(null)
   const [convenioEnEjecucion, setConvenioEnEjecucion] = useState<boolean | null>(null)
 
-  // Exportar a Excel (Fase 4)
   const [descargandoExcel, setDescargandoExcel] = useState(false)
 
-  // Edición de cabecera del cronograma (Fase 2)
   const [editandoCabecera, setEditandoCabecera] = useState(false)
   const [formFI, setFormFI] = useState('')
   const [formFF, setFormFF] = useState('')
   const [guardandoCab, setGuardandoCab] = useState(false)
   const [errCab, setErrCab] = useState<string | null>(null)
 
-  // Sesiones presenciales (Fase 3)
   const [sesionesP, setSesionesP] = useState<SesionP[]>([])
   const [capacitadores, setCapacitadores] = useState<Capacitador[]>([])
   const [perfilesUT, setPerfilesUT] = useState<PerfilUT[]>([])
   const [cargandoSes, setCargandoSes] = useState(false)
-  // Vista del cronograma: calendario interactivo (default) o lista clasica.
   const [vistaModo, setVistaModo] = useState<'calendario' | 'lista'>('calendario')
   const [modoSes, setModoSes] = useState<'agregar' | 'editar' | null>(null)
   const [editandoSesId, setEditandoSesId] = useState<number | null>(null)
-  // Si la sesion abierta en el modal ya fue radicada/aprobada: solo lectura
-  // (banner + boton Guardar oculto). Guardamos tambien el estado para el texto.
   const [sesAprobadaReadOnly, setSesAprobadaReadOnly] = useState(false)
   const [sesEstadoRad, setSesEstadoRad] = useState<string | null>(null)
   const [errSes, setErrSes] = useState<string | null>(null)
@@ -296,7 +280,6 @@ export default function CronogramaPage() {
   const [verSuplentesP, setVerSuplentesP] = useState(false)
   const [coberturasGrupo, setCoberturasGrupo] = useState<CoberturaGrupo[]>([])
 
-  // Actividades virtuales (Fase 4)
   const [sesionesV, setSesionesV] = useState<SesionV[]>([])
   const [modoVir, setModoVir] = useState<'agregar' | 'editar' | null>(null)
   const [editandoVirId, setEditandoVirId] = useState<number | null>(null)
@@ -326,7 +309,6 @@ export default function CronogramaPage() {
       .then(r => setAfs(r.data ?? []))
       .catch(() => setError('No se pudieron cargar las Acciones de Formación.'))
       .finally(() => setCargandoAfs(false))
-    // Estado del convenio (para modo solo-lectura cuando no está en ejecución).
     api.get<{ estadoNum: number | null }>(`/convenios/${proyectoId}`)
       .then(r => setConvenioEnEjecucion(Number(r.data?.estadoNum) === 1))
       .catch(() => setConvenioEnEjecucion(false))
@@ -401,7 +383,6 @@ export default function CronogramaPage() {
     setEditandoCabecera(true)
   }
 
-  // Fase 3/4 — cargar sesiones + catálogos según modalidad
   useEffect(() => {
     if (!crono || !afSel || !utSel) {
       setSesionesP([]); setSesionesV([]); setCapacitadores([]); setPerfilesUT([]); setCoberturasGrupo([])
@@ -549,7 +530,6 @@ export default function CronogramaPage() {
     } finally { setEliminandoSesId(null) }
   }
 
-  // Virtuales
   function abrirAgregarVirtual(preset?: { fechaInicio?: string; fechaFin?: string }) {
     setVNombre('')
     setVFechaIni(preset?.fechaInicio ?? (crono?.fechaInicio ? new Date(crono.fechaInicio).toISOString().slice(0, 10) : ''))
@@ -675,8 +655,7 @@ export default function CronogramaPage() {
   const horas = afSel && utSel ? horasUtSegunModalidad(utSel, afSel.modalidadId) : null
   const totalEvento = horas ? horas.prac + horas.teor : 0
 
-  // Coberturas del grupo: las que tienen ciudad son para sesiones presenciales;
-  // los departamentos (sin repetir) son la cobertura de las actividades virtuales.
+  // las coberturas con ciudad son las presenciales; los departamentos cubren lo virtual
   const coberturasPresenciales = coberturasGrupo.filter(c => c.ciudadId != null)
   const departamentosGrupo = Array.from(
     new Set(coberturasGrupo.map(c => (c.departamentoNombre ?? '').trim()).filter(Boolean)),
@@ -694,7 +673,6 @@ export default function CronogramaPage() {
           </div>
         )}
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl shadow-sm" style={{ backgroundColor: TITLE }}>
@@ -741,7 +719,6 @@ export default function CronogramaPage() {
           </div>
         )}
 
-        {/* ── Cascada ───────────────────────────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <div className="h-0.5 bg-gradient-to-r from-[#00304D] via-[#0070C0] to-[#00304D]" />
           <div className="p-5 space-y-4">
@@ -795,14 +772,12 @@ export default function CronogramaPage() {
           </div>
         </div>
 
-        {/* ── Estado de búsqueda ───────────────────────────────────────────── */}
         {buscando && (
           <div className="flex items-center justify-center py-12 text-neutral-400 gap-2">
             <Loader2 size={18} className="animate-spin" /> Consultando cronograma…
           </div>
         )}
 
-        {/* ── Información AF + UT + Cronograma ──────────────────────────────── */}
         {!buscando && buscado && afSel && utSel && grupoSel && (
           <>
             <InfoCards af={afSel} ut={utSel} grupo={grupoSel} horas={horas!} totalEvento={totalEvento} />
@@ -814,7 +789,6 @@ export default function CronogramaPage() {
               onEditar={abrirEditorCabecera}
             />
 
-            {/* ── Sesiones presenciales / PAT / Híbrida (Fase 3) ────────────── */}
             {crono && (
               <div className="flex items-center gap-1.5 bg-white rounded-xl border border-neutral-200 p-1 w-fit shadow-sm">
                 <button
@@ -859,7 +833,6 @@ export default function CronogramaPage() {
                 }}
                 onMoverPresencial={async (id, fecha, horaInicio, horaFin) => {
                   await api.patch(`/cronograma/sesion-presencial/${id}`, { fechaInicio: fecha, horaInicio, horaFin })
-                  // Refrescar localmente para que el calendario muestre el nuevo estado.
                   setSesionesP(arr => arr.map(s => s.sesionId === id
                     ? { ...s, fechaInicio: fecha, horaInicio, horaFin }
                     : s))
@@ -889,7 +862,6 @@ export default function CronogramaPage() {
               />
             )}
 
-            {/* ── Actividades virtuales / Híbrida (Fase 4) ──────────────────── */}
             {crono && vistaModo === 'lista' && [3, 4].includes(afSel.modalidadId) && (
               <SesionesVirtualesPanel
                 modalidadId={afSel.modalidadId}
@@ -912,7 +884,7 @@ export default function CronogramaPage() {
 
       </div>
 
-      {/* ── Modal cabecera del cronograma ─────────────────────────────────── */}
+      {/* modal cabecera del cronograma */}
       {editandoCabecera && afSel && utSel && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
@@ -1001,7 +973,7 @@ export default function CronogramaPage() {
         </div>
       )}
 
-      {/* ── Modal Agregar / Editar sesión presencial (Fase 3) ─────────────── */}
+      {/* modal agregar / editar sesión presencial */}
       {modoSes && afSel && crono && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden my-8">
@@ -1034,7 +1006,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Nombre */}
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide">Nombre de la sesión</label>
                 <input
@@ -1046,7 +1017,6 @@ export default function CronogramaPage() {
                 />
               </div>
 
-              {/* Fecha + Horas */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide">Fecha</label>
@@ -1087,7 +1057,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Cobertura del grupo (depto/ciudad) — solo Presencial/PAT/Híbrida */}
               {[1, 2, 3].includes(afSel.modalidadId) && coberturasPresenciales.length > 0 && (
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1115,7 +1084,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Sede + Aula + Dirección — solo Presencial (1) o Híbrida (3) */}
               {(afSel.modalidadId === 1 || afSel.modalidadId === 3) && (
                 <div className="space-y-2 bg-neutral-50 rounded-xl p-3 border border-neutral-100">
                   <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1138,7 +1106,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Herramienta + URL — solo PAT (2) o Híbrida (3) */}
               {(afSel.modalidadId === 2 || afSel.modalidadId === 3) && (
                 <div className="space-y-2 bg-neutral-50 rounded-xl p-3 border border-neutral-100">
                   <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1165,7 +1132,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Capacitador + Perfil */}
               <div className="grid grid-cols-1 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1290,7 +1256,7 @@ export default function CronogramaPage() {
         </div>
       )}
 
-      {/* ── Modal Agregar / Editar actividad virtual (Fase 4) ───────────────── */}
+      {/* modal agregar / editar actividad virtual */}
       {modoVir && afSel && crono && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden my-8">
@@ -1324,7 +1290,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Nombre */}
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide">Nombre de la actividad</label>
                 <input
@@ -1336,7 +1301,6 @@ export default function CronogramaPage() {
                 />
               </div>
 
-              {/* Período + Horas */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide">Fecha inicio</label>
@@ -1374,7 +1338,6 @@ export default function CronogramaPage() {
                 </div>
               </div>
 
-              {/* Plataforma — cada campo con su encabezado */}
               <div className="space-y-3 bg-neutral-50 rounded-xl p-3 border border-neutral-100">
                 <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
                   <Video size={11} /> Plataforma virtual
@@ -1419,7 +1382,6 @@ export default function CronogramaPage() {
                 </div>
               </div>
 
-              {/* Cobertura del grupo (departamentos) — read-only, para virtuales */}
               {departamentosGrupo.length > 0 && (
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1436,7 +1398,6 @@ export default function CronogramaPage() {
                 </div>
               )}
 
-              {/* Capacitador + Perfil */}
               <div className="grid grid-cols-1 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wide flex items-center gap-1">
@@ -1564,8 +1525,6 @@ export default function CronogramaPage() {
   )
 }
 
-// ─────────────────────────── SesionesPresencialesPanel ───────────────────────
-
 function SesionesPresencialesPanel({
   modalidadId, sesiones, cargando, eliminandoSesId, horasReg, totalEvento,
   onAgregar, onEditar, onEliminar, capacitadoresMap,
@@ -1600,7 +1559,6 @@ function SesionesPresencialesPanel({
       <div className="h-0.5 bg-gradient-to-r from-[#00304D] via-[#0070C0] to-[#00304D]" />
       <div className="p-5 space-y-4">
 
-        {/* Header con progreso */}
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <Users size={14} className="text-neutral-400" />
@@ -1620,7 +1578,6 @@ function SesionesPresencialesPanel({
           </button>
         </div>
 
-        {/* Barra de progreso de horas */}
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs text-neutral-500">
             <span>Horas registradas</span>
@@ -1634,7 +1591,6 @@ function SesionesPresencialesPanel({
           </div>
         </div>
 
-        {/* Loading / vacío / tabla */}
         {cargando ? (
           <div className="flex items-center gap-2 py-6 justify-center text-neutral-400 text-xs">
             <Loader2 size={14} className="animate-spin" /> Cargando sesiones…
@@ -1736,8 +1692,6 @@ function SesionesPresencialesPanel({
     </div>
   )
 }
-
-// ─────────────────────────── SesionesVirtualesPanel ──────────────────────────
 
 function SesionesVirtualesPanel({
   modalidadId, actividades, cargando, eliminandoVirId, horasReg, totalEvento,
@@ -1904,8 +1858,6 @@ function SesionesVirtualesPanel({
   )
 }
 
-// ─────────────────────────────── InfoCards ───────────────────────────────────
-
 function InfoCards({ af, ut, grupo, horas, totalEvento }: {
   af: AF
   ut: UT
@@ -1916,7 +1868,6 @@ function InfoCards({ af, ut, grupo, horas, totalEvento }: {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-      {/* AF */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-0.5 bg-gradient-to-r from-[#00304D] to-[#0070C0]" />
         <div className="p-5 space-y-3">
@@ -1938,7 +1889,6 @@ function InfoCards({ af, ut, grupo, horas, totalEvento }: {
         </div>
       </div>
 
-      {/* UT */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-0.5 bg-gradient-to-r from-[#00304D] to-[#0070C0]" />
         <div className="p-5 space-y-3">
@@ -1984,8 +1934,6 @@ function Stat({ icon, label, value, mono, highlight }: {
     </div>
   )
 }
-
-// ─────────────────────────────── CronogramaCard ──────────────────────────────
 
 function CronogramaCard({ crono, modalidadId, totalEvento, nActividad, onEditar }: {
   crono: Crono | null

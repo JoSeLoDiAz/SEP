@@ -1,25 +1,26 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm'
+import { NUMERO, FECHA, nombreEnBase } from '../../common/db/tipos-entidad'
 
-@Entity('USUARIOPERFIL')
+@Entity(nombreEnBase('USUARIOPERFIL'))
 export class UsuarioPerfil {
-  @PrimaryColumn({ name: 'USUARIOPERFILID', type: 'number' })
+  @PrimaryColumn({ name: nombreEnBase('USUARIOPERFILID'), type: NUMERO })
   usuarioPerfilId: number
 
-  @Column({ name: 'USUARIOID', type: 'number' })
+  @Column({ name: nombreEnBase('USUARIOID'), type: NUMERO })
   usuarioId: number
 
-  @Column({ name: 'PERFILID', type: 'number' })
+  @Column({ name: nombreEnBase('PERFILID'), type: NUMERO })
   perfilId: number
 
-  @Column({ name: 'PREDETERMINADO', type: 'number', default: 0 })
+  @Column({ name: nombreEnBase('PREDETERMINADO'), type: NUMERO, default: 0 })
   predeterminado: number
 
-  @Column({ name: 'ESTADO', type: 'number', default: 1 })
+  @Column({ name: nombreEnBase('ESTADO'), type: NUMERO, default: 1 })
   estado: number
 
-  @Column({ name: 'FECHAULTIMOACCESO', type: 'timestamp', nullable: true })
+  @Column({ name: nombreEnBase('FECHAULTIMOACCESO'), type: 'timestamp', nullable: true })
   fechaUltimoAcceso: Date | null
 
-  @Column({ name: 'FECHACREACION', type: 'timestamp' })
+  @Column({ name: nombreEnBase('FECHACREACION'), type: 'timestamp' })
   fechaCreacion: Date
 }

@@ -2,6 +2,7 @@
 
 import api from '@/lib/api'
 import { getSepUsuario, isEmpresa } from '@/lib/auth'
+import { cargarClavesPerfil, type ClavesPerfil } from '@/lib/use-perfiles'
 import { useRouter } from 'next/navigation'
 import {
     BarChart2,
@@ -31,8 +32,6 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-
-// ── Empresa home ──────────────────────────────────────────────────────────────
 
 const EMPRESA_CARDS = [
   {
@@ -99,8 +98,6 @@ interface ResumenPanel {
   proyectos: { borrador: number; confirmado: number; aprobado: number; rechazado: number; total: number }
   convenios: { activos: number }
 }
-
-// ── Admin home ────────────────────────────────────────────────────────────────
 
 interface ConvocatoriaResumen {
   id: number
@@ -273,37 +270,72 @@ const ADMIN_CARDS: AdminCard[] = [
   },
 ]
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-// Perfiles que tienen una landing dedicada y se redirigen automáticamente.
-const PERFIL_REDIRECT: Record<number, string> = {
-  15: '/panel/evaluadores', // GESTOR EVALUADORES
+// perfiles con landing propia: se redirige al entrar. El id del gestor cambia de una base a otra
+// (15 en el XE, 103 en el Exadata), así que el mapa se arma con las claves que da el backend
+function perfilRedirect(claves: ClavesPerfil): Record<number, string> {
+  return {
+    [claves.gestorEvaluadores]: '/panel/evaluadores',   // GESTOR EVALUADORES
+    [claves.evaluador]: '/panel/mi-expediente',          // EVALUADORGFCE
+  }
 }
 
 export default function PanelHome() {
   const router = useRouter()
   const [usuario, setUsuario] = useState<ReturnType<typeof getSepUsuario>>(null)
   const [redirigiendo, setRedirigiendo] = useState(false)
+  // hasta tener las claves no se sabe si el perfil tiene landing propia: no se pinta ninguna portada
+  const [decidiendo, setDecidiendo] = useState(true)
+  // sin las claves, el gestor y el evaluador caerían en la portada de administrador: se ofrece reintentar
+  const [clavesFallo, setClavesFallo] = useState(false)
+  const [intento, setIntento] = useState(0)
 
   useEffect(() => { document.title = 'Inicio | SEP' }, [])
 
   useEffect(() => {
     const u = getSepUsuario()
     setUsuario(u)
-    const dest = u ? PERFIL_REDIRECT[u.perfilId] : undefined
-    if (dest) {
-      setRedirigiendo(true)
-      router.replace(dest)
+    // la empresa no tiene landing propia: no espera las claves
+    if (!u || isEmpresa(u.perfilId)) {
+      setDecidiendo(false)
+      return
     }
-  }, [router])
+    let cancelado = false
+    setDecidiendo(true)
+    setClavesFallo(false)
+    cargarClavesPerfil()
+      .then(claves => {
+        const dest = perfilRedirect(claves)[u.perfilId]
+        if (dest && !cancelado) {
+          setRedirigiendo(true)
+          router.replace(dest)
+        }
+      })
+      .catch(() => { if (!cancelado) setClavesFallo(true) })
+      .finally(() => { if (!cancelado) setDecidiendo(false) })
+    return () => { cancelado = true }
+  }, [router, intento])
 
   const perfilId = usuario?.perfilId ?? 0
 
-  if (redirigiendo) {
+  if (redirigiendo || decidiendo) {
     return (
       <div className="p-10 flex items-center gap-2 text-neutral-500 text-sm">
         <Loader2 size={14} className="animate-spin" />
-        Redirigiendo a tu panel...
+        {redirigiendo ? 'Redirigiendo a tu panel...' : 'Cargando...'}
+      </div>
+    )
+  }
+
+  if (clavesFallo) {
+    return (
+      <div className="p-10 flex flex-col items-start gap-3 text-sm text-neutral-600">
+        <p>No se pudo cargar tu panel.</p>
+        <button
+          onClick={() => setIntento(n => n + 1)}
+          className="rounded-xl bg-[#00304D] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 active:scale-95"
+        >
+          Reintentar
+        </button>
       </div>
     )
   }
@@ -314,8 +346,6 @@ export default function PanelHome() {
 
   return <AdminHome />
 }
-
-// ── Empresa home view ─────────────────────────────────────────────────────────
 
 function EmpresaHome({ nombre }: { nombre: string }) {
   const [resumen, setResumen] = useState<ResumenPanel | null>(null)
@@ -362,7 +392,6 @@ function EmpresaHome({ nombre }: { nombre: string }) {
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
-      {/* Welcome banner */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-2 bg-gradient-to-r from-[#00304D] via-[#39A900] to-[#00304D]" />
         <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -385,7 +414,6 @@ function EmpresaHome({ nombre }: { nombre: string }) {
         </div>
       </div>
 
-      {/* Cards grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {EMPRESA_CARDS.map((card) => {
           const badge = getBadge(card.id)
@@ -394,10 +422,8 @@ function EmpresaHome({ nombre }: { nombre: string }) {
               key={card.id}
               className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
             >
-              {/* Barra de color superior */}
               <div className="h-1.5" style={{ backgroundColor: card.color }} />
 
-              {/* Ícono + badge */}
               <div className="px-5 pt-6 pb-3 flex justify-center relative">
                 <div
                   className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -414,7 +440,6 @@ function EmpresaHome({ nombre }: { nombre: string }) {
                 )}
               </div>
 
-              {/* Título */}
               <div
                 className="mx-4 rounded-xl px-3 py-2.5 text-center text-sm font-bold text-white mb-4"
                 style={{ backgroundColor: card.color }}
@@ -422,7 +447,6 @@ function EmpresaHome({ nombre }: { nombre: string }) {
                 {card.title}
               </div>
 
-              {/* Contenido */}
               <div className="px-5 pb-5 flex flex-col gap-2.5 flex-1">
                 <p className="text-xs text-neutral-600 leading-relaxed">
                   {card.descripcion}
@@ -444,8 +468,6 @@ function EmpresaHome({ nombre }: { nombre: string }) {
   )
 }
 
-// ── Admin home view ───────────────────────────────────────────────────────────
-
 function AdminHome() {
   const [convocatorias, setConvocatorias] = useState<ConvocatoriaResumen[] | null>(null)
   const [kpiLoading, setKpiLoading] = useState(true)
@@ -457,8 +479,7 @@ function AdminHome() {
       .finally(() => setKpiLoading(false))
   }, [])
 
-  // La "última convocatoria" es la más reciente (mayor año, luego mayor id).
-  // El backend ya las ordena así, basta con tomar la primera.
+  // el backend ya las ordena por año e id desc: la primera es la última
   const ultima = convocatorias?.[0] ?? null
   const evaluados = ultima ? (ultima.aprobados ?? 0) + (ultima.rechazados ?? 0) : 0
   const pendientes = ultima ? (ultima.confirmados ?? 0) : 0
@@ -475,7 +496,6 @@ function AdminHome() {
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
 
-      {/* Welcome banner */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-2 bg-gradient-to-r from-[#00304D] via-[#39A900] to-[#00304D]" />
         <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -494,7 +514,6 @@ function AdminHome() {
         </div>
       </div>
 
-      {/* Convocatoria actual + KPIs reales */}
       <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-1.5 bg-gradient-to-r from-[#00304D] via-[#0070C0] to-[#39A900]" />
         <div className="p-5 flex flex-col gap-4">
@@ -572,16 +591,13 @@ function AdminHome() {
         </div>
       </section>
 
-      {/* Cards de módulos */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {ADMIN_CARDS.map((card) => (
           <div key={card.id}
             className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 
-            {/* Barra superior */}
             <div className="h-1.5" style={{ backgroundColor: card.color }} />
 
-            {/* Ícono */}
             <div className="px-5 pt-6 pb-3 flex justify-center">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
                 style={{ backgroundColor: `${card.color}12` }}>
@@ -589,13 +605,11 @@ function AdminHome() {
               </div>
             </div>
 
-            {/* Título */}
             <div className="mx-4 rounded-xl px-3 py-2.5 text-center text-sm font-bold text-white mb-4"
               style={{ backgroundColor: card.color }}>
               {card.title}
             </div>
 
-            {/* Lista de opciones */}
             <ul className="px-5 pb-5 flex flex-col gap-2 flex-1">
               {card.links.map((link, idx) => (
                 <li key={idx}>

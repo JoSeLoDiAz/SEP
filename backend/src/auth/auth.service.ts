@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   BadRequestException,
   ConflictException,
@@ -20,25 +21,20 @@ import { LoginDto } from './dto/login.dto'
 import { RegistrarEmpresaDto } from './dto/registrar-empresa.dto'
 import { RegistrarPersonaDto } from './dto/registrar-persona.dto'
 import { MailService } from './mail.service'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { AHORA_UTC, AHORA_UTC_TS, HOY_UTC } from '../common/db/fecha-utc'
 
-// Token en memoria: { email, expira }
 interface ResetToken { email: string; expira: Date }
 
-/**
- * Replica exacta de GeneXus GetEncryptionKey():
- * Genera 16 bytes aleatorios y los convierte a hex mayúsculas (32 chars).
- */
+// El registro guardaba con manager.save, y TypeORM escribe las columnas 'date' de la entidad como
+// TO_DATE('YYYY-MM-DD') del día (UTC, el backend corre con TZ=UTC): solo el día, sin hora. Se conserva.
+
+// replica GetEncryptionKey() de GeneXus
 function getEncryptionKey(): string {
   return crypto.randomBytes(16).toString('hex').toUpperCase()
 }
 
-/**
- * Replica exacta de GeneXus Encrypt64(plainText, key):
- *   - Twofish-128 ECB
- *   - Key: hex-decoded 16 bytes (la llave es un string hex de 32 chars)
- *   - Padding: espacios (0x20) hasta 16 bytes
- *   - Output: Base64 standard
- */
+// Encrypt64 de GeneXus: twofish-128 ECB, key hex de 32 chars, padding con espacios
 function encrypt64(plainText: string, key: string): string {
   const tf = twofish(new Array(16).fill(0))
   const keyArr = Array.from(Buffer.from(key, 'hex')) as number[]
@@ -47,12 +43,7 @@ function encrypt64(plainText: string, key: string): string {
   return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
 }
 
-/**
- * Replica exacta de GeneXus Decrypt64(encryptedBase64, key):
- *   - Twofish-128 ECB
- *   - Key: hex-decoded 16 bytes
- *   - Quita espacios finales (padding de GeneXus)
- */
+// Decrypt64 de GeneXus: quita el padding de espacios del final
 function decrypt64(encryptedBase64: string, key: string): string {
   const tf = twofish(new Array(16).fill(0))
   const keyArr = Array.from(Buffer.from(key, 'hex')) as number[]
@@ -60,6 +51,9 @@ function decrypt64(encryptedBase64: string, key: string): string {
   const decArr = tf.decrypt(keyArr, encArr) as number[]
   return Buffer.from(decArr).toString('utf8').trimEnd()
 }
+
+// twofish trabaja sobre un bloque de 16 bytes: la clave no puede pasar de ahí
+const MAX_CLAVE = 16
 
 // Perfiles GeneXus → roles legibles
 const PERFIL_ROLES: Record<number, string> = {
@@ -81,6 +75,8 @@ const PERFIL_ROLES: Record<number, string> = {
 
 @Injectable()
 export class AuthService {
+  private readonly log = new Logger(AuthService.name)
+
   // Tokens de restablecimiento en memoria (TTL 30 min)
   private readonly resetTokens = new Map<string, ResetToken>()
 
@@ -104,16 +100,16 @@ export class AuthService {
     try {
       if (perfilId === 7) {
         const rows: Array<{ razon: string }> = await this.dataSource.query(
-          `SELECT TRIM(EMPRESARAZONSOCIAL) AS "razon"
-             FROM EMPRESA WHERE EMPRESAEMAIL = :1 AND ROWNUM = 1`,
+          `SELECT btrim((EMPRESARAZONSOCIAL)::text) AS "razon"
+             FROM EMPRESA WHERE EMPRESAEMAIL = $1 LIMIT 1`,
           [email],
         )
         if (rows[0]?.razon) return rows[0].razon
       } else {
         const rows: Array<{ nombres: string; apellido: string }> = await this.dataSource.query(
-          `SELECT TRIM(PERSONANOMBRES) AS "nombres",
-                  TRIM(PERSONAPRIMERAPELLIDO) AS "apellido"
-             FROM PERSONA WHERE PERSONAEMAIL = :1 AND ROWNUM = 1`,
+          `SELECT btrim((PERSONANOMBRES)::text) AS "nombres",
+                  btrim((PERSONAPRIMERAPELLIDO)::text) AS "apellido"
+             FROM PERSONA WHERE PERSONAEMAIL = $1 LIMIT 1`,
           [email],
         )
         if (rows[0]?.nombres) return `${rows[0].nombres} ${rows[0].apellido}`.trim()
@@ -122,7 +118,6 @@ export class AuthService {
     return email
   }
 
-  /** Lista los perfiles activos del usuario con nombre y último acceso. */
   private async listarPerfilesActivos(usuarioId: number) {
     const rows: Array<{
       usuarioPerfilId: number
@@ -133,12 +128,12 @@ export class AuthService {
     }> = await this.dataSource.query(
       `SELECT up.USUARIOPERFILID         AS "usuarioPerfilId",
               up.PERFILID                AS "perfilId",
-              TRIM(p.PERFILNOMBRE)       AS "perfilNombre",
+              btrim((p.PERFILNOMBRE)::text)       AS "perfilNombre",
               up.PREDETERMINADO          AS "predeterminado",
               up.FECHAULTIMOACCESO       AS "fechaUltimoAcceso"
          FROM USUARIOPERFIL up
          JOIN PERFIL p ON p.PERFILID = up.PERFILID
-        WHERE up.USUARIOID = :1
+        WHERE up.USUARIOID = $1
           AND up.ESTADO = 1
         ORDER BY up.PREDETERMINADO DESC, up.FECHAULTIMOACCESO DESC NULLS LAST, p.PERFILNOMBRE ASC`,
       [usuarioId],
@@ -151,39 +146,65 @@ export class AuthService {
 
   private async marcarUltimoAcceso(usuarioPerfilId: number) {
     await this.dataSource.query(
-      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = SYSTIMESTAMP WHERE USUARIOPERFILID = :1`,
+      `UPDATE USUARIOPERFIL SET FECHAULTIMOACCESO = ${AHORA_UTC_TS} WHERE USUARIOPERFILID = $1`,
       [usuarioPerfilId],
     )
   }
 
-  /**
-   * Verifica un token de Cloudflare Turnstile contra la API de Cloudflare.
-   * Si TURNSTILE_SECRET no está configurado en .env, se permite el login
-   * (modo desarrollo / testing). En produccion siempre debe estar.
-   */
+  // si no se llega a Cloudflare se deja pasar (la clave igual se verifica); un rechazo explícito sí bloquea
+  /** Para no repetir el aviso del captcha en cada intento de entrada. */
+  private avisoCaptchaDado = false
+
   private async verifyCaptcha(token?: string): Promise<void> {
-    const secret = process.env.TURNSTILE_SECRET
+    // `.trim()` a propósito: el guion de GitLab sube un espacio cuando la variable está vacía, y un espacio en
+    // JavaScript cuenta como valor. Sin esto, el SEP intentaría validar contra Cloudflare con un secreto en blanco
+    // y cada entrada costaría los 16 s de los dos intentos antes de dejar pasar igual.
+    const secret = process.env.TURNSTILE_SECRET?.trim()
     if (!secret) {
-      // Sin secret configurado → omitir verificación (dev mode)
+      // Sin clave no hay nada que comprobar, y así se puede entrar donde no hay salida a Cloudflare. Pero que quede
+      // dicho una vez en el registro: si esto aparece en producción, el login está sin captcha y nadie se enteró.
+      if (!this.avisoCaptchaDado) {
+        this.avisoCaptchaDado = true
+        this.log.warn(
+          'TURNSTILE_SECRET no está definida: el captcha no se comprueba. La contraseña sí. ' +
+          'Correcto en un entorno de pruebas; en producción hay que ponerla.',
+        )
+      }
       return
     }
     if (!token) {
       throw new UnauthorizedException('Falta validación de captcha')
     }
-    try {
-      const body = new URLSearchParams({ secret, response: token })
-      const res = await fetch(
-        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-        { method: 'POST', body },
-      )
-      const data = (await res.json()) as { success: boolean; 'error-codes'?: string[] }
-      if (!data.success) {
-        throw new UnauthorizedException('Captcha inválido o expirado')
+
+    let ultimoFallo: unknown = null
+
+    // dos intentos con tope de tiempo: un tropiezo de red no debe costar el login
+    for (let intento = 1; intento <= 2; intento++) {
+      try {
+        const body = new URLSearchParams({ secret, response: token })
+        const res = await fetch(
+          'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+          { method: 'POST', body, signal: AbortSignal.timeout(8_000) },
+        )
+        const data = (await res.json()) as { success: boolean; 'error-codes'?: string[] }
+        if (!data.success) {
+          this.log.warn(`Captcha rechazado: ${JSON.stringify(data['error-codes'] ?? [])}`)
+          throw new UnauthorizedException('Captcha inválido o expirado')
+        }
+        return
+      } catch (e) {
+        if (e instanceof UnauthorizedException) throw e
+        ultimoFallo = e
       }
-    } catch (e) {
-      if (e instanceof UnauthorizedException) throw e
-      throw new UnauthorizedException('Error al verificar el captcha')
     }
+
+    const causa = (ultimoFallo as { cause?: { code?: string } })?.cause?.code
+      ?? (ultimoFallo as Error)?.message ?? String(ultimoFallo)
+    this.log.error(
+      `No se pudo consultar a Cloudflare para validar el captcha (${causa}). ` +
+      'Se permite el ingreso; la contraseña sí se verifica. Revisar la salida a ' +
+      'challenges.cloudflare.com desde este servidor.',
+    )
   }
 
   async tiposDocumento(para: 'persona' | 'empresa') {
@@ -192,13 +213,13 @@ export class AuthService {
         ? 'TIPODOCUMENTOIDENTIDADPERSONA'
         : 'TIPODOCUMENTOIDENTIDADEMPRESA'
 
-    // Raw query: TRIM() para quitar espacios de NCHAR, ORDER BY nombre ya trimeado
+    // TRIM(): la columna es NCHAR y viene rellena de espacios
     const rows: Array<{ id: number; nombre: string }> = await this.dataSource.query(
       `SELECT TIPODOCUMENTOIDENTIDADID AS "id",
-              TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) AS "nombre"
+              btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "nombre"
          FROM TIPODOCUMENTOIDENTIDAD
         WHERE ${col} = 1
-        ORDER BY TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) ASC`,
+        ORDER BY btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) ASC`,
     )
     return rows
   }
@@ -214,8 +235,7 @@ export class AuthService {
       where: { usuarioEmail: dto.email },
     })
 
-    // Mensaje unificado: no revelamos si el correo existe o si la contraseña
-    // falló — mejor por seguridad y evita confundir al usuario.
+    // mensaje unificado: no revelar si el correo existe
     if (!usuario) {
       throw new UnauthorizedException('Credenciales inválidas')
     }
@@ -224,7 +244,6 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inactivo. Comuníquese con el administrador del sistema.')
     }
 
-    // Desencriptar clave almacenada con la llave del usuario (mismo algoritmo GeneXus)
     let claveDesencriptada: string
     try {
       claveDesencriptada = decrypt64(
@@ -241,14 +260,12 @@ export class AuthService {
 
     const perfiles = await this.listarPerfilesActivos(usuario.usuarioId)
 
-    // Si el usuario aún no tiene filas en USUARIOPERFIL (caso borde anterior a
-    // la migración), usamos USUARIO.PERFILID como fallback.
+    // sin filas en USUARIOPERFIL (usuarios previos a la migración): fallback a USUARIO.PERFILID
     if (perfiles.length === 0) {
       return this.emitirTokenFinal(usuario, usuario.perfilId, undefined)
     }
 
-    // Multirol: 2+ perfiles activos → emitimos preauthToken y dejamos al
-    // frontend pedir la selección.
+    // 2+ perfiles: preauthToken y el frontend pide la selección
     if (perfiles.length > 1) {
       const preauthToken = this.jwtService.sign(
         {
@@ -271,12 +288,10 @@ export class AuthService {
       }
     }
 
-    // Un solo perfil → JWT directo (flujo idéntico al anterior).
     const unico = perfiles[0]
     return this.emitirTokenFinal(usuario, unico.perfilId, unico.usuarioPerfilId)
   }
 
-  /** Genera el JWT final y arma la respuesta de login con el perfil ya elegido. */
   private async emitirTokenFinal(
     usuario: Usuario,
     perfilId: number,
@@ -314,7 +329,7 @@ export class AuthService {
     }
   }
 
-  /** Paso 2 del login multirol: el usuario elige con qué perfil entra. */
+  // paso 2 del login multirol
   async seleccionarPerfil(preauthToken: string, perfilId: number) {
     if (!preauthToken) throw new BadRequestException('Falta el token de pre-autenticación')
     if (!perfilId)     throw new BadRequestException('Debe seleccionar un perfil')
@@ -344,7 +359,6 @@ export class AuthService {
     return this.emitirTokenFinal(usuario, perfilId, fila.usuarioPerfilId)
   }
 
-  /** Cambio de perfil en caliente para usuarios ya autenticados. */
   async cambiarPerfil(usuarioId: number, perfilId: number) {
     if (!perfilId) throw new BadRequestException('Debe indicar el perfil destino')
 
@@ -363,7 +377,6 @@ export class AuthService {
     return this.emitirTokenFinal(usuario, perfilId, fila.usuarioPerfilId)
   }
 
-  /** Lista los perfiles activos del usuario autenticado (para topbar). */
   async perfilesDelUsuario(usuarioId: number) {
     return this.listarPerfilesActivos(usuarioId)
   }
@@ -373,7 +386,7 @@ export class AuthService {
       throw new BadRequestException('Debe aceptar los Términos y Condiciones')
     }
 
-    // PValidarCorreoRegistro — verificar que el email no exista
+    // PValidarCorreoRegistro
     const emailExiste = await this.usuarioRepo.findOne({
       where: { usuarioEmail: dto.usuarioEmail },
     })
@@ -383,7 +396,7 @@ export class AuthService {
       )
     }
 
-    // PValidarNit — verificar que el NIT no exista
+    // PValidarNit
     const nitExiste = await this.empresaRepo.findOne({
       where: { empresaIdentificacion: dto.empresaIdentificacion },
     })
@@ -393,77 +406,62 @@ export class AuthService {
       )
     }
 
-    // Equivalente a GetEncryptionKey() + Encrypt64()
     const llaveEncriptacion = getEncryptionKey()
     const claveEncriptada = encrypt64(dto.usuarioClave, llaveEncriptacion)
 
-    // Transacción: Usuario + Empresa (equivalente al commit doble de GeneXus)
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     await queryRunner.startTransaction()
 
     try {
-      // Obtener NEXTVAL del sequence de Oracle (igual que GeneXus internamente)
-      const seqResult = await queryRunner.query('SELECT USUARIOID.NEXTVAL FROM dual')
-      const nextUsuarioId: number = seqResult[0]['NEXTVAL']
+      // perfil 7 = empresa. El id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(queryRunner, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: 7,
+        USUARIOCLAVE: claveEncriptada,
+        USUARIOFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 2,
+        USUARIOEMAIL: dto.usuarioEmail,
+        USUARIOLLAVEENCRIPTACION: llaveEncriptacion,
+      })
 
-      // Crear Usuario (PerfilId=7 → empresa)
-      const usuario = new Usuario()
-      usuario.usuarioId = nextUsuarioId
-      usuario.perfilId = 7
-      usuario.usuarioClave = claveEncriptada
-      usuario.usuarioFechaRegistro = new Date()
-      usuario.usuarioEstado = 1
-      usuario.usuarioTipo = 2
-      usuario.usuarioEmail = dto.usuarioEmail
-      usuario.usuarioLlaveEncriptacion = llaveEncriptacion
-
-      const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
-
-      // Multirol: registrar el perfil 7 (empresa) en USUARIOPERFIL como
-      // predeterminado y activo. PERFILID en USUARIO se conserva como fallback.
+      // USUARIO.PERFILID se conserva solo como fallback
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 7, 1, 1, SYSDATE)`,
-        [usuarioGuardado.usuarioId],
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 7, 1, 1, ${AHORA_UTC})`,
+        [usuarioId],
       )
 
-      const seqEmpresa = await queryRunner.query('SELECT EMPRESAID.NEXTVAL FROM dual')
-      const nextEmpresaId: number = seqEmpresa[0]['NEXTVAL']
-
-      // Crear Empresa con valores secundarios por defecto (igual a GeneXus)
-      const empresa = new Empresa()
-      empresa.empresaId = nextEmpresaId
-      empresa.tipoDocumentoIdentidadId = dto.tipoDocumentoIdentidadId
-      empresa.empresaIdentificacion = dto.empresaIdentificacion
-      empresa.empresaDigitoVerificacion = dto.empresaDigitoVerificacion
-      empresa.empresaRazonSocial = dto.empresaRazonSocial.trim()
-      empresa.empresaSigla = (dto.empresaSigla ?? '').trim()
-      empresa.empresaEmail = dto.usuarioEmail
-      empresa.empresaFechaRegistro = new Date()
-      empresa.coberturaEmpresaId = 1
-      empresa.departamentoEmpresaId = 1
-      empresa.ciudadEmpresaId = 1
-      empresa.ciiuId = 1
-      empresa.tipoEmpresaId = 1
-      empresa.tamanoEmpresaId = 1
-      empresa.sectorId = 1
-      empresa.subSectorId = 1
-      empresa.tipoIdentificacionRep = 1
-
-      await queryRunner.manager.save(empresa)
+      // los ids en 1 son los valores por defecto que ya usaba GeneXus
+      await insertarConId(queryRunner, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+        TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId,
+        EMPRESAIDENTIFICACION: dto.empresaIdentificacion,
+        EMPRESADIGITOVERIFICACION: dto.empresaDigitoVerificacion,
+        EMPRESARAZONSOCIAL: dto.empresaRazonSocial.trim(),
+        EMPRESASIGLA: (dto.empresaSigla ?? '').trim(),
+        EMPRESAEMAIL: dto.usuarioEmail,
+        EMPRESAFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        COBERTURAEMPRESAID: 1,
+        DEPARTAMENTOEMPRESAID: 1,
+        CIUDADEMPRESAID: 1,
+        CIIUID: 1,
+        TIPOEMPRESAID: 1,
+        TAMANOEMPRESAID: 1,
+        SECTORID: 1,
+        SUBSECTORID: 1,
+        TIPOIDENTIFICACIONREP: 1,
+      })
 
       await queryRunner.commitTransaction()
 
       return {
         message: 'Usuario registrado exitosamente',
-        usuarioId: usuarioGuardado.usuarioId,
+        usuarioId,
       }
     } catch (err: any) {
       await queryRunner.rollbackTransaction()
-      // Traducir errores de Oracle a mensajes legibles (en lugar de
-      // "Internal server error" genérico).
+      // traducir errores de Oracle a mensajes legibles
       if (err?.code === 'ORA-01438' || err?.errorNum === 1438) {
         throw new BadRequestException(
           'Algún campo numérico excede el tamaño permitido. Revise el NIT (máx. 10 dígitos) y el dígito de verificación (0-9).',
@@ -485,7 +483,7 @@ export class AuthService {
       throw new BadRequestException('Debe aceptar los Términos y Condiciones')
     }
 
-    // PValidarEmailPersona — email no debe existir
+    // PValidarEmailPersona
     const emailExiste = await this.usuarioRepo.findOne({
       where: { usuarioEmail: dto.usuarioEmail },
     })
@@ -495,7 +493,7 @@ export class AuthService {
       )
     }
 
-    // PValidarIdentificacionPersona — identificación no debe existir
+    // PValidarIdentificacionPersona
     const idExiste = await this.personaRepo.findOne({
       where: { personaIdentificacion: dto.personaIdentificacion },
     })
@@ -513,55 +511,43 @@ export class AuthService {
     await queryRunner.startTransaction()
 
     try {
-      const seqUsuario = await queryRunner.query('SELECT USUARIOID.NEXTVAL FROM dual')
-      const nextUsuarioId: number = seqUsuario[0]['NEXTVAL']
+      // perfil 8 = persona. El id lo pone la base (en el Exadata, el trigger de GeneXus) y vuelve en el mismo INSERT
+      const usuarioId = await insertarConId(queryRunner, 'USUARIO', 'USUARIOID', { secuencia: 'USUARIOID' }, {
+        PERFILID: 8,
+        USUARIOCLAVE: claveEncriptada,
+        USUARIOFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        USUARIOESTADO: 1,
+        USUARIOTIPO: 1,
+        USUARIOEMAIL: dto.usuarioEmail,
+        USUARIOLLAVEENCRIPTACION: llaveEncriptacion,
+      })
 
-      // Crear Usuario (PerfilId=8 → persona/usuario)
-      const usuario = new Usuario()
-      usuario.usuarioId = nextUsuarioId
-      usuario.perfilId = 8
-      usuario.usuarioClave = claveEncriptada
-      usuario.usuarioFechaRegistro = new Date()
-      usuario.usuarioEstado = 1
-      usuario.usuarioTipo = 1
-      usuario.usuarioEmail = dto.usuarioEmail
-      usuario.usuarioLlaveEncriptacion = llaveEncriptacion
-
-      const usuarioGuardado = (await queryRunner.manager.save(usuario)) as Usuario
-
-      // Multirol: registrar el perfil 8 (persona/usuario) en USUARIOPERFIL como
-      // predeterminado y activo. PERFILID en USUARIO se conserva como fallback.
+      // USUARIO.PERFILID se conserva solo como fallback
       await queryRunner.query(
         `INSERT INTO USUARIOPERFIL
            (USUARIOPERFILID, USUARIOID, PERFILID, PREDETERMINADO, ESTADO, FECHACREACION)
-         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, :1, 8, 1, 1, SYSDATE)`,
-        [usuarioGuardado.usuarioId],
+         VALUES (USUARIOPERFIL_SEQ.NEXTVAL, $1, 8, 1, 1, ${AHORA_UTC})`,
+        [usuarioId],
       )
 
-      const seqPersona = await queryRunner.query('SELECT PERSONAID.NEXTVAL FROM dual')
-      const nextPersonaId: number = seqPersona[0]['NEXTVAL']
-
-      // Crear Persona
-      const persona = new Persona()
-      persona.personaId = nextPersonaId
-      persona.tipoDocumentoIdentidadId = dto.tipoDocumentoIdentidadId
-      persona.personaIdentificacion = dto.personaIdentificacion
-      persona.personaNombres = dto.personaNombres.trim()
-      persona.personaPrimerApellido = dto.personaPrimerApellido.trim()
-      persona.personaSegundoApellido = (dto.personaSegundoApellido ?? '').trim()
-      persona.personaEmail = dto.usuarioEmail
-      persona.personaFechaRegistro = new Date()
-      persona.generoId = 3
-      persona.ciudadId = 1
-      persona.personaHabeasData = 'SI'
-      persona.personaHabeasDataE = 'NA'
-
-      await queryRunner.manager.save(persona)
+      await insertarConId(queryRunner, 'PERSONA', 'PERSONAID', { secuencia: 'PERSONAID' }, {
+        TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoIdentidadId,
+        PERSONAIDENTIFICACION: dto.personaIdentificacion,
+        PERSONANOMBRES: dto.personaNombres.trim(),
+        PERSONAPRIMERAPELLIDO: dto.personaPrimerApellido.trim(),
+        PERSONASEGUNDOAPELLIDO: (dto.personaSegundoApellido ?? '').trim(),
+        PERSONAEMAIL: dto.usuarioEmail,
+        PERSONAFECHAREGISTRO: sqlCrudo(HOY_UTC),
+        GENEROID: 3,
+        CIUDADID: 1,
+        PERSONAHABEASDATA: 'SI',
+        PERSONAHABEASDATAE: 'NA',
+      })
       await queryRunner.commitTransaction()
 
       return {
         message: 'Usuario registrado exitosamente',
-        usuarioId: usuarioGuardado.usuarioId,
+        usuarioId,
       }
     } catch (err: any) {
       await queryRunner.rollbackTransaction()
@@ -593,20 +579,18 @@ export class AuthService {
     }
   }
 
-  // ── Restablecimiento de contraseña ────────────────────────────────────────
+  // restablecimiento de contraseña
 
   async solicitarRestablecimiento(email: string) {
     if (!email?.trim()) throw new BadRequestException('El correo es requerido')
 
     const usuario = await this.usuarioRepo.findOne({ where: { usuarioEmail: email.trim() } })
-    // Respuesta genérica para no revelar si el email existe o no
+    // respuesta genérica: no revelar si el email existe
     if (!usuario) return { message: 'Si el correo está registrado, recibirás un enlace en breve.' }
 
-    // Generar token único de 32 bytes → 64 chars hex
     const token = crypto.randomBytes(32).toString('hex')
-    const expira = new Date(Date.now() + 30 * 60 * 1000) // 30 minutos
+    const expira = new Date(Date.now() + 30 * 60 * 1000)
 
-    // Limpiar tokens anteriores del mismo email
     for (const [k, v] of this.resetTokens.entries()) {
       if (v.email === email.trim()) this.resetTokens.delete(k)
     }
@@ -639,5 +623,48 @@ export class AuthService {
     this.resetTokens.delete(token)
 
     return { message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' }
+  }
+
+  // el usuario cambia su propia clave, verificando la actual
+  async cambiarMiClave(email: string, claveActual: string, nuevaClave: string) {
+    const actual = claveActual ?? ''
+    const nueva = nuevaClave ?? ''
+
+    if (!actual) throw new BadRequestException('Escribe tu contraseña actual')
+    if (nueva.length < 6) {
+      throw new BadRequestException('La nueva contraseña debe tener al menos 6 caracteres')
+    }
+    // twofish cifra un bloque de 16 bytes: más largo no se podría volver a validar
+    if (Buffer.byteLength(nueva, 'utf8') > MAX_CLAVE) {
+      throw new BadRequestException(`La contraseña no puede pasar de ${MAX_CLAVE} caracteres`)
+    }
+    if (nueva !== nueva.trim()) {
+      throw new BadRequestException('La contraseña no puede empezar ni terminar en espacio')
+    }
+    if (nueva === actual) {
+      throw new BadRequestException('La nueva contraseña tiene que ser distinta de la actual')
+    }
+
+    const usuario = await this.usuarioRepo.findOne({ where: { usuarioEmail: email } })
+    if (!usuario) throw new NotFoundException('Usuario no encontrado')
+
+    let guardada: string
+    try {
+      guardada = decrypt64(usuario.usuarioClave, usuario.usuarioLlaveEncriptacion)
+    } catch {
+      throw new BadRequestException(
+        'No se pudo leer tu contraseña actual. Usa "Olvidé mi contraseña" desde el inicio de sesión.',
+      )
+    }
+    if (guardada !== actual) {
+      throw new UnauthorizedException('La contraseña actual no es correcta')
+    }
+
+    await this.usuarioRepo.update(usuario.usuarioId, {
+      usuarioClave: encrypt64(nueva, usuario.usuarioLlaveEncriptacion),
+    })
+
+    this.log.log(`Cambió su contraseña: ${email}`)
+    return { message: 'Tu contraseña quedó actualizada' }
   }
 }

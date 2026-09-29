@@ -10,8 +10,7 @@ import type { EventResizeDoneArg } from '@fullcalendar/interaction'
 import { useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
-// Tipos minimos compartidos con la pagina principal del cronograma. Se
-// duplican aca a proposito para mantener este componente desacoplado.
+// tipos duplicados a proposito para no acoplar con la pagina del cronograma
 export interface SesionPLite {
   sesionId: number
   numSesion: number | null
@@ -40,17 +39,13 @@ interface Props {
   sesionesV: SesionVLite[]
   fechaCronoInicio: string | null
   fechaCronoFin: string | null
-  /** Click en un slot vacio -> abrir modal de agregar con prefill. */
   onAgregarPresencial: (preset: { fecha: string; horaInicio: string; horaFin: string }) => void
   onAgregarVirtual: (preset: { fechaInicio: string; fechaFin: string }) => void
-  /** Click sobre un evento existente -> abrir modal editar. */
   onEditarPresencial: (sesionId: number) => void
   onEditarVirtual: (actividadId: number) => void
-  /** Drag/resize -> persistir cambios. Devolver promise para revertir si falla. */
+  // si la promesa falla, el calendario revierte el drag/resize
   onMoverPresencial: (sesionId: number, fecha: string, horaInicio: string, horaFin: string) => Promise<void>
   onMoverVirtual: (actividadId: number, fechaInicio: string, fechaFin: string) => Promise<void>
-  /** Notifica errores del backend tras drag/resize (p.ej. fecha fuera de
-   *  rango). Si no se provee, los errores quedan silenciosos en consola. */
   onError?: (mensaje: string) => void
 }
 
@@ -62,37 +57,25 @@ const COLOR_APROBADA   = '#15803D'   // verde — sesion aprobada por intervento
 
 function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }
 
-/** Toma un Date y devuelve "YYYY-MM-DD". */
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
-/** Toma un Date y devuelve "HH:MM". */
 function fmtTime(d: Date) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-/** Extrae [hora, minuto] de un valor que puede venir como "HH:MM",
- *  "HH:MM:SS" o como ISO completo (p.ej. "1970-01-01T08:00:00.000Z" —
- *  Oracle DATE serializado por TypeORM). En el caso ISO usamos UTC para
- *  evitar desfaces de zona horaria locales (Oracle guarda el "wall time"
- *  pero el driver lo expone como UTC midnight + offset). */
+// TypeORM serializa el DATE de Oracle como ISO UTC: leer en UTC evita el desfase de zona
 function parseHoraHHMM(hora: string): [number, number] | null {
-  // Caso 1: "HH:MM" o "HH:MM:SS" puro
   const m1 = hora.match(/^(\d{1,2}):(\d{2})/)
   if (m1) return [Number(m1[1]), Number(m1[2])]
-  // Caso 2: ISO completo "YYYY-MM-DDTHH:MM:SS..."
   const m2 = hora.match(/T(\d{2}):(\d{2})/)
   if (m2) return [Number(m2[1]), Number(m2[2])]
-  // Caso 3: parseable como Date — usamos UTC.
   const d = new Date(hora)
   if (!isNaN(d.getTime())) return [d.getUTCHours(), d.getUTCMinutes()]
   return null
 }
 
-/** Une fecha + hora en un string ISO LOCAL **sin offset** (p.ej.
- *  "2023-08-17T16:00:00"). FullCalendar lo interpreta como wall-clock
- *  literal, asi que se muestra exactamente esa hora sin importar la zona
- *  del navegador. Si no hay hora, devuelve solo "YYYY-MM-DD" (all-day). */
+// ISO sin offset: FullCalendar lo toma como wall-clock y no aplica la zona del navegador
 function combineIso(fecha: string, hora: string | null): string {
   const f = fecha.slice(0, 10)
   if (!hora) return f
@@ -101,26 +84,20 @@ function combineIso(fecha: string, hora: string | null): string {
   return `${f}T${pad(parsed[0])}:${pad(parsed[1])}:00`
 }
 
-/** Suma `n` dias a "YYYY-MM-DD" y devuelve "YYYY-MM-DD". FullCalendar trata
- *  el `end` de eventos all-day como exclusivo. */
+// para compensar el `end` exclusivo de los eventos all-day de FullCalendar
 function addDaysStr(fecha: string, n: number): string {
   const [y, m, d] = fecha.slice(0, 10).split('-').map(Number)
   const dt = new Date(Date.UTC(y, m - 1, d + n))
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
 }
 
-/** Una sesion/actividad esta "congelada" (no editable) si ya fue radicada
- *  (cualquier estado que no sea recien creada / sin radicar / devuelta para
- *  corregir: '', 'PENDIENTE', 'MODIFICAR'). */
+// ya radicada = no editable
 function estaBloqueada(estadoRadicado: string | null | undefined): boolean {
   const e = (estadoRadicado ?? '').trim().toUpperCase()
   return e !== '' && e !== 'PENDIENTE' && e !== 'MODIFICAR'
 }
 
-/** Formatea hora+minuto (numeros) como "8:30 am" / "3:30 pm" (12h, minusculas,
- *  sin puntos). Recibe numeros para evitar problemas con timezones: FC
- *  expone `arg.date.array = [year, month, day, hour, minute, second, ms]`
- *  con valores en wall-clock (ya sin offset). */
+// recibe numeros y no Date: FC entrega wall-clock en `arg.date.array`, sin offset
 function formato12hHM(h: number, m: number): string {
   const sufijo = h >= 12 ? 'pm' : 'am'
   const h12 = h % 12 || 12
@@ -137,7 +114,6 @@ export function CronogramaCalendario(props: Props) {
     onError,
   } = props
 
-  /** Extrae el mensaje legible de un error de axios o cualquier excepcion. */
   const errorMsg = (e: unknown): string => {
     const r = e as { response?: { data?: { message?: string } }; message?: string }
     return r?.response?.data?.message ?? r?.message ?? 'No se pudo guardar el cambio.'
@@ -149,9 +125,7 @@ export function CronogramaCalendario(props: Props) {
   const hayPresencial = [1, 2, 3].includes(modalidadId)
   const hayVirtual    = [3, 4].includes(modalidadId)
 
-  // Construye los eventos de FullCalendar a partir de sesiones presenciales y
-  // actividades virtuales. Cada uno lleva un `extendedProps.tipo` para el
-  // dispatching en los handlers.
+  // eventos del calendario; `extendedProps.tipo` decide el handler
   const events = useMemo<EventInput[]>(() => {
     const out: EventInput[] = []
     const colorP = modalidadId === 2 ? COLOR_PAT : COLOR_PRESENCIAL
@@ -194,11 +168,9 @@ export function CronogramaCalendario(props: Props) {
     return out
   }, [hayPresencial, hayVirtual, sesionesP, sesionesV, modalidadId])
 
-  // Click en slot vacio -> agregar.
   const handleSelect = (sel: DateSelectArg) => {
     if (busy) return
     if (sel.allDay) {
-      // Se selecciono en mes -> agregar virtual (si aplica) o presencial todo-el-dia.
       if (hayVirtual) {
         const ini = fmtDate(sel.start)
         // FC `end` es exclusivo en allDay -> restamos 1 dia para el rango real.
@@ -206,12 +178,9 @@ export function CronogramaCalendario(props: Props) {
         const fin = fmtDate(finReal)
         onAgregarVirtual({ fechaInicio: ini, fechaFin: fin })
       } else if (hayPresencial) {
-        // En vista mes seleccionando un dia, default 08:00-12:00.
         onAgregarPresencial({ fecha: fmtDate(sel.start), horaInicio: '08:00', horaFin: '12:00' })
       }
     } else {
-      // Slot con horas -> presencial. Si la modalidad es solo virtual, no
-      // hacemos nada (no deberia pasar porque hayPresencial=false bloquea).
       if (hayPresencial) {
         onAgregarPresencial({
           fecha: fmtDate(sel.start),
@@ -224,8 +193,7 @@ export function CronogramaCalendario(props: Props) {
   }
 
   const handleEventClick = (arg: EventClickArg) => {
-    // Aprobadas o no, abrimos el modal: si la sesion esta aprobada el modal
-    // se muestra de solo lectura (banner + sin boton Guardar).
+    // tambien se abre si esta aprobada: el modal queda en solo lectura
     const tipo = arg.event.extendedProps.tipo as 'P' | 'V' | undefined
     if (tipo === 'P') onEditarPresencial(arg.event.extendedProps.sesionId as number)
     else if (tipo === 'V') onEditarVirtual(arg.event.extendedProps.actividadId as number)
@@ -282,15 +250,9 @@ export function CronogramaCalendario(props: Props) {
     } finally { setBusy(false) }
   }
 
-  // Vista por defecto: si hay solo virtual, mes (mas natural para rangos de
-  // dias). Si hay presencial, semana con horas.
   const initialView = hayPresencial ? 'timeGridWeek' : 'dayGridMonth'
 
-  // Limites: el calendario solo navega dentro del rango exacto del
-  // cronograma. Sin colchon — si dejaramos margen, el usuario podria
-  // crear sesiones fuera y el backend las rechaza con 400. `end` es
-  // exclusivo en FullCalendar, asi que sumamos 1 dia para que el ultimo
-  // dia (fechaFin) sea seleccionable.
+  // sin colchon: el backend rechaza con 400 fuera del rango. +1 dia porque `end` es exclusivo
   const validRange = (() => {
     if (!fechaCronoInicio || !fechaCronoFin) return undefined
     const ini = new Date(fechaCronoInicio.slice(0, 10) + 'T00:00:00')
@@ -334,15 +296,10 @@ export function CronogramaCalendario(props: Props) {
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           initialView={initialView}
           locale="es"
-          // timeZone explicito: combinado con eventos en ISO local sin offset
-          // ("2023-08-17T16:00:00"), FC muestra exactamente esa hora y los
-          // handlers leen getHours()/getMinutes() (local) sin desfase.
+          // con los eventos en ISO sin offset, los handlers pueden leer getHours() local
           timeZone="local"
           firstDay={1}
-          // Alto fijo: el body del calendario hace su propio scroll. Asi no
-          // se "estira" la pagina cuando hay muchas semanas/eventos. 70vh
-          // funciona bien en pantallas estandar y mantiene el header
-          // (toolbar) y el footer del modulo siempre visibles.
+          // alto fijo: el scroll queda dentro del calendario y la pagina no se estira
           height="70vh"
           stickyHeaderDates
           headerToolbar={{
@@ -355,18 +312,11 @@ export function CronogramaCalendario(props: Props) {
           }}
           allDaySlot={hayVirtual}
           allDayText="Virtuales"
-          // Dia completo 00:00 → 24:00 para que puedan registrarse sesiones
-          // a cualquier hora (madrugada, noche, etc.).
           slotMinTime="00:00:00"
           slotMaxTime="24:00:00"
           slotDuration="00:30:00"
-          // Arranca el scroll en 6 am (horario habitual) sin ocultar el resto.
           scrollTime="06:00:00"
-          // Formato 12h con am/pm minusculas tanto en las etiquetas de hora
-          // del costado izquierdo como en cada bloque de evento. Usamos
-          // `arg.date.array` que entrega [year,month,day,hour,minute,...]
-          // en wall-clock (sin offset de timezone), evitando el desfase
-          // que aparece al usar getHours() sobre el marker UTC.
+          // `arg.date.array` viene en wall-clock; getHours() sobre el marker UTC desfasa
           slotLabelFormat={(arg) => {
             const a = (arg as { date: { array: number[] } }).date.array
             return formato12hHM(a[3] ?? 0, a[4] ?? 0)

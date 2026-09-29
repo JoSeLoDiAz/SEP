@@ -15,8 +15,6 @@ interface JwtUser { usuarioId: number; email: string; perfilId: number }
 export class EmpresaController {
   constructor(private readonly empresaService: EmpresaService) {}
 
-  // ── Datos ─────────────────────────────────────────────────────────────────
-
   @Get('datos')
   @ApiOperation({ summary: 'Datos básicos de la empresa del usuario autenticado' })
   getDatos(@CurrentUser() user: JwtUser) {
@@ -28,8 +26,6 @@ export class EmpresaController {
   getResumenPanel(@CurrentUser() user: JwtUser) {
     return this.empresaService.getResumenPanel(user.email)
   }
-
-  // ── Lookups ───────────────────────────────────────────────────────────────
 
   @Get('departamentos')
   getDepartamentos() {
@@ -73,8 +69,6 @@ export class EmpresaController {
     return this.empresaService.getMenu(user.perfilId)
   }
 
-  // ── Updates ───────────────────────────────────────────────────────────────
-
   @Put('identificacion')
   @ApiOperation({ summary: 'Actualizar razón social y sigla' })
   updateIdentificacion(
@@ -108,8 +102,6 @@ export class EmpresaController {
     return this.empresaService.cambiarClave(user.email, dto.nuevaClave)
   }
 
-  // ── Mesas Sectoriales ─────────────────────────────────────────────────────
-
   @Get('mesas-sectoriales')
   getMesasSectoriales() {
     return this.empresaService.getMesasSectoriales()
@@ -130,15 +122,11 @@ export class EmpresaController {
     return this.empresaService.eliminarMesaEmpresa(Number(id))
   }
 
-  // ── Sectores / Subsectores lookups ────────────────────────────────────────
-
   @Get('sectores')
   getSectores() { return this.empresaService.getSectores() }
 
   @Get('subsectores')
   getSubsectores() { return this.empresaService.getSubsectores() }
-
-  // ── Sectores/Subsectores PERTENECE ────────────────────────────────────────
 
   @Get('sectores-pertenece')
   getSectoresPertenece(@CurrentUser() user: JwtUser) {
@@ -170,8 +158,6 @@ export class EmpresaController {
     return this.empresaService.eliminarSubsectorPertenece(Number(id))
   }
 
-  // ── Sectores/Subsectores REPRESENTA ──────────────────────────────────────
-
   @Get('sectores-representa')
   getSectoresRepresenta(@CurrentUser() user: JwtUser) {
     return this.empresaService.getSectoresRepresenta(user.email)
@@ -201,8 +187,6 @@ export class EmpresaController {
   eliminarSubsectorRepresenta(@Param('id') id: string) {
     return this.empresaService.eliminarSubsectorRepresenta(Number(id))
   }
-
-  // ── Análisis empresarial ──────────────────────────────────────────────────
 
   @Get('analisis')
   getAnalisis(@CurrentUser() user: JwtUser) {

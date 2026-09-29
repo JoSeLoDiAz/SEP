@@ -12,8 +12,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 interface AFInfo {
   afId: number; numero: number; nombre: string; modalidadId: number; modalidad: string
   numTotHorasGrup: number; numGrupos: number; numBenef: number
@@ -38,16 +36,12 @@ interface RubroAF {
 interface GOData { afrubroid?: number; cofSena: number; especie: number; dinero: number; total: number }
 interface TransData { afrubroid?: number; beneficiarios: number; valor: number }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
 const fmt = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n ?? 0)
 
 const pct = (n: number) => `${Number(n ?? 0).toFixed(2)}%`
 
-// Valor unitario — totalRubro / cantidad de unidades.
-// Detecta la unidad por el campo poblado (no por el caso) para que también
-// funcione con rubros abiertos como R04 (tiquetes) que no tienen caso 1-4/8.
+// la unidad se detecta por el campo poblado, no por el caso: R04 (tiquetes) no tiene caso
 function valorUnidad(r: RubroAF): number | null {
   if (!r.totalRubro || r.totalRubro <= 0) return null
   if (r.numHoras > 0 && r.beneficiarios > 0) return r.totalRubro / (r.numHoras * r.beneficiarios)
@@ -59,13 +53,13 @@ function valorUnidad(r: RubroAF): number | null {
 }
 
 function unidadesLabel(r: RubroAF): string {
-  // caso 8 (R07.2.2/R07.2.3): tarifa × horas × benef → mostrar ambos
+  // caso 8 = R07.2.2 / R07.2.3
   if (r.caso === 8) {
     if (r.numHoras > 0 && r.beneficiarios > 0) return `${r.numHoras}h × ${r.beneficiarios} benef.`
     if (r.beneficiarios > 0) return `${r.beneficiarios} benef.`
     return '—'
   }
-  // caso 3 (R010): solo beneficiarios
+  // caso 3 = R010
   if (r.caso === 3) {
     return r.beneficiarios > 0 ? `${r.beneficiarios} benef.` : '—'
   }
@@ -78,11 +72,9 @@ function unidadesLabel(r: RubroAF): string {
 
 function camposVisibles(caso: number) {
   return {
-    // caso 8 (R07.2.2 / R07.2.3) pide horas Y beneficiarios → tope × horas × benef
     horas:    [1, 8].includes(caso),
     dias:     [4].includes(caso),
     unidades: [2].includes(caso),
-    // caso 3 (R010 — formación virtual) y caso 8 piden beneficiarios
     benef:    [3, 8].includes(caso),
     autoCalc: [1, 2, 3, 4, 8].includes(caso),
     fijo:     [5, 20].includes(caso),
@@ -92,7 +84,7 @@ function camposVisibles(caso: number) {
 function calcValorMaximo(caso: number, tope: number, horas: number, dias: number, cantidad: number, benef: number) {
   if (caso === 1) return tope * horas
   if (caso === 2) return tope * cantidad
-  if (caso === 3) return tope * benef       // R010: tope × # beneficiarios
+  if (caso === 3) return tope * benef
   if (caso === 4) return tope * dias
   if (caso === 8) return tope * horas * benef
   return 0
@@ -107,8 +99,6 @@ const emptyForm = {
 
 const emptyGO: GOData  = { cofSena: 0, especie: 0, dinero: 0, total: 0 }
 const emptyTrans: TransData = { beneficiarios: 0, valor: 0 }
-
-// ══════════════════════════════════════════════════════════════════════════════
 
 export default function RubrosAFPage() {
   const { id, afId } = useParams<{ id: string; afId: string }>()
@@ -127,16 +117,14 @@ export default function RubrosAFPage() {
   const [toast, setToast]         = useState<{tipo:'success'|'error'; msg:string}|null>(null)
   const [toastK, setToastK]       = useState(0)
 
-  // GO & Transferencia
+  // GO y transferencia
   const [goForm, setGoForm]       = useState<GOData>(emptyGO)
   const [transForm, setTransForm] = useState<TransData>(emptyTrans)
   const [savingGO, setSavingGO]   = useState(false)
   const [savingTrans, setSavingTrans] = useState(false)
 
-  // Prerequisitos
   const [prereqs, setPrereqs] = useState<{ ok: boolean; issues: string[] }>({ ok: true, issues: [] })
 
-  // Confirmación con modal cuando hay advertencias antes de guardar
   const [confirmar, setConfirmar] = useState<{
     titulo: string
     razones: string[]
@@ -146,8 +134,6 @@ export default function RubrosAFPage() {
   const showToast = (tipo: 'success'|'error', msg: string) => {
     setToast({ tipo, msg }); setToastK(k => k + 1)
   }
-
-  // ── Load ──────────────────────────────────────────────────────────────────
 
   const cargar = useCallback(async () => {
     setLoading(true)
@@ -177,8 +163,7 @@ export default function RubrosAFPage() {
     document.title = af ? `Rubros AF${af.numero} | SEP` : 'Rubros | SEP'
   }, [af])
 
-  // Refrescos parciales — evitan que `cargar()` sobrescriba inputs no guardados
-  // de otras secciones (p. ej. guardar GO no debe borrar Transferencia en edición).
+  // refrescos parciales: cargar() completo pisaría inputs sin guardar de otras secciones
   const refrescarRubros = useCallback(async () => {
     const [rRubros, rPre] = await Promise.all([
       api.get(`/proyectos/${proyectoId}/acciones/${afIdNum}/rubros`),
@@ -198,12 +183,10 @@ export default function RubrosAFPage() {
     setTransForm(r.data ?? emptyTrans)
   }, [proyectoId, afIdNum])
 
-  // ── Rubro select → fill form ──────────────────────────────────────────────
-
   function seleccionarRubro(rubroId: number) {
     const r = catalogo.find(c => c.rubroId === rubroId)
     if (!r) return
-    // R013 (pólizas/garantías): solo Contrapartida en Dinero
+    // R013 (pólizas): solo contrapartida en dinero
     const soloDinero = r.codigo?.trim().startsWith('R013') ?? false
     const existing = rubrosAF.find(a => a.rubroId === rubroId)
     if (existing) {
@@ -238,8 +221,6 @@ export default function RubrosAFPage() {
   const porcEspecie = totalCalc > 0 ? (form.contraEspecie / totalCalc * 100) : 0
   const porcDinero  = totalCalc > 0 ? (form.contraDinero  / totalCalc * 100) : 0
 
-  // ── Guardar rubro regular ─────────────────────────────────────────────────
-
   async function handleGuardar() {
     if (!form.rubroId) return showToast('error', 'Seleccione un rubro.')
     if (!form.justificacion.trim()) return showToast('error', 'La justificación del rubro es obligatoria.')
@@ -253,9 +234,7 @@ export default function RubrosAFPage() {
     if (r && campos.autoCalc && form.valorMaximo > 0 && totalCalc > form.valorMaximo) {
       return showToast('error', `El valor total supera el tope máximo (${fmt(form.valorMaximo)}).`)
     }
-    // Si el rubro pide beneficiarios, el valor por beneficiario se calcula
-    // dinámicamente en vivo (total / beneficiarios). Si no, mantiene el del
-    // form (ej. tiquetes que viene precargado).
+    // si el rubro no pide beneficiarios se conserva el valorBenef precargado (ej. tiquetes)
     const valorBenefCalc = campos.benef && form.beneficiarios > 0
       ? totalCalc / form.beneficiarios
       : form.valorBenef
@@ -292,9 +271,7 @@ export default function RubrosAFPage() {
     }
   }
 
-  // ── Guardar GO ────────────────────────────────────────────────────────────
-
-  // Persiste GO (sin chequeos, ya validados antes de llamar)
+  // sin validaciones: las hace handleGuardarGO
   async function persistirGO() {
     setSavingGO(true)
     try {
@@ -312,9 +289,7 @@ export default function RubrosAFPage() {
 
   async function handleGuardarGO() {
     if (goTotal < 1) return showToast('error', 'El valor total de Gastos de Operación debe ser mayor a cero.')
-    // Tope de GO: 10% si proyecto > $200M, 16% si ≤ $200M. Como aquí solo
-    // tenemos el total de esta AF, usamos 10% (el más estricto) como umbral
-    // del modal — el backend hará la validación final con el total de proyecto.
+    // aquí solo hay el total de esta AF: se avisa con el 10% (el tope estricto) y el backend valida con el del proyecto
     const razones: string[] = []
     if (porcGOvsAF > 10) {
       razones.push(`Los Gastos de Operación representan el ${pct(porcGOvsAF)} del total de la AF, lo cual puede superar el tope del 10% (R09.1) si el proyecto es mayor a $200.000.000. El máximo permitido es 16% (R09.2) en proyectos ≤ $200.000.000.`)
@@ -329,8 +304,6 @@ export default function RubrosAFPage() {
     }
     await persistirGO()
   }
-
-  // ── Guardar Transferencia ─────────────────────────────────────────────────
 
   async function persistirTrans() {
     setSavingTrans(true)
@@ -369,8 +342,6 @@ export default function RubrosAFPage() {
     await persistirTrans()
   }
 
-  // ── Totales ───────────────────────────────────────────────────────────────
-
   const totales = rubrosAF.reduce((acc, r) => ({
     totalRubro:    acc.totalRubro    + (r.totalRubro ?? 0),
     cofSena:       acc.cofSena       + (r.cofSena ?? 0),
@@ -382,7 +353,6 @@ export default function RubrosAFPage() {
   const totPorcEspecie = totales.totalRubro > 0 ? (totales.contraEspecie / totales.totalRubro * 100) : 0
   const totPorcDinero  = totales.totalRubro > 0 ? (totales.contraDinero  / totales.totalRubro * 100) : 0
 
-  // GO computed
   const goCofSena  = Number(goForm?.cofSena ?? 0)
   const goEspecie  = Number(goForm?.especie ?? 0)
   const goDinero   = Number(goForm?.dinero  ?? 0)
@@ -393,16 +363,11 @@ export default function RubrosAFPage() {
   const porcGOvsAF    = totales.totalRubro > 0 ? (goTotal / totales.totalRubro * 100) : 0
   const totalAFconGO  = totales.totalRubro + goTotal
 
-  // Transferencia computed
   const totalBenefAF   = af?.numBenef ?? 0
   const porcBenefTrans = totalBenefAF > 0 ? ((transForm?.beneficiarios ?? 0) / totalBenefAF * 100) : 0
   const porcValTrans   = totalAFconGO  > 0 ? ((transForm?.valor        ?? 0) / totalAFconGO  * 100) : 0
 
-  // ── Editable ─────────────────────────────────────────────────────────────
-  //   - Estado 0 (Sin Confirmar) requiere convocatoria abierta.
-  //   - Estado 2 (Subsanación / Reversado) SIEMPRE es editable, incluso con
-  //     convocatoria cerrada — el SENA reversó al proponente para que corrija.
-  // Los estados 1 (Confirmado), 3 (Aprobado) y 4 (Rechazado) son de solo lectura.
+  // estado 2 (subsanación) es editable aunque la convocatoria esté cerrada
   const editable = proyecto
     ? proyecto.estado === 2 || (proyecto.estado === 0 && proyecto.convocatoriaEstado !== 0)
     : false
@@ -417,8 +382,6 @@ export default function RubrosAFPage() {
           : proyecto.convocatoriaEstado === 0
             ? 'La convocatoria está cerrada. Los rubros son de solo lectura.'
             : ''
-
-  // ── Styles ────────────────────────────────────────────────────────────────
 
   const card  = 'bg-white rounded-2xl border border-neutral-200 shadow-sm'
   const inp   = 'w-full border border-neutral-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D] disabled:bg-neutral-50'
@@ -435,7 +398,6 @@ export default function RubrosAFPage() {
   const campos    = camposVisibles(form.caso)
   const rubroSel  = catalogo.find(c => c.rubroId === form.rubroId)
   const esTiquetes = rubroSel?.codigo?.trim().startsWith('R04') ?? false
-  // R013 (pólizas/garantías) solo admite Contrapartida en Dinero
   const esSoloDinero = rubroSel?.codigo?.trim().startsWith('R013') ?? false
 
   return (
@@ -447,7 +409,7 @@ export default function RubrosAFPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* Modal de confirmación cuando hay advertencias antes de guardar */}
+      {/* modal de confirmación */}
       <Modal open={!!confirmar} onClose={() => setConfirmar(null)} maxWidth="max-w-lg">
         <div className="p-6 flex flex-col gap-4">
           <div className="flex items-start gap-3">
@@ -487,7 +449,7 @@ export default function RubrosAFPage() {
         </div>
       )}
 
-      {/* Encabezado */}
+      {/* encabezado */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <DollarSign size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -506,8 +468,7 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* Datos clave de la AF (referencia rápida para llenar los rubros).
-          Mostramos horas por grupo, # grupos, total horas y beneficiarios. */}
+      {/* datos clave de la AF, referencia al llenar rubros */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4 flex flex-wrap gap-3">
         <div className="flex-1 min-w-[140px] rounded-xl bg-blue-50 border border-blue-100 px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-600/80">Horas por grupo</p>
@@ -531,7 +492,7 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* Menú — mismo estilo que la página de detalle AF */}
+      {/* menú */}
       <div className="flex flex-wrap gap-2">
         <Link href={`/panel/proyectos/${proyectoId}`}
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-[#00304D] hover:text-white transition">
@@ -578,10 +539,10 @@ export default function RubrosAFPage() {
         </div>
       )}
 
-      {/* ── Formulario arriba, tabla debajo ── */}
+      {/* formulario arriba, tabla debajo */}
       <div className="grid grid-cols-1 gap-6">
 
-        {/* Formulario rubro — solo visible si editable y prereqs OK */}
+        {/* formulario rubro */}
         <div className={`${card} flex flex-col ${(!editable || !prereqs.ok) ? 'hidden' : ''}`}>
           <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
             <div className="w-8 h-8 rounded-xl bg-[#00304D] flex items-center justify-center flex-shrink-0">
@@ -743,7 +704,7 @@ export default function RubrosAFPage() {
           </div>
         </div>
 
-        {/* Tabla rubros registrados + resumen */}
+        {/* tabla + resumen */}
         <div className="flex flex-col gap-4">
           <div className={card}>
             <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
@@ -822,7 +783,7 @@ export default function RubrosAFPage() {
             )}
           </div>
 
-          {/* Resumen presupuestal rubros */}
+          {/* resumen rubros */}
           {rubrosAF.length > 0 && (
             <div className={`${card} p-5`}>
               <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Resumen Rubros AF</p>
@@ -845,7 +806,7 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* ── Gastos de Operación ────────────────────────────────────────────── */}
+      {/* gastos de operación */}
       <div className={card}>
         <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
           <div className="w-8 h-8 rounded-xl bg-amber-700 flex items-center justify-center flex-shrink-0">
@@ -872,7 +833,7 @@ export default function RubrosAFPage() {
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-start">
 
-            {/* Inputs GO */}
+            {/* inputs GO */}
             <div className="flex flex-col gap-4">
               <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800 leading-relaxed">
                 Para proyectos &gt; $200.000.000: máximo 10% del total de las acciones de formación (R09.1).
@@ -922,7 +883,6 @@ export default function RubrosAFPage() {
               )}
             </div>
 
-            {/* Botón guardar GO */}
             {editable && (
               <button onClick={handleGuardarGO} disabled={savingGO || !prereqs.ok}
                 className="inline-flex items-center gap-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition whitespace-nowrap">
@@ -934,7 +894,7 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* ── Transferencia de Conocimiento y Tecnología ────────────────────── */}
+      {/* transferencia de conocimiento y tecnología */}
       <div className={card}>
         <div className="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
           <div className="w-8 h-8 rounded-xl bg-teal-700 flex items-center justify-center flex-shrink-0">
@@ -1026,7 +986,6 @@ export default function RubrosAFPage() {
         </div>
       </div>
 
-      {/* Volver arriba */}
       <div className="flex pt-2 pb-6">
         <button onClick={() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })}
           className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-[#00304D] text-xs font-semibold rounded-xl hover:bg-neutral-50 transition">

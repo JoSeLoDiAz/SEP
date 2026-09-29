@@ -2,11 +2,20 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { leerId, tieneTriggerDeId } from '../common/db/ids'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const oracledb = require('oracledb') as { BIND_OUT: number; NUMBER: unknown }
 
-/** DTO del módulo conveniente para crear o actualizar una plataforma virtual.
- *  Solo expone los 4 campos del legacy "Agregar Plataforma Virtual":
- *  Fecha de remisión, Link, Usuario y Clave. Las respuestas de interventoría
- *  y SENA se diligencian en otros módulos. */
+// NUMBER NOT NULL con DEFAULT NULL en las dos bases, así que un INSERT que las omite da ORA-01400. Son los criterios
+// que califica la interventoría en GeneXus; las filas que GeneXus crea los traen en 0. El SEP no los lee ni los edita
+const CRITERIOS_GENEXUS = [
+  'RENDI', 'COMTEC', 'DISPO', 'INTHERRA', 'IA', 'REDIGI', 'REDIDA', 'FORVIR', 'SESINC', 'FORHIB', 'PAT', 'DISATE',
+  'GESAF', 'GESGRU', 'GESUSU', 'ASIGUSU', 'GESPER', 'GESADM', 'GESCAP', 'GESBEN', 'GESINTER', 'GESSENA',
+  'GESSESSINC', 'REPEXCEL',
+].map((c) => `PLATAFORMASVIRTUALES${c}`)
+
+// solo los 4 campos que edita el conveniente; interventoría y SENA van por otros módulos
 export interface PlataformaVirtualDto {
   fechaRemi: string  // YYYY-MM-DD
   link: string
@@ -25,7 +34,6 @@ const VAL_SENA_LBL: Record<number, string> = { 1: 'CUMPLE', 2: 'NO CUMPLE' }
 export class PlataformasVirtualesService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Lista de plataformas virtuales del proyecto para la tabla. */
   async listar(proyectoId: number) {
     const rows: Array<{
       id: number; proyectoId: number;
@@ -37,26 +45,26 @@ export class PlataformasVirtualesService {
     }> = await this.ds.query(
       `SELECT pv.PLATAFORMASVIRTUALESID         AS "id",
               pv.PROYECTOID                     AS "proyectoId",
-              TRIM(pv.PLATAFORMASVIRTUALESLINK) AS "link",
-              TRIM(pv.PLATAFORMASVIRTUALESUSUARIO) AS "usuario",
-              TRIM(pv.PLATAFORMASVIRTUALESCLAVE)   AS "clave",
+              btrim((pv.PLATAFORMASVIRTUALESLINK)::text) AS "link",
+              btrim((pv.PLATAFORMASVIRTUALESUSUARIO)::text) AS "usuario",
+              btrim((pv.PLATAFORMASVIRTUALESCLAVE)::text)   AS "clave",
               pv.PLATAFORMASVIRTUALESESTADO     AS "estado",
               pv.PLATAFORMASVIRTUALESFECHAREMI  AS "fechaRemi",
               pv.PLATAFORMASVIRTUALESVALSENA    AS "valSena",
-              TRIM(e.EMPRESARAZONSOCIAL)        AS "empresaRazonSocial",
-              TRIM(e.EMPRESASIGLA)              AS "empresaSigla",
-              TRIM(cv.CONVENIOSNUMERO)          AS "convenioNumero"
+              btrim((e.EMPRESARAZONSOCIAL)::text)        AS "empresaRazonSocial",
+              btrim((e.EMPRESASIGLA)::text)              AS "empresaSigla",
+              btrim((cv.CONVENIOSNUMERO)::text)          AS "convenioNumero"
          FROM PLATAFORMASVIRTUALES pv
          JOIN PROYECTO p          ON p.PROYECTOID = pv.PROYECTOID
          LEFT JOIN CONVENIOS cv   ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e      ON e.EMPRESAID = p.EMPRESAID
-        WHERE pv.PROYECTOID = :1
+        WHERE pv.PROYECTOID = $1
         ORDER BY pv.PLATAFORMASVIRTUALESID`,
       [proyectoId],
     )
     const [conv] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     return {
@@ -69,12 +77,11 @@ export class PlataformasVirtualesService {
     }
   }
 
-  /** Detalle de una plataforma virtual para el modal de edición. */
   async getOne(proyectoId: number, id: number) {
     const [row] = await this.ds.query(
       `SELECT pv.*
          FROM PLATAFORMASVIRTUALES pv
-        WHERE pv.PLATAFORMASVIRTUALESID = :1 AND pv.PROYECTOID = :2
+        WHERE pv.PLATAFORMASVIRTUALESID = $1 AND pv.PROYECTOID = $2
         FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
@@ -110,8 +117,7 @@ export class PlataformasVirtualesService {
     if (!dto.clave?.trim()) throw new BadRequestException('Ingresa la clave de acceso.')
   }
 
-  /** El conveniente solo puede editar mientras la interventoría aún no apruebe
-   *  o rechace (ESTADO ∉ {1,2}) y el SENA no haya validado (VALSENA ∉ {1,2}). */
+  // bloquea al conveniente si ESTADO ∈ {1,2} o VALSENA ∈ {1,2}
   private exigirEditableConveniente(row: { estado: number; valSena: number }) {
     const estado = Number(row.estado ?? 0)
     if (estado === 1 || estado === 2) {
@@ -127,17 +133,21 @@ export class PlataformasVirtualesService {
     }
   }
 
-  /** Crea una nueva plataforma virtual (lado conveniente). */
   async crear(proyectoId: number, dto: PlataformaVirtualDto): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
-    const [{ nid }] = await this.ds.query(
-      `SELECT NVL(MAX(PLATAFORMASVIRTUALESID), 0) + 1 AS "nid" FROM PLATAFORMASVIRTUALES`,
-    )
-    const id = Number(nid)
+    // el id lo pone el trigger de id, que la tabla tiene en las dos bases (va NULL); si faltara, MAX+1 como antes.
+    // No va por insertarConId porque la fecha de remisión entra con TO_DATE(:x); el RETURNING trae el id que quedó
+    let idPrevio: number | null = null
+    if (!(await tieneTriggerDeId(this.ds, 'PLATAFORMASVIRTUALES', 'PLATAFORMASVIRTUALESID'))) {
+      const [{ nid }] = await this.ds.query(
+        `SELECT COALESCE(MAX(PLATAFORMASVIRTUALESID), 0) + 1 AS "nid" FROM PLATAFORMASVIRTUALES`,
+      )
+      idPrevio = Number(nid)
+    }
 
-    // Todas las columnas son NOT NULL; los campos que aún no aplican se llenan con
-    // placeholders (N' ' para texto, SYSDATE para fechas, 0 para usuarios/estado).
-    await this.ds.query(
+    // todas las columnas son NOT NULL: lo que no aplica va con placeholder. FECHACON no tiene default y el
+    // formulario no trae una fecha para ella: va la de hoy, en UTC
+    const salida: unknown = await this.ds.query(
       `INSERT INTO PLATAFORMASVIRTUALES
          (PLATAFORMASVIRTUALESID, PROYECTOID,
           PLATAFORMASVIRTUALESFECHAREMI, PLATAFORMASVIRTUALESRADINTER, PLATAFORMASVIRTUALESRADRESINTE,
@@ -145,33 +155,35 @@ export class PlataformasVirtualesService {
           PLATAFORMASVIRTUALESFECRADSENA, PLATAFORMASVIRTUALESLINK, PLATAFORMASVIRTUALESUSUARIO,
           PLATAFORMASVIRTUALESCLAVE, PLATAFORMASVIRTUALESESTADO, PLATAFORMASVIRTUALESFECHAREG,
           PLATAFORMASVIRTUALESUSUREGISTR, PLATAFORMASVIRTUALESOBSERVACIO,
-          PLATAFORMASVIRTUALESUSUSENA, PLATAFORMASVIRTUALESOBSSENA, PLATAFORMASVIRTUALESVALSENA)
-       VALUES (:1, :2,
-               TO_DATE(:3, 'YYYY-MM-DD'), N' ', N' ',
-               SYSDATE, N' ', N' ',
-               SYSDATE, :4, :5,
-               :6, 0, SYSDATE,
+          PLATAFORMASVIRTUALESUSUSENA, PLATAFORMASVIRTUALESOBSSENA, PLATAFORMASVIRTUALESVALSENA,
+          PLATAFORMASVIRTUALESFECHACON, ${CRITERIOS_GENEXUS.join(', ')})
+       VALUES ($1, $2,
+               TO_DATE($3, 'YYYY-MM-DD'), N' ', N' ',
+               ${AHORA_UTC}, N' ', N' ',
+               ${AHORA_UTC}, $4, $5,
+               $6, 0, ${AHORA_UTC},
                0, N' ',
-               0, N' ', 0)`,
+               0, N' ', 0,
+               ${AHORA_UTC}, ${CRITERIOS_GENEXUS.map(() => '0').join(', ')})
+       RETURNING PLATAFORMASVIRTUALESID INTO $7`,
       [
-        id, proyectoId,
+        idPrevio, proyectoId,
         dto.fechaRemi,
         dto.link.trim(), dto.usuario.trim(), dto.clave.trim(),
+        { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       ],
     )
+    const id = leerId(salida, 'PLATAFORMASVIRTUALES')
     return { mensaje: 'Plataforma virtual registrada correctamente.', id }
   }
 
-  /** Actualiza una plataforma virtual (lado conveniente).
-   *  Valida que la interventoría no haya emitido veredicto y que el SENA no
-   *  haya validado. Solo modifica fechaRemi, link, usuario y clave. */
   async actualizar(proyectoId: number, id: number, dto: PlataformaVirtualDto): Promise<{ mensaje: string }> {
     this.validar(dto)
     const [existe] = await this.ds.query(
       `SELECT PLATAFORMASVIRTUALESESTADO AS "estado",
               PLATAFORMASVIRTUALESVALSENA AS "valSena"
          FROM PLATAFORMASVIRTUALES
-        WHERE PLATAFORMASVIRTUALESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE PLATAFORMASVIRTUALESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Plataforma virtual no encontrada.')
@@ -179,11 +191,11 @@ export class PlataformasVirtualesService {
 
     await this.ds.query(
       `UPDATE PLATAFORMASVIRTUALES SET
-          PLATAFORMASVIRTUALESFECHAREMI = TO_DATE(:1, 'YYYY-MM-DD'),
-          PLATAFORMASVIRTUALESLINK      = :2,
-          PLATAFORMASVIRTUALESUSUARIO   = :3,
-          PLATAFORMASVIRTUALESCLAVE     = :4
-        WHERE PLATAFORMASVIRTUALESID = :5`,
+          PLATAFORMASVIRTUALESFECHAREMI = TO_DATE($1, 'YYYY-MM-DD'),
+          PLATAFORMASVIRTUALESLINK      = $2,
+          PLATAFORMASVIRTUALESUSUARIO   = $3,
+          PLATAFORMASVIRTUALESCLAVE     = $4
+        WHERE PLATAFORMASVIRTUALESID = $5`,
       [
         dto.fechaRemi,
         dto.link.trim(), dto.usuario.trim(), dto.clave.trim(),
@@ -193,7 +205,6 @@ export class PlataformasVirtualesService {
     return { mensaje: 'Plataforma virtual actualizada.' }
   }
 
-  /** Elimina una plataforma virtual (solo admin). */
   async eliminar(proyectoId: number, id: number, perfilId: number): Promise<{ mensaje: string }> {
     const PERFIL_ADMIN = 1
     if (perfilId !== PERFIL_ADMIN) {
@@ -201,16 +212,15 @@ export class PlataformasVirtualesService {
     }
     const [existe] = await this.ds.query(
       `SELECT PLATAFORMASVIRTUALESID AS "id" FROM PLATAFORMASVIRTUALES
-        WHERE PLATAFORMASVIRTUALESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE PLATAFORMASVIRTUALESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Plataforma virtual no encontrada.')
-    await this.ds.query(`DELETE FROM PLATAFORMASVIRTUALES WHERE PLATAFORMASVIRTUALESID = :1`, [id])
+    await this.ds.query(`DELETE FROM PLATAFORMASVIRTUALES WHERE PLATAFORMASVIRTUALESID = $1`, [id])
     return { mensaje: 'Plataforma virtual eliminada.' }
   }
 
-  /** Exporta a Excel todas las plataformas virtuales del proyecto.
-   *  Mantiene las 24 columnas del legacy `PExportarHerramienta`. */
+  // mantiene las 24 columnas del legacy PExportarHerramienta
   async exportarExcel(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
     type Row = {
       id: number; consec: number;
@@ -228,32 +238,32 @@ export class PlataformasVirtualesService {
     const rows: Row[] = await this.ds.query(
       `SELECT pv.PLATAFORMASVIRTUALESID                 AS "id",
               ROW_NUMBER() OVER (ORDER BY pv.PLATAFORMASVIRTUALESID) AS "consec",
-              TRIM(co.CONVOCATORIANOMBRE)               AS "convocatoria",
-              TRIM(cv.CONVENIOSNUMERO)                  AS "conveniosNumero",
+              btrim((co.CONVOCATORIANOMBRE)::text)               AS "convocatoria",
+              btrim((cv.CONVENIOSNUMERO)::text)                  AS "conveniosNumero",
               e.EMPRESAIDENTIFICACION                   AS "empresaIdentificacion",
               e.EMPRESADIGITOVERIFICACION               AS "empresaDigitoVerif",
-              TRIM(e.EMPRESARAZONSOCIAL)                AS "empresaRazonSocial",
-              TRIM(e.EMPRESASIGLA)                      AS "empresaSigla",
+              btrim((e.EMPRESARAZONSOCIAL)::text)                AS "empresaRazonSocial",
+              btrim((e.EMPRESASIGLA)::text)                      AS "empresaSigla",
               p.PROYECTOID                              AS "proyectoIdVal",
               pv.PLATAFORMASVIRTUALESFECHAREMI          AS "fechaRemi",
-              TRIM(pv.PLATAFORMASVIRTUALESRADINTER)     AS "radInter",
+              btrim((pv.PLATAFORMASVIRTUALESRADINTER)::text)     AS "radInter",
               pv.PLATAFORMASVIRTUALESFECRADRES          AS "fecRadRes",
-              TRIM(pv.PLATAFORMASVIRTUALESRADRESINTE)   AS "radResInter",
-              TRIM(pv.PLATAFORMASVIRTUALESNISSENA)      AS "nisSena",
-              TRIM(pv.PLATAFORMASVIRTUALESRADSENA)      AS "radSena",
+              btrim((pv.PLATAFORMASVIRTUALESRADRESINTE)::text)   AS "radResInter",
+              btrim((pv.PLATAFORMASVIRTUALESNISSENA)::text)      AS "nisSena",
+              btrim((pv.PLATAFORMASVIRTUALESRADSENA)::text)      AS "radSena",
               pv.PLATAFORMASVIRTUALESFECRADSENA         AS "fecRadSena",
-              TRIM(pv.PLATAFORMASVIRTUALESLINK)         AS "link",
-              TRIM(pv.PLATAFORMASVIRTUALESUSUARIO)      AS "usuario",
-              TRIM(pv.PLATAFORMASVIRTUALESCLAVE)        AS "clave",
+              btrim((pv.PLATAFORMASVIRTUALESLINK)::text)         AS "link",
+              btrim((pv.PLATAFORMASVIRTUALESUSUARIO)::text)      AS "usuario",
+              btrim((pv.PLATAFORMASVIRTUALESCLAVE)::text)        AS "clave",
               pv.PLATAFORMASVIRTUALESESTADO             AS "estado",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = pv.PLATAFORMASVIRTUALESUSUREGISTR
                 FETCH FIRST 1 ROW ONLY)                AS "usuRegistroInter",
-              TRIM(pv.PLATAFORMASVIRTUALESOBSERVACIO)   AS "observacion",
+              btrim((pv.PLATAFORMASVIRTUALESOBSERVACIO)::text)   AS "observacion",
               pv.PLATAFORMASVIRTUALESVALSENA            AS "valSena",
-              TRIM(pv.PLATAFORMASVIRTUALESOBSSENA)      AS "obsSena",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              btrim((pv.PLATAFORMASVIRTUALESOBSSENA)::text)      AS "obsSena",
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = pv.PLATAFORMASVIRTUALESUSUSENA
                 FETCH FIRST 1 ROW ONLY)                AS "usuRegistroSena"
@@ -262,7 +272,7 @@ export class PlataformasVirtualesService {
          LEFT JOIN CONVENIOS cv    ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e       ON e.EMPRESAID = p.EMPRESAID
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE pv.PROYECTOID = :1
+        WHERE pv.PROYECTOID = $1
         ORDER BY pv.PLATAFORMASVIRTUALESID`,
       [proyectoId],
     )

@@ -9,12 +9,7 @@ import { StepDatosEmpresa } from './step-datos-empresa'
 import { StepConfirmar } from './step-confirmar'
 import api from '@/lib/api'
 
-// ── Steps ──────────────────────────────────────────────────────────────────
-// 0 = Habeas Data
-// 1 = Buscar Persona
-// 2 = Datos Básicos
-// 3 = Datos Empresa
-// 4 = Confirmar
+// steps: 0 habeas data, 1 buscar persona, 2 datos básicos, 3 empresa, 4 confirmar
 
 interface Props {
   eventoId: number
@@ -88,14 +83,12 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
   const [alerta, setAlerta] = useState<Alerta>(null)
   const [personaExistente, setPersonaExistente] = useState(false)
 
-  // Catálogos
   const [departamentos, setDepartamentos] = useState<{ id: string; nombre: string }[]>([])
   const [ciudades, setCiudades] = useState<{ id: string; nombre: string }[]>([])
   const [caracterizaciones, setCaracterizaciones] = useState<{ id: string; nombre: string }[]>([])
   const [nivelesOcupacionales, setNivelesOcupacionales] = useState<{ id: string; nombre: string }[]>([])
   const [conferencias, setConferencias] = useState<{ id: string; nombre: string }[]>([])
 
-  // Cargar catálogos al montar
   useEffect(() => {
     Promise.all([
       api.get<{ id: string; nombre: string }[]>('/catalogos/departamentos'),
@@ -134,7 +127,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     }
   }, [])
 
-  // ── Step 0: Habeas Data ──────────────────────────────────────────────────
   const handleAceptar = () => {
     setStep(1)
     setAlerta(null)
@@ -144,7 +136,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     window.location.href = '/eventos'
   }
 
-  // ── Step 1: Buscar Persona ───────────────────────────────────────────────
   const handleBuscarPersona = async () => {
     if (!state.tipoIdentificacion || !state.identificacion.trim()) {
       setAlerta({ msg: 'Debe seleccionar el tipo de documento e ingresar el número.', tipo: 'error' })
@@ -199,7 +190,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
       const esExistente = !!data.personaId
       setPersonaExistente(esExistente)
 
-      // Si ya tiene departamento, cargar ciudades
       if (data.personaDepartamentoId) {
         try {
           const ciudadesRes = await api.get<{ id: string; nombre: string }[]>(
@@ -220,7 +210,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     }
   }
 
-  // ── Step 2: Guardar Datos Básicos ────────────────────────────────────────
   const handleGuardarDatosBasicos = async () => {
     const required = [
       state.personaNombres, state.personaPrimerApellido, state.generoId,
@@ -270,13 +259,12 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     }
   }
 
-  // Persona existente con valiarRegistro=1 (tiene persona pero no postulación del año)
+  // valiarRegistro=1: la persona ya existe pero no tiene postulación del año
   const handleAvanzarExistente = () => {
     setStep(3)
     setAlerta(null)
   }
 
-  // ── Step 3: Buscar Empresa ───────────────────────────────────────────────
   const handleBuscarEmpresa = async () => {
     if (!state.tipoDocEmpresa || !state.beneficiarioEmpresaNumero.trim()) {
       setAlerta({ msg: 'Ingrese el tipo de documento y número de la empresa.', tipo: 'error' })
@@ -308,7 +296,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
   }
 
   const handleCrearEmpresa = () => {
-    // Redirige al formulario de creación de empresa (nueva pestaña)
     window.open('/empresas/nueva', '_blank')
   }
 
@@ -346,7 +333,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     }
   }
 
-  // ── Step 4: Confirmar Inscripción ────────────────────────────────────────
   const handleConfirmar = async () => {
     if (state.validarConferencia && !state.conferenciaId) {
       setAlerta({ msg: 'Debe seleccionar el tipo de evento al cual desea participar.', tipo: 'error' })
@@ -363,7 +349,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
         identificacion: state.identificacion,
       })
       setAlerta({ msg: '¡Inscripción realizada exitosamente! Recibirá confirmación en su correo electrónico.', tipo: 'success' })
-      // Deshabilitar el botón permanentemente — el usuario ya está inscrito
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -374,12 +359,10 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
     }
   }
 
-  // ── Stepper visual ───────────────────────────────────────────────────────
   const STEP_LABELS = ['Habeas Data', 'Identificación', 'Datos Básicos', 'Empresa', 'Confirmar']
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Stepper */}
       {step > 0 && (
         <div className="flex items-center gap-0 overflow-x-auto pb-1">
           {STEP_LABELS.slice(1).map((label, i) => {
@@ -405,7 +388,6 @@ export function RegistroWizard({ eventoId, eventoNombre }: Props) {
         </div>
       )}
 
-      {/* Steps */}
       {step === 0 && (
         <StepHabeasData
           eventoNombre={eventoNombre}

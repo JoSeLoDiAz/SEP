@@ -1,6 +1,7 @@
 'use client'
 
 import api from '@/lib/api'
+import { bytesUtf8, limitarEdicionBytes } from '@/lib/bytes-utf8'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import { Modal } from '@/components/ui/modal'
 import {
@@ -8,8 +9,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-
-// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 interface Fuente       { id: number; nombre: string }
 interface Herramienta  { id: number; herramienta: string; muestra: number }
@@ -28,11 +27,12 @@ interface Diagnostico {
   necesidades: NecFormacion[]
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 const inputCls    = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D] transition bg-white'
 const selectCls   = inputCls + ' appearance-none cursor-pointer'
 const textareaCls = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00304D]/30 focus:border-[#00304D] transition bg-white resize-y min-h-[110px]'
+
+// NECESIDADHERROTRA es VARCHAR2(40 BYTE) en el Exadata (en el XE, 100): una letra con tilde o una ñ ocupan 2
+const HERR_OTRA_MAX_BYTES = 40
 
 function SectionCard({ title, color = '#00304D', children }: {
   title: string; color?: string; children: React.ReactNode
@@ -64,8 +64,6 @@ function Field({ label, req, hint, children }: {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 export default function DetalleDiagnosticoPage() {
   const { id } = useParams<{ id: string }>()
   const router  = useRouter()
@@ -76,34 +74,29 @@ export default function DetalleDiagnosticoPage() {
   const [diag,      setDiag]      = useState<Diagnostico | null>(null)
   const [fuentes,   setFuentes]   = useState<Fuente[]>([])
 
-  // ── Campos diagnóstico ────────────────────────────────────────────────────
   const [periodoI,      setPeriodoI]      = useState('')
   const [herrOtra,      setHerrOtra]      = useState('')
+  const [herrOtraRecortada, setHerrOtraRecortada] = useState(false)
   const [herrCreacion,  setHerrCreacion]  = useState('0')
   const [planCapa,      setPlanCapa]      = useState('0')
   const [herrDescrip,   setHerrDescrip]   = useState('')
   const [herrResultados,setHerrResultados]= useState('')
 
-  // ── Herramienta nueva ─────────────────────────────────────────────────────
   const [fuenteSelId, setFuenteSelId] = useState(0)
   const [muestra,     setMuestra]     = useState('')
   const [agHerr,      setAgHerr]      = useState(false)
 
-  // ── Necesidad formación ───────────────────────────────────────────────────
   const [nfNombre, setNfNombre] = useState('')
   const [nfBenef,  setNfBenef]  = useState('')
   const [agNf,     setAgNf]     = useState(false)
 
-  // ── Editar necesidad ──────────────────────────────────────────────────────
   const [editNf, setEditNf] = useState<NecFormacion | null>(null)
   const [editNombre, setEditNombre] = useState('')
   const [editBenef,  setEditBenef]  = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
-  // ── Modal eliminar ────────────────────────────────────────────────────────
   const [modalDel, setModalDel] = useState<{ tipo: 'herr' | 'nf'; id: number } | null>(null)
 
-  // ── Toast ─────────────────────────────────────────────────────────────────
   const [toast,    setToast]    = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
   const toastKey   = useRef(0)
   const [toastKey2,setToastKey2]= useState(0)
@@ -113,8 +106,6 @@ export default function DetalleDiagnosticoPage() {
     setToast({ tipo, msg })
     setToastKey2(toastKey.current)
   }
-
-  // ── Carga inicial ─────────────────────────────────────────────────────────
 
   async function cargar() {
     try {
@@ -126,6 +117,7 @@ export default function DetalleDiagnosticoPage() {
       setDiag(d)
       setPeriodoI(d.periodoI ? d.periodoI.slice(0, 10) : '')
       setHerrOtra(d.herrOtra ?? '')
+      setHerrOtraRecortada(false)
       setHerrCreacion(String(d.herrCreacion ?? 0))
       setPlanCapa(String(d.planCapa ?? 0))
       setHerrDescrip(d.herrDescrip ?? '')
@@ -144,11 +136,28 @@ export default function DetalleDiagnosticoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Guardar diagnóstico ───────────────────────────────────────────────────
+  // si no cabe, se recorta lo que se escribió o pegó, no la cola del texto; un valor que ya venía largo (el XE
+  // admite 100) no se deja crecer, solo acortar a mano
+  function cambiarHerrOtra(e: React.ChangeEvent<HTMLInputElement>) {
+    const campo = e.target
+    const r = limitarEdicionBytes(herrOtra, campo.value, campo.selectionStart, HERR_OTRA_MAX_BYTES)
+    setHerrOtraRecortada(r.recortado)
+    setHerrOtra(r.valor)
+    // React devuelve el campo al valor recortado y el cursor salta al final: se deja donde acabó lo que sí cupo
+    if (r.recortado) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === campo) campo.setSelectionRange(r.cursor, r.cursor)
+      })
+    }
+  }
 
   async function guardarDiagnostico() {
     if (!herrDescrip.trim() || !herrResultados.trim()) {
       showToast('error', 'La descripción y el resumen de resultados son obligatorios')
+      return
+    }
+    if (bytesUtf8(herrOtra) > HERR_OTRA_MAX_BYTES) {
+      showToast('error', `"Otro tipo de herramienta" ocupa ${bytesUtf8(herrOtra)} de ${HERR_OTRA_MAX_BYTES} posibles (cada tilde o ñ cuenta 2): acórtelo para guardar`)
       return
     }
     setGuardando(true)
@@ -169,8 +178,6 @@ export default function DetalleDiagnosticoPage() {
       setGuardando(false)
     }
   }
-
-  // ── Herramientas ──────────────────────────────────────────────────────────
 
   async function agregarHerramienta() {
     if (!fuenteSelId || !muestra) {
@@ -201,8 +208,6 @@ export default function DetalleDiagnosticoPage() {
       showToast('error', 'Error al eliminar')
     }
   }
-
-  // ── Necesidades de formación ──────────────────────────────────────────────
 
   async function agregarNecesidad() {
     if (!nfNombre.trim() || !nfBenef) {
@@ -263,13 +268,14 @@ export default function DetalleDiagnosticoPage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   if (loading) return (
     <div className="flex justify-center py-24">
       <Loader2 size={32} className="animate-spin text-[#00304D]" />
     </div>
   )
+
+  const herrOtraBytes = bytesUtf8(herrOtra)
+  const herrOtraExcedida = herrOtraBytes > HERR_OTRA_MAX_BYTES
 
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
@@ -279,7 +285,6 @@ export default function DetalleDiagnosticoPage() {
           mensaje={toast.msg} duration={4500} />
       )}
 
-      {/* Modal eliminar */}
       <Modal open={!!modalDel} onClose={() => setModalDel(null)}>
         <div className="flex flex-col items-center gap-4 p-2">
           <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
@@ -304,7 +309,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </Modal>
 
-      {/* Modal editar necesidad */}
       {editNf && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 flex flex-col gap-4">
@@ -333,7 +337,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ClipboardList size={22} className="text-white" />
@@ -353,9 +356,7 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </div>
 
-      {/* ── Diagnóstico de necesidades ──────────────────────────────────── */}
       <SectionCard title="Aplicación Diagnóstico de Necesidades de Formación" color="#00304D">
-        {/* Herramientas utilizadas */}
         <div className="flex flex-col gap-4 mb-6">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
             Herramientas y Muestra Poblacional
@@ -431,16 +432,27 @@ export default function DetalleDiagnosticoPage() {
           )}
         </div>
 
-        {/* Campos del diagnóstico */}
         <div className="flex flex-col gap-4 border-t border-neutral-100 pt-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Fecha de diagnóstico" req>
               <input type="date" value={periodoI} onChange={e => setPeriodoI(e.target.value)}
                 className={inputCls} />
             </Field>
-            <Field label="Otro tipo de herramienta, ¿cuál?">
-              <input type="text" value={herrOtra} onChange={e => setHerrOtra(e.target.value)}
+            <Field label="Otro tipo de herramienta, ¿cuál?" hint={`Máx. ${HERR_OTRA_MAX_BYTES}`}>
+              <input type="text" value={herrOtra} onChange={cambiarHerrOtra}
                 className={inputCls} placeholder="Especifique si aplica…" />
+              <span className={`text-xs text-right ${herrOtraExcedida ? 'text-red-600' : 'text-neutral-400'}`}>
+                {herrOtraBytes}/{HERR_OTRA_MAX_BYTES} · cada tilde o ñ cuenta 2
+              </span>
+              {herrOtraExcedida ? (
+                <span className="text-xs text-red-600">
+                  Ocupa {herrOtraBytes} de {HERR_OTRA_MAX_BYTES} posibles: acórtelo para poder guardar.
+                </span>
+              ) : herrOtraRecortada && (
+                <span className="text-xs text-amber-700">
+                  Se recortó al máximo de {HERR_OTRA_MAX_BYTES}: revise que haya quedado completo.
+                </span>
+              )}
             </Field>
             <Field label="¿La herramienta es de creación propia?">
               <div className="relative">
@@ -490,7 +502,6 @@ export default function DetalleDiagnosticoPage() {
         </div>
       </SectionCard>
 
-      {/* ── Necesidades de formación detectadas ────────────────────────── */}
       <SectionCard title="Necesidades de Formación Detectadas">
         <p className="text-xs text-neutral-500 mb-4 leading-relaxed">
           A continuación podrá registrar la necesidad detectada y el número de posibles beneficiarios.
@@ -517,7 +528,6 @@ export default function DetalleDiagnosticoPage() {
           </div>
         </div>
 
-        {/* Lista de necesidades registradas */}
         {diag && diag.necesidades.length > 0 && (
           <>
             {/* Desktop */}

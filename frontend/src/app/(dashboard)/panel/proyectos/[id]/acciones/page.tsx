@@ -12,8 +12,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Fragment, useEffect, useRef, useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Proyecto {
   proyectoId: number
   nombre: string
@@ -34,17 +32,12 @@ interface AF {
 
 interface Opcion { id: number; nombre: string }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function puedeEditar(p: Proyecto | null) {
   if (!p) return false
   const estado = Number(p.estado)
-  // Estado 2 (Reversado/Subsanación) siempre editable. Estado 0 requiere
-  // convocatoria abierta. Los demás estados son solo lectura.
+  // estado 2 (subsanación) siempre editable; estado 0 solo con convocatoria abierta
   return estado === 2 || (estado === 0 && p.convocatoriaEstado !== 0)
 }
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AccionesPage() {
   const { id } = useParams<{ id: string }>()
@@ -54,7 +47,6 @@ export default function AccionesPage() {
   const [afs, setAfs]             = useState<AF[]>([])
   const [loading, setLoading]     = useState(true)
 
-  // Crear AF modal
   const [modalOpen, setModalOpen]             = useState(false)
   const [tiposEvento, setTiposEvento]         = useState<Opcion[]>([])
   const [modalidades, setModalidades]         = useState<Opcion[]>([])
@@ -62,11 +54,9 @@ export default function AccionesPage() {
   const [creando, setCreando]                 = useState(false)
   const nombreRef                             = useRef<HTMLInputElement>(null)
 
-  // Eliminar AF
   const [confirmElim, setConfirmElim]         = useState<{ id: number; nombre: string } | null>(null)
   const [eliminando, setEliminando]           = useState(false)
 
-  // Toast
   const toastKey  = useRef(0)
   const [toastK2, setToastK2]                 = useState(0)
   const [toast, setToast]                     = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null)
@@ -76,8 +66,6 @@ export default function AccionesPage() {
     setToast({ tipo, msg })
     setToastK2(toastKey.current)
   }
-
-  // ── Load ──────────────────────────────────────────────────────────────────
 
   async function cargar() {
     try {
@@ -99,8 +87,6 @@ export default function AccionesPage() {
     cargar()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proyectoId])
-
-  // ── Crear AF ──────────────────────────────────────────────────────────────
 
   async function abrirModal() {
     setForm({ nombre: '', tipoEventoId: '', modalidadFormacionId: '', numBenef: '' })
@@ -145,8 +131,6 @@ export default function AccionesPage() {
     }
   }
 
-  // ── Eliminar AF ───────────────────────────────────────────────────────────
-
   async function confirmarEliminar() {
     if (!confirmElim) return
     setEliminando(true)
@@ -162,8 +146,6 @@ export default function AccionesPage() {
       setEliminando(false)
     }
   }
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -190,7 +172,6 @@ export default function AccionesPage() {
         />
       )}
 
-      {/* ── Encabezado ─────────────────────────────────────────────────── */}
       <div className="bg-[#00304D] rounded-2xl px-6 py-4 flex flex-wrap items-center gap-3">
         <Layers size={22} className="text-white flex-shrink-0" />
         <div className="flex flex-col flex-1 min-w-0">
@@ -207,7 +188,6 @@ export default function AccionesPage() {
         </div>
       </div>
 
-      {/* ── Menú secciones (uniforme) ────────────────────────────────── */}
       <ProyectoTabs proyectoId={proyectoId} active="acciones" extraTabs={
         Number(proyecto?.estado) !== 3 ? (
           <span className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl border ${
@@ -220,10 +200,8 @@ export default function AccionesPage() {
         ) : null
       } />
 
-      {/* ── Tabla / Cards ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden">
 
-        {/* Header de la sección */}
         <div className="px-5 py-4 border-b border-neutral-100 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 flex-1">
             <ClipboardList size={15} className="text-[#00304D]" />
@@ -418,7 +396,6 @@ export default function AccionesPage() {
         )}
       </div>
 
-      {/* ── Modal crear AF ─────────────────────────────────────────────── */}
       <Modal open={modalOpen} onClose={() => !creando && setModalOpen(false)} maxWidth="max-w-lg">
         <div className="flex flex-col">
           <div className="flex items-center gap-3 px-6 py-4 bg-[#00304D]">
@@ -430,7 +407,6 @@ export default function AccionesPage() {
           </div>
           <div className="px-6 py-5 flex flex-col gap-4">
 
-            {/* Nombre */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">
                 Nombre de la Acción de Formación <span className="text-red-500">*</span>
@@ -446,7 +422,6 @@ export default function AccionesPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Tipo de evento */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">
                   Tipo de Evento <span className="text-red-500">*</span>
@@ -461,7 +436,6 @@ export default function AccionesPage() {
                 </select>
               </div>
 
-              {/* Modalidad de formación */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">
                   Modalidad <span className="text-red-500">*</span>
@@ -476,7 +450,6 @@ export default function AccionesPage() {
                 </select>
               </div>
 
-              {/* N° Beneficiarios */}
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">
                   Número de Beneficiarios <span className="text-red-500">*</span>
@@ -514,7 +487,6 @@ export default function AccionesPage() {
         </div>
       </Modal>
 
-      {/* ── Modal confirmar eliminar ────────────────────────────────────── */}
       <Modal open={!!confirmElim} onClose={() => !eliminando && setConfirmElim(null)} maxWidth="max-w-sm">
         <div className="p-6 flex flex-col gap-5">
           <div className="flex flex-col gap-1">

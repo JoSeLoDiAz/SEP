@@ -11,7 +11,6 @@ import { CertificacionService } from './certificacion.service'
 export class CertificacionController {
   constructor(private readonly svc: CertificacionService) {}
 
-  /** Cabecera: AF, grupo, modalidad, evento, horas totales. */
   @Get('proyecto/:proyectoId/grupo/:afGrupoId')
   getCabecera(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -20,7 +19,6 @@ export class CertificacionController {
     return this.svc.getCabecera(proyectoId, afGrupoId)
   }
 
-  /** Combobox de UTs del AF. */
   @Get('proyecto/:proyectoId/grupo/:afGrupoId/unidades')
   listarUnidades(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -29,7 +27,7 @@ export class CertificacionController {
     return this.svc.listarUnidades(proyectoId, afGrupoId)
   }
 
-  /** Sesiones de la UT (presenciales o virtuales según modalidad). */
+  // devuelve presenciales o virtuales según la modalidad
   @Get('proyecto/:proyectoId/grupo/:afGrupoId/unidad/:utId/sesiones')
   listarSesiones(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -39,7 +37,6 @@ export class CertificacionController {
     return this.svc.listarSesiones(proyectoId, afGrupoId, utId)
   }
 
-  /** Beneficiarios del grupo con sus UTHoras actuales para una UT. */
   @Get('proyecto/:proyectoId/grupo/:afGrupoId/unidad/:utId/beneficiarios')
   listarBeneficiarios(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -49,8 +46,7 @@ export class CertificacionController {
     return this.svc.listarBeneficiarios(proyectoId, afGrupoId, utId)
   }
 
-  /** Certifica masivamente a todos los beneficiarios activos del grupo con
-   *  las horas máximas de cada sesión. No sobrescribe filas con horas > 0. */
+  // no sobrescribe filas que ya tienen horas > 0
   @Post('proyecto/:proyectoId/grupo/:afGrupoId/unidad/:utId/masivo')
   certificarMasivo(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -60,7 +56,6 @@ export class CertificacionController {
     return this.svc.certificarMasivo(proyectoId, afGrupoId, utId)
   }
 
-  /** Datos del Reporte de Asistencia: cabecera + UTs + beneficiarios + horas. */
   @Get('proyecto/:proyectoId/grupo/:afGrupoId/asistencia')
   getReporteAsistencia(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,
@@ -69,7 +64,6 @@ export class CertificacionController {
     return this.svc.getReporteAsistencia(proyectoId, afGrupoId)
   }
 
-  /** Descarga del Reporte de Asistencia en Excel (.xlsx) con cabecera F2.x/F3.1. */
   @Get('proyecto/:proyectoId/grupo/:afGrupoId/asistencia/excel')
   @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   async exportarAsistenciaExcel(
@@ -83,7 +77,6 @@ export class CertificacionController {
     res.end(buffer)
   }
 
-  /** Guarda las UTHoras de un beneficiario en una UT. */
   @Post('proyecto/:proyectoId/grupo/:afGrupoId/unidad/:utId/persona/:personaId')
   guardarHoras(
     @Param('proyectoId', ParseIntPipe) proyectoId: number,

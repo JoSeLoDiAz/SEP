@@ -47,7 +47,7 @@ export function StepDatosEmpresa({
   return (
     <div className="flex flex-col gap-6">
       {/* Datos Empresariales */}
-      <div className="flex items-center gap-3 px-5 py-3 text-white font-semibold text-base rounded-lg shadow-sm" style={{ backgroundColor: '#00324D' }}>
+      <div className="flex items-center gap-3 px-5 py-3 text-white font-semibold text-base rounded-lg shadow-sm" style={{ backgroundColor: '#00304D' }}>
         <span>💼</span> Datos Empresariales
       </div>
 

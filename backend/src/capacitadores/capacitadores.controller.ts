@@ -7,6 +7,7 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import type { Response } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CapacitadoresService } from './capacitadores.service'
+import { contentDisposition } from '../common/text/nombre-archivo'
 
 interface MulterFile {
   originalname: string
@@ -95,7 +96,7 @@ export class CapacitadoresController {
   ) {
     const { nombreArchivo, buffer } = await this.svc.getDocumentoEmpresaArchivo(docId)
     res.setHeader('Content-Type', 'application/pdf')
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombreArchivo)}"`)
+    res.setHeader('Content-Disposition', contentDisposition(nombreArchivo, true))
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)
   }

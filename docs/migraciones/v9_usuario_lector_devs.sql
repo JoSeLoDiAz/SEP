@@ -1,7 +1,4 @@
--- ══════════════════════════════════════════════════════════════════
 --   v9 — Crear usuario SEP_LECTOR (solo lectura) para los devs
---   Ejecutar como SEPLOCAL en la BD del servidor centralizado.
--- ══════════════════════════════════════════════════════════════════
 
 -- 1. Borrar si ya existe (idempotente)
 BEGIN
@@ -11,8 +8,6 @@ END;
 /
 
 -- 2. Crear usuario con la contraseña inicial
---    Reemplaza <CLAVE_INICIAL> antes de ejecutar. NO commitees el script
---    con la contraseña real; pásala por canal seguro a los devs.
 CREATE USER SEP_LECTOR IDENTIFIED BY "<CLAVE_INICIAL>"
   DEFAULT TABLESPACE USERS
   TEMPORARY TABLESPACE TEMP

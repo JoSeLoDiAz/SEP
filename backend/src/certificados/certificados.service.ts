@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { DataSource } from 'typeorm';
+import { leerDocumento } from '../common/documentos/documentos-disco';
 
 const PDFDocument: new (
   opts?: Record<string, unknown>,
@@ -129,50 +130,116 @@ function anoEnLetras(a: number): string {
   return result.trim();
 }
 
+// Fila de la tabla pública: campos genéricos porque el evaluador no tiene empresa ni AF
+export interface CertificadoPublico {
+  consecutivo: number;
+  tipo: 'BENEFICIARIO' | 'EVALUADOR';
+  tipoNombre: string;
+  entidad: string;
+  concepto: string;
+  detalle: string;
+  fecha: string;
+  /** Epoch en ms, solo para ordenar. No se pinta. */
+  fechaOrden: number;
+  codigo: string;
+  urlPdf: string;
+  personaId: number;
+}
+
+const ENTIDAD_EVALUADOR =
+  'SENA — Grupo de Gestión para la Productividad y la Competitividad';
+
 @Injectable()
 export class CertificadosService {
   constructor(private readonly dataSource: DataSource) {}
 
-  /** Busca PersonaId por tipo doc + número de identificación */
+  /** Un documento se escribe de muchas formas: `53.068.755`, `53 068 755`. Todas son el mismo número. */
+  private normalizarDocumento(v: string): string {
+    return v.replace(/[.\s-]/g, '').trim();
+  }
+
+  /**
+   * Busca la persona por documento exacto, no por coincidencia.
+   *
+   * Antes iba con `LIKE '%numero%'`, y un comodín por delante impide usar el índice: PostgreSQL recorría las 292.201
+   * filas de `persona` y descartaba 284.029 una a una, **160 ms**. Con igualdad entra por `ipersona2`, el índice
+   * único del documento: **0,6 ms**.
+   *
+   * Además de más rápido es más correcto: con `LIKE`, escribir `5306` devolvía los certificados de cualquiera cuyo
+   * documento contuviera esas cifras.
+   */
   private async findPersonaId(
     tipoDocAbrev: string,
     identificacion: string,
   ): Promise<number | null> {
     const substring = TIPO_DOC_MAP[tipoDocAbrev.toUpperCase()] ?? tipoDocAbrev;
     const rows = await this.dataSource.query(
-      `SELECT P.PERSONAID FROM PERSONA P
-       JOIN TIPODOCUMENTOIDENTIDAD T ON T.TIPODOCUMENTOIDENTIDADID = P.TIPODOCUMENTOIDENTIDADID
-       WHERE UPPER(TO_CHAR(T.TIPODOCUMENTOIDENTIDADNOMBRE)) LIKE UPPER(:param_0)
-         AND TO_CHAR(P.PERSONAIDENTIFICACION) LIKE :param_1`,
-      [`%${substring}%`, `%${identificacion}%`],
+      `SELECT p.personaid AS "personaId"
+         FROM persona p
+         JOIN tipodocumentoidentidad t ON t.tipodocumentoidentidadid = p.tipodocumentoidentidadid
+        WHERE p.personaidentificacion = $1
+          AND upper(t.tipodocumentoidentidadnombre) LIKE upper($2)`,
+      [this.normalizarDocumento(identificacion), `%${substring}%`],
     );
-    return rows.length ? (rows[0]['PERSONAID'] as number) : null;
+    return rows.length ? (rows[0]['personaId'] as number) : null;
   }
 
-  /** Lista certificados de una persona */
+  // Beneficiario y evaluador van juntos: es la misma persona buscando con su cédula
   async buscarPorPersona(tipoDocumento: string, numero: string) {
     const personaId = await this.findPersonaId(tipoDocumento, numero);
     if (!personaId) return [];
-    return this.listarCertificados(personaId, null);
+    return this.unir(
+      await this.listarCertificados(personaId, null),
+      await this.listarCertificadosEvaluador(personaId, null),
+    );
   }
 
-  /** Lista certificados por código de evidencia */
+  // El código puede ser EVIDENCIAVALIDACION o CODIGOVERIFICACION: se consultan ambos
   async buscarPorCodigo(codigo: string) {
+    const limpio = codigo.trim();
+    if (!limpio) return [];
+
     const rows = await this.dataSource.query(
       `SELECT P.PERSONAID FROM AFGRUPOBENEFICIARIO AFGB
        JOIN PERSONA P ON P.PERSONAID = AFGB.PERSONAID
-       WHERE TO_CHAR(AFGB.EVIDENCIAVALIDACION) LIKE :param_0`,
-      [`%${codigo.trim()}%`],
+       WHERE AFGB.EVIDENCIAVALIDACION LIKE $1`,
+      [`%${limpio}%`],
     );
-    if (!rows.length) return [];
-    const personaId = rows[0]['PERSONAID'] as number;
-    return this.listarCertificados(personaId, codigo.trim());
+    const beneficiario = rows.length
+      ? await this.listarCertificados(rows[0]['PERSONAID'] as number, limpio)
+      : [];
+
+    // Igualdad y no LIKE: con un prefijo corto se pescarían certificados ajenos
+    const evalRows = await this.dataSource.query(
+      `SELECT E.PERSONAID FROM EVALUADORCERTIFICADO C
+       JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+       JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+       WHERE UPPER(C.CODIGOVERIFICACION) = UPPER($1)`,
+      [limpio],
+    );
+    const evaluador = evalRows.length
+      ? await this.listarCertificadosEvaluador(
+          evalRows[0]['PERSONAID'] as number,
+          limpio,
+        )
+      : [];
+
+    return this.unir(beneficiario, evaluador);
+  }
+
+  private unir(
+    beneficiario: CertificadoPublico[],
+    evaluador: CertificadoPublico[],
+  ): CertificadoPublico[] {
+    return [...beneficiario, ...evaluador]
+      .sort((a, b) => b.fechaOrden - a.fechaOrden)
+      .map((c, i) => ({ ...c, consecutivo: i + 1 }));
   }
 
   private async listarCertificados(
     personaId: number,
     soloEvidencia: string | null,
-  ) {
+  ): Promise<CertificadoPublico[]> {
     let sql = `
       SELECT
         AFGB.AFGRUPOBENEFICIARIOID,
@@ -189,13 +256,13 @@ export class CertificadosService {
       JOIN ACCIONFORMACION AF ON AF.ACCIONFORMACIONID = AFG.ACCIONFORMACIONID
       JOIN PROYECTO PR ON PR.PROYECTOID = AF.PROYECTOID
       JOIN EMPRESA E ON E.EMPRESAID = PR.EMPRESAID
-      WHERE AFGB.PERSONAID = :param_0
-        AND TRIM(TO_CHAR(AFGB.CERTIFICA)) = 'SI'
-        AND TRIM(TO_CHAR(AFGB.VALIDACIONINTERVENTOR)) = 'VERIFICADO'`;
+      WHERE AFGB.PERSONAID = $1
+        AND AFGB.CERTIFICA = 'SI'
+        AND AFGB.VALIDACIONINTERVENTOR = 'VERIFICADO'`;
 
     const params: unknown[] = [personaId];
     if (soloEvidencia) {
-      sql += ` AND TO_CHAR(AFGB.EVIDENCIAVALIDACION) LIKE :param_1`;
+      sql += ` AND AFGB.EVIDENCIAVALIDACION LIKE $2`;
       params.push(`%${soloEvidencia}%`);
     }
     sql += ` ORDER BY AFGB.FECHAVALIDACIONINTERVENTOR DESC`;
@@ -207,29 +274,112 @@ export class CertificadosService {
 
     const str = (v: unknown) => String(v ?? '').trim();
 
-    return rows.map((r, i) => ({
-      consecutivo: i + 1,
-      afGrupoBeneficiarioId: r['AFGRUPOBENEFICIARIOID'],
-      personaId: r['PERSONAID'],
-      proyectoId: r['PROYECTOID'],
-      empresaRazonSocial: str(r['EMPRESARAZONSOCIAL']),
-      accionFormacionNombre: str(r['ACCIONFORMACIONNOMBRE'])
-        .toUpperCase()
-        .replace('TRANSFERENCIA:', '')
-        .trim(),
-      fechaValidacionInterventor: this.formatFecha(
-        r['FECHAVALIDACIONINTERVENTOR'] as Date,
-      ),
-      evidenciaValidacion: str(r['EVIDENCIAVALIDACION']),
-    }));
+    return rows.map((r, i) => {
+      const id = Number(r['AFGRUPOBENEFICIARIOID']);
+      const personaIdFila = Number(r['PERSONAID']);
+      const fecha = r['FECHAVALIDACIONINTERVENTOR'] as Date;
+      return {
+        consecutivo: i + 1,
+        tipo: 'BENEFICIARIO' as const,
+        tipoNombre: 'Beneficiario',
+        entidad: str(r['EMPRESARAZONSOCIAL']),
+        concepto: str(r['ACCIONFORMACIONNOMBRE'])
+          .toUpperCase()
+          .replace('TRANSFERENCIA:', '')
+          .trim(),
+        detalle: 'Acción de formación',
+        fecha: this.formatFecha(fecha),
+        fechaOrden: fecha ? new Date(fecha).getTime() : 0,
+        codigo: str(r['EVIDENCIAVALIDACION']),
+        urlPdf: `/certificados/${id}/pdf?personaId=${personaIdFila}`,
+        personaId: personaIdFila,
+      };
+    });
   }
 
-  /** Genera el PDF del certificado */
+  // Solo los no anulados: uno anulado no se puede descargar
+  private async listarCertificadosEvaluador(
+    personaId: number,
+    soloCodigo: string | null,
+  ): Promise<CertificadoPublico[]> {
+    const params: unknown[] = [personaId];
+    let filtroCodigo = '';
+    if (soloCodigo) {
+      filtroCodigo = ` AND UPPER(TRIM(C.CODIGOVERIFICACION)) = UPPER($2)`;
+      params.push(soloCodigo);
+    }
+
+    const rows: Record<string, unknown>[] = await this.dataSource.query(
+      `SELECT C.CERTIFICADOID, C.ANIO, C.CONSECUTIVO, C.CODIGOVERIFICACION,
+              C.FECHAEMISION, C.DATOSSNAPSHOT, E.PERSONAID
+         FROM EVALUADORCERTIFICADO C
+         JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+         JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+        WHERE E.PERSONAID = $1
+          AND C.ANULADO = 0${filtroCodigo}
+        ORDER BY C.ANIO DESC, C.CONSECUTIVO DESC`,
+      params,
+    );
+
+    const str = (v: unknown) => String(v ?? '').trim();
+
+    return rows.map((r, i) => {
+      // El snapshot guarda rol y convocatoria como estaban al emitir el certificado
+      let s: Record<string, unknown> = {};
+      try {
+        s = JSON.parse(str(r['DATOSSNAPSHOT'])) as Record<string, unknown>;
+      } catch {
+        /* snapshot ilegible: se muestra el certificado igual */
+      }
+      const id = Number(r['CERTIFICADOID']);
+      const personaIdFila = Number(r['PERSONAID']);
+      const fecha = r['FECHAEMISION'] as Date;
+      const numero = `${r['ANIO']}-${String(Number(r['CONSECUTIVO'])).padStart(4, '0')}`;
+      const rol = str(s['rol']) || 'Evaluador';
+      const contexto = str(s['convocatoria']) || str(s['proceso']);
+
+      return {
+        consecutivo: i + 1,
+        tipo: 'EVALUADOR' as const,
+        tipoNombre: 'Evaluador',
+        entidad: ENTIDAD_EVALUADOR,
+        concepto: [rol.toUpperCase(), contexto.toUpperCase()]
+          .filter(Boolean)
+          .join(' · '),
+        detalle: `Banco de Evaluadores · Certificado N° ${numero}`,
+        fecha: this.formatFecha(fecha),
+        fechaOrden: fecha ? new Date(fecha).getTime() : 0,
+        codigo: str(r['CODIGOVERIFICACION']),
+        urlPdf: `/certificados/evaluador/${id}/pdf?personaId=${personaIdFila}`,
+        personaId: personaIdFila,
+      };
+    });
+  }
+
+  // Pide personaId además del id: el id es secuencial y solo bastaría para bajar cualquiera
+  async pdfEvaluador(
+    certificadoId: number,
+    personaId: number,
+  ): Promise<{ certificadoId: number }> {
+    const rows = await this.dataSource.query(
+      `SELECT C.CERTIFICADOID, C.ANULADO
+         FROM EVALUADORCERTIFICADO C
+         JOIN EVALUADORPARTICIPACION PA ON PA.PARTICIPACIONID = C.PARTICIPACIONID
+         JOIN EVALUADOR E ON E.EVALUADORID = PA.EVALUADORID
+        WHERE C.CERTIFICADOID = $1 AND E.PERSONAID = $2`,
+      [certificadoId, personaId],
+    );
+    if (!rows.length) throw new NotFoundException('Certificado no encontrado');
+    if (Number(rows[0]['ANULADO']) === 1) {
+      throw new NotFoundException('Este certificado fue anulado');
+    }
+    return { certificadoId };
+  }
+
   async generarPdf(
     afGrupoBeneficiarioId: number,
     personaId: number,
   ): Promise<Buffer> {
-    // 1. Datos del beneficiario en este grupo
     const [afgb] = await this.dataSource.query(
       `SELECT AFGB.AFGRUPOBENEFICIARIOID, AFGB.AFGRUPOID, AFGB.EVIDENCIAVALIDACION,
               AFGB.FECHAVALIDACIONINTERVENTOR, AFGB.AFGRUPOBENEFICIARIOIDFIRMA,
@@ -240,22 +390,20 @@ export class CertificadosService {
        FROM AFGRUPOBENEFICIARIO AFGB
        JOIN PERSONA P ON P.PERSONAID = AFGB.PERSONAID
        JOIN TIPODOCUMENTOIDENTIDAD TD ON TD.TIPODOCUMENTOIDENTIDADID = P.TIPODOCUMENTOIDENTIDADID
-       WHERE AFGB.AFGRUPOBENEFICIARIOID = :param_0 AND AFGB.PERSONAID = :param_1`,
+       WHERE AFGB.AFGRUPOBENEFICIARIOID = $1 AND AFGB.PERSONAID = $2`,
       [afGrupoBeneficiarioId, personaId],
     );
     if (!afgb) throw new NotFoundException('Certificado no encontrado');
 
-    // 2. Datos del grupo → acción de formación
     const [af] = await this.dataSource.query(
       `SELECT AF.ACCIONFORMACIONNOMBRE, AF.PROYECTOID, AF.ACCIONFORMACIONID,
               AF.MODALIDADFORMACIONID, AF.TIPOEVENTOID
        FROM AFGRUPO AFG
        JOIN ACCIONFORMACION AF ON AF.ACCIONFORMACIONID = AFG.ACCIONFORMACIONID
-       WHERE AFG.AFGRUPOID = :param_0`,
+       WHERE AFG.AFGRUPOID = $1`,
       [afgb['AFGRUPOID']],
     );
 
-    // 3. Proyecto + empresa + convenio
     const [proy] = await this.dataSource.query(
       `SELECT PR.PROYECTOID, PR.PROYECTONOMBRE, PR.EMPRESAID, PR.CONVOCATORIAID,
               C.CONVENIOSNUMERO, C.CONVENIOSID,
@@ -263,7 +411,7 @@ export class CertificadosService {
        FROM PROYECTO PR
        LEFT JOIN CONVENIOS C ON C.PROYECTOID = PR.PROYECTOID
        LEFT JOIN CONVOCATORIA CV ON CV.CONVOCATORIAID = PR.CONVOCATORIAID
-       WHERE PR.PROYECTOID = :param_0`,
+       WHERE PR.PROYECTOID = $1`,
       [af['PROYECTOID']],
     );
 
@@ -271,37 +419,35 @@ export class CertificadosService {
       `SELECT E.EMPRESARAZONSOCIAL, CI.CIUDADNOMBRE
        FROM EMPRESA E
        LEFT JOIN CIUDAD CI ON CI.CIUDADID = E.CIUDADEMPRESAID
-       WHERE E.EMPRESAID = :param_0`,
+       WHERE E.EMPRESAID = $1`,
       [proy['EMPRESAID']],
     );
 
-    // 4. Programa
     let programaNombre = '';
     const convocatoriaId = proy?.['CONVOCATORIAID'];
     if (convocatoriaId) {
       const [prog] = await this.dataSource.query(
         `SELECT PG.PROGRAMANOMBRE FROM CONVOCATORIA CV
          JOIN PROGRAMA PG ON PG.PROGRAMAID = CV.PROGRAMAID
-         WHERE CV.CONVOCATORIAID = :param_0`,
+         WHERE CV.CONVOCATORIAID = $1`,
         [convocatoriaId],
       );
       programaNombre = prog?.['PROGRAMANOMBRE'] ?? '';
     }
 
-    // 5. Tipo de evento
     const [tipoEvento] = await this.dataSource.query(
-      `SELECT TIPOEVENTONOMBRE FROM TIPOEVENTO WHERE TIPOEVENTOID = :param_0`,
+      `SELECT TIPOEVENTONOMBRE FROM TIPOEVENTO WHERE TIPOEVENTOID = $1`,
       [af['TIPOEVENTOID']],
     );
 
-    // 6. Horas según modalidad (incluye modalidades 5 y 6 del GeneXus)
+    // Las modalidades 5 y 6 del GeneXus suman dos columnas de horas, el resto una
     const [horas] = await this.dataSource.query(
       `SELECT
-         SUM(NVL(UNIDADTEMATICAHORASPP,0)   + NVL(UNIDADTEMATICAHORASTP,0))   AS HORAS_PP,
-         SUM(NVL(UNIDADTEMATICAHORASPPAT,0) + NVL(UNIDADTEMATICAHORASTPAT,0)) AS HORAS_PAT,
-         SUM(NVL(UNIDADTEMATICAHORASPHIB,0) + NVL(UNIDADTEMATICAHORASTHIB,0)) AS HORAS_HIB,
-         SUM(NVL(UNIDADTEMATICAHORASPV,0)   + NVL(UNIDADTEMATICAHORASTV,0))   AS HORAS_VIR
-       FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = :param_0`,
+         SUM(COALESCE(UNIDADTEMATICAHORASPP,0)   + COALESCE(UNIDADTEMATICAHORASTP,0))   AS HORAS_PP,
+         SUM(COALESCE(UNIDADTEMATICAHORASPPAT,0) + COALESCE(UNIDADTEMATICAHORASTPAT,0)) AS HORAS_PAT,
+         SUM(COALESCE(UNIDADTEMATICAHORASPHIB,0) + COALESCE(UNIDADTEMATICAHORASTHIB,0)) AS HORAS_HIB,
+         SUM(COALESCE(UNIDADTEMATICAHORASPV,0)   + COALESCE(UNIDADTEMATICAHORASTV,0))   AS HORAS_VIR
+       FROM UNIDADTEMATICA WHERE ACCIONFORMACIONID = $1`,
       [af['ACCIONFORMACIONID']],
     );
     const modalidad = Number(af['MODALIDADFORMACIONID'] ?? 1);
@@ -322,46 +468,50 @@ export class CertificadosService {
       sumaHoras = Number(horas?.[colMap[modalidad] ?? 'HORAS_PP'] ?? 0);
     }
 
-    // 7. Firma + imagen de firma (BLOB)
     const firmaCertId = afgb['AFGRUPOBENEFICIARIOIDFIRMA'];
     let firma: Record<string, unknown> = {};
     if (firmaCertId) {
       const [f] = await this.dataSource.query(
         `SELECT FIRMACERTIFICADOSNOMBRE, FIRMACERTIFICADOSCARGO, FIRMACERTIFICADOSFIRMA
-         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = :param_0`,
+         FROM FIRMACERTIFICADOS WHERE FIRMACERTIFICADOSID = $1`,
         [firmaCertId],
       );
       firma = f ?? {};
     }
 
-    // 8. Logo del proyecto (BLOB) desde PROYECTO
     const [proyLogo] = await this.dataSource.query(
-      `SELECT PROYECTOLOGOEMPRESA FROM PROYECTO WHERE PROYECTOID = :param_0`,
+      `SELECT PROYECTOLOGOEMPRESA FROM PROYECTO WHERE PROYECTOID = $1`,
       [af['PROYECTOID']],
     );
 
-    // 9. Logo capacitadores (BLOB) si existe
     const logoCapId = afgb['AFGRUPOBENEFICIARIOIDLOGO'];
     let logoCap: Record<string, unknown> = {};
     if (logoCapId) {
       const [lc] = await this.dataSource.query(
-        `SELECT LOGOCAPACITADORESLOGO FROM LOGOCAPACITADORES WHERE LOGOCAPACITADORESID = :param_0`,
+        `SELECT LOGOCAPACITADORESLOGO FROM LOGOCAPACITADORES WHERE LOGOCAPACITADORESID = $1`,
         [logoCapId],
       );
       logoCap = lc ?? {};
     }
 
-    // Convertir LOBs a Buffer
+    // El archivo del volumen si está; si no, el BLOB de siempre. Mientras los documentos vivan en los dos sitios el
+    // resultado es el mismo, y así el certificado deja de depender de que la imagen siga dentro de la base.
     const [proyLogoBuffer, capacitadorLogoBuffer, firmaImgBuffer] =
       await Promise.all([
-        this.readLob(proyLogo?.['PROYECTOLOGOEMPRESA']),
-        this.readLob(logoCap?.['LOGOCAPACITADORESLOGO']),
-        this.readLob(firma['FIRMACERTIFICADOSFIRMA']),
+        leerDocumento('proyecto', 'proyectologoempresa', af['PROYECTOID'] as number) ??
+          this.readLob(proyLogo?.['PROYECTOLOGOEMPRESA']),
+        logoCapId
+          ? (leerDocumento('logocapacitadores', 'logocapacitadoreslogo', logoCapId as number) ??
+            this.readLob(logoCap?.['LOGOCAPACITADORESLOGO']))
+          : null,
+        firmaCertId
+          ? (leerDocumento('firmacertificados', 'firmacertificadosfirma', firmaCertId as number) ??
+            this.readLob(firma['FIRMACERTIFICADOSFIRMA']))
+          : null,
       ]);
 
-    // ── Construir datos del certificado ────────────────────────────
     const str = (v: unknown) => String(v ?? '').trim();
-    // Los campos NCHAR de Oracle traen espacios internos — normalizar con str() antes de unir
+    // NCHAR de Oracle trae espacios internos: normalizar con str() antes de unir
     const nombreCompleto = [
       afgb['PERSONANOMBRES'],
       afgb['PERSONAPRIMERAPELLIDO'],
@@ -403,7 +553,6 @@ export class CertificadosService {
     const convocatoriaNombre = str(proy?.['CONVOCATORIANOMBRE']);
     const evidencia = str(afgb['EVIDENCIAVALIDACION']);
 
-    // ── Generar PDF ────────────────────────────────────────────────
     return this.buildPdf({
       nombreCompleto,
       datosPersona,
@@ -466,13 +615,13 @@ export class CertificadosService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const pageW = doc.page.width; // 841.89
-      const pageH = doc.page.height; // 595.28
+      const pageW = doc.page.width;
+      const pageH = doc.page.height;
       const contentW = pageW - mLeft - mRight;
       const cx = { align: 'center' as const, width: contentW };
       const x = mLeft;
 
-      // ── Fondo SENA (Formato2 = fondo con watermark, Formato1 = fondo alternativo) ──
+      // Formato2 es el fondo con watermark; Formato1 el alternativo
       const fondoPath = join(__dirname, 'assets', 'Formato2.png');
       const fondoAlt = join(__dirname, 'assets', 'Formato1.png');
       const fondo = existsSync(fondoPath)
@@ -484,7 +633,6 @@ export class CertificadosService {
         doc.image(fondo, 0, 0, { width: pageW, height: pageH });
       }
 
-      // Helpers
       const ln = (n = 1) => {
         doc.moveDown(n);
       };
@@ -493,7 +641,7 @@ export class CertificadosService {
       const italic = (sz: number) => doc.font('Helvetica-Oblique').fontSize(sz);
       const write = (text: string, opts = cx) => doc.text(text, x, doc.y, opts);
 
-      // ── Logos en el encabezado (encima del fondo) ──────────────────
+      // Logos del encabezado, encima del fondo
       const logoH = 75,
         logoY = 20,
         logoMaxW = 120;
@@ -503,8 +651,7 @@ export class CertificadosService {
       ) as Buffer[];
       if (logos.length > 0) {
         const totalW = logos.length * logoMaxW + (logos.length - 1) * gap;
-        // Con 2 logos: desplazar a la derecha para no tapar el SENA del fondo
-        // Con 1 logo: centrar
+        // Con dos logos hay que correrlos a la derecha para no tapar el SENA del fondo
         const offset = logos.length > 1 ? 60 : 0;
         let logoX = (pageW - totalW) / 2 + offset;
         for (const logo of logos) {
@@ -520,7 +667,6 @@ export class CertificadosService {
       // Texto empieza DEBAJO de los logos
       doc.y = 95;
 
-      // ── SENA + Empresa ──────────────────────────────────────────────
       bold(16);
       write('El Servicio Nacional de Aprendizaje - SENA');
       if (d.empresaNombre) {
@@ -532,7 +678,6 @@ export class CertificadosService {
       italic(12);
       write('Hacen Constar que');
 
-      // ── Nombre ─────────────────────────────────────────────────────
       ln(0.7);
       bold(20);
       write(d.nombreCompleto);
@@ -540,7 +685,6 @@ export class CertificadosService {
       regular(12);
       write(d.datosPersona);
 
-      // ── Evento + Acción ────────────────────────────────────────────
       ln(0.7);
       italic(12);
       write(d.eventoFinal);
@@ -548,12 +692,10 @@ export class CertificadosService {
       bold(13);
       write(d.accionNombre);
 
-      // ── Programa ───────────────────────────────────────────────────
       ln(0.9);
       bold(15);
       write(d.programaNombre);
 
-      // ── Convenio + horas + ciudad ──────────────────────────────────
       ln(0.6);
       if (d.convenioNum) {
         regular(11);
@@ -570,12 +712,10 @@ export class CertificadosService {
         `En testimonio de lo anterior, se firma el presente en ${d.ciudad.toUpperCase()}, a los ${diaLetra} (${d.dia}) días del mes de ${d.mes} (${d.mesNum}) de ${anoLetra} (${d.ano})`,
       );
 
-      // ── Firma ───────────────────────────────────────────────────────
       ln(1);
       italic(11);
       write('Firmado digitalmente por');
 
-      // Imagen de firma manuscrita
       const firmaImgY = doc.y + 4;
       if (d.firmaImgBuf) {
         try {
@@ -600,7 +740,6 @@ export class CertificadosService {
         ln(0.4);
       }
 
-      // ── Convocatoria ────────────────────────────────────────────────
       if (d.convocatoriaNombre) {
         italic(9.5);
         write(
@@ -611,9 +750,8 @@ export class CertificadosService {
         ln(0.5);
       }
 
-      // ── Autenticidad al final de la página, izquierda ───────────────
+      // Bloque de autenticidad anclado al pie de la página
       const left = { align: 'left' as const, width: contentW };
-      // Reservar 52pt al fondo (2-3 líneas a 7-8pt con leading)
       const autenticidadH = 25;
       doc.y = pageH - mBottom - autenticidadH;
       regular(9.2);
@@ -630,17 +768,28 @@ export class CertificadosService {
     });
   }
 
-  /** Convierte un LOB de Oracle (stream o Buffer) a Buffer, o null si vacío */
+  // El driver de Oracle devuelve el LOB como stream o ya como Buffer
+
+  /**
+   * GeneXus deja un solo byte `0x00` en la columna cuando no hay documento: no es una imagen, y contarla como tal
+   * corría de sitio los logos del encabezado. Es el mismo criterio con el que se extrajeron los 49.910 archivos al
+   * volumen, así que la base y el disco responden igual.
+   */
+  private esDocumento(b: Buffer): boolean {
+    return b.length > 1 || (b.length === 1 && b[0] !== 0);
+  }
 
   private readLob(lob: any): Promise<Buffer | null> {
     if (!lob) return Promise.resolve(null);
-    if (Buffer.isBuffer(lob)) return Promise.resolve(lob.length ? lob : null);
+    if (Buffer.isBuffer(lob))
+      return Promise.resolve(this.esDocumento(lob) ? lob : null);
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       lob.on('data', (c: Buffer) => chunks.push(c));
       lob.on('end', () => {
         lob.close?.(() => {});
-        resolve(chunks.length ? Buffer.concat(chunks) : null);
+        const b = chunks.length ? Buffer.concat(chunks) : null;
+        resolve(b && this.esDocumento(b) ? b : null);
       });
       lob.on('error', () => {
         lob.close?.(() => {});
@@ -656,7 +805,6 @@ export class CertificadosService {
     return `${dt.toLocaleDateString('es-CO')} ${dt.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`;
   }
 
-  /** Stream del PDF como Readable */
   async streamPdf(
     afGrupoBeneficiarioId: number,
     personaId: number,

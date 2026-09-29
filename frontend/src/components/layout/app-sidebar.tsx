@@ -1,42 +1,26 @@
 'use client'
 
-import { clearSepAuth, type SepUsuario } from '@/lib/auth'
+import { clearSepAuth, getSepUsuario, isEmpresa, type SepUsuario } from '@/lib/auth'
 import api from '@/lib/api'
+import { armarMenu, rutaDe, type MenuItem, type PerfilesBanco } from '@/lib/menu-lateral'
 import { cn } from '@/lib/utils'
+import { cargarClavesPerfil } from '@/lib/use-perfiles'
 import { useTieneConvenios } from '@/lib/use-tiene-convenios'
 import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, CalendarDays, ChevronLeft, ChevronRight,
   ClipboardList, Cog, FileCheck2, FileText, FolderKanban,
-  Home, LayoutDashboard, LogOut, ScrollText, Users, Wallet, X,
-  BookUser, BarChart2,
+  Home, IdCard, LayoutDashboard, LogOut, Megaphone, Network, ScrollText,
+  ShieldCheck, Users, Wallet, X, BookUser, BarChart2,
 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-// ── Mapa URL GeneXus → ruta Next.js ─────────────────────────────────────────
+// el mapa url genexus → ruta next y el armado del menú viven en lib/menu-lateral
 
-const URL_MAP: Record<string, string> = {
-  'InicioEmpresa.aspx':        '/panel',
-  'InicioUsuario.aspx':        '/panel',
-  'DatosBasicosEmpresa.aspx':  '/panel/datos',
-  'Necesidades.aspx':          '/panel/necesidades',
-  'Proyectos.aspx':            '/panel/proyectos',
-  'WPConvenios.aspx':          '/panel/convenios',
-  'wptratamientodatos.aspx':   '/panel/beneficiarios',
-  'ContactosEmpresa.aspx':     '/panel/contactos',
-  'AnalisisEmpresarial.aspx':  '/panel/analisis',
-  'Empresas.aspx':             '/panel/empresas',
-  'Convenios.aspx':            '/panel/convenios',
-  'Cronograma.aspx':           '/panel/cronograma',
-  'Certificados.aspx':         '/panel/certificacion',
-  'Desembolsos.aspx':          '/panel/desembolsos',
-  'Evaluaciones.aspx':         '/panel/evaluaciones',
-}
-
-// ── Mapa ícono FontAwesome → Lucide ─────────────────────────────────────────
+// mapa icono fontawesome → lucide
 
 const ICON_MAP: Record<string, LucideIcon> = {
   'fa-home':              Home,
@@ -66,6 +50,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'fa-tachometer-alt':    LayoutDashboard,
   'fa-chart-bar':         BarChart2,
   'fa-address-book':      BookUser,
+  // llevan prefijo fa- aunque no vengan de fontawesome: la tabla MENU usa esa convención
+  'fa-shield-check':      ShieldCheck,
+  'fa-bullhorn':          Megaphone,
+  'fa-sitemap':           Network,
+  'fa-sliders':           Cog,
+  'fa-id-card':           IdCard,
 }
 
 function faToLucide(iconClass: string): LucideIcon {
@@ -74,12 +64,8 @@ function faToLucide(iconClass: string): LucideIcon {
   for (const part of parts) {
     if (ICON_MAP[part]) return ICON_MAP[part]
   }
-  return FileText // default
+  return FileText
 }
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface MenuItem { desc: string; url: string; icono: string }
 
 interface AppSidebarProps {
   usuario: SepUsuario | null
@@ -87,42 +73,27 @@ interface AppSidebarProps {
   onMobileClose: () => void
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
-
 export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [menuFallo, setMenuFallo] = useState(false)
+  const [intento, setIntento] = useState(0)
   const { tieneConvenios } = useTieneConvenios()
 
-  const LABEL_OVERRIDE: Record<string, string> = {
-    'Mis Proyectos': 'Proyectos',
-    'Mis Necesidades': 'Necesidades',
-  }
-
-  const EXTRA_ITEMS: MenuItem[] = [
-    { desc: 'Convenios', url: 'WPConvenios.aspx', icono: 'ScrollText' },
-  ]
-
   useEffect(() => {
-    api.get<MenuItem[]>('/empresa/menu')
-      .then(r => {
-        const items = r.data.map(item => ({
-          ...item,
-          desc: LABEL_OVERRIDE[item.desc] ?? item.desc,
-        }))
-        // Añadir items extra que no vengan del API
-        for (const extra of EXTRA_ITEMS) {
-          if (!items.some(it => it.url === extra.url)) {
-            items.push(extra)
-          }
-        }
-        setMenuItems(items)
+    const perfilId = getSepUsuario()?.perfilId ?? 0
+    // la empresa nunca es del banco: su menú no espera las claves. Los demás sí, porque el gestor no tiene el mismo
+    // id en las dos bases; si no llegan, se ofrece reintentar
+    const banco: Promise<PerfilesBanco | null> = isEmpresa(perfilId) ? Promise.resolve(null) : cargarClavesPerfil()
+    Promise.all([api.get<MenuItem[]>('/empresa/menu'), banco])
+      .then(([r, claves]) => {
+        setMenuItems(armarMenu(r.data, perfilId, claves))
+        setMenuFallo(false)
       })
-      .catch(() => setMenuItems([]))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+      .catch(() => { setMenuItems([]); setMenuFallo(true) })
+  }, [intento])
 
   function handleLogout() {
     clearSepAuth()
@@ -130,12 +101,27 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
   }
 
   function renderNav(isMobile: boolean) {
+    if (menuItems.length === 0 && menuFallo) {
+      return (
+        <nav className="flex flex-col gap-2 flex-1 px-2 py-3">
+          <p className="text-[11px] leading-snug text-white/60">
+            No se pudo cargar el menú.
+          </p>
+          <button
+            onClick={() => setIntento(n => n + 1)}
+            className="rounded-lg border border-white/20 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 transition hover:bg-white/10"
+          >
+            Reintentar
+          </button>
+        </nav>
+      )
+    }
     if (menuItems.length === 0) return null
 
     return (
       <nav className="flex flex-col gap-0.5 flex-1 overflow-y-auto">
         {menuItems.map((item, i) => {
-          const path = URL_MAP[item.url] ?? null
+          const path = rutaDe(item.url)
           const Icon = faToLucide(item.icono)
           const active = path !== null && pathname === path
           const isDisabled = path === null
@@ -245,7 +231,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
 
   return (
     <>
-      {/* ── Desktop sidebar ────────────────────────────────────────────── */}
+      {/* sidebar escritorio */}
       <aside className={cn(
         'relative hidden lg:flex flex-col min-h-screen bg-[#00304D] flex-shrink-0 z-20 transition-all duration-250',
         collapsed ? 'w-[68px] px-3 py-5' : 'w-[240px] px-4 py-5'
@@ -263,7 +249,7 @@ export function AppSidebar({ usuario, mobileOpen, onMobileClose }: AppSidebarPro
         </button>
       </aside>
 
-      {/* ── Mobile backdrop + drawer ────────────────────────────────────── */}
+      {/* backdrop + drawer móvil */}
       <div
         className={cn('fixed inset-0 z-40 bg-black/50 lg:hidden transition-opacity duration-200',
           mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none')}

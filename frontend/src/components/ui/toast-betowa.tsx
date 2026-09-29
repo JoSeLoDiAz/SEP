@@ -13,7 +13,7 @@ export interface ToastBetowaPros {
   mensaje?: string
 }
 
-const BETOWA = 'linear-gradient(135deg,#00324d 0%,#6c29b3 100%)'
+const BETOWA = 'linear-gradient(135deg,#00304d 0%,#6c29b3 100%)'
 
 const V = {
   success: {

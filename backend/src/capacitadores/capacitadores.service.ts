@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { insertarConId, sqlCrudo } from '../common/db/ids'
+import { leerDocumento } from '../common/documentos/documentos-disco'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const oracledb = require('oracledb') as { DB_TYPE_BLOB: number }
@@ -16,12 +19,10 @@ interface MulterFile {
 export class CapacitadoresService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Bloquea escrituras cuando el convenio del proyecto no está EN EJECUCIÓN
-   *  (estado != 1). Se usa en todos los métodos que modifican capacitadores. */
   private async assertConvenioEnEjecucion(proyectoId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado"
-         FROM CONVENIOS WHERE PROYECTOID = :1
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado"
+         FROM CONVENIOS WHERE PROYECTOID = $1
         ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
@@ -33,38 +34,37 @@ export class CapacitadoresService {
     }
   }
 
-  /** Resuelve el proyectoId desde un capacitador y aplica el guard. */
   private async assertConvenioActivoPorCapacitador(capacitadorId: number): Promise<void> {
     const [row] = await this.ds.query(
-      `SELECT PROYECTOID AS "proyectoId" FROM CAPACITADOR
-        WHERE CAPACITADORID = :1 FETCH FIRST 1 ROW ONLY`,
+      `SELECT PROYECTOID AS "proyectoId" FROM CAPACITADORES
+        WHERE CAPACITADORID = $1 FETCH FIRST 1 ROW ONLY`,
       [capacitadorId],
     )
     if (!row) throw new BadRequestException('Capacitador no encontrado.')
     await this.assertConvenioEnEjecucion(Number(row.proyectoId))
   }
 
-  // ── Personas naturales ────────────────────────────────────────────────────
-
+  // las dos listas van por fecha de registro y el id solo desempata: en el Exadata (RAC, secuencia
+  // NOORDER con caché) un id mayor no es un registro más reciente
   async listarPersonas(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID              AS "capacitadorId",
               c.CAPACITADORPERSONAID        AS "personaId",
-              TRIM(c.CAPAESTADO)            AS "estado",
-              TRIM(c.CAPAINTERESTADO)       AS "estadoInterventoria",
+              btrim((c.CAPAESTADO)::text)            AS "estado",
+              btrim((c.CAPAINTERESTADO)::text)       AS "estadoInterventoria",
               c.CAPAOBSERVACION             AS "observacion",
               c.CAPAFECHAREGISTRO           AS "fechaRegistro",
-              TRIM(p.PERSONANOMBRES) || ' ' || TRIM(p.PERSONAPRIMERAPELLIDO) || ' ' ||
-                NVL(TRIM(p.PERSONASEGUNDOAPELLIDO), '') AS "nombreCompleto",
-              TRIM(p.PERSONAIDENTIFICACION) AS "identificacion",
-              TRIM(t.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento"
+              btrim((p.PERSONANOMBRES)::text) || ' ' || btrim((p.PERSONAPRIMERAPELLIDO)::text) || ' ' ||
+                COALESCE(btrim((p.PERSONASEGUNDOAPELLIDO)::text), '') AS "nombreCompleto",
+              btrim((p.PERSONAIDENTIFICACION)::text) AS "identificacion",
+              btrim((t.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento"
          FROM CAPACITADORES c
          JOIN PERSONA p ON p.PERSONAID = c.CAPACITADORPERSONAID
          JOIN TIPODOCUMENTOIDENTIDAD t ON t.TIPODOCUMENTOIDENTIDADID = p.TIPODOCUMENTOIDENTIDADID
-        WHERE c.PROYECTOID = :1
-          AND TRIM(c.CAPATIPO) = 'PE'
-          AND NVL(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
-        ORDER BY c.CAPACITADORID ASC`,
+        WHERE c.PROYECTOID = $1
+          AND btrim((c.CAPATIPO)::text) = 'PE'
+          AND COALESCE(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
+        ORDER BY c.CAPAFECHAREGISTRO ASC, c.CAPACITADORID ASC`,
       [proyectoId],
     )
   }
@@ -73,46 +73,43 @@ export class CapacitadoresService {
     await this.assertConvenioEnEjecucion(proyectoId)
     const dup: any[] = await this.ds.query(
       `SELECT CAPACITADORID FROM CAPACITADORES
-        WHERE PROYECTOID = :1 AND CAPACITADORPERSONAID = :2 AND TRIM(CAPATIPO) = 'PE'
-          AND NVL(CAPACITADORPERSONAIDTRANFERENC, 0) = 0`,
+        WHERE PROYECTOID = $1 AND CAPACITADORPERSONAID = $2 AND btrim((CAPATIPO)::text) = 'PE'
+          AND COALESCE(CAPACITADORPERSONAIDTRANFERENC, 0) = 0`,
       [proyectoId, personaId],
     )
     if (dup.length) throw new BadRequestException('Esta persona ya está registrada como capacitadora en este proyecto.')
 
-    const [{ id }] = await this.ds.query<{ id: number }[]>(
-      `SELECT NVL(MAX(CAPACITADORID), 0) + 1 AS "id" FROM CAPACITADORES`,
-    )
-    await this.ds.query(
-      `INSERT INTO CAPACITADORES
-         (CAPACITADORID, PROYECTOID, CAPACITADORPERSONAID, CAPATIPO,
-          CAPAESTADO, CAPAINTERESTADO, CAPAFECHAREGISTRO, CAPAFECHAACTUALIZAR)
-       VALUES (:1, :2, :3, 'PE', 'ACTIVO', 'PENDIENTE DE APROBACION', SYSDATE, SYSDATE)`,
-      [id, proyectoId, personaId],
-    )
+    const id = await insertarConId(this.ds, 'CAPACITADORES', 'CAPACITADORID', { maxMasUno: true }, {
+      PROYECTOID: proyectoId,
+      CAPACITADORPERSONAID: personaId,
+      CAPATIPO: 'PE',
+      CAPAESTADO: 'ACTIVO',
+      CAPAINTERESTADO: 'PENDIENTE DE APROBACION',
+      CAPAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      CAPAFECHAACTUALIZAR: sqlCrudo(AHORA_UTC),
+    })
     return { capacitadorId: id }
   }
-
-  // ── Empresas jurídicas ────────────────────────────────────────────────────
 
   async listarEmpresas(proyectoId: number) {
     return this.ds.query(
       `SELECT c.CAPACITADORID              AS "capacitadorId",
               c.CAPACITADOREMPRESAID        AS "empresaId",
-              TRIM(c.CAPAESTADO)            AS "estado",
-              TRIM(c.CAPAINTERESTADO)       AS "estadoInterventoria",
+              btrim((c.CAPAESTADO)::text)            AS "estado",
+              btrim((c.CAPAINTERESTADO)::text)       AS "estadoInterventoria",
               c.CAPAOBSERVACION             AS "observacion",
               c.CAPAFECHAREGISTRO           AS "fechaRegistro",
-              TRIM(e.EMPRESARAZONSOCIAL)    AS "razonSocial",
-              TRIM(e.EMPRESASIGLA)          AS "sigla",
+              btrim((e.EMPRESARAZONSOCIAL)::text)    AS "razonSocial",
+              btrim((e.EMPRESASIGLA)::text)          AS "sigla",
               e.EMPRESAIDENTIFICACION       AS "identificacion",
-              TRIM(t.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento"
+              btrim((t.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento"
          FROM CAPACITADORES c
          JOIN EMPRESA e ON e.EMPRESAID = c.CAPACITADOREMPRESAID
          JOIN TIPODOCUMENTOIDENTIDAD t ON t.TIPODOCUMENTOIDENTIDADID = e.TIPODOCUMENTOIDENTIDADID
-        WHERE c.PROYECTOID = :1
-          AND TRIM(c.CAPATIPO) = 'EM'
-          AND NVL(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
-        ORDER BY c.CAPACITADORID ASC`,
+        WHERE c.PROYECTOID = $1
+          AND btrim((c.CAPATIPO)::text) = 'EM'
+          AND COALESCE(c.CAPACITADORPERSONAIDTRANFERENC, 0) = 0
+        ORDER BY c.CAPAFECHAREGISTRO ASC, c.CAPACITADORID ASC`,
       [proyectoId],
     )
   }
@@ -121,41 +118,38 @@ export class CapacitadoresService {
     await this.assertConvenioEnEjecucion(proyectoId)
     const dup: any[] = await this.ds.query(
       `SELECT CAPACITADORID FROM CAPACITADORES
-        WHERE PROYECTOID = :1 AND CAPACITADOREMPRESAID = :2 AND TRIM(CAPATIPO) = 'EM'
-          AND NVL(CAPACITADORPERSONAIDTRANFERENC, 0) = 0`,
+        WHERE PROYECTOID = $1 AND CAPACITADOREMPRESAID = $2 AND btrim((CAPATIPO)::text) = 'EM'
+          AND COALESCE(CAPACITADORPERSONAIDTRANFERENC, 0) = 0`,
       [proyectoId, empresaId],
     )
     if (dup.length) throw new BadRequestException('Esta empresa ya está registrada como capacitadora en este proyecto.')
 
-    const [{ id }] = await this.ds.query<{ id: number }[]>(
-      `SELECT NVL(MAX(CAPACITADORID), 0) + 1 AS "id" FROM CAPACITADORES`,
-    )
-    await this.ds.query(
-      `INSERT INTO CAPACITADORES
-         (CAPACITADORID, PROYECTOID, CAPACITADOREMPRESAID, CAPATIPO,
-          CAPAESTADO, CAPAINTERESTADO, CAPAFECHAREGISTRO, CAPAFECHAACTUALIZAR)
-       VALUES (:1, :2, :3, 'EM', 'ACTIVO', 'PENDIENTE DE APROBACION', SYSDATE, SYSDATE)`,
-      [id, proyectoId, empresaId],
-    )
+    const id = await insertarConId(this.ds, 'CAPACITADORES', 'CAPACITADORID', { maxMasUno: true }, {
+      PROYECTOID: proyectoId,
+      CAPACITADOREMPRESAID: empresaId,
+      CAPATIPO: 'EM',
+      CAPAESTADO: 'ACTIVO',
+      CAPAINTERESTADO: 'PENDIENTE DE APROBACION',
+      CAPAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+      CAPAFECHAACTUALIZAR: sqlCrudo(AHORA_UTC),
+    })
     return { capacitadorId: id }
   }
-
-  // ── Toggle estado ─────────────────────────────────────────────────────────
 
   async toggleEstado(capacitadorId: number, nuevoEstado: 'ACTIVO' | 'INACTIVO') {
     await this.assertConvenioActivoPorCapacitador(capacitadorId)
     const [cap]: any[] = await this.ds.query(
-      `SELECT TRIM(CAPAINTERESTADO) AS "inter",
-              TRIM(CAPACITADORESTADOTRANSFERENCIA) AS "trans"
-         FROM CAPACITADORES WHERE CAPACITADORID = :1`,
+      `SELECT btrim((CAPAINTERESTADO)::text) AS "inter",
+              btrim((CAPACITADORESTADOTRANSFERENCIA)::text) AS "trans"
+         FROM CAPACITADORES WHERE CAPACITADORID = $1`,
       [capacitadorId],
     )
     if (cap?.inter === 'APROBADO' || cap?.trans === 'APROBADOT') {
       throw new BadRequestException('No se puede cambiar el estado de un capacitador ya aprobado.')
     }
     await this.ds.query(
-      `UPDATE CAPACITADORES SET CAPAESTADO = :1, CAPAFECHAACTUALIZAR = SYSDATE
-        WHERE CAPACITADORID = :2`,
+      `UPDATE CAPACITADORES SET CAPAESTADO = $1, CAPAFECHAACTUALIZAR = ${AHORA_UTC}
+        WHERE CAPACITADORID = $2`,
       [nuevoEstado, capacitadorId],
     )
     return { ok: true }
@@ -164,31 +158,29 @@ export class CapacitadoresService {
   async tiposDocEmpresa() {
     return this.ds.query(
       `SELECT TIPODOCUMENTOIDENTIDADID AS "id",
-              TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) AS "nombre"
+              btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "nombre"
          FROM TIPODOCUMENTOIDENTIDAD
-        WHERE NVL(TIPODOCUMENTOIDENTIDADPERSONA, 0) = 0
-        ORDER BY TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) ASC`,
+        WHERE COALESCE(TIPODOCUMENTOIDENTIDADPERSONA, 0) = 0
+        ORDER BY btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) ASC`,
     )
   }
-
-  // ── Empresa capacitadora — búsqueda / creación ────────────────────────────
 
   async buscarEmpresa(tipoDocId: number, identificacion: string) {
     const rows: any[] = await this.ds.query(
       `SELECT e.EMPRESAID                   AS "empresaId",
               e.TIPODOCUMENTOIDENTIDADID     AS "tipoDocumentoId",
-              TRIM(t.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
+              btrim((t.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
               e.EMPRESAIDENTIFICACION        AS "identificacion",
               e.EMPRESADIGITOVERIFICACION    AS "digitoVerificacion",
-              TRIM(e.EMPRESARAZONSOCIAL)     AS "razonSocial",
-              TRIM(e.EMPRESASIGLA)           AS "sigla",
-              TRIM(e.EMPRESAEMAIL)           AS "email",
-              TRIM(e.EMPRESATELEFONO)        AS "telefono",
-              TRIM(e.EMPRESADIRECCION)       AS "direccion"
+              btrim((e.EMPRESARAZONSOCIAL)::text)     AS "razonSocial",
+              btrim((e.EMPRESASIGLA)::text)           AS "sigla",
+              btrim((e.EMPRESAEMAIL)::text)           AS "email",
+              btrim((e.EMPRESATELEFONO)::text)        AS "telefono",
+              btrim((e.EMPRESADIRECCION)::text)       AS "direccion"
          FROM EMPRESA e
          JOIN TIPODOCUMENTOIDENTIDAD t ON t.TIPODOCUMENTOIDENTIDADID = e.TIPODOCUMENTOIDENTIDADID
-        WHERE e.TIPODOCUMENTOIDENTIDADID = :1
-          AND e.EMPRESAIDENTIFICACION = :2`,
+        WHERE e.TIPODOCUMENTOIDENTIDADID = $1
+          AND e.EMPRESAIDENTIFICACION = $2`,
       [tipoDocId, identificacion],
     )
     return rows[0] ?? null
@@ -198,17 +190,17 @@ export class CapacitadoresService {
     const rows: any[] = await this.ds.query(
       `SELECT e.EMPRESAID                   AS "empresaId",
               e.TIPODOCUMENTOIDENTIDADID     AS "tipoDocumentoId",
-              TRIM(t.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocumento",
+              btrim((t.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocumento",
               e.EMPRESAIDENTIFICACION        AS "identificacion",
               e.EMPRESADIGITOVERIFICACION    AS "digitoVerificacion",
-              TRIM(e.EMPRESARAZONSOCIAL)     AS "razonSocial",
-              TRIM(e.EMPRESASIGLA)           AS "sigla",
-              TRIM(e.EMPRESAEMAIL)           AS "email",
-              TRIM(e.EMPRESATELEFONO)        AS "telefono",
-              TRIM(e.EMPRESADIRECCION)       AS "direccion"
+              btrim((e.EMPRESARAZONSOCIAL)::text)     AS "razonSocial",
+              btrim((e.EMPRESASIGLA)::text)           AS "sigla",
+              btrim((e.EMPRESAEMAIL)::text)           AS "email",
+              btrim((e.EMPRESATELEFONO)::text)        AS "telefono",
+              btrim((e.EMPRESADIRECCION)::text)       AS "direccion"
          FROM EMPRESA e
          JOIN TIPODOCUMENTOIDENTIDAD t ON t.TIPODOCUMENTOIDENTIDADID = e.TIPODOCUMENTOIDENTIDADID
-        WHERE e.EMPRESAID = :1`,
+        WHERE e.EMPRESAID = $1`,
       [empresaId],
     )
     return rows[0] ?? null
@@ -224,20 +216,18 @@ export class CapacitadoresService {
     telefono: string
     direccion: string
   }) {
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(EMPRESAID), 0) + 1 AS "id" FROM EMPRESA`,
-    )
-    await this.ds.query(
-      `INSERT INTO EMPRESA
-         (EMPRESAID, TIPODOCUMENTOIDENTIDADID, EMPRESAIDENTIFICACION, EMPRESADIGITOVERIFICACION,
-          EMPRESARAZONSOCIAL, EMPRESASIGLA, EMPRESAEMAIL, EMPRESATELEFONO,
-          EMPRESADIRECCION, EMPRESAFECHAREGISTRO)
-       VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, SYSDATE)`,
-      [
-        id, dto.tipoDocumentoId, dto.identificacion, dto.digitoVerificacion ?? 0,
-        dto.razonSocial, dto.sigla, dto.email, dto.telefono, dto.direccion,
-      ],
-    )
+    // sin trigger (hoy, el XE) sale de la secuencia EMPRESAID, la misma que usa el registro de empresas
+    const id = await insertarConId(this.ds, 'EMPRESA', 'EMPRESAID', { secuencia: 'EMPRESAID' }, {
+      TIPODOCUMENTOIDENTIDADID: dto.tipoDocumentoId,
+      EMPRESAIDENTIFICACION: dto.identificacion,
+      EMPRESADIGITOVERIFICACION: dto.digitoVerificacion ?? 0,
+      EMPRESARAZONSOCIAL: dto.razonSocial,
+      EMPRESASIGLA: dto.sigla,
+      EMPRESAEMAIL: dto.email,
+      EMPRESATELEFONO: dto.telefono,
+      EMPRESADIRECCION: dto.direccion,
+      EMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { empresaId: id }
   }
 
@@ -260,24 +250,22 @@ export class CapacitadoresService {
     }
     if (!sets.length) return { ok: true }
     params.push(empresaId)
-    await this.ds.query(`UPDATE EMPRESA SET ${sets.join(', ')} WHERE EMPRESAID = :${params.length}`, params)
+    await this.ds.query(`UPDATE EMPRESA SET ${sets.join(', ')} WHERE EMPRESAID = $${params.length}`, params)
     return { ok: true }
   }
-
-  // ── HV Empresa ────────────────────────────────────────────────────────────
 
   async getHVEmpresa(empresaId: number) {
     const rows: any[] = await this.ds.query(
       `SELECT HVEMPRESAID                   AS "hvEmpresaId",
               EMPRESAID                     AS "empresaId",
-              TRIM(HVEMPRESANOMBREARCHIVO)  AS "estado",
+              btrim((HVEMPRESANOMBREARCHIVO)::text)  AS "estado",
               HVEMPRESAPROYECTO             AS "proyectoOrigen",
-              TRIM(HVEMPRESAHABEASDATA)     AS "habeasData",
-              TRIM(HVEMPRESAHABEASDATAE)    AS "habeasDataE",
+              btrim((HVEMPRESAHABEASDATA)::text)     AS "habeasData",
+              btrim((HVEMPRESAHABEASDATAE)::text)    AS "habeasDataE",
               HVEMPRESAFECHAREGISTRO        AS "fechaRegistro",
               HVEMPRESAFECHAACTUALIZACION   AS "fechaActualizacion",
               HVEMPRESAOBSERVACION          AS "observacion"
-         FROM HVEMPRESA WHERE EMPRESAID = :1`,
+         FROM HVEMPRESA WHERE EMPRESAID = $1`,
       [empresaId],
     )
     return rows[0] ?? null
@@ -287,29 +275,25 @@ export class CapacitadoresService {
     if (proyectoId) await this.assertConvenioEnEjecucion(proyectoId)
     const existing = await this.getHVEmpresa(empresaId)
     if (existing) return existing
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(HVEMPRESAID), 0) + 1 AS "id" FROM HVEMPRESA`,
-    )
-    await this.ds.query(
-      `INSERT INTO HVEMPRESA
-         (HVEMPRESAID, EMPRESAID, HVEMPRESAPROYECTO, HVEMPRESANOMBREARCHIVO,
-          HVEMPRESAHABEASDATA, HVEMPRESAHABEASDATAE, HVEMPRESAFECHAREGISTRO)
-       VALUES (:1, :2, :3, 'PENDIENTE', 'SI', 'SI', SYSDATE)`,
-      [id, empresaId, proyectoId],
-    )
+    const id = await insertarConId(this.ds, 'HVEMPRESA', 'HVEMPRESAID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      HVEMPRESAPROYECTO: proyectoId,
+      HVEMPRESANOMBREARCHIVO: 'PENDIENTE',
+      HVEMPRESAHABEASDATA: 'SI',
+      HVEMPRESAHABEASDATAE: 'SI',
+      HVEMPRESAFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { hvEmpresaId: id }
   }
 
-  // ── Documentos PDF empresa ─────────────────────────────────────────────────
-
   async listarDocumentosEmpresa(empresaId: number, tipo?: string, num?: number) {
     let sql = `SELECT DOCUMENTOSCAPJURIDICOID          AS "docId",
-                      TRIM(DOCUMENTOSCAPJURIDICOTIPO)  AS "tipo",
+                      btrim((DOCUMENTOSCAPJURIDICOTIPO)::text)  AS "tipo",
                       DOCUMENTOSCAPJURIDICONUM          AS "num",
-                      TRIM(DOCUMENTOSCAPJURIDICONOMBREARC) AS "nombreArchivo",
-                      DBMS_LOB.GETLENGTH(DOCUMENTOSCAPJURIDICODOC) AS "tamanoBytes",
+                      btrim((DOCUMENTOSCAPJURIDICONOMBREARC)::text) AS "nombreArchivo",
+                      length(DOCUMENTOSCAPJURIDICODOC) AS "tamanoBytes",
                       DOCUMENTOSCAPJURIDICOFECHAREG     AS "fechaRegistro"
-                 FROM DOCUMENTOSCAPJURIDICO WHERE EMPRESAID = :1`
+                 FROM DOCUMENTOSCAPJURIDICO WHERE EMPRESAID = $1`
     const params: any[] = [empresaId]
     if (tipo) { sql += ` AND TRIM(DOCUMENTOSCAPJURIDICOTIPO) = :${params.length + 1}`; params.push(tipo) }
     if (num !== undefined) { sql += ` AND DOCUMENTOSCAPJURIDICONUM = :${params.length + 1}`; params.push(num) }
@@ -319,62 +303,61 @@ export class CapacitadoresService {
   async subirDocumentoEmpresa(empresaId: number, tipo: string, num: number, file: MulterFile) {
     await this.ds.query(
       `DELETE FROM DOCUMENTOSCAPJURIDICO
-        WHERE EMPRESAID = :1 AND TRIM(DOCUMENTOSCAPJURIDICOTIPO) = :2 AND DOCUMENTOSCAPJURIDICONUM = :3`,
+        WHERE EMPRESAID = $1 AND btrim((DOCUMENTOSCAPJURIDICOTIPO)::text) = $2 AND DOCUMENTOSCAPJURIDICONUM = $3`,
       [empresaId, tipo, num],
     )
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(DOCUMENTOSCAPJURIDICOID), 0) + 1 AS "id" FROM DOCUMENTOSCAPJURIDICO`,
-    )
-    await this.ds.query(
-      `INSERT INTO DOCUMENTOSCAPJURIDICO
-         (DOCUMENTOSCAPJURIDICOID, EMPRESAID, DOCUMENTOSCAPJURIDICONUM,
-          DOCUMENTOSCAPJURIDICOTIPO, DOCUMENTOSCAPJURIDICONOMBREARC,
-          DOCUMENTOSCAPJURIDICODOC, DOCUMENTOSCAPJURIDICOFECHAREG)
-       VALUES (:1, :2, :3, :4, :5, :6, SYSDATE)`,
-      [id, empresaId, num, tipo, file.originalname, file.buffer],
-    )
+    const id = await insertarConId(this.ds, 'DOCUMENTOSCAPJURIDICO', 'DOCUMENTOSCAPJURIDICOID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      DOCUMENTOSCAPJURIDICONUM: num,
+      DOCUMENTOSCAPJURIDICOTIPO: tipo,
+      DOCUMENTOSCAPJURIDICONOMBREARC: file.originalname,
+      // como BLOB, igual que en DOCUMENTOSPERSONAS: el driver lo sube como LOB temporal; un Buffer
+      // suelto de más de 4000 bytes viaja como LONG RAW, y eso junto al RETURNING puede dar ORA-22816
+      DOCUMENTOSCAPJURIDICODOC: { type: oracledb.DB_TYPE_BLOB, val: file.buffer },
+      DOCUMENTOSCAPJURIDICOFECHAREG: sqlCrudo(AHORA_UTC),
+    })
     return { docId: id }
   }
 
   async getDocumentoEmpresaArchivo(docId: number) {
     const rows: any[] = await this.ds.query(
-      `SELECT TRIM(DOCUMENTOSCAPJURIDICONOMBREARC) AS "nombreArchivo",
+      `SELECT btrim((DOCUMENTOSCAPJURIDICONOMBREARC)::text) AS "nombreArchivo",
               DOCUMENTOSCAPJURIDICODOC AS "buffer"
-         FROM DOCUMENTOSCAPJURIDICO WHERE DOCUMENTOSCAPJURIDICOID = :1`,
+         FROM DOCUMENTOSCAPJURIDICO WHERE DOCUMENTOSCAPJURIDICOID = $1`,
       [docId],
     )
     if (!rows[0]) throw new BadRequestException('Documento no encontrado.')
-    return rows[0] as { nombreArchivo: string; buffer: Buffer }
+    const fila = rows[0] as { nombreArchivo: string; buffer: Buffer }
+    const enDisco = leerDocumento('documentoscapjuridico', 'documentoscapjuridicodoc', docId)
+    return enDisco ? { ...fila, buffer: enDisco } : fila
   }
 
   async eliminarDocumentoEmpresa(docId: number) {
     await this.ds.query(
-      `DELETE FROM DOCUMENTOSCAPJURIDICO WHERE DOCUMENTOSCAPJURIDICOID = :1`, [docId],
+      `DELETE FROM DOCUMENTOSCAPJURIDICO WHERE DOCUMENTOSCAPJURIDICOID = $1`, [docId],
     )
     return { ok: true }
   }
-
-  // ── Otros documentos empresa ───────────────────────────────────────────────
 
   async listarDocsAdicionalesEmpresa(empresaId: number) {
     const rows: any[] = await this.ds.query(
       `SELECT da.HVEMPRESADOCID                  AS "hvEmpresaDocId",
               da.PERSONADOCREQID                 AS "tipoDocId",
-              TRIM(dr.PERSONADOCREQNOMBRE)       AS "nombre",
-              TRIM(dr.PERSONADOCREQSIGLA)        AS "sigla",
-              TRIM(da.HVEMPRESADOCNOMBREARCHIVO) AS "estado",
+              btrim((dr.PERSONADOCREQNOMBRE)::text)       AS "nombre",
+              btrim((dr.PERSONADOCREQSIGLA)::text)        AS "sigla",
+              btrim((da.HVEMPRESADOCNOMBREARCHIVO)::text) AS "estado",
               da.HVEMPRESADOCUMETOSPROYECTO      AS "proyectoOrigen",
               da.HVEMPRESADOCFECHAREGISTRO       AS "fechaRegistro",
               dc.DOCUMENTOSCAPJURIDICOID         AS "documentoId",
-              TRIM(dc.DOCUMENTOSCAPJURIDICONOMBREARC) AS "nombreArchivo",
-              DBMS_LOB.GETLENGTH(dc.DOCUMENTOSCAPJURIDICODOC) AS "tamanoBytes"
+              btrim((dc.DOCUMENTOSCAPJURIDICONOMBREARC)::text) AS "nombreArchivo",
+              length(dc.DOCUMENTOSCAPJURIDICODOC) AS "tamanoBytes"
          FROM HVEMPRESADOCUMETOS da
          JOIN PERSONADOCREQUERIDOS dr ON dr.PERSONADOCREQID = da.PERSONADOCREQID
          LEFT JOIN DOCUMENTOSCAPJURIDICO dc
            ON dc.EMPRESAID = da.EMPRESAID
-          AND TRIM(dc.DOCUMENTOSCAPJURIDICOTIPO) = 'DA'
+          AND btrim((dc.DOCUMENTOSCAPJURIDICOTIPO)::text) = 'DA'
           AND dc.DOCUMENTOSCAPJURIDICONUM = da.HVEMPRESADOCID
-        WHERE da.EMPRESAID = :1
+        WHERE da.EMPRESAID = $1
         ORDER BY da.HVEMPRESADOCID ASC`,
       [empresaId],
     )
@@ -395,23 +378,20 @@ export class CapacitadoresService {
   }
 
   async crearDocAdicionalEmpresa(empresaId: number, dto: { tipoDocId: number; proyectoId?: number }) {
-    const [[{ id }]] = await this.ds.query<[{ id: number }][]>(
-      `SELECT NVL(MAX(HVEMPRESADOCID), 0) + 1 AS "id" FROM HVEMPRESADOCUMETOS`,
-    )
-    await this.ds.query(
-      `INSERT INTO HVEMPRESADOCUMETOS
-         (HVEMPRESADOCID, EMPRESAID, PERSONADOCREQID, HVEMPRESADOCNOMBREARCHIVO,
-          HVEMPRESADOCUMETOSPROYECTO, HVEMPRESADOCFECHAREGISTRO)
-       VALUES (:1, :2, :3, 'PENDIENTE', :4, SYSDATE)`,
-      [id, empresaId, dto.tipoDocId, dto.proyectoId ?? 0],
-    )
+    const id = await insertarConId(this.ds, 'HVEMPRESADOCUMETOS', 'HVEMPRESADOCID', { maxMasUno: true }, {
+      EMPRESAID: empresaId,
+      PERSONADOCREQID: dto.tipoDocId,
+      HVEMPRESADOCNOMBREARCHIVO: 'PENDIENTE',
+      HVEMPRESADOCUMETOSPROYECTO: dto.proyectoId ?? 0,
+      HVEMPRESADOCFECHAREGISTRO: sqlCrudo(AHORA_UTC),
+    })
     return { hvEmpresaDocId: id }
   }
 
   async eliminarDocAdicionalEmpresa(hvEmpresaDocId: number, empresaId: number) {
     const [doc]: any[] = await this.ds.query(
-      `SELECT TRIM(HVEMPRESADOCNOMBREARCHIVO) AS "estado"
-         FROM HVEMPRESADOCUMETOS WHERE HVEMPRESADOCID = :1`,
+      `SELECT btrim((HVEMPRESADOCNOMBREARCHIVO)::text) AS "estado"
+         FROM HVEMPRESADOCUMETOS WHERE HVEMPRESADOCID = $1`,
       [hvEmpresaDocId],
     )
     if (doc?.estado === 'APROBADO') {
@@ -419,12 +399,12 @@ export class CapacitadoresService {
     }
     await this.ds.query(
       `DELETE FROM DOCUMENTOSCAPJURIDICO
-        WHERE EMPRESAID = :1 AND TRIM(DOCUMENTOSCAPJURIDICOTIPO) = 'DA'
-          AND DOCUMENTOSCAPJURIDICONUM = :2`,
+        WHERE EMPRESAID = $1 AND btrim((DOCUMENTOSCAPJURIDICOTIPO)::text) = 'DA'
+          AND DOCUMENTOSCAPJURIDICONUM = $2`,
       [empresaId, hvEmpresaDocId],
     )
     await this.ds.query(
-      `DELETE FROM HVEMPRESADOCUMETOS WHERE HVEMPRESADOCID = :1`, [hvEmpresaDocId],
+      `DELETE FROM HVEMPRESADOCUMETOS WHERE HVEMPRESADOCID = $1`, [hvEmpresaDocId],
     )
     return { ok: true }
   }

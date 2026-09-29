@@ -37,7 +37,7 @@ export default async function RegistrarPage({ params }: Props) {
       {/* Título */}
       <div
         className="flex items-center gap-3 px-6 py-4 text-white font-bold text-xl rounded-lg shadow"
-        style={{ backgroundColor: '#00324D' }}
+        style={{ backgroundColor: '#00304D' }}
       >
         <span>📋</span>
         Inscripción a Evento

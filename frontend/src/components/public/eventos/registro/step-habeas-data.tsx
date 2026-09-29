@@ -12,7 +12,7 @@ export function StepHabeasData({ eventoNombre, onAceptar, onRechazar }: Props) {
       {/* Barra título */}
       <div
         className="flex items-center gap-3 px-6 py-4 text-white font-semibold text-lg rounded-lg shadow"
-        style={{ backgroundColor: '#00324D' }}
+        style={{ backgroundColor: '#00304D' }}
       >
         <ShieldCheck size={22} className="flex-shrink-0" />
         LEY DE TRATAMIENTO DE DATOS — HABEAS DATA

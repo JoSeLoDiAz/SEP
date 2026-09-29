@@ -7,5 +7,6 @@ import { ImportarProyectoService } from './importar-proyecto.service'
   imports: [AuthModule],
   controllers: [ImportarProyectoController],
   providers: [ImportarProyectoService],
+  exports: [ImportarProyectoService],
 })
 export class ImportarProyectoModule {}

@@ -11,7 +11,7 @@
 En la reunión con Adriana López, Carlos Adrián Peláez, Myriam Juliana, Yerly y Julio se acordó:
 
 - Partir **desde la base de datos** para tener claro qué datos se cargan y qué información hace falta.
-- Yerly elaboró una base de datos preliminar (Excel) con la información de un evaluador real (William Cardona) como **caso piloto** para validar la estructura.
+- Se elaboró una base de datos preliminar (Excel) con la información de un evaluador real como **caso piloto** para validar la estructura.
 - Las **encuestas de evaluación** solo tienen información desde 2024 — incluirlas, pero advertir que la cobertura es parcial.
 - Adriana cierra: vamos a montar el **documento de requerimientos formal** (Juliana) y luego se programa el desarrollo.
 - Carlos Adrián pidió: ir mostrando pantallazos durante el desarrollo para construir colectivamente el módulo.
@@ -20,15 +20,15 @@ Conclusión: **diseñamos el modelo de datos primero**, validamos con Adriana, y
 
 ---
 
-## 2. Análisis del Excel piloto (William Cardona)
+## 2. Análisis del Excel piloto
 
 El archivo `Base Banco Evaluadores 2026.xlsx` tiene **85 columnas** repetidas porque el formato actual mete cada año de participación como un bloque de 8 columnas (AÑO, ROL, MODALIDAD, PROCESO, PROYECTOS EVALUADOS, MESA, EQUIPO, DINAMIZADOR) en la misma fila — eso no escala y obliga a normalizar.
 
 Adicionalmente, en la carpeta del evaluador encontramos:
 
 ```
-William Alexander Cardona Perdomo/
-├── William ... - Foto.jpg            ← foto de perfil
+<Evaluador piloto>/
+├── <Evaluador> - Foto.jpg            ← foto de perfil
 ├── HV Y ESTUDIOS/                    ← 6 PDFs (HV, pregrado, posgrado, diplomados, proyectos)
 ├── EXPERIENCIA/                      ← certificados laborales
 └── TICS/                             ← certificados de competencias TIC
@@ -298,7 +298,7 @@ USUARIO → POST /auth/login (email + clave)
 | **2** | Backend auth: login con detección multirol + endpoint `/auth/seleccionar-perfil` + `/auth/cambiar-perfil` | Equipo TIC |
 | **3** | Frontend: pantalla de selección de perfil + botón "Cambiar perfil" en topbar | Equipo TIC |
 | **4** | Pantalla de admin para asignar/revocar perfiles a usuarios | Equipo TIC |
-| **5** | DDL del banco (tablas 3.1–3.6 + catálogos 3.8–3.10) + sembrar piloto William Cardona | Equipo TIC |
+| **5** | DDL del banco (tablas 3.1–3.6 + catálogos 3.8–3.10) + sembrar el evaluador piloto | Equipo TIC |
 | **6** | Backend NestJS: módulo `evaluadores` con CRUD + carga de archivos (BLOB) | Equipo TIC |
 | **7** | Frontend: listado tipo "tarjetas con foto" + ficha del evaluador (pantallazo a Carlos) | Equipo TIC |
 | **8** | Importador desde el Excel actual (carga masiva del histórico — campos opcionales se dejan vacíos) | Equipo TIC |

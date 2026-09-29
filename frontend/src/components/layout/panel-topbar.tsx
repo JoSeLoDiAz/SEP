@@ -3,7 +3,8 @@
 import api from '@/lib/api'
 import { clearSepAuth, type SepUsuario } from '@/lib/auth'
 import { useTieneConvenios } from '@/lib/use-tiene-convenios'
-import { Check, ChevronDown, Loader2, LogOut, Menu, UserCog } from 'lucide-react'
+import Link from 'next/link'
+import { Check, ChevronDown, KeyRound, Loader2, LogOut, Menu, UserCog } from 'lucide-react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
@@ -110,11 +111,10 @@ export function PanelTopbar({ usuario, onMenuOpen }: PanelTopbarProps) {
           {(usuario?.nombre?.[0] ?? 'U').toUpperCase()}
         </div>
 
-        {tieneVarios && (
-          <div ref={menuRef} className="relative">
+        <div ref={menuRef} className="relative">
             <button
               onClick={() => setMenuAbierto(v => !v)}
-              title="Cambiar perfil"
+              title={tieneVarios ? 'Cambiar perfil o contraseña' : 'Mi cuenta'}
               className="flex items-center gap-1 p-2 rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-[#00304D] transition-colors"
             >
               <UserCog size={17} />
@@ -122,9 +122,12 @@ export function PanelTopbar({ usuario, onMenuOpen }: PanelTopbarProps) {
             </button>
             {menuAbierto && (
               <div className="absolute right-0 mt-2 w-72 bg-white border border-neutral-200 rounded-xl shadow-lg overflow-hidden z-40">
+                {tieneVarios && (
                 <div className="px-3 py-2 border-b border-neutral-100">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">Cambiar perfil</p>
                 </div>
+                )}
+                {tieneVarios && (
                 <ul className="max-h-72 overflow-y-auto">
                   {perfiles.map(p => {
                     const activo = p.perfilId === usuario?.perfilId
@@ -155,10 +158,20 @@ export function PanelTopbar({ usuario, onMenuOpen }: PanelTopbarProps) {
                     )
                   })}
                 </ul>
+                )}
+                <Link
+                  href="/panel/mi-clave"
+                  onClick={() => setMenuAbierto(false)}
+                  className={`flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 transition ${
+                    tieneVarios ? 'border-t border-neutral-100' : ''
+                  }`}
+                >
+                  <KeyRound size={14} className="text-neutral-400" />
+                  Cambiar mi contraseña
+                </Link>
               </div>
             )}
           </div>
-        )}
 
         <button
           onClick={handleLogout}

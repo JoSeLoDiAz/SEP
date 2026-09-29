@@ -5,187 +5,17 @@ import { Modal } from '@/components/ui/modal'
 import { ToastBetowa } from '@/components/ui/toast-betowa'
 import {
   AlertTriangle, ArrowLeft, Building2, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
-  FileSpreadsheet, Info, Loader2, RefreshCcw, ShieldAlert, Upload, UserCircle2, X,
+  Database, FileSpreadsheet, FileText, Info, Loader2, RefreshCcw, Save, ShieldAlert, Upload, UserCircle2, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ReportePreview } from '@/components/importar/reporte-preview'
+import type { ContactoSimple, ExcelAFConDetalle, PreviewImportacion } from '@/lib/types/importar-proyecto'
 
 const PRIMARY = '#00304D'
 
 interface Convocatoria { id: number; nombre: string; estado: number }
-
-interface PreviewEmpresa {
-  estado: 'nueva' | 'existente'
-  nit: string
-  razonSocial: string
-  empresaIdExistente?: number
-  diferenciasDatos?: Array<{ campo: string; actual: string | null; nuevo: string | null }>
-}
-interface PreviewUsuario {
-  email: string
-  estado: 'nuevo' | 'existente'
-  usuarioIdExistente?: number
-}
-interface PreviewConvocatoria {
-  convocatoriaId: number; nombre: string; estado: number; abierta: boolean
-}
-interface PreviewValidacion { nivel: 'error' | 'warning' | 'info'; campo?: string; mensaje: string }
-
-interface ContactoSimple { id: string; tipo: string; nombre: string; email: string; telefono: string }
-interface ExcelContacto { representanteLegal: ContactoSimple; contacto1: ContactoSimple; contactoSustenta: ContactoSimple }
-
-interface ExcelDiagnostico {
-  numero: number
-  herramientas: Array<{ nombre: string; muestra: string }>
-  fecha: string | null
-  herramientaPropia: string | null
-  otraHerramienta: string | null
-  planCapacitacion: string | null
-  descripcion: string | null
-  resumen: string | null
-}
-interface ExcelNecesidad { numeroDiagnostico: number; numeroNecesidad: number; necesidad: string; numeroBeneficiarios: number }
-
-interface ExcelPresupuesto {
-  numeroAFs: number; beneficiarios: number; valorAFs: number
-  gastosOperacion: number; valorTransferencia: number; beneficiariosTransferencia: number
-  poliza: number; valorTotal: number
-  cofinanciacionSena: number; contrapartidaEspecie: number; contrapartidaDinero: number
-  gastosOpCofinSena: number; gastosOpContraEspecie: number; gastosOpContraDinero: number
-}
-
-interface ExcelAFConDetalle {
-  consecutivo: number
-  nombre: string
-  // Identificación
-  eventoFormacion: string | null
-  modalidadFormacion: string | null
-  metodologia: string | null
-  enfoque: string | null
-  horasPorGrupo: number | null
-  numeroGrupos: number | null
-  beneficiariosPresenciales: number | null
-  beneficiariosSincronicos: number | null
-  // Necesidad y problema
-  diagnostico: string | null
-  causasEfectos: string | null
-  efectos: string | null
-  objetivos: string | null
-  justificacion: string | null
-  codigoNecesidad: number | null
-  codigoDiagnostico: number | null
-  // Perfil beneficiarios
-  areas: string[]
-  justificacionAreas: string | null
-  niveles: string[]
-  justificacionNiveles: string | null
-  ocupacionesCuoc: string[]
-  trabajadoresMujeres: number | null
-  trabajadoresCampesinos: number | null
-  trabajadoresCampesinosTexto: string | null
-  trabajadoresPopular: number | null
-  trabajadoresPopularTexto: string | null
-  trabajadoresDiscapacidad: number | null
-  empresasBic: number | null
-  mipymesEmpresas: number | null
-  mipymesTrabajadores: number | null
-  justificacionMipymes: string | null
-  cadenaEmpresas: number | null
-  cadenaTrabajadores: number | null
-  justificacionCadena: string | null
-  // Sectores
-  sectoresPertenecen: string[]
-  subsectoresPertenecen: string[]
-  sectoresBeneficia: string[]
-  subsectoresBeneficia: string[]
-  justificacionSectores: string | null
-  // Alineación e impactos
-  componenteAlineacion: string | null
-  descripcionAlineacion: string | null
-  justificacionAlineacion: string | null
-  justificacionEspecializada: string | null
-  impactosTrabajador: string[]
-  impactosProductividad: string[]
-  // Ambiente y recursos
-  ambiente: string | null
-  material: string | null
-  justificacionSiAplica: string | null
-  recursosDidacticos: string | null
-  insumos: string | null
-  justificacionInsumo: string | null
-  gestionConocimiento: string | null
-  // Hijos
-  uts: Array<{
-    numeroUT: number
-    nombre: string
-    horasPracticas: number | null
-    horasTeoricas: number | null
-    contenido: string | null
-    competencia: string | null
-    actividades: string[]
-    descripcionActividad: string | null
-    perfiles: Array<{ perfil: string; horas: number | null }>
-    articulacionTerritorial: string | null
-    esArticulacionTerritorial: boolean
-  }>
-  rubros: Array<{
-    idRubro: string
-    nombreRubro: string | null
-    descripcion: string | null
-    justificacion: string | null
-    numHoras: number | null
-    numPaginasUnidades: number | null
-    numBeneficiarios: number | null
-    numDias: number | null
-    totalRubro: number | null
-    cofinanciacionSena: number | null
-    contrapartidaEspecie: number | null
-    contrapartidaDinero: number | null
-  }>
-  cobertura: Array<{
-    numeroGrupo: number
-    departamentoPresencial: string | null
-    ciudadPresencial: string | null
-    beneficiariosPresencial: number | null
-    departamentos: Array<{ departamento: string; beneficiarios: number }>
-    justificacion: string | null
-  }>
-}
-
-interface PreviewImportacion {
-  empresa: PreviewEmpresa
-  usuario: PreviewUsuario
-  convocatoria: PreviewConvocatoria
-  proyecto: {
-    nombre: string
-    modalidadProyectoId: number | null
-    modalidadProyectoNombre: string | null
-    presupuesto: ExcelPresupuesto
-    totalAFs: number; totalUTs: number; totalRubros: number; totalCoberturas: number
-  }
-  contactos: ExcelContacto
-  diagnosticos: ExcelDiagnostico[]
-  necesidades: ExcelNecesidad[]
-  basicos: { nit: string; razonSocial: string; sigla: string | null; email: string; celular: string | null; direccionDomicilio: string | null; departamentoDomicilio: string | null; ciudadDomicilio: string | null; tipoOrganizacion: string | null; tamanoEmpresa: string | null; modalidadParticipacion: string | null }
-  generalidades: {
-    objetoSocial: string | null
-    productosServicios: string | null
-    situacionActual: string | null
-    papelSector: string | null
-    retos: string | null
-    experienciaFormativa: string | null
-    objetivoProyecto: string | null
-    sectorPertenece: string | null
-    subsectorPertenece: string | null
-    sectoresRepresenta: string[]
-    subsectoresRepresenta: string[]
-    cadenaProductiva: string | null
-    interacciones: string | null
-  }
-  afs: ExcelAFConDetalle[]
-  validaciones: PreviewValidacion[]
-}
 
 function fmtCop(v: number): string {
   return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
@@ -213,11 +43,13 @@ export default function ImportarProyectoPage() {
   const [errMsg, setErrMsg] = useState('')
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string; duration?: number } | null>(null)
 
-  // Modal confirmación
   const [confirmAbierto, setConfirmAbierto] = useState(false)
   const [clave, setClave] = useState(generarClave())
   const [actualizarEmpresa, setActualizarEmpresa] = useState(false)
   const [importando, setImportando] = useState(false)
+
+  const [reporteAbierto, setReporteAbierto] = useState(false)
+  const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     api.get<Convocatoria[]>('/proyectos/admin/convocatorias')
@@ -259,7 +91,7 @@ export default function ImportarProyectoPage() {
         mensaje: string
       }>(
         '/admin/importar-proyecto/confirmar', fd,
-        // 90 s — proyectos grandes pueden tardar varios segundos en BD.
+        // 90 s: proyectos grandes tardan en BD
         { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 90_000 },
       )
       const noEnc = res.data.rubrosNoEncontrados
@@ -277,7 +109,7 @@ export default function ImportarProyectoPage() {
       const advertencia = advertencias.length > 0 ? ` — ${advertencias.join(', ')}` : ''
       setToast({ tipo: 'success', msg: `Proyecto importado: ${partes.join(', ')}${advertencia}`, duration: 9000 })
       setConfirmAbierto(false)
-      // Damos margen para que el admin alcance a leer el resumen antes del redirect.
+      // margen para leer el resumen antes del redirect
       setTimeout(() => router.push(`/panel/admin/aprobacion/proyectos`), 6000)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
@@ -311,6 +143,29 @@ export default function ImportarProyectoPage() {
     }
   }
 
+  // re-sube el .xlsx: el backend lo re-parsea y persiste el JSON en CONVPROYGUARDADO
+  async function handleGuardar() {
+    if (!preview || !archivo || !convocatoriaId) return
+    setGuardando(true)
+    try {
+      const fd = new FormData()
+      fd.append('archivo', archivo)
+      await api.post(`/admin/convocatoria-proyectos/guardar?convocatoriaId=${convocatoriaId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 90_000,
+      })
+      setToast({ tipo: 'success', msg: 'Proyecto guardado en la convocatoria', duration: 6000 })
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      setToast({ tipo: 'error', msg: msg ?? 'No se pudo guardar el proyecto' })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  if (reporteAbierto && preview) {
+    return <ReportePreview preview={preview} onVolver={() => setReporteAbierto(false)} />
+  }
+
   return (
     <div className="p-5 sm:p-7 xl:p-10 flex flex-col gap-6">
       {toast && (
@@ -323,6 +178,12 @@ export default function ImportarProyectoPage() {
           <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Administración</p>
           <h1 className="text-white font-bold text-base sm:text-lg">Importar proyecto desde Excel del formulador</h1>
         </div>
+        <Link
+          href="/panel/admin/convocatoria-proyectos"
+          className="inline-flex items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/20"
+        >
+          <Database size={16} /> Proyectos guardados
+        </Link>
       </div>
 
       <Link href="/panel" className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#00304D] w-fit">
@@ -330,7 +191,6 @@ export default function ImportarProyectoPage() {
         Volver al panel de administración
       </Link>
 
-      {/* Paso 1 — Subir */}
       <section className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-wide text-[#00304D] mb-3">1. Cargar archivo</p>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
@@ -378,10 +238,28 @@ export default function ImportarProyectoPage() {
         )}
       </section>
 
-      {/* Paso 2 — Preview */}
       {preview && (
         <>
-          <p className="text-xs font-bold uppercase tracking-wide text-[#00304D] -mb-2">2. Revisar antes de importar</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 -mb-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-[#00304D]">2. Revisar antes de importar</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleGuardar}
+                disabled={guardando}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#39a900] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#2f8c00] disabled:opacity-50"
+              >
+                {guardando ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Guardar en convocatoria
+              </button>
+              <button
+                type="button"
+                onClick={() => setReporteAbierto(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#00304D] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#013a5c]"
+              >
+                <FileText size={16} /> Ver reporte completo
+              </button>
+            </div>
+          </div>
 
           {preview.validaciones.length > 0 && (
             <section className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
@@ -407,7 +285,6 @@ export default function ImportarProyectoPage() {
             </section>
           )}
 
-          {/* 1. Datos básicos de la empresa */}
           <Card titulo="1. Datos básicos de la empresa" icono={Building2}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <Dato label="NIT" valor={preview.empresa.nit} mono />
@@ -458,7 +335,6 @@ export default function ImportarProyectoPage() {
             )}
           </Card>
 
-          {/* 2. Contactos */}
           <Card titulo="2. Contactos" icono={UserCircle2}>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <ContactoCard titulo="Representante legal" c={preview.contactos.representanteLegal} />
@@ -467,7 +343,6 @@ export default function ImportarProyectoPage() {
             </div>
           </Card>
 
-          {/* 3. Análisis Organizacional */}
           <Card titulo="3. Análisis Organizacional">
             <div className="grid grid-cols-1 gap-3 text-sm">
               <Dato label="Objeto social de la empresa / gremio" valor={preview.generalidades.objetoSocial} multiline />
@@ -495,7 +370,6 @@ export default function ImportarProyectoPage() {
             </div>
           </Card>
 
-          {/* 4. Diagnóstico */}
           {preview.diagnosticos.length > 0 && (
             <Card titulo={`4. Diagnóstico (${preview.diagnosticos.length})`}>
               <ul className="space-y-3">
@@ -542,7 +416,6 @@ export default function ImportarProyectoPage() {
             </Card>
           )}
 
-          {/* 5. Necesidades de formación */}
           {preview.necesidades.length > 0 && (
             <Card titulo={`5. Necesidades de formación (${preview.necesidades.length})`}>
               <ul className="text-sm space-y-1.5">
@@ -559,7 +432,6 @@ export default function ImportarProyectoPage() {
             </Card>
           )}
 
-          {/* 6. Proyecto a crear (datos del proyecto antes de las AFs) */}
           <Card titulo="6. Proyecto a crear">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <Dato label="Nombre (autogenerado)" valor={preview.proyecto.nombre} />
@@ -569,21 +441,17 @@ export default function ImportarProyectoPage() {
             </div>
           </Card>
 
-          {/* 7. Acciones de Formación */}
           <Card titulo={`7. Acciones de Formación (${preview.afs.length})`}>
             <div className="flex flex-col gap-3">
               {preview.afs.map(af => <AFCard key={af.consecutivo} af={af} />)}
             </div>
           </Card>
 
-          {/* 8. Presupuesto del proyecto */}
           <Card titulo="8. Presupuesto del proyecto">
             <div className="flex flex-col gap-4">
-              {/* Total Acciones de Formación — SOLO AFs (sin GO ni Transferencia) */}
               {(() => {
                 const p = preview.proyecto.presupuesto
-                // Las cifras de Datos_Presupuesto son del proyecto entero (ya
-                // incluyen GO). Para mostrar solo AFs hay que restar el GO.
+                // Datos_Presupuesto trae cifras del proyecto entero: hay que restar el GO
                 const cofinAFs   = (p.cofinanciacionSena   ?? 0) - (p.gastosOpCofinSena    ?? 0)
                 const especieAFs = (p.contrapartidaEspecie ?? 0) - (p.gastosOpContraEspecie ?? 0)
                 const dineroAFs  = (p.contrapartidaDinero  ?? 0) - (p.gastosOpContraDinero  ?? 0) - (p.valorTransferencia ?? 0)
@@ -604,7 +472,6 @@ export default function ImportarProyectoPage() {
                 )
               })()}
 
-              {/* Gastos de operación */}
               {(() => {
                 const valorAFs = preview.proyecto.presupuesto.valorAFs || 0
                 const goTotal  = preview.proyecto.presupuesto.gastosOperacion || 0
@@ -629,7 +496,6 @@ export default function ImportarProyectoPage() {
                 )
               })()}
 
-              {/* Transferencia de conocimiento */}
               {(() => {
                 const valorAFs    = preview.proyecto.presupuesto.valorAFs || 0
                 const goTotal     = preview.proyecto.presupuesto.gastosOperacion || 0
@@ -652,7 +518,6 @@ export default function ImportarProyectoPage() {
                 )
               })()}
 
-              {/* Total del proyecto */}
               <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 mb-3">Total del proyecto</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -665,7 +530,6 @@ export default function ImportarProyectoPage() {
             </div>
           </Card>
 
-          {/* CTA confirmación */}
           {(() => {
             const hayErrores = preview.validaciones.some(v => v.nivel === 'error')
             return (
@@ -698,7 +562,6 @@ export default function ImportarProyectoPage() {
         </>
       )}
 
-      {/* Modal de confirmación */}
       {preview && (
         <Modal open={confirmAbierto} onClose={() => !importando && setConfirmAbierto(false)} maxWidth="max-w-lg">
           <div className="bg-[#00304D] px-5 py-4 flex items-center justify-between gap-3">
@@ -715,7 +578,6 @@ export default function ImportarProyectoPage() {
           </div>
 
           <div className="p-5 flex flex-col gap-4">
-            {/* Resumen */}
             <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-xs">
               <p className="font-bold text-neutral-700 mb-1">Resumen</p>
               <ul className="text-neutral-700 space-y-0.5">
@@ -728,7 +590,6 @@ export default function ImportarProyectoPage() {
               </ul>
             </div>
 
-            {/* Decisión: empresa nueva → clave */}
             {preview.empresa.estado === 'nueva' && (
               <div>
                 <label className="block text-xs font-semibold text-neutral-700 mb-1">
@@ -758,7 +619,6 @@ export default function ImportarProyectoPage() {
               </div>
             )}
 
-            {/* Decisión: empresa existente → actualizar datos */}
             {preview.empresa.estado === 'existente' && preview.empresa.diferenciasDatos && preview.empresa.diferenciasDatos.length > 0 && (
               <label className="flex items-start gap-2 text-xs cursor-pointer">
                 <input
@@ -782,7 +642,6 @@ export default function ImportarProyectoPage() {
               </p>
             )}
 
-            {/* Botones */}
             <div className="flex justify-end gap-2 pt-2 border-t border-neutral-100">
               <button
                 onClick={() => setConfirmAbierto(false)}
@@ -807,8 +666,6 @@ export default function ImportarProyectoPage() {
     </div>
   )
 }
-
-// ── Subcomponentes ─────────────────────────────────────────────────────────────
 
 function Card({ titulo, icono: Icono, children }: { titulo: string; icono?: React.ComponentType<{ size?: number; className?: string }>; children: React.ReactNode }) {
   return (
@@ -859,9 +716,7 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
   const horasGrupo = af.horasPorGrupo ?? 0
   const numGrupos  = af.numeroGrupos ?? 0
   const totalHoras = horasGrupo * numGrupos
-  // Detector robusto de R09 (Gastos de Operación) y R015 (Transferencia).
-  // Capta R09, R09.1, R09.2, R9, R015, R015.1, R0.15, etc. y como respaldo
-  // mira el nombre del rubro por si el código viene con formato distinto.
+  // el código del rubro llega con formatos distintos (R09, R9, R09.1); de respaldo, por nombre
   const isGO = (r: ExcelAFConDetalle['rubros'][number]) =>
     /^R0?9(\D|$)/i.test(r.idRubro.trim()) ||
     /GASTOS\s+DE\s+OPERACI/i.test(r.nombreRubro ?? '')
@@ -871,13 +726,12 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
   const rubroGO    = af.rubros.find(isGO)
   const rubroTrans = af.rubros.find(isTrans)
   const rubrosNormales = af.rubros.filter(r => !isGO(r) && !isTrans(r))
-  // El total de la AF NO incluye GO ni Transferencia (esos van aparte).
+  // el total de la AF no incluye GO ni Transferencia
   const totalRubro = rubrosNormales.reduce((s, r) => s + (r.totalRubro ?? 0), 0)
   const totalCofin = rubrosNormales.reduce((s, r) => s + (r.cofinanciacionSena ?? 0), 0)
   const totalEspecie = rubrosNormales.reduce((s, r) => s + (r.contrapartidaEspecie ?? 0), 0)
   const totalDinero = rubrosNormales.reduce((s, r) => s + (r.contrapartidaDinero ?? 0), 0)
 
-  // Concatenar impactos en un solo string como pidió el usuario.
   const impactosConcat = [
     ...af.impactosTrabajador.map((i, idx) => `Trabajador ${idx + 1}: ${i}`),
     ...af.impactosProductividad.map((i, idx) => `Productividad ${idx + 1}: ${i}`),
@@ -907,7 +761,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
       {abierto && (
         <div className="border-t border-neutral-100 px-4 py-4 bg-neutral-50/50 flex flex-col gap-5 text-sm">
 
-          {/* Identificación */}
           <Bloque titulo="Identificación de la AF">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
               <Dato label="Evento" valor={af.eventoFormacion} />
@@ -923,7 +776,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </div>
           </Bloque>
 
-          {/* Necesidad y problema */}
           <Bloque titulo="Necesidad y problema">
             <div className="grid grid-cols-1 gap-2 text-xs">
               <Dato label={`Necesidad asociada (#${af.codigoNecesidad ?? '—'} · diagnóstico ${af.codigoDiagnostico ?? '—'})`} valor={af.diagnostico} multiline />
@@ -934,35 +786,27 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </div>
           </Bloque>
 
-          {/* Perfil beneficiarios — orden: Áreas+just → Niveles+just → CUOC →
-              Discapacidad → Mujeres → BIC → MIPYMES+just → Cadena+just →
-              Campesinos+just → Populares+just */}
           <Bloque titulo="Perfil de los beneficiarios">
-            {/* Áreas funcionales + justificación */}
             <div className="grid grid-cols-1 gap-2 text-xs">
               <Dato label="Áreas funcionales" valor={af.areas.join(' · ') || '—'} />
               <Dato label="Justificación de áreas" valor={af.justificacionAreas} multiline />
             </div>
 
-            {/* Niveles + justificación */}
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs">
               <Dato label="Niveles ocupacionales" valor={af.niveles.join(' · ') || '—'} />
               <Dato label="Justificación de niveles" valor={af.justificacionNiveles} multiline />
             </div>
 
-            {/* CUOC */}
             <div className="mt-3 text-xs">
               <Dato label={`Ocupaciones CUOC (${af.ocupacionesCuoc.length})`} valor={af.ocupacionesCuoc.join(' · ') || '—'} multiline />
             </div>
 
-            {/* Discapacidad / Mujeres / BIC */}
             <div className="mt-3 grid grid-cols-3 gap-x-4 text-xs">
               <Dato label="Trabajadores en discapacidad" valor={af.trabajadoresDiscapacidad} />
               <Dato label="Trabajadores mujeres" valor={af.trabajadoresMujeres} />
               <Dato label="Empresas BIC" valor={af.empresasBic} />
             </div>
 
-            {/* MIPYMES + justificación */}
             <div className="mt-3 border-t border-neutral-100 pt-3">
               <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 mb-1.5">MIPYMES</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
@@ -974,7 +818,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
               </div>
             </div>
 
-            {/* Cadena productiva + justificación */}
             <div className="mt-3 border-t border-neutral-100 pt-3">
               <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 mb-1.5">Cadena productiva</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
@@ -986,25 +829,21 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
               </div>
             </div>
 
-            {/* Trabajadores economía campesina + justificación */}
             <div className="mt-3 border-t border-neutral-100 pt-3 grid grid-cols-1 gap-2 text-xs">
               <Dato label="N° trabajadores economía campesina" valor={af.trabajadoresCampesinos} />
               <Dato label="Justificación economía campesina" valor={af.trabajadoresCampesinosTexto} multiline />
             </div>
 
-            {/* Trabajadores economía popular + justificación */}
             <div className="mt-3 border-t border-neutral-100 pt-3 grid grid-cols-1 gap-2 text-xs">
               <Dato label="N° trabajadores economía popular" valor={af.trabajadoresPopular} />
               <Dato label="Justificación economía popular" valor={af.trabajadoresPopularTexto} multiline />
             </div>
           </Bloque>
 
-          {/* Enfoque de la AF */}
           <Bloque titulo="Enfoque de la AF">
             <Dato label="Enfoque" valor={af.enfoque} />
           </Bloque>
 
-          {/* Sectores y subsectores que pertenecen los beneficiarios */}
           {(af.sectoresPertenecen.length > 0 || af.subsectoresPertenecen.length > 0) && (
             <Bloque titulo="Sectores y subsectores a los que PERTENECEN los beneficiarios">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -1014,7 +853,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Sectores y subsectores que beneficia la AF (clasificación) */}
           {(af.sectoresBeneficia.length > 0 || af.subsectoresBeneficia.length > 0 || af.justificacionSectores) && (
             <Bloque titulo="Sectores y subsectores que BENEFICIA la AF">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -1029,7 +867,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Alineación e impactos */}
           <Bloque titulo="Alineación e impactos esperados">
             <div className="grid grid-cols-1 gap-2 text-xs">
               <Dato label="Componente de alineación (reto nacional)" valor={af.componenteAlineacion} />
@@ -1040,13 +877,11 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </div>
           </Bloque>
 
-          {/* Unidades temáticas */}
           {af.uts.length > 0 && (
             <Bloque titulo={`Unidades temáticas (${af.uts.length})`}>
               <div className="flex flex-col gap-2">
                 {af.uts.map(u => {
                   const totalHorasUt = (u.horasPracticas ?? 0) + (u.horasTeoricas ?? 0)
-                  // Las UT de articulación territorial son especiales: card en morado.
                   const esArt = u.esArticulacionTerritorial
                   return (
                     <div
@@ -1074,7 +909,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
                         <span className="text-neutral-500 shrink-0">{totalHorasUt}h ({u.horasPracticas ?? 0}p · {u.horasTeoricas ?? 0}t)</span>
                       </div>
                       <div className="grid grid-cols-1 gap-1.5">
-                        {/* Orden: contenido → competencia → actividades → descripción → perfil capacitador */}
                         <Dato label="Contenido" valor={u.contenido} multiline />
                         <Dato label="Competencia por adquirir" valor={u.competencia} multiline />
                         {u.actividades.length > 0 && (
@@ -1110,7 +944,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Cobertura */}
           {af.cobertura.length > 0 && (
             <Bloque titulo={`Cobertura (${af.cobertura.length} grupo${af.cobertura.length !== 1 ? 's' : ''})`}>
               <div className="flex flex-col gap-2">
@@ -1143,7 +976,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Ambiente y recursos */}
           <Bloque titulo="Ambiente, material y recursos">
             <div className="grid grid-cols-1 gap-2 text-xs">
               <Dato label="Ambiente de aprendizaje" valor={af.ambiente} />
@@ -1156,7 +988,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </div>
           </Bloque>
 
-          {/* Rubros de la AF (excluyendo R09 y R015) */}
           {rubrosNormales.length > 0 && (
             <Bloque titulo={`Rubros de la AF (${rubrosNormales.length})`}>
               <div className="flex flex-col gap-2">
@@ -1190,7 +1021,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Gastos de operación */}
           {rubroGO && (
             <Bloque titulo="Gastos de operación de la AF (R09)">
               <div className="border border-neutral-200 rounded-lg p-3 text-xs bg-white">
@@ -1208,7 +1038,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Transferencia de conocimiento */}
           {rubroTrans && (
             <Bloque titulo="Transferencia de conocimiento (R015)">
               <div className="border border-neutral-200 rounded-lg p-3 text-xs bg-white">
@@ -1225,7 +1054,6 @@ function AFCard({ af }: { af: ExcelAFConDetalle }) {
             </Bloque>
           )}
 
-          {/* Resumen presupuestal de la AF — solo rubros normales (no incluye GO ni Transferencia) */}
           <div className="border-t border-neutral-200 pt-3">
             <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 mb-2">Resumen rubros AF (no incluye GO ni Transferencia)</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">

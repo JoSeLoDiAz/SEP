@@ -2,7 +2,6 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import { JwtService } from '@nestjs/jwt'
 import type { Request, Response } from 'express'
 import { Observable } from 'rxjs'
-import { tap } from 'rxjs/operators'
 import type { JwtPayload } from '../strategies/jwt.strategy'
 
 interface AuthedUser {
@@ -13,34 +12,28 @@ interface AuthedUser {
   usuarioPerfilId?: number
 }
 
-/**
- * Sliding session: cada request autenticada exitosa devuelve un nuevo JWT
- * en el header `X-New-Token`. El frontend lo captura y reemplaza el token
- * en localStorage. Mientras el usuario interactúa con el aplicativo, su
- * sesión se renueva infinitamente. Si para de interactuar, el JWT caduca
- * según JWT_EXPIRES_IN (30m).
- */
+// sliding session: cada request autenticada devuelve un JWT nuevo en X-New-Token
 @Injectable()
 export class RefreshTokenInterceptor implements NestInterceptor {
   constructor(private readonly jwtService: JwtService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    return next.handle().pipe(
-      tap(() => {
-        const req = context.switchToHttp().getRequest<Request & { user?: AuthedUser }>()
-        const res = context.switchToHttp().getResponse<Response>()
-        if (!req.user) return
-        const payload: JwtPayload = {
-          sub: req.user.usuarioId,
-          email: req.user.email,
-          perfilId: req.user.perfilId,
-          rol: req.user.rol,
-          usuarioPerfilId: req.user.usuarioPerfilId,
-          scope: 'auth',
-        }
-        const newToken = this.jwtService.sign(payload)
-        res.setHeader('X-New-Token', newToken)
-      }),
-    )
+    const req = context.switchToHttp().getRequest<Request & { user?: AuthedUser }>()
+    const res = context.switchToHttp().getResponse<Response>()
+
+    // la cabecera va antes de next.handle(): las rutas que sirven archivos cierran la respuesta ellas mismas
+    if (req.user && !res.headersSent) {
+      const payload: JwtPayload = {
+        sub: req.user.usuarioId,
+        email: req.user.email,
+        perfilId: req.user.perfilId,
+        rol: req.user.rol,
+        usuarioPerfilId: req.user.usuarioPerfilId,
+        scope: 'auth',
+      }
+      res.setHeader('X-New-Token', this.jwtService.sign(payload))
+    }
+
+    return next.handle()
   }
 }

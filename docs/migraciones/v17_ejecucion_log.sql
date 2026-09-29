@@ -1,21 +1,4 @@
 -- v17_ejecucion_log.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Audit log para cambios sobre las tablas vivas durante la ejecución del
--- proyecto (estado 3 = Aprobado).
---
--- Cuando el administrador SENA modifica grupos, coberturas, unidades
--- temáticas o material de formación de un proyecto que ya fue aprobado, la
--- operación queda registrada aquí con:
---   - tabla afectada
---   - operación (INSERT/UPDATE/DELETE)
---   - id del registro
---   - usuario y perfil
---   - fecha
---   - opcional: snapshots antes/después (CLOB)
---
--- En estados distintos a 3 (formulación/ borrador) NO se loggea — esos
--- cambios son parte normal de la edición del proponente.
--- ──────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE EJECUCIONLOG (
   EJECUCIONLOGID    NUMBER          NOT NULL,

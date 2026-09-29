@@ -14,7 +14,15 @@ out/
 .env
 .env.local
 .env.*.local
+.env.pre.sep
 !.env.example
+!.env.pre.example
+
+# ── CI local ──
+.ci-artifacts/
+.ci-be-deploy/
+.ci-offline-seed/
+.ci-ssh-*-pre.key
 
 # ── Logs ──
 logs/
@@ -35,9 +43,38 @@ docker/nginx/logs/
 *.swp
 *.swo
 
-# ── Herramientas locales (Claude Code, etc.) ──
+# ── Configuración local de herramientas ──
 .claude/
+
+# ── Datos reales de personas ──
+# Hojas de vida, fotos, cédulas y bases con identificaciones y correos de
+# personas reales. Se trabajan en local pero NO entran al repositorio: un
+# repositorio no es el sitio para datos personales, y una vez subidos quedan
+# en el historial aunque después se borren.
+docs/evaluador/*.xlsx
+docs/evaluador/*/
+!docs/evaluador/plantillas/
+docs/reports/
+
+# ── Respaldos de migraciones con datos de personas ──
+# El repositorio es público. Los respaldos que traen nombres, cédulas o nombres de
+# archivo de evaluadores van fuera: ../respaldos/. Solo se versionan los que
+# contienen únicamente identificadores internos (respaldo-v64.json, por ejemplo).
+docs/migraciones/respaldo-v6[6-9]*.json
+docs/migraciones/respaldo-v[7-9]*.json
+docs/migraciones/*-clasificacion.json
+docs/migraciones/*-datos.json
+
+# ── Temporales de Office ──
+# Word deja un archivo de bloqueo mientras el documento está abierto.
+~$*
 
 # ── OS ──
 .DS_Store
 Thumbs.db
+
+# lo que deja ts-node al compilar los guiones de scripts/
+backend/scripts/*.js
+backend/scripts/*.js.map
+backend/scripts/*.d.ts
+!backend/scripts/probar-correo.js

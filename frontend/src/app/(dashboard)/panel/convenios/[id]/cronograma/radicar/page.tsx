@@ -508,7 +508,7 @@ function DetalleRadicadoModal({
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden my-6">
-        <div className="bg-[#00324D] px-5 py-4 flex items-start justify-between gap-3 shrink-0">
+        <div className="bg-[#00304D] px-5 py-4 flex items-start justify-between gap-3 shrink-0">
           <div className="text-white">
             <h3 className="font-bold text-base flex items-center gap-2">
               <ClipboardCheck size={18} /> Radicado #{detalle?.numero ?? '…'}

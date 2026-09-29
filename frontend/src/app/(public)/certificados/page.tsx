@@ -1,4 +1,5 @@
 import { Award } from 'lucide-react'
+import { CabeceraPagina } from '@/components/public/cabecera-pagina'
 import { CertificadosForm } from '@/components/public/certificados/certificados-form'
 
 export const metadata = {
@@ -9,17 +10,13 @@ export const metadata = {
 export default function CertificadosPage() {
   return (
     <div className="flex flex-col">
-      {/* Barra de título — estilo GeneXus original */}
-      <div
-        className="w-full flex items-center gap-3 px-6 py-4 text-white font-semibold text-lg shadow-md"
-        style={{ backgroundColor: '#00324D' }}
-      >
-        <Award size={22} className="flex-shrink-0" />
-        Descarga de Certificados - SEP
-      </div>
+      <CabeceraPagina
+        icono={Award}
+        titulo="Descarga de certificados"
+        descripcion="Consulta y descarga tus certificados de participación en los eventos del GGPC, como beneficiario de una acción de formación o como evaluador del banco."
+      />
 
-      {/* Contenido */}
-      <div className="max-w-4xl mx-auto w-full px-6 py-8">
+      <div className="mx-auto w-full max-w-5xl px-6 pb-14 pt-2">
         <CertificadosForm />
       </div>
     </div>

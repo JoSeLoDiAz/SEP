@@ -6,7 +6,7 @@ import { Usuario } from '../auth/entities/usuario.entity'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { twofish } = require('twofish')
 
-// ── Twofish (mismo algoritmo que GeneXus) ────────────────────────────────────
+// twofish: mismo algoritmo que GeneXus
 
 function encrypt64(plainText: string, key: string): string {
   const tf = twofish(new Array(16).fill(0))
@@ -15,8 +15,6 @@ function encrypt64(plainText: string, key: string): string {
   while (padded.length < 16) padded.push(0x20)
   return Buffer.from(tf.encrypt(keyArr, padded)).toString('base64')
 }
-
-// ── Raw-query helper: TRIM nchar ─────────────────────────────────────────────
 
 @Injectable()
 export class EmpresaService {
@@ -28,67 +26,62 @@ export class EmpresaService {
     private readonly dataSource: DataSource,
   ) {}
 
-  // ── Datos básicos completos ───────────────────────────────────────────────
-
   async getDatos(email: string) {
-    // Empresa
     const [emp] = await this.dataSource.query(
       `SELECT
          e.EMPRESAID                AS "empresaId",
          e.TIPODOCUMENTOIDENTIDADID AS "tipoDocumentoIdentidadId",
-         TRIM(tdi.TIPODOCUMENTOIDENTIDADNOMBRE) AS "tipoDocNombre",
+         btrim((tdi.TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "tipoDocNombre",
          e.EMPRESAIDENTIFICACION    AS "empresaIdentificacion",
          e.EMPRESADIGITOVERIFICACION AS "empresaDigitoVerificacion",
-         TRIM(e.EMPRESARAZONSOCIAL) AS "empresaRazonSocial",
-         TRIM(e.EMPRESASIGLA)       AS "empresaSigla",
+         btrim((e.EMPRESARAZONSOCIAL)::text) AS "empresaRazonSocial",
+         btrim((e.EMPRESASIGLA)::text)       AS "empresaSigla",
          e.EMPRESAEMAIL             AS "empresaEmail",
          e.EMPRESAFECHAREGISTRO     AS "empresaFechaRegistro",
          e.COBERTURAEMPRESAID       AS "coberturaEmpresaId",
          e.DEPARTAMENTOEMPRESAID    AS "departamentoEmpresaId",
          e.CIUDADEMPRESAID          AS "ciudadEmpresaId",
-         TRIM(e.EMPRESADIRECCION)   AS "empresaDireccion",
-         TRIM(e.EMPRESATELEFONO)    AS "empresaTelefono",
-         TRIM(e.EMPRESACELULAR)     AS "empresaCelular",
+         btrim((e.EMPRESADIRECCION)::text)   AS "empresaDireccion",
+         btrim((e.EMPRESATELEFONO)::text)    AS "empresaTelefono",
+         btrim((e.EMPRESACELULAR)::text)     AS "empresaCelular",
          e.EMPRESAINDICATIVO        AS "empresaIndicativo",
-         TRIM(e.EMPRESAWEBSITE)     AS "empresaWebsite",
+         btrim((e.EMPRESAWEBSITE)::text)     AS "empresaWebsite",
          e.CIIUID                   AS "ciiuId",
          e.TIPOEMPRESAID            AS "tipoEmpresaId",
          e.TAMANOEMPRESAID          AS "tamanoEmpresaId",
          CASE WHEN e.EMPRESACERTIFCOMP = 1 THEN 'S' ELSE 'N' END AS "empresaCertifComp",
          CASE WHEN e.EMPRESAEXPERTTECN = 1 THEN 'S' ELSE 'N' END AS "empresaExpertTecn",
          e.TIPOIDENTIFICACIONREP    AS "tipoIdentificacionRep",
-         TRIM(e.EMPRESAREPDOCUMENTO) AS "empresaRepDocumento",
-         TRIM(e.EMPRESAREP)         AS "empresaRep",
-         TRIM(e.EMPRESAREPCARGO)    AS "empresaRepCargo",
-         TRIM(e.EMPRESAREPCORREO)   AS "empresaRepCorreo",
-         TRIM(e.EMPRESAREPTEL)      AS "empresaRepTel"
+         btrim((e.EMPRESAREPDOCUMENTO)::text) AS "empresaRepDocumento",
+         btrim((e.EMPRESAREP)::text)         AS "empresaRep",
+         btrim((e.EMPRESAREPCARGO)::text)    AS "empresaRepCargo",
+         btrim((e.EMPRESAREPCORREO)::text)   AS "empresaRepCorreo",
+         btrim((e.EMPRESAREPTEL)::text)      AS "empresaRepTel"
        FROM EMPRESA e
        LEFT JOIN TIPODOCUMENTOIDENTIDAD tdi
               ON tdi.TIPODOCUMENTOIDENTIDADID = e.TIPODOCUMENTOIDENTIDADID
-       WHERE e.EMPRESAEMAIL = :1
-         AND ROWNUM = 1`,
+       WHERE e.EMPRESAEMAIL = $1
+ LIMIT 1`,
       [email],
     )
     if (!emp) throw new NotFoundException('Empresa no encontrada')
 
-    // Usuario (fecha registro + perfil)
     const [usr] = await this.dataSource.query(
       `SELECT u.USUARIOFECHAREGISTRO AS "fechaRegistro",
-              TRIM(p.PERFILNOMBRE)   AS "perfilNombre"
+              btrim((p.PERFILNOMBRE)::text)   AS "perfilNombre"
          FROM USUARIO u
          JOIN PERFIL  p ON p.PERFILID = u.PERFILID
-        WHERE u.USUARIOEMAIL = :1
-          AND ROWNUM = 1`,
+        WHERE u.USUARIOEMAIL = $1
+ LIMIT 1`,
       [email],
     )
 
-    // CIIU desc
     let ciiuDesc = ''
     if (emp.ciiuId) {
       try {
         const [c] = await this.dataSource.query(
-          `SELECT TRIM(CIIUCODIGO) || ' - ' || TRIM(CIIUDESCRIPCION) AS "desc"
-             FROM CIIU WHERE CIIUID = :1 AND ROWNUM = 1`,
+          `SELECT btrim((CIIUCODIGO)::text) || ' - ' || btrim((CIIUDESCRIPCION)::text) AS "desc"
+             FROM CIIU WHERE CIIUID = $1 LIMIT 1`,
           [emp.ciiuId],
         )
         ciiuDesc = c?.desc ?? ''
@@ -98,22 +91,20 @@ export class EmpresaService {
     return { ...emp, ...usr, ciiuDesc }
   }
 
-  // ── Lookups ───────────────────────────────────────────────────────────────
-
   async getDepartamentos() {
     return this.dataSource.query(
-      `SELECT DEPARTAMENTOID AS "id", TRIM(DEPARTAMENTONOMBRE) AS "nombre"
+      `SELECT DEPARTAMENTOID AS "id", btrim((DEPARTAMENTONOMBRE)::text) AS "nombre"
          FROM DEPARTAMENTO
-        ORDER BY TRIM(DEPARTAMENTONOMBRE) ASC`,
+        ORDER BY btrim((DEPARTAMENTONOMBRE)::text) ASC`,
     )
   }
 
   async getCiudades(departamentoId: number) {
     return this.dataSource.query(
-      `SELECT CIUDADID AS "id", TRIM(CIUDADNOMBRE) AS "nombre"
+      `SELECT CIUDADID AS "id", btrim((CIUDADNOMBRE)::text) AS "nombre"
          FROM CIUDAD
-        WHERE DEPARTAMENTOID = :1
-        ORDER BY TRIM(CIUDADNOMBRE) ASC`,
+        WHERE DEPARTAMENTOID = $1
+        ORDER BY btrim((CIUDADNOMBRE)::text) ASC`,
       [departamentoId],
     )
   }
@@ -121,7 +112,7 @@ export class EmpresaService {
   async getCoberturas() {
     try {
       return await this.dataSource.query(
-        `SELECT COBERTURAID AS "id", TRIM(COBERTURADESCRIPCION) AS "nombre"
+        `SELECT COBERTURAID AS "id", btrim((COBERTURADESCRIPCION)::text) AS "nombre"
            FROM COBERTURA
           WHERE COBERTURAESTADO = 1
           ORDER BY COBERTURAID ASC`,
@@ -133,11 +124,11 @@ export class EmpresaService {
     try {
       return await this.dataSource.query(
         `SELECT CIIUID AS "id",
-                TRIM(CIIUCODIGO) || ' - ' || TRIM(CIIUDESCRIPCION) AS "nombre"
+                btrim((CIIUCODIGO)::text) || ' - ' || btrim((CIIUDESCRIPCION)::text) AS "nombre"
            FROM CIIU
-          WHERE UPPER(TRIM(CIIUCODIGO)) LIKE UPPER(:1)
-             OR UPPER(TRIM(CIIUDESCRIPCION)) LIKE UPPER(:2)
-          ORDER BY TRIM(CIIUCODIGO) ASC
+          WHERE UPPER(btrim((CIIUCODIGO)::text)) LIKE UPPER($1)
+             OR UPPER(btrim((CIIUDESCRIPCION)::text)) LIKE UPPER($2)
+          ORDER BY btrim((CIIUCODIGO)::text) ASC
           FETCH FIRST 30 ROWS ONLY`,
         [`%${q}%`, `%${q}%`],
       )
@@ -147,7 +138,7 @@ export class EmpresaService {
   async getTiposOrganizacion() {
     try {
       return await this.dataSource.query(
-        `SELECT TIPOEMPRESAID AS "id", TRIM(TIPOEMPRESANOMBRE) AS "nombre"
+        `SELECT TIPOEMPRESAID AS "id", btrim((TIPOEMPRESANOMBRE)::text) AS "nombre"
            FROM TIPOEMPRESA
           ORDER BY TIPOEMPRESAID ASC`,
       )
@@ -157,7 +148,7 @@ export class EmpresaService {
   async getTamanosEmpresa() {
     try {
       return await this.dataSource.query(
-        `SELECT TAMANOEMPRESAID AS "id", TRIM(TAMANOEMPRESANOMBRE) AS "nombre"
+        `SELECT TAMANOEMPRESAID AS "id", btrim((TAMANOEMPRESANOMBRE)::text) AS "nombre"
            FROM TAMANOEMPRESA
           ORDER BY TAMANOEMPRESAID ASC`,
       )
@@ -168,15 +159,13 @@ export class EmpresaService {
     try {
       return await this.dataSource.query(
         `SELECT TIPODOCUMENTOIDENTIDADID AS "id",
-                TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) AS "nombre"
+                btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "nombre"
            FROM TIPODOCUMENTOIDENTIDAD
           WHERE TIPODOCUMENTOIDENTIDADPERSONA = 1
-          ORDER BY TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) ASC`,
+          ORDER BY btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) ASC`,
       )
     } catch { return [] }
   }
-
-  // ── Updates ───────────────────────────────────────────────────────────────
 
   async updateIdentificacion(email: string, dto: { empresaRazonSocial: string; empresaSigla: string }) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
@@ -197,15 +186,15 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     await this.dataSource.query(
       `UPDATE EMPRESA SET
-         DEPARTAMENTOEMPRESAID = :1,
-         CIUDADEMPRESAID       = :2,
-         COBERTURAEMPRESAID    = :3,
-         EMPRESADIRECCION      = :4,
-         EMPRESATELEFONO       = :5,
-         EMPRESACELULAR        = :6,
-         EMPRESAINDICATIVO     = :7,
-         EMPRESAWEBSITE        = :8
-       WHERE EMPRESAID = :9`,
+         DEPARTAMENTOEMPRESAID = $1,
+         CIUDADEMPRESAID       = $2,
+         COBERTURAEMPRESAID    = $3,
+         EMPRESADIRECCION      = $4,
+         EMPRESATELEFONO       = $5,
+         EMPRESACELULAR        = $6,
+         EMPRESAINDICATIVO     = $7,
+         EMPRESAWEBSITE        = $8
+       WHERE EMPRESAID = $9`,
       [
         dto.departamentoEmpresaId,
         dto.ciudadEmpresaId,
@@ -235,12 +224,12 @@ export class EmpresaService {
     try {
       await this.dataSource.query(
         `UPDATE EMPRESA SET
-           CIIUID            = :1,
-           TIPOEMPRESAID     = :2,
-           TAMANOEMPRESAID   = :3,
-           EMPRESACERTIFCOMP = :4,
-           EMPRESAEXPERTTECN = :5
-         WHERE EMPRESAID = :6`,
+           CIIUID            = $1,
+           TIPOEMPRESAID     = $2,
+           TAMANOEMPRESAID   = $3,
+           EMPRESACERTIFCOMP = $4,
+           EMPRESAEXPERTTECN = $5
+         WHERE EMPRESAID = $6`,
         [ciiuId, tipoId, tamanoId, certif, expert, empresa.empresaId],
       )
     } catch (e) {
@@ -257,13 +246,13 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     await this.dataSource.query(
       `UPDATE EMPRESA SET
-         TIPOIDENTIFICACIONREP = :1,
-         EMPRESAREPDOCUMENTO   = :2,
-         EMPRESAREP            = :3,
-         EMPRESAREPCARGO       = :4,
-         EMPRESAREPCORREO      = :5,
-         EMPRESAREPTEL         = :6
-       WHERE EMPRESAID = :7`,
+         TIPOIDENTIFICACIONREP = $1,
+         EMPRESAREPDOCUMENTO   = $2,
+         EMPRESAREP            = $3,
+         EMPRESAREPCARGO       = $4,
+         EMPRESAREPCORREO      = $5,
+         EMPRESAREPTEL         = $6
+       WHERE EMPRESAID = $7`,
       [
         dto.tipoIdentificacionRep,
         dto.empresaRepDocumento.trim(),
@@ -290,7 +279,7 @@ export class EmpresaService {
                 EMPRESAEXPERIENCIA  AS "experiencia",
                 EMPRESAESLABONES    AS "eslabones",
                 EMPRESAINTERACCIONES AS "interacciones"
-           FROM EMPRESA WHERE EMPRESAID = :1`,
+           FROM EMPRESA WHERE EMPRESAID = $1`,
         [empresa.empresaId],
       )
       return row ?? {}
@@ -309,15 +298,15 @@ export class EmpresaService {
     try {
       await this.dataSource.query(
         `UPDATE EMPRESA SET
-           EMPRESAOBJETO        = :1,
-           EMPRESAPRODUCTOS     = :2,
-           EMPRESASITUACION     = :3,
-           EMPRESAPAPEL         = :4,
-           EMPRESARETOS         = :5,
-           EMPRESAEXPERIENCIA   = :6,
-           EMPRESAESLABONES     = :7,
-           EMPRESAINTERACCIONES = :8
-         WHERE EMPRESAID = :9`,
+           EMPRESAOBJETO        = $1,
+           EMPRESAPRODUCTOS     = $2,
+           EMPRESASITUACION     = $3,
+           EMPRESAPAPEL         = $4,
+           EMPRESARETOS         = $5,
+           EMPRESAEXPERIENCIA   = $6,
+           EMPRESAESLABONES     = $7,
+           EMPRESAINTERACCIONES = $8
+         WHERE EMPRESAID = $9`,
         [
           dto.objeto        ?? null,
           dto.productos     ?? null,
@@ -338,13 +327,13 @@ export class EmpresaService {
 
   async getMenu(perfilId: number) {
     const rows: Array<{ desc: string; url: string; icono: string }> = await this.dataSource.query(
-      `SELECT TRIM(MENUXDESC)  AS "desc",
-              TRIM(MENXURL)    AS "url",
-              TRIM(MENUXICONO) AS "icono"
+      `SELECT btrim((MENUXDESC)::text)  AS "desc",
+              btrim((MENXURL)::text)    AS "url",
+              btrim((MENUXICONO)::text) AS "icono"
          FROM MENU
-        WHERE MENXEST   = 'A'
+        WHERE btrim((MENXEST)::text) = 'A'
           AND MENXPADRE = 0
-          AND PERFILID  = :1
+          AND PERFILID  = $1
         ORDER BY MENUXPOSI ASC`,
       [perfilId],
     )
@@ -362,15 +351,13 @@ export class EmpresaService {
     return { message: 'Contraseña actualizada correctamente' }
   }
 
-  // ── Mesas Sectoriales ─────────────────────────────────────────────────────
-
   async getMesasSectoriales() {
     try {
       return await this.dataSource.query(
         `SELECT MESASECTORIALID AS "id",
-                TRIM(MESASECTORIALNOMBRE) AS "nombre"
+                btrim((MESASECTORIALNOMBRE)::text) AS "nombre"
            FROM MESASECTORIAL
-          ORDER BY TRIM(MESASECTORIALNOMBRE) ASC`,
+          ORDER BY btrim((MESASECTORIALNOMBRE)::text) ASC`,
       )
     } catch { return [] }
   }
@@ -381,11 +368,11 @@ export class EmpresaService {
     try {
       return await this.dataSource.query(
         `SELECT ems.EMPRESAMESASECTORIALID AS "id",
-                TRIM(ms.MESASECTORIALNOMBRE) AS "nombre"
+                btrim((ms.MESASECTORIALNOMBRE)::text) AS "nombre"
            FROM EMPRESAMESASECTORIAL ems
            JOIN MESASECTORIAL ms ON ms.MESASECTORIALID = ems.MESASECTORIALIDEMPRESA
-          WHERE ems.EMPRESAIDMESASECTORIAL = :1
-          ORDER BY TRIM(ms.MESASECTORIALNOMBRE) ASC`,
+          WHERE ems.EMPRESAIDMESASECTORIAL = $1
+          ORDER BY btrim((ms.MESASECTORIALNOMBRE)::text) ASC`,
         [empresa.empresaId],
       )
     } catch { return [] }
@@ -397,13 +384,13 @@ export class EmpresaService {
     try {
       const existing = await this.dataSource.query(
         `SELECT EMPRESAMESASECTORIALID FROM EMPRESAMESASECTORIAL
-          WHERE EMPRESAIDMESASECTORIAL = :1 AND MESASECTORIALIDEMPRESA = :2 AND ROWNUM = 1`,
+          WHERE EMPRESAIDMESASECTORIAL = $1 AND MESASECTORIALIDEMPRESA = $2 LIMIT 1`,
         [empresa.empresaId, mesaSectorialId],
       )
       if (existing.length > 0) throw new ConflictException('La mesa ya está registrada para esta empresa')
       await this.dataSource.query(
         `INSERT INTO EMPRESAMESASECTORIAL (EMPRESAIDMESASECTORIAL, MESASECTORIALIDEMPRESA)
-         VALUES (:1, :2)`,
+         VALUES ($1, $2)`,
         [empresa.empresaId, mesaSectorialId],
       )
       return { message: 'Mesa sectorial registrada' }
@@ -416,20 +403,18 @@ export class EmpresaService {
   async eliminarMesaEmpresa(empresaMesaSectorialId: number) {
     try {
       await this.dataSource.query(
-        `DELETE FROM EMPRESAMESASECTORIAL WHERE EMPRESAMESASECTORIALID = :1`,
+        `DELETE FROM EMPRESAMESASECTORIAL WHERE EMPRESAMESASECTORIALID = $1`,
         [empresaMesaSectorialId],
       )
       return { message: 'Mesa sectorial eliminada' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  // ── Sectores / Subsectores ────────────────────────────────────────────────
-
   async getSectores() {
     try {
       return await this.dataSource.query(
-        `SELECT SECTORID AS "id", TRIM(SECTORDESCRIPCION) AS "nombre"
-           FROM SECTOR ORDER BY TRIM(SECTORDESCRIPCION) ASC`,
+        `SELECT SECTORID AS "id", btrim((SECTORDESCRIPCION)::text) AS "nombre"
+           FROM SECTOR ORDER BY btrim((SECTORDESCRIPCION)::text) ASC`,
       )
     } catch { return [] }
   }
@@ -437,23 +422,21 @@ export class EmpresaService {
   async getSubsectores() {
     try {
       return await this.dataSource.query(
-        `SELECT SUBSECTORID AS "id", TRIM(SUBSECTORNOMBRE) AS "nombre"
-           FROM SUBSECTOR ORDER BY TRIM(SUBSECTORNOMBRE) ASC`,
+        `SELECT SUBSECTORID AS "id", btrim((SUBSECTORNOMBRE)::text) AS "nombre"
+           FROM SUBSECTOR ORDER BY btrim((SUBSECTORNOMBRE)::text) ASC`,
       )
     } catch { return [] }
   }
-
-  // ── Sectores que PERTENECE ────────────────────────────────────────────────
 
   async getSectoresPertenece(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       return await this.dataSource.query(
-        `SELECT sp.SECTORPEMPRESAID AS "id", TRIM(s.SECTORDESCRIPCION) AS "nombre"
+        `SELECT sp.SECTORPEMPRESAID AS "id", btrim((s.SECTORDESCRIPCION)::text) AS "nombre"
            FROM SECTORPEMPRESA sp
            JOIN SECTOR s ON s.SECTORID = sp.SECTORIDPEMPRESA
-          WHERE sp.EMPRESAIDPSECTOR = :1 ORDER BY TRIM(s.SECTORDESCRIPCION) ASC`,
+          WHERE sp.EMPRESAIDPSECTOR = $1 ORDER BY btrim((s.SECTORDESCRIPCION)::text) ASC`,
         [empresa.empresaId],
       )
     } catch { return [] }
@@ -464,12 +447,12 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       const ex = await this.dataSource.query(
-        `SELECT SECTORPEMPRESAID FROM SECTORPEMPRESA WHERE EMPRESAIDPSECTOR=:1 AND SECTORIDPEMPRESA=:2 AND ROWNUM=1`,
+        `SELECT SECTORPEMPRESAID FROM SECTORPEMPRESA WHERE EMPRESAIDPSECTOR=$1 AND SECTORIDPEMPRESA=$2 LIMIT 1`,
         [empresa.empresaId, sectorId],
       )
       if (ex.length > 0) throw new ConflictException('Sector ya registrado')
       await this.dataSource.query(
-        `INSERT INTO SECTORPEMPRESA (EMPRESAIDPSECTOR, SECTORIDPEMPRESA) VALUES (:1,:2)`,
+        `INSERT INTO SECTORPEMPRESA (EMPRESAIDPSECTOR, SECTORIDPEMPRESA) VALUES ($1,$2)`,
         [empresa.empresaId, sectorId],
       )
       return { message: 'Sector registrado' }
@@ -481,22 +464,20 @@ export class EmpresaService {
 
   async eliminarSectorPertenece(id: number) {
     try {
-      await this.dataSource.query(`DELETE FROM SECTORPEMPRESA WHERE SECTORPEMPRESAID=:1`, [id])
+      await this.dataSource.query(`DELETE FROM SECTORPEMPRESA WHERE SECTORPEMPRESAID=$1`, [id])
       return { message: 'Sector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
-
-  // ── Subsectores que PERTENECE ─────────────────────────────────────────────
 
   async getSubsectoresPertenece(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       return await this.dataSource.query(
-        `SELECT sp.SUBSECTORPEMPRESAID AS "id", TRIM(s.SUBSECTORNOMBRE) AS "nombre"
+        `SELECT sp.SUBSECTORPEMPRESAID AS "id", btrim((s.SUBSECTORNOMBRE)::text) AS "nombre"
            FROM SUBSECTORPEMPRESA sp
            JOIN SUBSECTOR s ON s.SUBSECTORID = sp.SUBSECTORIDPEMPRESA
-          WHERE sp.EMPRESAIDPSUBSECTOR = :1 ORDER BY TRIM(s.SUBSECTORNOMBRE) ASC`,
+          WHERE sp.EMPRESAIDPSUBSECTOR = $1 ORDER BY btrim((s.SUBSECTORNOMBRE)::text) ASC`,
         [empresa.empresaId],
       )
     } catch { return [] }
@@ -507,12 +488,12 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       const ex = await this.dataSource.query(
-        `SELECT SUBSECTORPEMPRESAID FROM SUBSECTORPEMPRESA WHERE EMPRESAIDPSUBSECTOR=:1 AND SUBSECTORIDPEMPRESA=:2 AND ROWNUM=1`,
+        `SELECT SUBSECTORPEMPRESAID FROM SUBSECTORPEMPRESA WHERE EMPRESAIDPSUBSECTOR=$1 AND SUBSECTORIDPEMPRESA=$2 LIMIT 1`,
         [empresa.empresaId, subsectorId],
       )
       if (ex.length > 0) throw new ConflictException('Subsector ya registrado')
       await this.dataSource.query(
-        `INSERT INTO SUBSECTORPEMPRESA (EMPRESAIDPSUBSECTOR, SUBSECTORIDPEMPRESA) VALUES (:1,:2)`,
+        `INSERT INTO SUBSECTORPEMPRESA (EMPRESAIDPSUBSECTOR, SUBSECTORIDPEMPRESA) VALUES ($1,$2)`,
         [empresa.empresaId, subsectorId],
       )
       return { message: 'Subsector registrado' }
@@ -524,22 +505,20 @@ export class EmpresaService {
 
   async eliminarSubsectorPertenece(id: number) {
     try {
-      await this.dataSource.query(`DELETE FROM SUBSECTORPEMPRESA WHERE SUBSECTORPEMPRESAID=:1`, [id])
+      await this.dataSource.query(`DELETE FROM SUBSECTORPEMPRESA WHERE SUBSECTORPEMPRESAID=$1`, [id])
       return { message: 'Subsector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
-
-  // ── Sectores que REPRESENTA ───────────────────────────────────────────────
 
   async getSectoresRepresenta(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       return await this.dataSource.query(
-        `SELECT se.SECTOREMPRESAID AS "id", TRIM(s.SECTORDESCRIPCION) AS "nombre"
+        `SELECT se.SECTOREMPRESAID AS "id", btrim((s.SECTORDESCRIPCION)::text) AS "nombre"
            FROM SECTOREMPRESA se
            JOIN SECTOR s ON s.SECTORID = se.SECTORIDEMPRESA
-          WHERE se.EMPRESAID = :1 ORDER BY TRIM(s.SECTORDESCRIPCION) ASC`,
+          WHERE se.EMPRESAID = $1 ORDER BY btrim((s.SECTORDESCRIPCION)::text) ASC`,
         [empresa.empresaId],
       )
     } catch { return [] }
@@ -550,12 +529,12 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       const ex = await this.dataSource.query(
-        `SELECT SECTOREMPRESAID FROM SECTOREMPRESA WHERE EMPRESAID=:1 AND SECTORIDEMPRESA=:2 AND ROWNUM=1`,
+        `SELECT SECTOREMPRESAID FROM SECTOREMPRESA WHERE EMPRESAID=$1 AND SECTORIDEMPRESA=$2 LIMIT 1`,
         [empresa.empresaId, sectorId],
       )
       if (ex.length > 0) throw new ConflictException('Sector ya registrado')
       await this.dataSource.query(
-        `INSERT INTO SECTOREMPRESA (EMPRESAID, SECTORIDEMPRESA) VALUES (:1,:2)`,
+        `INSERT INTO SECTOREMPRESA (EMPRESAID, SECTORIDEMPRESA) VALUES ($1,$2)`,
         [empresa.empresaId, sectorId],
       )
       return { message: 'Sector registrado' }
@@ -567,22 +546,20 @@ export class EmpresaService {
 
   async eliminarSectorRepresenta(id: number) {
     try {
-      await this.dataSource.query(`DELETE FROM SECTOREMPRESA WHERE SECTOREMPRESAID=:1`, [id])
+      await this.dataSource.query(`DELETE FROM SECTOREMPRESA WHERE SECTOREMPRESAID=$1`, [id])
       return { message: 'Sector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
-
-  // ── Subsectores que REPRESENTA ────────────────────────────────────────────
 
   async getSubsectoresRepresenta(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       return await this.dataSource.query(
-        `SELECT se.SUBSECTOREMPRESAID AS "id", TRIM(s.SUBSECTORNOMBRE) AS "nombre"
+        `SELECT se.SUBSECTOREMPRESAID AS "id", btrim((s.SUBSECTORNOMBRE)::text) AS "nombre"
            FROM SUBSECTOREMPRESA se
            JOIN SUBSECTOR s ON s.SUBSECTORID = se.SUBSECTORIDEMPRESA
-          WHERE se.EMPRESAID = :1 ORDER BY TRIM(s.SUBSECTORNOMBRE) ASC`,
+          WHERE se.EMPRESAID = $1 ORDER BY btrim((s.SUBSECTORNOMBRE)::text) ASC`,
         [empresa.empresaId],
       )
     } catch { return [] }
@@ -593,12 +570,12 @@ export class EmpresaService {
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     try {
       const ex = await this.dataSource.query(
-        `SELECT SUBSECTOREMPRESAID FROM SUBSECTOREMPRESA WHERE EMPRESAID=:1 AND SUBSECTORIDEMPRESA=:2 AND ROWNUM=1`,
+        `SELECT SUBSECTOREMPRESAID FROM SUBSECTOREMPRESA WHERE EMPRESAID=$1 AND SUBSECTORIDEMPRESA=$2 LIMIT 1`,
         [empresa.empresaId, subsectorId],
       )
       if (ex.length > 0) throw new ConflictException('Subsector ya registrado')
       await this.dataSource.query(
-        `INSERT INTO SUBSECTOREMPRESA (EMPRESAID, SUBSECTORIDEMPRESA) VALUES (:1,:2)`,
+        `INSERT INTO SUBSECTOREMPRESA (EMPRESAID, SUBSECTORIDEMPRESA) VALUES ($1,$2)`,
         [empresa.empresaId, subsectorId],
       )
       return { message: 'Subsector registrado' }
@@ -610,34 +587,32 @@ export class EmpresaService {
 
   async eliminarSubsectorRepresenta(id: number) {
     try {
-      await this.dataSource.query(`DELETE FROM SUBSECTOREMPRESA WHERE SUBSECTOREMPRESAID=:1`, [id])
+      await this.dataSource.query(`DELETE FROM SUBSECTOREMPRESA WHERE SUBSECTOREMPRESAID=$1`, [id])
       return { message: 'Subsector eliminado' }
     } catch (e) { throw new BadRequestException(`Error Oracle: ${(e as Error).message}`) }
   }
 
-  /** Resumen para los badges del home del proponente: cuenta registros y
-   *  estado de cada módulo (datos básicos, contactos, análisis, necesidades,
-   *  proyectos por estado, convenios activos). */
+  // resumen para los badges del home del proponente
   async getResumenPanel(email: string) {
     const empresa = await this.empresaRepo.findOne({ where: { empresaEmail: email } })
     if (!empresa) throw new NotFoundException('Empresa no encontrada')
     const empresaId = empresa.empresaId
 
     const [datos] = await this.dataSource.query(
-      `SELECT TRIM(EMPRESARAZONSOCIAL) AS "rs",
-              TRIM(EMPRESADIRECCION)   AS "dir",
-              TRIM(EMPRESACELULAR)     AS "cel",
+      `SELECT btrim((EMPRESARAZONSOCIAL)::text) AS "rs",
+              btrim((EMPRESADIRECCION)::text)   AS "dir",
+              btrim((EMPRESACELULAR)::text)     AS "cel",
               DEPARTAMENTOEMPRESAID    AS "depto",
               CIUDADEMPRESAID          AS "ciu",
               COBERTURAEMPRESAID       AS "cob",
               CIIUID                   AS "ciiu",
               TIPOEMPRESAID            AS "tipoEmp",
               TAMANOEMPRESAID          AS "tamEmp",
-              DBMS_LOB.GETLENGTH(EMPRESAOBJETO)    AS "lObj",
-              DBMS_LOB.GETLENGTH(EMPRESAPRODUCTOS) AS "lProd",
-              DBMS_LOB.GETLENGTH(EMPRESASITUACION) AS "lSit",
-              DBMS_LOB.GETLENGTH(EMPRESARETOS)     AS "lRet"
-         FROM EMPRESA WHERE EMPRESAID = :1`,
+              length(EMPRESAOBJETO)    AS "lObj",
+              length(EMPRESAPRODUCTOS) AS "lProd",
+              length(EMPRESASITUACION) AS "lSit",
+              length(EMPRESARETOS)     AS "lRet"
+         FROM EMPRESA WHERE EMPRESAID = $1`,
       [empresaId],
     )
     const datosCompleto = !!(datos?.rs && datos?.dir && datos?.cel
@@ -647,18 +622,18 @@ export class EmpresaService {
                              && Number(datos?.lSit) > 0 && Number(datos?.lRet) > 0)
 
     const [contactos] = await this.dataSource.query(
-      `SELECT COUNT(*) AS "C" FROM CONTACTOEMPRESA WHERE EMPRESAIDCONTACTO = :1`,
+      `SELECT COUNT(*) AS "C" FROM CONTACTOEMPRESA WHERE EMPRESAIDCONTACTO = $1`,
       [empresaId],
     )
 
     const [necesidades] = await this.dataSource.query(
-      `SELECT COUNT(*) AS "C" FROM NECESIDAD WHERE EMPRESANECESIDADID = :1`,
+      `SELECT COUNT(*) AS "C" FROM NECESIDAD WHERE EMPRESANECESIDADID = $1`,
       [empresaId],
     )
 
     const proyEstados: any[] = await this.dataSource.query(
-      `SELECT NVL(PROYECTOESTADO, 0) AS "estado", COUNT(*) AS "C"
-         FROM PROYECTO WHERE EMPRESAID = :1
+      `SELECT COALESCE(PROYECTOESTADO, 0) AS "estado", COUNT(*) AS "C"
+         FROM PROYECTO WHERE EMPRESAID = $1
         GROUP BY PROYECTOESTADO`,
       [empresaId],
     )
@@ -675,7 +650,7 @@ export class EmpresaService {
     const [convenios] = await this.dataSource.query(
       `SELECT COUNT(*) AS "C"
          FROM CONVENIOS c JOIN PROYECTO p ON p.PROYECTOID = c.PROYECTOID
-        WHERE p.EMPRESAID = :1 AND c.CONVENIOSESTADO = 1`,
+        WHERE p.EMPRESAID = $1 AND c.CONVENIOSESTADO = 1`,
       [empresaId],
     )
 

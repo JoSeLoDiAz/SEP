@@ -1,12 +1,4 @@
 -- v12_gestion_conocimiento_estado.sql
--- ──────────────────────────────────────────────────────────────────────────
--- Agrega el campo GESTIONCONOCIMIENTOESTADO al catálogo y normaliza el
--- listado para que coincida con el formulario oficial del VBA del MinTrabajo
--- (4 ítems estándar: INFOGRAFÍA, ARTÍCULO, VIDEO, PODCAST).
---
--- El catálogo previo (IDs 1..6) se conserva con ESTADO=0 para no romper
--- las FK existentes en AFGESTIONCONOCIMIENTO.
--- ──────────────────────────────────────────────────────────────────────────
 
 -- 1) Columna ESTADO: 1 = activa, 0 = inactiva.
 ALTER TABLE GESTIONCONOCIMIENTO
@@ -16,7 +8,6 @@ ALTER TABLE GESTIONCONOCIMIENTO
 UPDATE GESTIONCONOCIMIENTO SET GESTIONCONOCIMIENTOESTADO = 0;
 
 -- 3) Insertar las 4 opciones oficiales (VBA MinTrabajo).
---    IDs 7..10 (siguientes al máximo actual = 6).
 INSERT INTO GESTIONCONOCIMIENTO (GESTIONCONOCIMIENTOID, GESTIONCONOCIMIENTONOMBRE, GESTIONCONOCIMIENTOESTADO)
   VALUES (7, 'INFOGRAFÍA', 1);
 INSERT INTO GESTIONCONOCIMIENTO (GESTIONCONOCIMIENTOID, GESTIONCONOCIMIENTONOMBRE, GESTIONCONOCIMIENTOESTADO)

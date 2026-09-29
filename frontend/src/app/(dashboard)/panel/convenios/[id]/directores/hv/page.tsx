@@ -33,8 +33,7 @@ interface Experiencia {
   proyectoOrigen: number | null
   convocatoriaOrigen: number | null
   convocatoriaActual: number | null
-  /** True si el ítem fue registrado por otro proyecto de la MISMA convocatoria.
-   *  Cuando true, no es editable desde aquí. */
+  // lo registró otro proyecto de la misma convocatoria: no editable aquí
   mismaConvocatoria: boolean
 }
 
@@ -139,11 +138,11 @@ const FORM_DEFAULTS: FormPersona = {
   habeasData: false,
 }
 
-const TITLE_COLOR = '#00324D'
+const TITLE_COLOR = '#00304D'
 
 function formatDuracion(fi: Date | null, ff: Date | null): string {
   if (!fi || !ff) return '—'
-  // Inclusivo: el día final cuenta (2→4 oct = días 2,3,4 = 3 días)
+  // inclusivo: el día final cuenta
   const ffIncl = new Date(ff.getTime() + 86400000)
   let anos = ffIncl.getFullYear() - fi.getFullYear()
   let meses = ffIncl.getMonth() - fi.getMonth()
@@ -179,21 +178,17 @@ export default function HVDirectorPage() {
   const [tiposDoc, setTiposDoc] = useState<TipoDocumento[]>([])
   const [perfilId, setPerfilId] = useState(0)
 
-  // Búsqueda de persona por documento
   const [busqueda, setBusqueda] = useState({ tipoDocumentoId: '', identificacion: '' })
   const [buscando, setBuscando] = useState(false)
   const [yaBuscado, setYaBuscado] = useState(false)
 
-  // Persona y form
   const [persona, setPersona] = useState<Persona | null>(null)
   const [form, setForm] = useState<FormPersona>(FORM_DEFAULTS)
   const [guardando, setGuardando] = useState(false)
 
-  // HV principal
   const [hvDoc, setHvDoc] = useState<DocumentoCargado | null>(null)
   const [cargandoDoc, setCargandoDoc] = useState(false)
 
-  // Experiencia laboral
   const [tiposExp, setTiposExp] = useState<TipoExperiencia[]>([])
   const [experiencias, setExperiencias] = useState<Experiencia[]>([])
   const [docsEx, setDocsEx] = useState<Record<number, DocumentoCargado | null>>({})
@@ -205,7 +200,6 @@ export default function HVDirectorPage() {
   const [expEliminandoId, setExpEliminandoId] = useState<number | null>(null)
   const [expConfirmEliminar, setExpConfirmEliminar] = useState<number | null>(null)
 
-  // Títulos académicos
   const [tiposTit, setTiposTit] = useState<TipoTitulo[]>([])
   const [titulos, setTitulos] = useState<Titulo[]>([])
   const [docsTi, setDocsTi] = useState<Record<number, DocumentoCargado | null>>({})
@@ -218,7 +212,6 @@ export default function HVDirectorPage() {
   const [titConfirmEliminar, setTitConfirmEliminar] = useState<number | null>(null)
   const [expandedTitId, setExpandedTitId] = useState<number | null>(null)
 
-  // Otros Documentos Adicionales
   const [tiposDA, setTiposDA] = useState<TipoDocAdicional[]>([])
   const [docsAdic, setDocsAdic] = useState<DocAdicional[]>([])
   const [cargandoDA, setCargandoDA] = useState(false)
@@ -229,27 +222,17 @@ export default function HVDirectorPage() {
   const [daConfirmEliminar, setDAConfirmEliminar] = useState<number | null>(null)
   const [expandedDAId, setExpandedDAId] = useState<number | null>(null)
 
-  // Asociar como director
   const [asociando, setAsociando] = useState(false)
   const [asociandoCap, setAsociandoCap] = useState(false)
   const [personaYaEsCapacitador, setPersonaYaEsCapacitador] = useState(false)
 
-  // Estado del director actual del proyecto.
-  // - personaEsDirectorActivo: la persona cargada es el director ACTIVO del
-  //   proyecto. Cuando es true se muestran las secciones de HV / Experiencia
-  //   y se oculta "Asociar como director".
-  // - directorAprobadoEnProyecto: la interventoría aprobó al director en
-  //   este proyecto. Cuando es true, todo queda en modo lectura.
   const [personaEsDirectorActivo, setPersonaEsDirectorActivo] = useState(false)
   const [directorAprobadoEnProyecto, setDirectorAprobadoEnProyecto] = useState(false)
 
-  // Modal de Habeas Data
   const [habeasOpen, setHabeasOpen] = useState(false)
 
-  // Acordeón de experiencias (id expandida o null)
   const [expandedExpId, setExpandedExpId] = useState<number | null>(null)
 
-  // Toast
   const [toastVisible, setToastVisible] = useState(false)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error' | 'warning'; titulo: string; msg: string } | null>(null)
   function showToast(tipo: 'success' | 'error' | 'warning', titulo: string, msg: string) {
@@ -263,24 +246,17 @@ export default function HVDirectorPage() {
     api.get<TipoDocumento[]>('/contactos/tipos-doc')
       .then(r => setTiposDoc(r.data ?? []))
       .catch(() => setTiposDoc([]))
-    // Catálogo de tipos de experiencia (DOCENCIA, LABORAL, etc.)
     api.get<TipoExperiencia[]>('/personas/catalogos/tipos-experiencia')
       .then(r => setTiposExp(r.data ?? []))
       .catch(() => setTiposExp([]))
-    // Catálogo de tipos de título (TÉCNICO, PROFESIONAL, MAGISTER, etc.)
     api.get<TipoTitulo[]>('/personas/catalogos/tipos-titulo')
       .then(r => setTiposTit(r.data ?? []))
       .catch(() => setTiposTit([]))
-    // Catálogo de tipos de documento adicional
     api.get<TipoDocAdicional[]>('/personas/catalogos/tipos-doc-adicional')
       .then(r => setTiposDA(r.data ?? []))
       .catch(() => setTiposDA([]))
 
-    // Si entramos con ?personaId=N (botón "Ver Hoja de Vida" desde la
-    // página de directores), precargamos la persona y sus documentos sin
-    // pasar por el paso de búsqueda. Adicionalmente consultamos el estado
-    // del director del proyecto: si esta persona es el director ACTIVO y
-    // está APROBADO por la interventoría, bloqueamos la edición.
+    // con ?personaId=N se precarga todo y se salta el paso de búsqueda
     if (personaIdQuery > 0) {
       (async () => {
         try {
@@ -298,7 +274,7 @@ export default function HVDirectorPage() {
           await recargarDocsAdicionales(r.data.personaId)
           if (modoCapacitador) setPersonaYaEsCapacitador(true)
         } catch {
-          // Si no se puede precargar, no rompemos: queda el flujo manual.
+          // sin precarga queda el flujo manual de búsqueda
         }
         try {
           const rDir = await api.get<{ activo: { personaId: number; estadoInterventoria: string } | null }>(
@@ -352,8 +328,6 @@ export default function HVDirectorPage() {
     }
   }
 
-  // ── Experiencia laboral ────────────────────────────────────────────────
-
   async function recargarExperiencia(personaId: number) {
     try {
       setCargandoExp(true)
@@ -362,8 +336,7 @@ export default function HVDirectorPage() {
         api.get<DocumentoCargado[]>(`/personas/${personaId}/documentos`, { params: { tipo: 'EX' } }),
       ])
       setExperiencias(rExp.data ?? [])
-      // Indexar documentos EX por num (= experienciaId) para mostrar el adjunto
-      // de cada experiencia.
+      // los documentos EX se indexan por num = experienciaId
       const idx: Record<number, DocumentoCargado | null> = {}
       for (const exp of rExp.data ?? []) {
         idx[exp.experienciaId] = (rDocsAll.data ?? []).find((d: any) => Number(d.num) === exp.experienciaId) ?? null
@@ -453,8 +426,6 @@ export default function HVDirectorPage() {
     } finally { setExpEliminandoId(null) }
   }
 
-  // ── Títulos académicos ─────────────────────────────────────────────────
-
   async function recargarTitulos(personaId: number) {
     try {
       setCargandoTit(true)
@@ -543,8 +514,6 @@ export default function HVDirectorPage() {
     } finally { setTitEliminandoId(null) }
   }
 
-  // ── Otros Documentos Adicionales ──────────────────────────────────────────
-
   async function recargarDocsAdicionales(personaId: number) {
     try {
       setCargandoDA(true)
@@ -595,9 +564,7 @@ export default function HVDirectorPage() {
     } finally { setDAEliminandoId(null) }
   }
 
-  /** Refresca el estado del director ACTIVO del proyecto y compara con la
-   *  persona cargada para decidir si mostrar "Asociar" o las secciones de
-   *  HV/Experiencia/etc. */
+  // de esto depende si se muestra "Asociar" o las secciones de HV
   async function refrescarEstadoDirector(personaId: number) {
     try {
       const r = await api.get<{ activo: { personaId: number; estadoInterventoria: string } | null }>(
@@ -735,9 +702,6 @@ export default function HVDirectorPage() {
     }
   }
 
-  // El proponente puede editar los datos básicos y los archivos solo si la
-  // interventoría aún no ha aprobado al director en este proyecto. Si ya está
-  // aprobado, todo queda en modo lectura.
   const PERFIL_EMPRESA = 7
   const PERFIL_ADMIN = 1
   const tienePerfilEditor = perfilId === PERFIL_EMPRESA || perfilId === PERFIL_ADMIN
@@ -771,7 +735,6 @@ export default function HVDirectorPage() {
         </div>
       )}
 
-      {/* Banner: director ya aprobado en este proyecto → solo lectura */}
       {directorAprobadoEnProyecto && (
         <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
@@ -789,7 +752,6 @@ export default function HVDirectorPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="h-1.5 bg-[#00304D]" />
         <div className="p-5 sm:p-6 flex items-center gap-4 flex-wrap">
@@ -818,7 +780,6 @@ export default function HVDirectorPage() {
         </div>
       </div>
 
-      {/* 1. Buscar persona */}
       <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center gap-2 bg-gradient-to-r from-[#00304D]/5 to-transparent">
           <Search size={16} className="text-[#00304D]" />
@@ -854,7 +815,6 @@ export default function HVDirectorPage() {
         </div>
       </section>
 
-      {/* 2. Datos personales */}
       {yaBuscado && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -975,9 +935,6 @@ export default function HVDirectorPage() {
         </section>
       )}
 
-      {/* 3. Asociar como director — solo cuando la persona NO está asociada
-            todavía a este proyecto. Si ya está asociada, mostramos un banner
-            confirmando el estado. */}
       {persona && !personaEsDirectorActivo && !modoCapacitador && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center gap-2 bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -1025,7 +982,6 @@ export default function HVDirectorPage() {
         </div>
       )}
 
-      {/* 3b. Asociar como Capacitador */}
       {modoCapacitador && persona && !personaYaEsCapacitador && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center gap-2 bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -1068,7 +1024,6 @@ export default function HVDirectorPage() {
         </div>
       )}
 
-      {/* 4. Hoja de Vida (archivo principal) — solo si ya está asociada como director o en modo capacitador */}
       {persona && (personaEsDirectorActivo || modoCapacitador) && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center gap-2 bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -1098,11 +1053,10 @@ export default function HVDirectorPage() {
         </section>
       )}
 
-      {/* 5. Experiencia laboral — solo si está asociada como director o en modo capacitador */}
       {persona && (personaEsDirectorActivo || modoCapacitador) && (() => {
         const totalDias = experiencias.reduce((acc, e) => {
           if (!e.fechaInicio || !e.fechaFin) return acc
-          // +1 para inclusivo (inicio y fin cuentan)
+          // +1: inicio y fin cuentan
           return acc + Math.max(0, Math.floor((new Date(e.fechaFin).getTime() - new Date(e.fechaInicio).getTime()) / 86400000) + 1)
         }, 0)
         return (
@@ -1147,11 +1101,7 @@ export default function HVDirectorPage() {
                     const fmt = (d: Date | null) => d ? d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
                     const fmtCorto = (d: Date | null) => d ? d.toLocaleDateString('es-CO', { month: '2-digit', year: 'numeric' }) : '—'
                     const aprobado = (exp.estadoArchivo ?? '').toUpperCase() === 'APROBADO'
-                    // Solo bloqueamos por "otro proyecto" cuando éste pertenece a la
-                    // MISMA convocatoria (lo está usando ese proyecto activamente).
-                    // Si viene de OTRA convocatoria (ej.: año anterior), se puede
-                    // editar — al hacerlo el ítem toma propiedad este proyecto y
-                    // vuelve al estado pendiente para que la interventoría lo verifique.
+                    // si viene de otra convocatoria sí se edita: pasa a este proyecto y vuelve a pendiente
                     const otroProyectoMismaConv = exp.mismaConvocatoria === true
                     const otroProyectoOtraConv = exp.proyectoOrigen != null
                       && Number(exp.proyectoOrigen) !== proyectoId
@@ -1166,7 +1116,6 @@ export default function HVDirectorPage() {
                         className={`rounded-xl border bg-white overflow-hidden transition ${
                           expandida ? 'border-[#00304D] shadow-sm' : 'border-neutral-200'
                         }`}>
-                        {/* Header siempre visible (clickeable para expandir) */}
                         <button
                           type="button"
                           onClick={() => setExpandedExpId(expandida ? null : exp.experienciaId)}
@@ -1213,7 +1162,6 @@ export default function HVDirectorPage() {
                           </div>
                         </button>
 
-                        {/* Body expandible */}
                         {expandida && (
                           <div className="border-t border-neutral-100 p-4 flex flex-col gap-3 bg-neutral-50/30">
                             <div className="flex items-start justify-end gap-1.5 flex-wrap">
@@ -1284,7 +1232,6 @@ export default function HVDirectorPage() {
         )
       })()}
 
-      {/* 6. Títulos académicos — solo si está asociada como director o en modo capacitador */}
       {persona && (personaEsDirectorActivo || modoCapacitador) && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -1438,7 +1385,6 @@ export default function HVDirectorPage() {
         </section>
       )}
 
-      {/* 7. Otros Documentos Adicionales — solo si está asociada como director */}
       {persona && (personaEsDirectorActivo || modoCapacitador) && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <header className="px-5 py-3.5 border-b border-neutral-100 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-[#00304D]/5 to-transparent">
@@ -1559,7 +1505,6 @@ export default function HVDirectorPage() {
         </section>
       )}
 
-      {/* Modal: política de Habeas Data y Tratamiento de Datos */}
       <Modal open={habeasOpen} onClose={() => setHabeasOpen(false)} maxWidth="max-w-2xl">
         <div className="flex flex-col max-h-[85vh]">
           <header className="px-6 py-4 border-b border-neutral-200 flex items-center gap-2">
@@ -1619,7 +1564,6 @@ export default function HVDirectorPage() {
         </div>
       </Modal>
 
-      {/* Modal: agregar / editar experiencia */}
       <Modal open={expModalOpen} onClose={() => !expGuardando && setExpModalOpen(false)} maxWidth="max-w-2xl">
         <div className="p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
           <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1680,7 +1624,6 @@ export default function HVDirectorPage() {
         </div>
       </Modal>
 
-      {/* Modal: agregar / editar título académico */}
       <Modal open={titModalOpen} onClose={() => !titGuardando && setTitModalOpen(false)} maxWidth="max-w-2xl">
         <div className="p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
           <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1733,7 +1676,6 @@ export default function HVDirectorPage() {
         </div>
       </Modal>
 
-      {/* Modal: agregar documento adicional */}
       <Modal open={daModalOpen} onClose={() => !daGuardando && setDAModalOpen(false)} maxWidth="max-w-lg">
         <div className="p-6 flex flex-col gap-4">
           <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1767,7 +1709,6 @@ export default function HVDirectorPage() {
         </div>
       </Modal>
 
-      {/* Confirm: eliminar documento adicional */}
       <ConfirmModal
         open={daConfirmEliminar != null}
         onClose={() => setDAConfirmEliminar(null)}
@@ -1784,7 +1725,6 @@ export default function HVDirectorPage() {
         cargando={daEliminandoId != null}
       />
 
-      {/* Confirm: eliminar experiencia */}
       <ConfirmModal
         open={expConfirmEliminar != null}
         onClose={() => setExpConfirmEliminar(null)}
@@ -1801,7 +1741,6 @@ export default function HVDirectorPage() {
         cargando={expEliminandoId != null}
       />
 
-      {/* Confirm: eliminar título académico */}
       <ConfirmModal
         open={titConfirmEliminar != null}
         onClose={() => setTitConfirmEliminar(null)}

@@ -12,9 +12,7 @@ import type { PersonaDto, TipoDocPersona } from './personas.service'
 
 interface JwtUser { usuarioId: number; email: string; perfilId: number }
 
-// Tipo mínimo del archivo entregado por Multer; no dependemos del namespace
-// global Express.Multer.File porque con module:"nodenext" no siempre lo
-// resuelve y solo necesitamos estos campos.
+// el namespace global Express.Multer.File no resuelve con module:"nodenext"
 interface MulterFile {
   originalname: string
   mimetype: string
@@ -22,7 +20,7 @@ interface MulterFile {
   buffer: Buffer
 }
 
-const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
+const MAX_PDF_BYTES = 8 * 1024 * 1024
 
 @ApiTags('personas')
 @Controller('personas')
@@ -31,7 +29,7 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
 export class PersonasController {
   constructor(private readonly personasService: PersonasService) {}
 
-  // ── Búsqueda y CRUD persona ────────────────────────────────────────────
+  // busqueda y crud de persona
 
   @Get('buscar')
   buscar(
@@ -60,9 +58,7 @@ export class PersonasController {
     return this.personasService.actualizarPersona(id, dto)
   }
 
-  // ── Documentos PDF ─────────────────────────────────────────────────────
-
-  // ── Catálogos ──────────────────────────────────────────────────────────
+  // catalogos
 
   @Get('catalogos/tipos-experiencia')
   tiposExperiencia() {
@@ -79,7 +75,7 @@ export class PersonasController {
     return this.personasService.listarTiposDocAdicional()
   }
 
-  // ── Experiencia laboral ────────────────────────────────────────────────
+  // experiencia laboral
 
   @Get(':id/experiencia')
   listarExperiencia(
@@ -125,7 +121,7 @@ export class PersonasController {
     )
   }
 
-  // ── Títulos académicos ─────────────────────────────────────────────────
+  // titulos academicos
 
   @Get(':id/titulos')
   listarTitulos(
@@ -169,7 +165,7 @@ export class PersonasController {
     )
   }
 
-  // ── Otros Documentos Adicionales ──────────────────────────────────────────
+  // documentos adicionales
 
   @Get(':id/docs-adicionales')
   listarDocsAdicionales(@Param('id', ParseIntPipe) personaId: number) {
@@ -192,7 +188,7 @@ export class PersonasController {
     return this.personasService.eliminarDocAdicional(docAdicId, user.perfilId)
   }
 
-  // ── Documentos PDF ─────────────────────────────────────────────────────
+  // documentos pdf
 
   @Get(':id/documentos')
   listarDocumentos(
@@ -205,12 +201,7 @@ export class PersonasController {
     )
   }
 
-  /** Subida de PDF — multipart/form-data con campos:
-   *    archivo: el PDF
-   *    tipo:    HV | EX | TI | DA
-   *    num:     consecutivo del registro relacionado (id experiencia/título/doc).
-   *             Para HV se usa 0.
-   */
+  // multipart: archivo, tipo (HV|EX|TI|DA), num (id del registro; 0 para HV)
   @Post(':id/documentos')
   @UseInterceptors(FileInterceptor('archivo', {
     limits: { fileSize: MAX_PDF_BYTES },
@@ -240,8 +231,7 @@ export class PersonasController {
   ) {
     const { nombreArchivo, buffer } = await this.personasService.getDocumentoArchivo(docId)
     res.setHeader('Content-Type', 'application/pdf')
-    // Inline para que se previsualice en el navegador; el front puede forzar
-    // descarga con download="" en el <a>.
+    // inline para previsualizar; el front fuerza descarga con download=""
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nombreArchivo)}"`)
     res.setHeader('Content-Length', String(buffer.length))
     res.end(buffer)

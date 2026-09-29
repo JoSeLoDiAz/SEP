@@ -117,14 +117,12 @@ export default function CertificarPage() {
     }).finally(() => setCargandoBenefs(false))
   }, [utId, proyectoId, afGrupoId, unidades])
 
-  /** Actualiza el valor de horas en memoria y recalcula total local. */
   function setHora(personaId: number, sesionIdx: number, valor: number) {
     setBenefs(prev => prev.map(b => {
       if (b.personaId !== personaId) return b
       const nuevasHoras = [...b.horas]
       const sesion = sesiones[sesionIdx]
       const max = sesion?.maxHoras ?? 0
-      // Cap local: no permitir más que el máximo de la sesión.
       nuevasHoras[sesionIdx] = Math.max(0, Math.min(valor, max))
       const total = nuevasHoras.reduce((a, n) => a + n, 0)
       return { ...b, horas: nuevasHoras, totalHoras: total }
@@ -139,7 +137,6 @@ export default function CertificarPage() {
         { horas: b.horas.slice(0, sesiones.length) },
       )
       setToast({ tipo: 'success', msg: r.data.mensaje })
-      // Reflejar en la fila el % cumplimiento actualizado.
       setBenefs(prev => prev.map(x => x.personaId === b.personaId
         ? { ...x, porcentajeCumplimiento: r.data.porcentajeCumplimiento, totalHoras: r.data.total }
         : x))
@@ -149,8 +146,7 @@ export default function CertificarPage() {
     } finally { setTrabajandoId(null) }
   }
 
-  /** Llena las horas de UN beneficiario con el máximo de cada sesión.
-   *  No guarda — el usuario revisa y luego hace clic en Guardar. */
+  // no guarda: el usuario revisa y luego da Guardar
   function llenarConMaximo(personaId: number) {
     setBenefs(prev => prev.map(b => {
       if (b.personaId !== personaId) return b
@@ -161,9 +157,7 @@ export default function CertificarPage() {
     }))
   }
 
-  /** Certificación masiva: el backend asigna max horas a los beneficiarios
-   *  sin horas (no sobrescribe los que ya tienen). Tras confirmar y guardar,
-   *  recargamos la tabla. */
+  // el backend no sobrescribe a quien ya tiene horas
   async function ejecutarMasivo() {
     setMasivoCargando(true)
     try {
@@ -172,7 +166,6 @@ export default function CertificarPage() {
         {},
       )
       setToast({ tipo: r.data.sinSesiones ? 'error' : 'success', msg: r.data.mensaje })
-      // Recargar beneficiarios para reflejar los nuevos totales y % cumplimiento.
       const rB = await api.get<Beneficiario[]>(
         `/certificacion/proyecto/${proyectoId}/grupo/${afGrupoId}/unidad/${utId}/beneficiarios`,
       )
@@ -188,7 +181,6 @@ export default function CertificarPage() {
   const utActual = unidades.find(u => u.utId === utId) ?? null
   const bloqueado = cab?.convenioEnEjecucion === false
 
-  /** Lista filtrada por texto en nombre o identificación. */
   const benefsFiltrados = useMemo(() => {
     const q = filtro.trim().toLowerCase()
     if (!q) return benefs
@@ -210,7 +202,6 @@ export default function CertificarPage() {
             mensaje={toast.msg} duration={4500} />
         )}
 
-        {/* Header */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="p-2.5 rounded-xl shadow-sm" style={{ backgroundColor: TITLE }}>
             <ClipboardCheck size={20} className="text-white" />
@@ -336,7 +327,6 @@ export default function CertificarPage() {
               </div>
             ) : (
               <section className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
-                {/* Toolbar: buscador + certificar masivo */}
                 <div className="px-4 py-3 border-b border-neutral-100 flex flex-wrap items-center gap-3 bg-neutral-50">
                   <div className="flex-1 min-w-[200px] max-w-md relative">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -459,7 +449,6 @@ export default function CertificarPage() {
           </>
         )}
 
-        {/* Modal: confirmar certificación masiva */}
         <Modal open={masivoConfirm} onClose={() => !masivoCargando && setMasivoConfirm(false)} maxWidth="max-w-lg">
           <div className="flex flex-col">
             <div className="px-5 py-4 flex items-center gap-3 border-b border-neutral-100" style={{ backgroundColor: '#7C3AED' }}>

@@ -1,0 +1,17 @@
+-- Reversa de v65. Solo borra el tipo si nadie subió una tarjeta todavía.
+SET SERVEROUTPUT ON;
+DECLARE
+  v_docs NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO v_docs
+    FROM EVALUADORDOCUMENTO d JOIN TIPODOCUMENTOEVAL t ON t.TIPODOCUMENTOEVALID = d.TIPODOCUMENTOEVALID
+   WHERE UPPER(TRIM(t.CODIGO)) = 'TARJETA_PROFESIONAL';
+  IF v_docs > 0 THEN
+    DBMS_OUTPUT.PUT_LINE('NO se borra: ya hay ' || v_docs || ' tarjetas cargadas');
+  ELSE
+    DELETE FROM TIPODOCUMENTOEVAL WHERE UPPER(TRIM(CODIGO)) = 'TARJETA_PROFESIONAL';
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('tipo borrado');
+  END IF;
+END;
+/

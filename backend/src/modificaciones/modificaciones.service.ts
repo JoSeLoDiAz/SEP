@@ -2,11 +2,12 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import ExcelJS from 'exceljs'
+import { AHORA_UTC } from '../common/db/fecha-utc'
+import { leerId, tieneTriggerDeId } from '../common/db/ids'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const oracledb = require('oracledb') as { BIND_OUT: number; NUMBER: unknown }
 
-/** DTO del módulo conveniente (lado empresa/operador) para crear o actualizar
- *  una modificación. Solo expone los tres campos del legacy "Agregar Modificaciones":
- *  Tipo, Fecha de envío y Observaciones. Las respuestas de interventoría y SENA
- *  se diligencian en otro módulo y no llegan por este DTO. */
+// lo que envía el conveniente; interventoría y SENA responden en otro módulo
 export interface ModificacionDto {
   tipoModificacionId: number
   fechaEnvio: string             // YYYY-MM-DD
@@ -29,26 +30,24 @@ const VAL_SENA_LBL: Record<number, string> = { 1: 'CUMPLE', 2: 'NO CUMPLE' }
 export class ModificacionesService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
-  /** Catálogo TipoModificacion para el combobox. */
   async listarTipos() {
     return this.ds.query(
-      `SELECT TIPOMODIFICACIONID AS "id", TRIM(TIPOMODIFICACIONNOMBRE) AS "nombre"
+      `SELECT TIPOMODIFICACIONID AS "id", btrim((TIPOMODIFICACIONNOMBRE)::text) AS "nombre"
          FROM TIPOMODIFICACION
         WHERE TIPOMODIFICACIONESTADO = 1
         ORDER BY TIPOMODIFICACIONID`,
     )
   }
 
-  /** Lista de modificaciones del proyecto para la tabla. */
   async listar(proyectoId: number) {
     const rows = await this.ds.query(
       `SELECT m.MODIFICACIONESID                        AS "id",
               m.PROYECTOID                              AS "proyectoId",
               m.TIPOMODIFICACIONID                      AS "tipoModificacionId",
-              UPPER(TRIM(tm.TIPOMODIFICACIONNOMBRE))    AS "tipoModificacion",
-              TRIM(cv.CONVENIOSNUMERO)                  AS "convenioNumero",
-              UPPER(TRIM(e.EMPRESASIGLA))               AS "empresaSigla",
-              UPPER(TRIM(e.EMPRESARAZONSOCIAL))         AS "empresaRazonSocial",
+              UPPER(btrim((tm.TIPOMODIFICACIONNOMBRE)::text))    AS "tipoModificacion",
+              btrim((cv.CONVENIOSNUMERO)::text)                  AS "convenioNumero",
+              UPPER(btrim((e.EMPRESASIGLA)::text))               AS "empresaSigla",
+              UPPER(btrim((e.EMPRESARAZONSOCIAL)::text))         AS "empresaRazonSocial",
               m.MODIFICACIONESCONCEPTO                  AS "concepto",
               m.MODIFICACIONESCONCEPTOSENA              AS "conceptoSena",
               m.MODIFICACIONESESTADO                    AS "estado",
@@ -60,14 +59,14 @@ export class ModificacionesService {
          JOIN PROYECTO p          ON p.PROYECTOID = m.PROYECTOID
          LEFT JOIN CONVENIOS cv   ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e      ON e.EMPRESAID = p.EMPRESAID
-        WHERE m.PROYECTOID = :1
+        WHERE m.PROYECTOID = $1
         ORDER BY m.MODIFICACIONESID`,
       [proyectoId],
     )
-    // También el estado del convenio para que el front decida si gatear.
+    // el front usa este estado para gatear la edición
     const [conv] = await this.ds.query(
-      `SELECT NVL(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
-        WHERE PROYECTOID = :1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
+      `SELECT COALESCE(CONVENIOSESTADO, 0) AS "estado" FROM CONVENIOS
+        WHERE PROYECTOID = $1 ORDER BY CONVENIOSID DESC FETCH FIRST 1 ROW ONLY`,
       [proyectoId],
     )
     return {
@@ -81,17 +80,16 @@ export class ModificacionesService {
     }
   }
 
-  /** Devuelve una modificación por id para editar. */
   async getOne(proyectoId: number, id: number) {
     const [row] = await this.ds.query(
       `SELECT m.*
          FROM MODIFICACIONES m
-        WHERE m.MODIFICACIONESID = :1 AND m.PROYECTOID = :2
+        WHERE m.MODIFICACIONESID = $1 AND m.PROYECTOID = $2
         FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!row) throw new NotFoundException('Modificación no encontrada.')
-    // Normalizar nombres camelCase para el frontend.
+    // el SELECT m.* devuelve las columnas en mayúsculas: hay que mapearlas
     return {
       id: Number(row.MODIFICACIONESID),
       proyectoId: Number(row.PROYECTOID),
@@ -125,8 +123,7 @@ export class ModificacionesService {
     if (!dto.fechaEnvio) throw new BadRequestException('Ingresa la fecha de envío.')
   }
 
-  /** El conveniente solo puede editar la modificación mientras la interventoría
-   *  no haya emitido concepto y el SENA no haya aprobado o rechazado. */
+  // concepto 4 = PENDIENTE y aprobación 0 = NA: único estado editable
   private exigirEditableConveniente(row: { concepto: number; aprobacionSena: number }) {
     if (Number(row.concepto) !== 4) {
       throw new ForbiddenException(
@@ -141,18 +138,19 @@ export class ModificacionesService {
     }
   }
 
-  /** Crea una nueva modificación (lado conveniente).
-   *  - Solo recibe Tipo, Fecha de envío y Observaciones.
-   *  - El resto de campos quedan en sus valores por defecto hasta que la
-   *    interventoría/SENA respondan en sus módulos respectivos. */
   async crear(proyectoId: number, dto: ModificacionDto, _usuarioId: number, _perfilId: number): Promise<{ mensaje: string; id: number }> {
     this.validar(dto)
-    const [{ nid }] = await this.ds.query(
-      `SELECT NVL(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
-    )
-    const id = Number(nid)
+    // el id lo pone el trigger de id, que la tabla tiene en las dos bases (va NULL); si faltara, MAX+1 como antes.
+    // No va por insertarConId porque la fecha de envío entra con TO_DATE(:x); el RETURNING trae el id que quedó
+    let idPrevio: number | null = null
+    if (!(await tieneTriggerDeId(this.ds, 'MODIFICACIONES', 'MODIFICACIONESID'))) {
+      const [{ nid }] = await this.ds.query(
+        `SELECT COALESCE(MAX(MODIFICACIONESID), 0) + 1 AS "nid" FROM MODIFICACIONES`,
+      )
+      idPrevio = Number(nid)
+    }
 
-    await this.ds.query(
+    const salida: unknown = await this.ds.query(
       `INSERT INTO MODIFICACIONES
          (MODIFICACIONESID, PROYECTOID, TIPOMODIFICACIONID,
           MODIFICACIONESFECHAREGIS, MODIFICACIONESFECHAENVIO, MODIFICACIONESFECHAREMI,
@@ -165,36 +163,35 @@ export class ModificacionesService {
           MODIFICACIONESRADIINTERAPRO, MODIFICACIONESRADIINTERAPROFEC,
           MODIFICACIONESESTADO, MODIFICACIONESUSUARIOSENA, MODIFICACIONESUSUARIOINTER,
           MODIFICACIONESOBSERSENA, MODIFICACIONESVALSENA)
-       VALUES (:1, :2, :3, SYSDATE,
-               TO_DATE(:4, 'YYYY-MM-DD'),
-               SYSDATE,
-               4, 4, :5, N' ',
+       VALUES ($1, $2, $3, ${AHORA_UTC},
+               TO_DATE($4, 'YYYY-MM-DD'),
+               ${AHORA_UTC},
+               4, 4, $5, N' ',
                N' ', NULL,
                N' ', NULL,
                0, N' ', NULL,
                N' ', N' ', 1,
                N' ', NULL,
-               1, NULL, NULL, N' ', NULL)`,
+               1, NULL, NULL, N' ', NULL)
+       RETURNING MODIFICACIONESID INTO $6`,
       [
-        id, proyectoId, Number(dto.tipoModificacionId),
+        idPrevio, proyectoId, Number(dto.tipoModificacionId),
         dto.fechaEnvio,
         (dto.observaciones ?? '').trim() || ' ',
+        { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       ],
     )
+    const id = leerId(salida, 'MODIFICACIONES')
     return { mensaje: 'Modificación registrada correctamente.', id }
   }
 
-  /** Actualiza una modificación existente (lado conveniente).
-   *  - Solo modifica Tipo, Fecha de envío y Observaciones.
-   *  - Valida que la interventoría aún no haya emitido concepto y que el SENA
-   *    no haya aprobado o rechazado. */
   async actualizar(proyectoId: number, id: number, dto: ModificacionDto, _usuarioId: number, _perfilId: number): Promise<{ mensaje: string }> {
     this.validar(dto)
     const [existe] = await this.ds.query(
       `SELECT MODIFICACIONESCONCEPTO       AS "concepto",
               MODIFICACIONESAPROBACIONSENA AS "aprobacionSena"
          FROM MODIFICACIONES
-        WHERE MODIFICACIONESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE MODIFICACIONESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Modificación no encontrada.')
@@ -202,10 +199,10 @@ export class ModificacionesService {
 
     await this.ds.query(
       `UPDATE MODIFICACIONES SET
-          TIPOMODIFICACIONID = :1,
-          MODIFICACIONESFECHAENVIO = TO_DATE(:2, 'YYYY-MM-DD'),
-          MODIFICACIONESOBSERVACIONES = :3
-        WHERE MODIFICACIONESID = :4`,
+          TIPOMODIFICACIONID = $1,
+          MODIFICACIONESFECHAENVIO = TO_DATE($2, 'YYYY-MM-DD'),
+          MODIFICACIONESOBSERVACIONES = $3
+        WHERE MODIFICACIONESID = $4`,
       [
         Number(dto.tipoModificacionId),
         dto.fechaEnvio,
@@ -216,7 +213,6 @@ export class ModificacionesService {
     return { mensaje: 'Modificación actualizada.' }
   }
 
-  /** Elimina una modificación (solo admin). */
   async eliminar(proyectoId: number, id: number, perfilId: number): Promise<{ mensaje: string }> {
     const PERFIL_ADMIN = 1
     if (perfilId !== PERFIL_ADMIN) {
@@ -224,15 +220,15 @@ export class ModificacionesService {
     }
     const [existe] = await this.ds.query(
       `SELECT MODIFICACIONESID AS "id" FROM MODIFICACIONES
-        WHERE MODIFICACIONESID = :1 AND PROYECTOID = :2 FETCH FIRST 1 ROW ONLY`,
+        WHERE MODIFICACIONESID = $1 AND PROYECTOID = $2 FETCH FIRST 1 ROW ONLY`,
       [id, proyectoId],
     )
     if (!existe) throw new NotFoundException('Modificación no encontrada.')
-    await this.ds.query(`DELETE FROM MODIFICACIONES WHERE MODIFICACIONESID = :1`, [id])
+    await this.ds.query(`DELETE FROM MODIFICACIONES WHERE MODIFICACIONESID = $1`, [id])
     return { mensaje: 'Modificación eliminada.' }
   }
 
-  /** Exporta a Excel todas las modificaciones del proyecto (28 columnas). */
+  // excel de 28 columnas: headers, filas y anchos van en el mismo orden
   async exportarExcel(proyectoId: number): Promise<{ buffer: Buffer; filename: string }> {
     type Row = {
       id: number
@@ -268,36 +264,36 @@ export class ModificacionesService {
     const rows: Row[] = await this.ds.query(
       `SELECT m.MODIFICACIONESID AS "id",
               ROW_NUMBER() OVER (ORDER BY m.MODIFICACIONESID) AS "consec",
-              TRIM(co.CONVOCATORIANOMBRE) AS "convocatoria",
-              TRIM(cv.CONVENIOSNUMERO)    AS "conveniosNumero",
-              TRIM(e.EMPRESARAZONSOCIAL)  AS "empresa",
-              TRIM(tm.TIPOMODIFICACIONNOMBRE) AS "tipoModificacion",
+              btrim((co.CONVOCATORIANOMBRE)::text) AS "convocatoria",
+              btrim((cv.CONVENIOSNUMERO)::text)    AS "conveniosNumero",
+              btrim((e.EMPRESARAZONSOCIAL)::text)  AS "empresa",
+              btrim((tm.TIPOMODIFICACIONNOMBRE)::text) AS "tipoModificacion",
               m.MODIFICACIONESFECHAENVIO  AS "fechaEnvio",
-              TRIM(m.MODIFICACIONESOBSERVACIONES) AS "observaciones",
+              btrim((m.MODIFICACIONESOBSERVACIONES)::text) AS "observaciones",
               m.MODIFICACIONESFECHAREMI   AS "fechaRemi",
               m.MODIFICACIONESCONCEPTO    AS "concepto",
-              TRIM(m.MODIFICACIONESNISSENA) AS "nisSena",
-              TRIM(m.MODIFICACIONESRADISENA) AS "radiSena",
+              btrim((m.MODIFICACIONESNISSENA)::text) AS "nisSena",
+              btrim((m.MODIFICACIONESRADISENA)::text) AS "radiSena",
               m.MODIFICACIONESRADISENAFECHA AS "radiSenaFecha",
-              TRIM(m.MODIFICACIONESRADIINTER) AS "radiInter",
+              btrim((m.MODIFICACIONESRADIINTER)::text) AS "radiInter",
               m.MODIFICACIONESRADIINTERFECHA AS "radiInterFecha",
-              TRIM(m.MODIFICACIONESOBSERINTER) AS "observInter",
+              btrim((m.MODIFICACIONESOBSERINTER)::text) AS "observInter",
               m.MODIFICACIONESAPROBACIONSENA AS "aprobacionSena",
-              TRIM(m.MODIFICACIONESNISAPROSENA) AS "nisAproSena",
-              TRIM(m.MODIFICACIONESRADISENAAPRO) AS "radiSenaApro",
+              btrim((m.MODIFICACIONESNISAPROSENA)::text) AS "nisAproSena",
+              btrim((m.MODIFICACIONESRADISENAAPRO)::text) AS "radiSenaApro",
               m.MODIFICACIONESRADISENAAPROFECH AS "radiSenaAproFecha",
               m.MODIFICACIONESCONCEPTOSENA AS "conceptoSena",
               m.MODIFICACIONESRESPUESTASENA AS "respuestaSena",
-              TRIM(m.MODIFICACIONESRADIINTERAPRO) AS "radiInterApro",
+              btrim((m.MODIFICACIONESRADIINTERAPRO)::text) AS "radiInterApro",
               m.MODIFICACIONESRADIINTERAPROFEC AS "radiInterAproFecha",
               m.MODIFICACIONESVALSENA AS "valSena",
-              TRIM(m.MODIFICACIONESOBSERSENA) AS "observSena",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              btrim((m.MODIFICACIONESOBSERSENA)::text) AS "observSena",
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us
                  LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = m.MODIFICACIONESUSUARIOSENA
                 FETCH FIRST 1 ROW ONLY) AS "usuarioSenaNombre",
-              (SELECT TRIM(pp.PERSONANOMBRES) || N' ' || TRIM(pp.PERSONAPRIMERAPELLIDO)
+              (SELECT btrim((pp.PERSONANOMBRES)::text) || N' ' || btrim((pp.PERSONAPRIMERAPELLIDO)::text)
                  FROM USUARIO us
                  LEFT JOIN PERSONA pp ON pp.PERSONAEMAIL = us.USUARIOEMAIL
                 WHERE us.USUARIOID = m.MODIFICACIONESUSUARIOINTER
@@ -309,7 +305,7 @@ export class ModificacionesService {
          LEFT JOIN CONVENIOS cv  ON cv.PROYECTOID = p.PROYECTOID
          LEFT JOIN EMPRESA e     ON e.EMPRESAID = p.EMPRESAID
          LEFT JOIN CONVOCATORIA co ON co.CONVOCATORIAID = p.CONVOCATORIAID
-        WHERE m.PROYECTOID = :1
+        WHERE m.PROYECTOID = $1
         ORDER BY m.MODIFICACIONESID`,
       [proyectoId],
     )
@@ -376,7 +372,6 @@ export class ModificacionesService {
         Number(r.estado) === 1 ? 'ACTIVO' : 'INACTIVO',
       ])
     }
-    // Anchos sugeridos.
     const widths = [5, 30, 20, 30, 26, 18, 35, 22, 18, 18, 20, 18, 22, 22, 30, 14, 22, 22, 22, 22, 22, 22, 22, 16, 30, 26, 26, 10]
     widths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
 

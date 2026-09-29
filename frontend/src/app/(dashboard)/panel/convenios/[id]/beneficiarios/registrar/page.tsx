@@ -58,7 +58,6 @@ interface PostulacionResp {
   perfilTrasferenciaId: number | null
   postulacionTrasferencia: string | null
   rangoEdadId: number | null
-  /* Empresa de la postulación previa (precarga) */
   empresaTipoDocumentoId: number | null
   empresaTipoDocumento: string | null
   empresaNumero: string | null
@@ -97,7 +96,6 @@ function rangoEdadIdParaEdad(edad: number): number {
 const labelCls = 'text-[11px] font-bold text-neutral-700 uppercase tracking-wide'
 const inputCls = 'h-10 rounded-lg border border-neutral-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0070C0] bg-white transition'
 
-/* Toggle SI/NO reutilizable */
 function ToggleSiNo({
   value, onChange, disabled,
 }: { value: 'SI' | 'NO' | ''; onChange: (v: 'SI' | 'NO') => void; disabled?: boolean }) {
@@ -129,10 +127,9 @@ export default function RegistrarBeneficiarioPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const proyectoId = Number(params?.id)
-  /* Guard para no auto-buscar más de una vez aunque el efecto se re-evalúe. */
+  // evita que el auto-buscar se dispare dos veces si el efecto se re-evalúa
   const autoBuscadoRef = useRef(false)
 
-  /* Sección actual */
   const [seccion, setSeccion] = useState<'basicos' | 'postulacion'>('basicos')
 
   /* Catálogos */
@@ -156,9 +153,7 @@ export default function RegistrarBeneficiarioPage() {
   const [bIdent, setBIdent] = useState('')
   const [buscando, setBuscando] = useState(false)
   const [resultado, setResultado] = useState<BuscarResp | null>(null)
-  /* depto pendiente: si el catálogo aún no había cargado cuando hicimos buscar,
-   *  guardamos el id aquí y un useEffect lo aplica al `pDeptoId` apenas el
-   *  catálogo de departamentos esté disponible. */
+  // el id del depto puede llegar antes que el catálogo; se aplica cuando cargue
   const [deptoPendiente, setDeptoPendiente] = useState<number | null>(null)
 
   /* Persona (form) */
@@ -193,7 +188,6 @@ export default function RegistrarBeneficiarioPage() {
   const [empresaModalOpen, setEmpresaModalOpen] = useState(false)
   const [asociarModalOpen, setAsociarModalOpen] = useState(false)
 
-  /* ─────────── Catálogos ─────────── */
   useEffect(() => {
     setCargandoCat(true)
     Promise.all([
@@ -227,7 +221,7 @@ export default function RegistrarBeneficiarioPage() {
       .catch(() => setCiudades([]))
   }, [pDeptoId])
 
-  /* Cargar estado del convenio para gatear los botones de guardar/asociar. */
+  // el estado del convenio gatea los botones de guardar/asociar
   useEffect(() => {
     if (!proyectoId) return
     api.get<{ estadoNum: number | null }>(`/convenios/${proyectoId}`)
@@ -235,8 +229,6 @@ export default function RegistrarBeneficiarioPage() {
       .catch(() => setConvenioEnEjecucion(false))
   }, [proyectoId])
 
-  /* Si la búsqueda devolvió un depto antes de que el catálogo terminara
-   *  de cargar, lo aplicamos apenas el catálogo aparezca. */
   useEffect(() => {
     if (deptoPendiente && departamentos.some(d => d.id === deptoPendiente)) {
       setPDeptoId(deptoPendiente)
@@ -244,9 +236,7 @@ export default function RegistrarBeneficiarioPage() {
     }
   }, [deptoPendiente, departamentos])
 
-  /* Auto-buscar cuando la página se abre con ?tipoDocumentoId=&identificacion=
-   *  (viene de la tabla de Beneficiarios → botón "Actualizar"). Espera a que
-   *  los catálogos terminen de cargar y luego dispara la búsqueda una sola vez. */
+  // auto-búsqueda al llegar con ?tipoDocumentoId=&identificacion= desde la tabla
   useEffect(() => {
     if (autoBuscadoRef.current || cargandoCat) return
     const tdId = Number(searchParams?.get('tipoDocumentoId')) || 0
@@ -259,7 +249,6 @@ export default function RegistrarBeneficiarioPage() {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [cargandoCat])
 
-  /* ─────────── Hidratar formularios ─────────── */
   function aplicarResultado(r: BuscarResp) {
     if (r.persona) {
       const p = r.persona
@@ -275,8 +264,7 @@ export default function RegistrarBeneficiarioPage() {
       const ciudadId = Number(p.ciudadId) || 0
       setPDeptoId(deptoId)
       setPCiudadId(ciudadId)
-      // Si el catálogo aún no incluye este depto (cargó tarde), guardamos
-      // el id como pendiente para volver a aplicarlo cuando aparezca.
+      // el catálogo pudo cargar tarde: lo dejamos pendiente
       if (deptoId && !departamentos.some(d => d.id === deptoId)) {
         setDeptoPendiente(deptoId)
       }
@@ -301,9 +289,7 @@ export default function RegistrarBeneficiarioPage() {
       setXPerfilTransfId(po.perfilTrasferenciaId ?? 0)
       const tr = (po.postulacionTrasferencia ?? '').toUpperCase()
       setXTransferencia(tr === 'SI' ? 'SI' : tr === 'NO' ? 'NO' : '')
-      // Empresa de la postulación previa — viene en la misma respuesta
-      // (LEFT JOIN con BENEFICIARIOEMPRESA). Reusamos esos datos para
-      // precargar la sección sin un round-trip extra.
+      // la empresa ya viene en esta respuesta (LEFT JOIN), no hace falta otra llamada
       if (po.beneficiarioEmpresaId && po.empresaNumero) {
         const emp: EmpresaBenef = {
           id: po.beneficiarioEmpresaId,
@@ -321,9 +307,7 @@ export default function RegistrarBeneficiarioPage() {
         setXEmpresa(null); setXEmpNumero(''); setEmpNoEncontrada(false)
       }
     } else {
-      // Sin postulación: defaults útiles para no obligar a llenar todo.
-      // El perfil "NO APLICA" (id=4 en PERFILTRASFERENCIA) y transferencia=NO
-      // son la mayoría de los casos. El usuario lo puede cambiar.
+      // "NO APLICA" es id 4 en PERFILTRASFERENCIA, fallback si no está en el catálogo
       const noAplica = perfilesTransf.find(p => /no\s*aplica/i.test(p.nombre))
       setXAntiguedad(''); setXNivelId(0); setXCaracterizacionId(0)
       setXPerfilTransfId(noAplica?.id ?? 4)
@@ -332,7 +316,6 @@ export default function RegistrarBeneficiarioPage() {
     }
   }
 
-  /* ─────────── Acciones ─────────── */
   async function buscar(opts?: { tipoDocumentoId?: number; identificacion?: string }) {
     const tdId = opts?.tipoDocumentoId ?? bTipoDocId
     const ident = (opts?.identificacion ?? bIdent).trim()
@@ -436,7 +419,6 @@ export default function RegistrarBeneficiarioPage() {
     } finally { setGuardandoPostu(false) }
   }
 
-  /* ─────────── Computed ─────────── */
   const edad = useMemo(() => calcularEdad(pFechaNac), [pFechaNac])
   const rangoEdad = useMemo(() => edad > 0 ? rangoEdadIdParaEdad(edad) : 0, [edad])
   const rangoEdadNombre = useMemo(
@@ -473,7 +455,6 @@ export default function RegistrarBeneficiarioPage() {
   const puedeGuardarPostulacion = camposFaltantesPostu.length === 0 && !bloqueadoPorConvenio
   const puedeAsociar = resultado?.estado === 'vigente' && !bloqueadoPorConvenio
 
-  /* ─────────── Render helpers ─────────── */
   function chipEstado() {
     if (!resultado) return null
     const map = {
@@ -508,12 +489,10 @@ export default function RegistrarBeneficiarioPage() {
     )
   }
 
-  /* Stepper */
   function Step({ n, label, activo, completo, onClick, disabled }: {
     n: number; label: string; activo: boolean; completo: boolean
     onClick?: () => void; disabled?: boolean
   }) {
-    // Disponible = no activo, no completo, pero clickeable.
     const disponible = !activo && !completo && !disabled
     return (
       <button type="button" onClick={onClick} disabled={disabled}
@@ -589,7 +568,6 @@ export default function RegistrarBeneficiarioPage() {
           }}
         />
 
-        {/* Header */}
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl shadow-sm" style={{ backgroundColor: TITLE }}>
             <UserPlus size={20} className="text-white" />
@@ -603,7 +581,6 @@ export default function RegistrarBeneficiarioPage() {
           </Link>
         </div>
 
-        {/* Stepper */}
         <div className="bg-white border border-neutral-200 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-3">
           <Step n={1} label="Datos básicos" activo={seccion === 'basicos'} completo={!!pPersonaId} onClick={() => setSeccion('basicos')} />
           <ArrowRight size={14} className="text-neutral-300" />
@@ -618,7 +595,6 @@ export default function RegistrarBeneficiarioPage() {
           <div className="ml-auto">{chipEstado()}</div>
         </div>
 
-        {/* Buscador sticky de persona */}
         <div className="sticky top-2 z-20 bg-white border border-neutral-200 rounded-2xl p-4 shadow-md">
           <div className="flex flex-col sm:flex-row items-end gap-3">
             <div className="flex items-center gap-2 text-[#00304D] font-bold text-sm self-start sm:self-end shrink-0">
@@ -653,11 +629,9 @@ export default function RegistrarBeneficiarioPage() {
             <Loader2 size={16} className="animate-spin" /> Cargando catálogos…
           </div>
         ) : seccion === 'basicos' ? (
-          /* ───────── DATOS BÁSICOS ───────── */
           <section className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
             <div className="h-1 bg-gradient-to-r from-[#00304D] via-[#0070C0] to-[#00304D]" />
             <div className="p-5 space-y-5">
-              {/* Bloque: Identidad */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <User size={16} className="text-[#0070C0]" />
@@ -705,7 +679,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* Bloque: Contacto */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Phone size={16} className="text-[#0070C0]" />
@@ -725,7 +698,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* Bloque: Ubicación */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <MapPin size={16} className="text-[#0070C0]" />
@@ -759,7 +731,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* Habeas Data */}
               <div className="bg-gradient-to-br from-neutral-50 to-white border border-neutral-200 rounded-xl p-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-[#00304D]/10 mt-0.5">
@@ -791,7 +762,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* CTA footer */}
               <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-neutral-100">
                 {!puedeGuardarPersona && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 flex-1">
@@ -813,11 +783,9 @@ export default function RegistrarBeneficiarioPage() {
             </div>
           </section>
         ) : (
-          /* ───────── DATOS DE POSTULACIÓN ───────── */
           <section className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
             <div className="h-1 bg-gradient-to-r from-[#00304D] via-[#0070C0] to-[#00304D]" />
             <div className="p-5 space-y-5">
-              {/* Estado banner */}
               <div className="bg-gradient-to-br from-neutral-50 to-white border border-neutral-200 rounded-xl px-4 py-3 flex items-center gap-3">
                 <ClipboardCheck size={20} className="text-[#0070C0]" />
                 <div className="flex-1">
@@ -840,7 +808,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* Antigüedad */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 py-1">
                 <div className="flex-1">
                   <label className={labelCls}>¿Se ha beneficiado anteriormente? *</label>
@@ -849,7 +816,6 @@ export default function RegistrarBeneficiarioPage() {
                 <ToggleSiNo value={xAntiguedad} onChange={setXAntiguedad} />
               </div>
 
-              {/* Empresa */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Building2 size={16} className="text-[#0070C0]" />
@@ -884,7 +850,6 @@ export default function RegistrarBeneficiarioPage() {
                   </div>
                 </div>
 
-                {/* Resultado búsqueda empresa */}
                 {xEmpresa && (
                   <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
                     <div className="flex items-start gap-3">
@@ -914,7 +879,6 @@ export default function RegistrarBeneficiarioPage() {
                 )}
               </div>
 
-              {/* Datos laborales */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <FileText size={16} className="text-[#0070C0]" />
@@ -938,7 +902,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* Transferencia */}
               <div className="bg-gradient-to-br from-neutral-50 to-white border border-neutral-200 rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                   <p className="text-sm font-bold text-[#00304D] flex-1">¿Beneficiario de transferencia? *</p>
@@ -953,7 +916,6 @@ export default function RegistrarBeneficiarioPage() {
                 </div>
               </div>
 
-              {/* CTA footer */}
               <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-neutral-100">
                 {!puedeGuardarPostulacion && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 flex-1">

@@ -16,8 +16,6 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 
-// ── Types base ────────────────────────────────────────────────────────────────
-
 interface Empresa {
   razonSocial: string; sigla: string | null; nit: string | number; digitoV: string | number
   email: string | null; direccion: string | null; telefono: string | null; celular: string | null
@@ -106,8 +104,6 @@ interface Reporte {
   versionActual: VersionActual | null
 }
 
-// ── Types detalle por AF (consumidos desde endpoints existentes) ─────────────
-
 interface Opcion    { id: number; nombre: string }
 interface AreaItem  { aafId: number; areaId: number; nombre: string; otro: string | null }
 interface NivelItem { anId: number; nivelId: number; nombre: string }
@@ -185,8 +181,6 @@ interface AfDetalle {
   rubros: RubroAf[]
 }
 
-// ── Helpers UI ────────────────────────────────────────────────────────────────
-
 const TITLE_COLOR = '#00304D'
 
 const fmt = (n: number) =>
@@ -233,7 +227,6 @@ function TextBlock({ label, value }: { label: string; value?: string | null }) {
     </div>
   )
 }
-// Variante que siempre renderiza (muestra "—" cuando está vacío)
 function TextBlockAlways({ label, value }: { label: string; value?: string | null }) {
   return (
     <div>
@@ -259,8 +252,6 @@ function ListTable({ items }: { items: string[] }) {
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-
 export default function ReporteProyectoPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -272,36 +263,28 @@ export default function ReporteProyectoPage() {
   const [data, setData]       = useState<Reporte | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(false)
-  // Metadatos de la versión histórica que se está mostrando (solo cuando aplica)
   const [versionVista, setVersionVista] = useState<{
     versionId: number; numero: number; codigo: string
     fecha: string | null; usuario: string | null; comentario: string | null
   } | null>(null)
-  // Cuando un admin abre el reporte y existe versión FINAL, mostramos el
-  // snapshot de esa versión en lugar de los datos vivos (que el proponente
-  // pudo haber editado después). Este flag distingue ese modo del modo
-  // "histórica via URL ?versionId=X".
+  // admin viendo el snapshot de la versión FINAL en vez de los datos vivos
   const [vistaSnapshotAuto, setVistaSnapshotAuto] = useState(false)
-  // Detectar admin temprano (antes del useEffect de carga)
   const usuarioEarly = typeof window !== 'undefined' ? getSepUsuario() : null
   const esAdminEarly = usuarioEarly ? isAdmin(usuarioEarly.perfilId) : false
   const mostrandoSnapshot = esVersionHistorica || vistaSnapshotAuto
 
-  // Detalle por AF (cargado tras el reporte base)
   const [afsDetalle, setAfsDetalle] = useState<Record<number, AfDetalle>>({})
   const [loadingDetalles, setLoadingDetalles] = useState(false)
 
-  // Catálogos (para resolver IDs → nombres en alineación, ambiente, etc.)
+  // catálogos para resolver IDs → nombres
   const [retos, setRetos]                     = useState<Opcion[]>([])
   const [tiposAmbiente, setTiposAmbiente]     = useState<Opcion[]>([])
   const [gestionConocs, setGestionConocs]     = useState<Opcion[]>([])
   const [materialesForm, setMaterialesForm]   = useState<Opcion[]>([])
 
-  // Modal de confirmación del proyecto
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
 
-  // Toast estilo Betowa
   const toastKey = useRef(0)
   const [toastKey2, setToastKey2] = useState(0)
   const [toast, setToast] = useState<{ tipo: 'success' | 'error' | 'warning'; titulo: string; msg: string } | null>(null)
@@ -311,7 +294,6 @@ export default function ReporteProyectoPage() {
     setToastKey2(toastKey.current)
   }
 
-  // Validación de completitud para confirmar
   const [validacion, setValidacion] = useState<{ ok: boolean; issues: string[] } | null>(null)
   const [validando, setValidando] = useState(false)
 
@@ -331,7 +313,6 @@ export default function ReporteProyectoPage() {
             versionId: meta.versionId, numero: meta.numero, codigo: meta.codigo,
             fecha: meta.fecha, usuario: meta.usuario, comentario: meta.comentario,
           })
-          // Hidratar afsDetalle directamente desde el snapshot
           const map: Record<number, AfDetalle> = {}
           for (const item of snapshot.accionesDetalle ?? []) {
             const { afId, ...detalle } = item
@@ -348,9 +329,7 @@ export default function ReporteProyectoPage() {
           const r = await api.get<Reporte>(`/proyectos/${id}/reporte`)
           const live = r.data
           const vAct = live.versionActual
-          // Admin: si existe versión FINAL, cargamos el snapshot inmutable de
-          // esa versión para que vea exactamente lo que va a aprobar (no los
-          // datos vivos que el proponente pueda seguir editando).
+          // admin: si hay versión FINAL se muestra su snapshot, no los datos vivos
           if (esAdminEarly && vAct?.esFinal === 1 && vAct.versionId) {
             try {
               const s = await api.get<{
@@ -359,11 +338,7 @@ export default function ReporteProyectoPage() {
                 snapshot: Reporte & { accionesDetalle?: Array<{ afId: number } & AfDetalle> }
               }>(`/proyectos/versiones/${vAct.versionId}`)
               const { snapshot, ...meta } = s.data
-              // Mezclamos snapshot (datos aprobables) con campos del live que
-              // gobiernan la máquina de estados y los botones de acción
-              // (estado, fechaRadicacion, versionActual). El snapshot fue
-              // capturado ANTES de marcarse como FINAL, así que su
-              // proyecto.estado y versionActual están desactualizados.
+              // el snapshot se guardó antes de marcarse FINAL: estado y versionActual salen del live
               setData({
                 ...snapshot,
                 proyecto: {
@@ -385,7 +360,6 @@ export default function ReporteProyectoPage() {
               }
               setAfsDetalle(map)
             } catch {
-              // Si falla la carga del snapshot, mostramos los datos vivos como fallback
               setData(live)
             }
           } else {
@@ -401,7 +375,6 @@ export default function ReporteProyectoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, verVersionId])
 
-  // Catálogos auxiliares (una sola vez)
   useEffect(() => {
     api.get<Opcion[]>('/proyectos/retonacionales').then(r => setRetos(r.data)).catch(() => {})
     api.get<Opcion[]>('/proyectos/tiposambiente').then(r => setTiposAmbiente(r.data)).catch(() => {})
@@ -409,8 +382,7 @@ export default function ReporteProyectoPage() {
     api.get<Opcion[]>('/proyectos/materialformacion').then(r => setMaterialesForm(r.data)).catch(() => {})
   }, [])
 
-  // Una vez tenemos el reporte, cargar el detalle de cada AF en paralelo.
-  // En modo "versión histórica" no fetchamos: ya viene en el snapshot.
+  // en modo snapshot no se pide detalle: ya viene dentro del snapshot
   useEffect(() => {
     if (!data) return
     if (mostrandoSnapshot) return
@@ -455,35 +427,26 @@ export default function ReporteProyectoPage() {
     ).finally(() => setLoadingDetalles(false))
   }, [data])
 
-  // Comentario opcional al crear nueva versión
   const [comentarioVersion, setComentarioVersion] = useState('')
 
-  // Modal/estado para aprobación SENA (solo admin)
   const [aprobarOpen, setAprobarOpen] = useState(false)
   const [aprobando, setAprobando] = useState(false)
   const [comentarioAprobacion, setComentarioAprobacion] = useState('')
-  // Estado de aprobación de cada AF: aprobada (default) o rechazada con motivo
   const [afsAprobacion, setAfsAprobacion] = useState<Record<number, { aprobada: boolean; motivo: string }>>({})
-  // Modal/estado para reversar a Subsanación (solo admin)
   const [reversarOpen, setReversarOpen] = useState(false)
   const [reversando, setReversando] = useState(false)
   const [comentarioReversar, setComentarioReversar] = useState('')
-  // Modal/estado para rechazo total del proyecto (solo admin)
   const [rechazarOpen, setRechazarOpen] = useState(false)
   const [rechazando, setRechazando] = useState(false)
   const [motivoRechazoProy, setMotivoRechazoProy] = useState('')
-  // Concepto individual por AF dentro del rechazo total. Por defecto todas
-  // quedan como rechazadas (igual al comportamiento histórico), pero el admin
-  // puede marcar algunas como aprobadas o asignarles un motivo específico.
+  // concepto por AF dentro del rechazo total: por defecto todas rechazadas
   const [afsConceptoRech, setAfsConceptoRech] = useState<Record<number, { aprobada: boolean; motivo: string }>>({})
-  // Publicar/despublicar resultados de la CONVOCATORIA (no del proyecto)
+  // publicar/despublicar es por convocatoria, no por proyecto
   const [publicarOpen, setPublicarOpen] = useState(false)
   const [publicarAccion, setPublicarAccion] = useState<'publicar' | 'despublicar'>('publicar')
   const [publicandoFlag, setPublicandoFlag] = useState(false)
   const esAdmin = esAdminEarly
 
-  // Inicializa el estado de aprobación de las AFs (todas aprobadas por
-  // defecto) cada vez que abrimos el modal.
   function abrirModalAprobar() {
     const ini: Record<number, { aprobada: boolean; motivo: string }> = {}
     for (const af of data?.acciones ?? []) {
@@ -494,7 +457,6 @@ export default function ReporteProyectoPage() {
   }
 
   async function handleAprobar() {
-    // Validar que toda AF rechazada tenga motivo
     const afsRechazadas = Object.entries(afsAprobacion)
       .filter(([, v]) => !v.aprobada)
       .map(([afId, v]) => ({ afId: Number(afId), motivo: v.motivo.trim() }))
@@ -503,14 +465,13 @@ export default function ReporteProyectoPage() {
       showToast('error', 'Falta motivo de rechazo', 'Todas las AFs marcadas como rechazadas deben tener un motivo escrito.')
       return
     }
-    // Conceptos opcionales sobre AFs aprobadas (campo `motivo` reutilizado en el state)
+    // en las AFs aprobadas el campo motivo se reutiliza como concepto
     const conceptosAprobadas = Object.entries(afsAprobacion)
       .filter(([, v]) => v.aprobada && v.motivo.trim())
       .map(([afId, v]) => ({ afId: Number(afId), concepto: v.motivo.trim() }))
     setAprobando(true)
     try {
-      // La restauración recorre muchas tablas; subimos el timeout a 2 min para
-      // evitar falsos errores cuando la operación es lenta pero exitosa.
+      // la restauración recorre muchas tablas: por eso 2 min de timeout
       await api.post(`/proyectos/${id}/aprobar`, {
         comentario: comentarioAprobacion.trim() || undefined,
         afsRechazadas: afsRechazadas.length > 0 ? afsRechazadas : undefined,
@@ -545,15 +506,13 @@ export default function ReporteProyectoPage() {
       showToast('error', 'Motivo obligatorio', 'Debes registrar el motivo general del rechazo del proyecto.')
       return
     }
-    // AFs marcadas con concepto positivo aun cuando el proyecto se rechaza,
-    // con concepto/observación opcional.
     const afsAprobadas = Object.entries(afsConceptoRech)
       .filter(([, v]) => v.aprobada)
       .map(([afId, v]) => {
         const concepto = v.motivo.trim()
         return concepto ? { afId: Number(afId), concepto } : { afId: Number(afId) }
       })
-    // AFs con motivo individual (sobrescribe el motivo general por AF)
+    // el motivo por AF sobrescribe el motivo general
     const afsConMotivoIndiv = Object.entries(afsConceptoRech)
       .filter(([, v]) => !v.aprobada && v.motivo.trim())
       .map(([afId, v]) => ({ afId: Number(afId), motivo: v.motivo.trim() }))
@@ -606,8 +565,7 @@ export default function ReporteProyectoPage() {
         'La versión FINAL fue desmarcada. El proponente puede ahora editar el proyecto y volver a marcar una versión como FINAL.')
       setReversarOpen(false)
       setComentarioReversar('')
-      // Recargamos la página completa porque cambió el estado y la vista admin
-      // ya no debería mostrar el snapshot FINAL (no hay).
+      // recarga completa: ya no hay snapshot FINAL que mostrar
       window.location.reload()
     } catch (e: any) {
       showToast('error', 'No se pudo reversar', e?.response?.data?.message ?? 'Error inesperado.')
@@ -675,19 +633,13 @@ export default function ReporteProyectoPage() {
           sectoresRepresenta, subsectoresRepresenta, contactos, acciones, diagnosticos, presupuesto } = data
 
   const telCel = [empresa.telefono, empresa.celular].filter(Boolean).join(' / ') || '—'
-  // Estados:
-  //   0 → Sin confirmar (puede crear versiones)
-  //   1 → Confirmado (tiene versión FINAL — bloqueado para edición/nuevas versiones)
-  //   2 → Reversado (tuvo FINAL, la quitó — vuelve a poder crear versiones)
-  //   3 → Aprobado SENA · 4 → Rechazado SENA (congelados)
+  // estado: 0 sin confirmar · 1 con FINAL · 2 reversado · 3 aprobado · 4 rechazado
   const tieneFinal = proyecto.estado === 1
   const aprobado = proyecto.estado === 3
   const rechazado = proyecto.estado === 4
   const puedeCrearVersion = !tieneFinal && !aprobado && !rechazado && !esVersionHistorica
 
-  // ── Plan Operativo: cada fila combina AF + GO por contrapartida ─────────────
-  // Override SOLO en este reporte: para TALLER-PUESTO DE TRABAJO REAL las horas
-  // del Plan Operativo son siempre 8 (independiente de lo registrado en la AF).
+  // solo en este reporte: TALLER-PUESTO DE TRABAJO REAL va con 8 horas fijas
   const esTallerPuestoTrabajo = (tipoEvento: string | null) =>
     !!tipoEvento && /puesto\s*de\s*trabajo/i.test(tipoEvento)
   const planOperativo = acciones.map(a => {
@@ -713,26 +665,20 @@ export default function ReporteProyectoPage() {
       html { scroll-behavior: smooth; scroll-padding-top: 80px; }
       @media print {
         @page { size: A4 landscape; margin: 8mm 8mm; }
-        /* Forzar colores e impresión fiel */
         *, *::before, *::after {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
           color-adjust: exact !important;
         }
-        /* Layout: revelar todo */
         aside, header, .no-print { display: none !important; }
         html, body { overflow: visible !important; height: auto !important; background: white !important; }
         body > div { display: block !important; height: auto !important; overflow: visible !important; }
         body > div > div { height: auto !important; overflow: visible !important; }
         main { overflow: visible !important; height: auto !important; padding: 0 !important; }
-        /* Reducir paddings del contenedor principal */
         .max-w-5xl { max-width: 100% !important; padding: 0 !important; gap: 8px !important; }
-        /* Permitir que las secciones grandes fluyan entre páginas para no
-           dejar grandes huecos en blanco. Solo evitamos cortar lo marcado
-           explícitamente con .avoid-break y cabeceras / filas de tablas. */
+        /* las secciones fluyen entre páginas para no dejar huecos en blanco */
         section { page-break-inside: auto; break-inside: auto; }
         .avoid-break { page-break-inside: avoid; break-inside: avoid; }
-        /* Padding interno de las secciones más compacto al imprimir */
         section .p-5, section .p-4 { padding: 8px !important; }
         section .py-3 { padding-top: 6px !important; padding-bottom: 6px !important; }
         section .pt-4 { padding-top: 6px !important; }
@@ -740,17 +686,13 @@ export default function ReporteProyectoPage() {
         section .gap-5 { gap: 8px !important; }
         section .gap-4 { gap: 6px !important; }
         section .mb-3 { margin-bottom: 6px !important; }
-        /* Tablas: permitir cortes entre filas pero no dentro de una fila */
         table { page-break-inside: auto; width: 100% !important; max-width: 100% !important; table-layout: auto; }
         thead { display: table-header-group; }
         tr, td, th { page-break-inside: avoid; }
-        /* Evitar overflow horizontal: permitir wrap en celdas largas */
         .overflow-x-auto { overflow: visible !important; width: 100% !important; }
         td.whitespace-nowrap, th.whitespace-nowrap { white-space: normal !important; }
-        /* Quitar truncados (e.g. título de la AF) para que el nombre completo salga */
         .truncate { overflow: visible !important; text-overflow: clip !important; white-space: normal !important; }
-        /* Tablas anchas (Plan Operativo / Rubros): fuente y padding compactos
-           para que entren en la página sin recortes */
+        /* tablas anchas (Plan Operativo / Rubros): compactas para que quepan */
         .print-wide-table {
           font-size: 7.5pt !important;
           table-layout: fixed !important;
@@ -762,17 +704,14 @@ export default function ReporteProyectoPage() {
           overflow-wrap: anywhere !important;
           white-space: normal !important;
         }
-        /* Tipografía algo más compacta para impresión */
         body { font-size: 9.5pt; }
         h1, h2, h3 { page-break-after: avoid; }
-        /* Sombras planas */
         .shadow-sm, .shadow-lg { box-shadow: none !important; }
       }
     `}</style>
 
     <div className="p-4 sm:p-7 xl:p-10 max-w-5xl mx-auto flex flex-col gap-5 sm:gap-6 print:p-4 print:gap-4 pb-32">
 
-      {/* Banner cuando se está viendo una versión histórica */}
       {esVersionHistorica && versionVista && (
         <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 flex items-start gap-3 no-print">
           <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
@@ -795,8 +734,6 @@ export default function ReporteProyectoPage() {
         </div>
       )}
 
-      {/* Banner cuando un admin abre el reporte y existe versión FINAL: estamos
-          mostrando el snapshot inmutable de esa versión, no los datos vivos. */}
       {vistaSnapshotAuto && versionVista && (
         <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 flex items-start gap-3 no-print">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
@@ -815,7 +752,6 @@ export default function ReporteProyectoPage() {
         </div>
       )}
 
-      {/* Banner: Proyecto rechazado por SENA */}
       {rechazado && proyecto.motivoRechazo && (
         <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-4 flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-red-700 text-white flex items-center justify-center shrink-0">
@@ -831,7 +767,6 @@ export default function ReporteProyectoPage() {
         </div>
       )}
 
-      {/* Banner: Proyecto aprobado con AF rechazadas */}
       {aprobado && acciones.some(a => a.estadoAprobacion === 0) && (
         <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">
@@ -849,7 +784,6 @@ export default function ReporteProyectoPage() {
         </div>
       )}
 
-      {/* Encabezado tipo formulario SENA */}
       <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row items-center gap-4 p-4 sm:p-5 border-b border-neutral-200">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -899,7 +833,6 @@ export default function ReporteProyectoPage() {
           </div>
         </div>
 
-        {/* Bloque de versión del proyecto */}
         <div className="px-4 pb-4">
           {(() => {
             const v = esVersionHistorica && versionVista
@@ -1172,7 +1105,7 @@ export default function ReporteProyectoPage() {
         </div>
       </section>
 
-      {/* 6. PLAN OPERATIVO DEL PROYECTO (AF + GO combinados por contrapartida) */}
+      {/* 6. PLAN OPERATIVO DEL PROYECTO */}
       {planOperativo.length > 0 && (
         <section className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <SectionHeader icon={Activity}>Plan Operativo del Proyecto de Formación</SectionHeader>
@@ -1213,7 +1146,6 @@ export default function ReporteProyectoPage() {
                     <td className="border border-neutral-200 px-2 py-2 text-right font-semibold whitespace-nowrap" style={{ color: TITLE_COLOR }}>{r.valorHoraBenef > 0 ? fmt(r.valorHoraBenef) : '—'}</td>
                   </tr>
                 ))}
-                {/* Totales por columna */}
                 <tr style={{ backgroundColor: '#F5F8FB' }}>
                   <td colSpan={8} className="border border-neutral-200 px-2 py-2 text-right text-xs font-semibold" style={{ color: TITLE_COLOR }}>Totales</td>
                   <td className="border border-neutral-200 px-2 py-2 text-right text-xs font-bold whitespace-nowrap" style={{ color: TITLE_COLOR }}>{fmt(totalCofSena)}</td>
@@ -1222,7 +1154,6 @@ export default function ReporteProyectoPage() {
                   <td className="border border-neutral-200 px-2 py-2 text-right text-xs font-bold whitespace-nowrap" style={{ color: TITLE_COLOR }}>{fmt(totalAfMasGo)}</td>
                   <td className="border border-neutral-200 px-2 py-2"></td>
                 </tr>
-                {/* Total combinado AF + GO en una sola celda */}
                 <tr style={{ backgroundColor: TITLE_COLOR }}>
                   <td colSpan={11} className="border border-neutral-200 px-2 py-3 text-right text-xs font-bold text-white uppercase">Total AF + Gastos de Operación</td>
                   <td className="border border-neutral-200 px-2 py-3 text-right text-sm font-bold text-white whitespace-nowrap">{fmt(totalAfMasGo)}</td>
@@ -1237,7 +1168,7 @@ export default function ReporteProyectoPage() {
         </section>
       )}
 
-      {/* 7. ACCIONES DE FORMACIÓN — lista con lupa que ancla al detalle */}
+      {/* 7. ACCIONES DE FORMACIÓN */}
       <section id="lista-acciones" className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden scroll-mt-20">
         <SectionHeader icon={BookOpen}>Acciones de Formación ({acciones.length})</SectionHeader>
         <div className="p-5">
@@ -1334,9 +1265,7 @@ export default function ReporteProyectoPage() {
           <SectionHeader icon={Wallet}>Presupuesto General del Proyecto</SectionHeader>
           <div className="p-5 flex flex-col gap-5">
 
-            {/* Tarjetas KPI: AFs · GO · Transferencia */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Acciones de Formación — Azul (color principal) */}
               <div className="rounded-2xl border border-[#00304D]/20 overflow-hidden flex flex-col">
                 <div className="px-4 py-2.5" style={{ backgroundColor: TITLE_COLOR }}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">Acciones de Formación</p>
@@ -1352,7 +1281,6 @@ export default function ReporteProyectoPage() {
                 </div>
               </div>
 
-              {/* Gastos de Operación — Ámbar */}
               <div className="rounded-2xl border border-amber-200 overflow-hidden flex flex-col">
                 <div className="px-4 py-2.5 bg-amber-600">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-50">Gastos de Operación · {presupuesto.go.codigo}</p>
@@ -1368,7 +1296,6 @@ export default function ReporteProyectoPage() {
                 </div>
               </div>
 
-              {/* Transferencia — Esmeralda */}
               <div className="rounded-2xl border border-emerald-200 overflow-hidden flex flex-col">
                 <div className="px-4 py-2.5 bg-emerald-600">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-50">Transferencia de Conocimiento</p>
@@ -1383,7 +1310,6 @@ export default function ReporteProyectoPage() {
               </div>
             </div>
 
-            {/* Total del Proyecto — destacado */}
             <div className="rounded-2xl overflow-hidden border-2 border-[#00304D]/30">
               <div className="px-5 py-3 flex items-center justify-between" style={{ backgroundColor: TITLE_COLOR }}>
                 <span className="text-xs font-bold uppercase tracking-wider text-white">Total del Proyecto</span>
@@ -1421,9 +1347,6 @@ export default function ReporteProyectoPage() {
       </button>
     )}
 
-    {/* Botones admin: Aprobar, Reversar a Subsanación y Rechazar.
-        Solo visibles cuando hay versión FINAL marcada y no estamos viendo
-        una versión histórica. */}
     {esAdmin && tieneFinal && !esVersionHistorica && (
       <>
         <button onClick={abrirModalAprobar}
@@ -1444,11 +1367,7 @@ export default function ReporteProyectoPage() {
       </>
     )}
 
-    {/* Publicar/Despublicar resultados de la CONVOCATORIA — solo admin,
-        cuando este proyecto ya fue aprobado o rechazado. La publicación es
-        por convocatoria: en cuanto se libera, TODOS los proponentes con
-        proyectos en esa convocatoria ven simultáneamente el resultado de
-        su evaluación. */}
+    {/* al publicar, todos los proponentes de la convocatoria ven su resultado a la vez */}
     {esAdmin && !esVersionHistorica && data && (aprobado || rechazado) && (
       data.proyecto.resultadosPublicados === 1 ? (
         <button onClick={() => abrirPublicarModal('despublicar')} disabled={publicandoFlag}
@@ -1465,7 +1384,6 @@ export default function ReporteProyectoPage() {
       )
     )}
 
-    {/* Modal de aprobación */}
     <Modal open={aprobarOpen} onClose={() => !aprobando && setAprobarOpen(false)} maxWidth="max-w-3xl">
       <div className="p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto">
         <h3 className="text-base font-bold text-neutral-800">Aprobar Proyecto</h3>
@@ -1474,7 +1392,6 @@ export default function ReporteProyectoPage() {
           deben llevar motivo y no sumarán al presupuesto del proyecto aprobado.
         </p>
 
-        {/* Lista de AFs con checkbox + motivo de rechazo */}
         <div className="flex flex-col gap-2.5 border border-neutral-200 rounded-2xl p-3 bg-neutral-50/50">
           {(data?.acciones ?? []).length === 0 && (
             <p className="text-xs text-neutral-400 text-center py-4">No hay acciones de formación.</p>
@@ -1585,7 +1502,6 @@ export default function ReporteProyectoPage() {
       </div>
     </Modal>
 
-    {/* Modal de rechazo total del proyecto */}
     <Modal open={rechazarOpen} onClose={() => !rechazando && setRechazarOpen(false)} maxWidth="max-w-3xl">
       <div className="p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto">
         <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1598,7 +1514,6 @@ export default function ReporteProyectoPage() {
           motivos específicos por AF si aplica.
         </p>
 
-        {/* Lista de AFs con concepto individual */}
         <div className="flex flex-col gap-2.5 border border-neutral-200 rounded-2xl p-3 bg-neutral-50/50">
           {(data?.acciones ?? []).length === 0 && (
             <p className="text-xs text-neutral-400 text-center py-4">No hay acciones de formación.</p>
@@ -1710,7 +1625,6 @@ export default function ReporteProyectoPage() {
       </div>
     </Modal>
 
-    {/* Modal de envío a Subsanación */}
     <Modal open={reversarOpen} onClose={() => !reversando && setReversarOpen(false)} maxWidth="max-w-lg">
       <div className="p-6 flex flex-col gap-5">
         <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1758,8 +1672,6 @@ export default function ReporteProyectoPage() {
       </div>
     </Modal>
 
-    {/* Modal de publicar/despublicar resultados de la CONVOCATORIA. La acción
-        afecta a todos los proyectos de la misma convocatoria, no solo a este. */}
     <Modal open={publicarOpen} onClose={() => !publicandoFlag && setPublicarOpen(false)} maxWidth="max-w-lg">
       <div className="p-6 flex flex-col gap-5">
         <h3 className="text-base font-bold text-neutral-800 flex items-center gap-2">
@@ -1921,8 +1833,7 @@ export default function ReporteProyectoPage() {
   )
 }
 
-// ── Helpers Rubros ───────────────────────────────────────────────────────────
-// Replican la lógica de la tabla "Rubros Registrados" de la página de la AF.
+// replican la lógica de la tabla "Rubros Registrados" de la página de la AF
 
 function valorUnidad(r: RubroAf): number | null {
   const total = Number(r.totalRubro) || 0
@@ -1954,8 +1865,6 @@ function unidadesLabel(r: RubroAf): string {
   if (benef > 0)              return `${benef} benef.`
   return '—'
 }
-
-// ── Componente: detalle completo de una AF dentro del reporte ────────────────
 
 function AfDetalleSection({
   af, detalle, loading,
@@ -2383,7 +2292,7 @@ function AfDetalleSection({
               )}
             </div>
 
-            {/* 11. Gastos de Operación de la AF (separado, fuera de la tabla de rubros) */}
+            {/* 11. Gastos de Operación de la AF */}
             <div className="border-t border-neutral-100 pt-4">
               <SubHeader icon={FileText}>Gastos de Operación (R09)</SubHeader>
               {!presupuestoGoAf || presupuestoGoAf.total === 0 ? (
@@ -2486,7 +2395,6 @@ function AfDetalleSection({
           </>
         )}
 
-        {/* Si aún no llegó el detalle pero hay datos del presupuesto base, mostrar resumen mínimo */}
         {!detalle && (presupuestoAf || presupuestoGoAf) && (
           <div className="border-t border-neutral-100 pt-4">
             <SubHeader icon={Wallet}>Resumen Presupuestal de la AF</SubHeader>
@@ -2531,7 +2439,6 @@ function AfDetalleSection({
           </div>
         )}
 
-        {/* Volver al listado de Acciones de Formación */}
         <div className="border-t border-neutral-100 pt-4 flex justify-end no-print">
           <a href="#lista-acciones"
             className="inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl px-4 py-2 border border-neutral-200 text-neutral-600 hover:bg-neutral-50 transition">

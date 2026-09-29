@@ -36,7 +36,7 @@ export class ContactosService {
         `SELECT PROYECTOID      AS "proyectoId",
                 PROYECTONOMBRE  AS "proyectoNombre"
            FROM PROYECTO
-          WHERE EMPRESAID = :1
+          WHERE EMPRESAID = $1
           ORDER BY PROYECTOID ASC`,
         [empresaId],
       )
@@ -50,7 +50,7 @@ export class ContactosService {
     try {
       const rows = await this.dataSource.query(
         `SELECT TIPODOCUMENTOIDENTIDADID     AS "id",
-                TRIM(TIPODOCUMENTOIDENTIDADNOMBRE) AS "nombre"
+                btrim((TIPODOCUMENTOIDENTIDADNOMBRE)::text) AS "nombre"
            FROM TIPODOCUMENTOIDENTIDAD
           WHERE TIPODOCUMENTOIDENTIDADPERSONA = 1
           ORDER BY TIPODOCUMENTOIDENTIDADNOMBRE ASC`,
@@ -79,7 +79,7 @@ export class ContactosService {
                 END                           AS "proyectoNombre"
            FROM CONTACTOEMPRESA c
            LEFT JOIN PROYECTO p ON p.PROYECTOID = c.PROYECTOIDCONTACTOS
-          WHERE c.EMPRESAIDCONTACTO = :1
+          WHERE c.EMPRESAIDCONTACTO = $1
           ORDER BY c.CONTACTOEMPRESAID ASC`,
         [empresaId],
       )
@@ -98,7 +98,7 @@ export class ContactosService {
            (EMPRESAIDCONTACTO, CONTACTOEMPRESANOMBRE, CONTACTOEMPRESACARGO,
             CONTACTOEMPRESACORREO, CONTACTOEMPRESATELEFONO, CONTACTOEMPRESADOCUMENTO,
             TIPOIDENTIFICACIONCONTACTOP, PROYECTOIDCONTACTOS)
-         VALUES (:1, :2, :3, :4, :5, :6, :7, :8)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [empresaId, dto.nombre, dto.cargo, dto.correo,
          dto.telefono ?? null, dto.documento ?? null,
          dto.tipoIdentificacionId ?? null, proyectoId],
@@ -115,15 +115,15 @@ export class ContactosService {
     try {
       await this.dataSource.query(
         `UPDATE CONTACTOEMPRESA
-            SET CONTACTOEMPRESANOMBRE       = :1,
-                CONTACTOEMPRESACARGO        = :2,
-                CONTACTOEMPRESACORREO       = :3,
-                CONTACTOEMPRESATELEFONO     = :4,
-                CONTACTOEMPRESADOCUMENTO    = :5,
-                TIPOIDENTIFICACIONCONTACTOP = :6,
-                PROYECTOIDCONTACTOS         = :7
-          WHERE CONTACTOEMPRESAID = :8
-            AND EMPRESAIDCONTACTO = :9`,
+            SET CONTACTOEMPRESANOMBRE       = $1,
+                CONTACTOEMPRESACARGO        = $2,
+                CONTACTOEMPRESACORREO       = $3,
+                CONTACTOEMPRESATELEFONO     = $4,
+                CONTACTOEMPRESADOCUMENTO    = $5,
+                TIPOIDENTIFICACIONCONTACTOP = $6,
+                PROYECTOIDCONTACTOS         = $7
+          WHERE CONTACTOEMPRESAID = $8
+            AND EMPRESAIDCONTACTO = $9`,
         [dto.nombre, dto.cargo, dto.correo,
          dto.telefono ?? null, dto.documento ?? null,
          dto.tipoIdentificacionId ?? null, proyectoId,
@@ -140,8 +140,8 @@ export class ContactosService {
     try {
       await this.dataSource.query(
         `DELETE FROM CONTACTOEMPRESA
-          WHERE CONTACTOEMPRESAID = :1
-            AND EMPRESAIDCONTACTO = :2`,
+          WHERE CONTACTOEMPRESAID = $1
+            AND EMPRESAIDCONTACTO = $2`,
         [contactoId, empresaId],
       )
       return { message: 'Contacto eliminado correctamente' }

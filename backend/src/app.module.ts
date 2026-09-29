@@ -2,29 +2,18 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { ajustarTiposPostgres } from './common/db/postgres-tipos'
-import { EstadoController } from './common/estado.controller'
-import { PerfilesController } from './common/perfiles.controller'
-import { MigracionGuard } from './common/migracion.guard'
 import { AuthModule } from './auth/auth.module'
 import { CapacitadoresModule } from './capacitadores/capacitadores.module'
 import { CertificacionModule } from './certificacion/certificacion.module'
 import { CertificadosModule } from './certificados/certificados.module'
+import { ajustarTiposPostgres } from './common/db/postgres-tipos'
+import { EstadoController } from './common/estado.controller'
+import { MigracionGuard } from './common/migracion.guard'
+import { PerfilesController } from './common/perfiles.controller'
 import { ContactosModule } from './contactos/contactos.module'
 import { ConveniosModule } from './convenios/convenios.module'
 import { ConvocatoriaProyectosModule } from './convocatoria-proyectos/convocatoria-proyectos.module'
 import { CronogramaModule } from './cronograma/cronograma.module'
-import { EmpresaModule } from './empresa/empresa.module'
-import { EvaluadoresModule } from './evaluadores/evaluadores.module'
-import { RetroalimentacionModule } from './retroalimentacion/retroalimentacion.module'
-import { GruposModule } from './grupos/grupos.module'
-import { ImportarProyectoModule } from './importar-proyecto/importar-proyecto.module'
-import { ModificacionesModule } from './modificaciones/modificaciones.module'
-import { NecesidadesModule } from './necesidades/necesidades.module'
-import { PersonasModule } from './personas/personas.module'
-import { PlataformasVirtualesModule } from './plataformas-virtuales/plataformas-virtuales.module'
-import { ProyectosModule } from './proyectos/proyectos.module'
-import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
 import { BeneficiariosModule } from './dashboards/beneficiarios/beneficiarios.module'
 import { CapacitadoresDBModule } from './dashboards/capacitadores/capacitadores.module'
 import { ConveniosDBModule } from './dashboards/convenios/convenios.module'
@@ -35,8 +24,21 @@ import { ImagenInstitucionalModule } from './dashboards/imageninstitucional/imag
 import { MaterialFormacionModule } from './dashboards/materialformacion/materialformacion.module'
 import { ModificacionesDBModule } from './dashboards/modificaciones/modificaciones.module'
 import { PlataformasVirtualesDBModule } from './dashboards/plataformasvirtuales/plataformasvirtuales.module'
+import { TransferenciaDBModule } from './dashboards/transferencia/transferencia.module'
 import { VisitascampoModule } from './dashboards/visitascampo/visitascampo.module'
 import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
+import { EmpresaModule } from './empresa/empresa.module'
+import { EvaluadoresModule } from './evaluadores/evaluadores.module'
+import { GruposModule } from './grupos/grupos.module'
+import { ImportarProyectoModule } from './importar-proyecto/importar-proyecto.module'
+import { ModificacionesModule } from './modificaciones/modificaciones.module'
+import { NecesidadesModule } from './necesidades/necesidades.module'
+import { PersonasModule } from './personas/personas.module'
+import { PlataformasVirtualesModule } from './plataformas-virtuales/plataformas-virtuales.module'
+import { ProyectosModule } from './proyectos/proyectos.module'
+import { RetroalimentacionModule } from './retroalimentacion/retroalimentacion.module'
+import { UsuariosAdminModule } from './usuarios-admin/usuarios-admin.module'
+
 
 
 @Module({
@@ -120,7 +122,8 @@ import { VisitassedeModule } from './dashboards/visitassede/visitassede.module'
     PlataformasVirtualesDBModule,
     VisitascampoModule,
     VisitassedeModule,
-    
+    TransferenciaDBModule,
+
   ],
   controllers: [EstadoController, PerfilesController],
   providers: [

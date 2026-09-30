@@ -73,6 +73,7 @@ const modules: ModuleDef[] = [
     cta: 'Conocer la convocatoria',
     icon: 'GraduationCap',
     accent: 'lime',
+    imagen: '/images/services/fce.webp',
     external: true,
   },
   {
@@ -83,6 +84,7 @@ const modules: ModuleDef[] = [
     cta: 'Descargar',
     icon: 'Award',
     accent: 'cerulean',
+    imagen: '/images/services/certificados.webp',
   },
   {
     id: 'eventos',
@@ -92,6 +94,7 @@ const modules: ModuleDef[] = [
     cta: 'Ver cronograma',
     icon: 'CalendarCheck',
     accent: 'cerulean',
+    imagen: '/images/services/eventos.webp',
   },
   {
     id: 'proponente',
@@ -101,6 +104,7 @@ const modules: ModuleDef[] = [
     cta: 'Crear registro',
     icon: 'Building2',
     accent: 'green',
+    imagen: '/images/services/proponente.webp',
   },
   {
     id: 'usuario',
@@ -110,6 +114,7 @@ const modules: ModuleDef[] = [
     cta: 'Crear registro',
     icon: 'UserPlus',
     accent: 'purpura',
+    imagen: '/images/services/usuario.webp',
   },
   {
     id: 'proximamente',
@@ -118,6 +123,7 @@ const modules: ModuleDef[] = [
     href: '#',
     icon: 'Megaphone',
     accent: 'cerulean',
+    imagen: '/images/services/proximamente.webp',
     disabled: true,
   },
 ]

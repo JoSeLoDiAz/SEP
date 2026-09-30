@@ -26,31 +26,27 @@ export type ModuleIcon = keyof typeof ICONS
 export type ModuleAccent = 'lime' | 'green' | 'cerulean' | 'purpura'
 
 // clases literales: tailwind no compila nombres armados en ejecucion
-const ACCENT: Record<ModuleAccent, { franja: string; velo: string; enlace: string; foco: string; borde: string }> = {
+const ACCENT: Record<ModuleAccent, { franja: string; enlace: string; foco: string; borde: string }> = {
   lime: {
     franja: 'bg-gradient-to-br from-lime-500 to-green-500',
-    velo: 'bg-gradient-to-t from-lime-600/85 via-lime-600/40 to-transparent',
     enlace: 'text-lime-600',
     foco: 'focus-visible:outline-lime-500',
     borde: 'group-hover:border-lime-500',
   },
   green: {
     franja: 'bg-gradient-to-br from-green-500 to-green-700',
-    velo: 'bg-gradient-to-t from-green-700/85 via-green-700/40 to-transparent',
     enlace: 'text-green-500',
     foco: 'focus-visible:outline-green-500',
     borde: 'group-hover:border-green-500',
   },
   cerulean: {
     franja: 'bg-gradient-to-br from-cerulean-500 to-cerulean-700',
-    velo: 'bg-gradient-to-t from-cerulean-500/85 via-cerulean-500/40 to-transparent',
     enlace: 'text-cerulean-500',
     foco: 'focus-visible:outline-cerulean-500',
     borde: 'group-hover:border-cerulean-500',
   },
   purpura: {
     franja: 'bg-gradient-to-br from-purpura-500 to-purpura-700',
-    velo: 'bg-gradient-to-t from-purpura-500/85 via-purpura-500/40 to-transparent',
     enlace: 'text-purpura-500',
     foco: 'focus-visible:outline-purpura-500',
     borde: 'group-hover:border-purpura-500',
@@ -99,8 +95,10 @@ export function ModuleCard({ mod }: { mod: ModuleDef }) {
               mod.disabled && 'grayscale',
             )}
           />
-          {/* velo de color: sostiene el icono blanco sobre cualquier foto */}
-          <div className={cn('absolute inset-0', accent.velo)} />
+          {/* sombra neutra abajo: sostiene el icono blanco sin tenir la imagen.
+              Con el color del acento encima, una tarjeta azul bajo velo lima
+              terminaba degradada de un color a otro. */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
         </>
       )}
 

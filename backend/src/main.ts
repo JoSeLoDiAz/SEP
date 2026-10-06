@@ -10,6 +10,19 @@ const oracledb = require('oracledb') as {
 oracledb.fetchAsString = [oracledb.CLOB]
 oracledb.fetchAsBuffer = [oracledb.BLOB]
 
+// El .env antes de cualquier import. Los decoradores de las entidades deciden sus tipos leyendo process.env.DB_TIPO al
+// cargarse (ver tipos-entidad.ts), y eso pasa mucho antes de que Nest monte ConfigModule: sin esto, DB_TIPO solo vale
+// si va exportado en el entorno, y quien lo ponga en el .env arranca con los tipos de Oracle contra PostgreSQL.
+// Lo que ya venga del entorno manda; esto solo rellena lo que falte, que es como se despliega en el servidor.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { readFileSync } = require('node:fs') as { readFileSync: (p: string, e: string) => string }
+try {
+  for (const linea of readFileSync(`${__dirname}/../.env`, 'utf8').split(/\r?\n/)) {
+    const par = linea.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/)
+    if (par && !(par[1] in process.env)) process.env[par[1]] = par[2].trim()
+  }
+} catch { /* sin fichero se usan las variables del entorno, que es lo que hace el contenedor */ }
+
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
